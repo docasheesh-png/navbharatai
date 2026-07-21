@@ -1583,6 +1583,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_collections',
+      description:
+        'Add a real saved-collections / boards backend to the app (server/collections/) — a packaged domain ' +
+        'vertical for Pinterest-style boards or "save to collection". The real guarantee is MEMBERSHIP ' +
+        'INTEGRITY: an item can belong to MANY collections at once, saving the same item twice is idempotent ' +
+        '(no duplicate, exact itemCount), removing an item from one collection never affects the others, and ' +
+        'each list is duplicate-free (newest-saved first). Collection names are unique per owner. Emits a ' +
+        'dependency-free CollectionService (create, rename, saveItem, removeItem, collectionsForItem, view, ' +
+        'listForOwner) + an Express router (GET /api/collections ?owner=, POST /api/collections, GET/PATCH/DELETE ' +
+        '/api/collections/:id, POST /api/collections/:id/items, DELETE /api/collections/:id/items/:itemId). ' +
+        'Distinct from generate_wishlist (a single flat list per user) and generate_tags (labels on one entity). ' +
+        'In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2672,6 +2687,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_quiz',
   'generate_availability',
   'generate_announcements',
+  'generate_collections',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

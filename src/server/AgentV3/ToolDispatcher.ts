@@ -169,6 +169,7 @@ import { generateFaqIntegration } from '../lib/FaqGenerator';
 import { generateQuizIntegration } from '../lib/QuizGenerator';
 import { generateAvailabilityIntegration } from '../lib/AvailabilityGenerator';
 import { generateAnnouncementsIntegration } from '../lib/AnnouncementsGenerator';
+import { generateCollectionsIntegration } from '../lib/CollectionsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3962,6 +3963,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('announcements starter');
         const anDeps = ancfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a site-announcements backend:\n${anWritten.join('\n')}\nAdd the dependencies: ${anDeps}\n\n${ancfg.instructions}`;
+      }
+
+      case 'generate_collections': {
+        // Breadth recipe (domain vertical) — saved collections/boards (server/collections/): a real
+        // CollectionService whose core guarantee is MEMBERSHIP INTEGRITY (an item lives in many collections,
+        // idempotent saves, removing from one never affects the others) + an Express router. Pure gen in
+        // CollectionsGenerator.ts.
+        const clcfg = generateCollectionsIntegration();
+        const clWritten: string[] = [];
+        for (const [path, content] of Object.entries(clcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          clWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('collections starter');
+        const clDeps = clcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a saved-collections backend:\n${clWritten.join('\n')}\nAdd the dependencies: ${clDeps}\n\n${clcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

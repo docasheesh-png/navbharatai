@@ -16,11 +16,14 @@ import {
   IndianRupee,
   Zap,
 } from 'lucide-react';
+import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface MonetizationWizardProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app to inject the snippet into. */
+  files?: Record<string, string>;
   onCodeUpdate?: (code: string) => void;
 }
 
@@ -294,11 +297,11 @@ const RevenueCalculator: React.FC<{ method: MethodId }> = ({ method }) => {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({ generatedCode, onCodeUpdate }) => {
+export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({ generatedCode, files, onCodeUpdate }) => {
   const [selected, setSelected] = useState<MethodId>('razorpay');
   const [copiedKey, setCopied] = useState('');
   const [showSecret, setShowSecret] = useState(false);
-  const [injected, setInjected] = useState(false);
+  const [injectState, setInjectState] = useState<'idle' | 'done' | 'noapp'>('idle');
 
   // Razorpay config
   const [rzpCfg, setRzpCfg] = useState<RazorpayConfig>({
@@ -343,10 +346,22 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({ generate
       const { pricing } = generateSubscriptionCode(subCfg.plans);
       snippet = `\n<!-- Subscription Pricing -->\n${pricing}`;
     }
-    onCodeUpdate((generatedCode || '') + snippet);
-    setInjected(true);
-    setTimeout(() => setInjected(false), 2500);
-  }, [selected, rzpCfg, upiCfg, adsCfg, subCfg, generatedCode, onCodeUpdate]);
+    // Inject into the REAL app (admin autopsy 2026-07-21): the old code appended onto the retired
+    // generatedCode placeholder and flashed "Injected!" even when nothing real was updated. Resolve
+    // the real source; only claim success when there's an app to inject into.
+    const src = resolveAppSource(generatedCode, files);
+    if (!hasAnalysableApp(src)) {
+      setInjectState('noapp');
+      setTimeout(() => setInjectState('idle'), 2500);
+      return;
+    }
+    const merged = src.html.includes('</body>')
+      ? src.html.replace('</body>', `${snippet}\n</body>`)
+      : src.html + snippet;
+    onCodeUpdate(merged);
+    setInjectState('done');
+    setTimeout(() => setInjectState('idle'), 2500);
+  }, [selected, rzpCfg, upiCfg, adsCfg, subCfg, generatedCode, files, onCodeUpdate]);
 
   const methods: { id: MethodId; icon: React.ReactNode; label: string; tagline: string; detail: string; fee: string; color: string }[] = [
     { id: 'razorpay', icon: <CreditCard size={20} />, label: 'Razorpay', tagline: "India ka #1 payment gateway", detail: 'Credit/Debit, UPI, Netbanking', fee: '2% + ₹3 / txn', color: '#6366f1' },
@@ -682,14 +697,14 @@ async function handlePayment() {
             <button
               onClick={handleInject}
               style={{
-                marginLeft: 'auto', background: injected ? '#22c55e' : activeMethod.color,
+                marginLeft: 'auto', background: injectState === 'done' ? '#22c55e' : injectState === 'noapp' ? '#f59e0b' : activeMethod.color,
                 border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer',
                 color: '#fff', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5,
                 transition: 'background 0.2s',
               }}
             >
-              {injected ? <Check size={13} /> : <Zap size={13} />}
-              {injected ? 'Injected!' : 'Inject into App'}
+              {injectState === 'done' ? <Check size={13} /> : <Zap size={13} />}
+              {injectState === 'done' ? 'Injected!' : injectState === 'noapp' ? 'Build an app first' : 'Inject into App'}
             </button>
           )}
         </div>

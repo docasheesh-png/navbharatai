@@ -165,8 +165,11 @@ module.exports = {
           <Paintbrush className="w-5 h-5 text-pink-400" />
         </div>
         <div>
-          <h2 className="font-semibold text-white text-base">White-label Branding</h2>
-          <p className="text-xs text-white/40">App ka naam, logo, colors, fonts customize karo — apna brand banao</p>
+          {/* Honest name (admin autopsy 2026-07-21): this generates a brand kit (CSS variables, meta
+              tags, Tailwind config) to EXPORT and paste into your app — it does not auto-apply to the
+              built app. Renamed so it no longer implies one-click white-labeling. */}
+          <h2 className="font-semibold text-white text-base">Brand Kit Generator</h2>
+          <p className="text-xs text-white/40">Define name, logo, colors &amp; fonts → export a brand kit (CSS, meta tags, Tailwind config) to drop into your app</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={resetToDefault} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/40 hover:text-white transition-all">

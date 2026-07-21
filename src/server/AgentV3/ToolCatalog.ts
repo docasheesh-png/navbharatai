@@ -1568,6 +1568,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_announcements',
+      description:
+        'Add a real site-announcement / banner backend to the app (server/announcements/) — a packaged domain ' +
+        'vertical for maintenance notices, promos and new-feature callouts. The real guarantee is SCHEDULED ' +
+        'VISIBILITY + DISMISS-ONCE: a banner is only active inside its optional [startsAt, endsAt] window (and ' +
+        'when published), and once a user dismisses a dismissible banner it NEVER shows for that user again — ' +
+        'activeFor(user) returns exactly the banners a given user should see now. level is ' +
+        'info|success|warning|critical. Emits a dependency-free AnnouncementService (create, update, dismiss, ' +
+        'activeFor, list) + an Express router (GET /api/announcements/active ?user=, GET/POST ' +
+        '/api/announcements, PATCH/DELETE /api/announcements/:id, POST /api/announcements/:id/dismiss). Distinct ' +
+        'from generate_notification_center (a per-user inbox) and generate_activity_feed (an event timeline). ' +
+        'In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2656,6 +2671,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_faq',
   'generate_quiz',
   'generate_availability',
+  'generate_announcements',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

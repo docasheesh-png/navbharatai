@@ -678,6 +678,25 @@ export function emptyBuildFailureSummary(
 }
 
 /**
+ * FINAL-SYNTAX-ERROR HONESTY (sibling of the reviewer-CRITICAL false-success fix, 2026-07-21). The final
+ * syntax re-verify catches a LATE repair (endgame / reviewer-autofix) that reintroduced a non-parsing
+ * file after the early syntax gate. It already records an UNRESOLVED OUTCOME_SYNTAX_ERROR so the health
+ * card can't say READY — but it never flipped the build's `ok` verdict, so a build that WON'T COMPILE
+ * could still emit ok:true and be BILLED as success (only the preview-verify path zeroed billing, and
+ * only when it actually observed the non-render). An app that does not compile is not a delivered app
+ * (the "working app or free" law) — force ok:false with an honest, resumable summary so both exit paths
+ * (the deadline finalizer and the normal settle) agree and the failed-build billing guard makes it free.
+ * White-label: no provider/model names. Pure + exported for testing.
+ */
+export function finalSyntaxErrorSummary(fileCount: number): string {
+  const n = Math.max(1, fileCount);
+  return (
+    `Your app is saved, but ${n} file${n === 1 ? '' : 's'} in the final build ${n === 1 ? "doesn't" : "don't"} ` +
+    `compile yet — so it isn't runnable. You have NOT been charged for this build. Reply "continue" and I'll finish the fix.`
+  );
+}
+
+/**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
  * NOT per build/message.
  *
@@ -8210,6 +8229,12 @@ export function registerAgentV3Routes(app: Express): void {
           if (finalSyntaxErrors.length > 0) {
             buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_SYNTAX_ERROR', message: `${finalSyntaxErrors.length} file(s) do not parse in the final build — the app cannot compile:\n${syntaxRepairInstruction(finalSyntaxErrors)}`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ A syntax error remains in the final build — the app won't compile yet. Your files are saved; send a follow-up and I'll finish the fix.`, ts: Date.now() });
+            // FALSE-SUCCESS GUARD (sibling): an app that does not compile is NOT a delivered app — flip the
+            // verdict so both exits agree (buildResultRef drives the deadline finalizer; result drives the
+            // normal settle) and the "working app or free" guard makes it free. findSyntaxErrors flags ONLY
+            // genuinely non-parsing files (see the block header), so a good build is never falsely failed.
+            if (result) result = { ...result, ok: false, summary: finalSyntaxErrorSummary(finalSyntaxErrors.length) };
+            if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };
           }
         } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
       }

@@ -30,13 +30,17 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
 2. **Prompt-cache stable prefixes for GLM/Kimi (AP-5)** — byte-identical stable system/prefix blocks for the
    cheap providers. OPEN (grep: `cache_control` only in `ClaudeClient.ts`, none in `AgentV3/providers/`).
    Real speed + cost win on the cheap floor that leads every free/paid build.
-3. **Cap-4 cost-alerting thresholds** — the one remaining Cap-4 half (injection trio already shipped).
-   OPEN (grep empty). Emit a build-report advisory when a build's spend crosses a threshold.
+3. **~~Cap-4 cost-alerting thresholds~~ — ✅ DONE (verified 2026-07-21).** `costAlert.ts`
+   (`costAlertThresholdUsd` / `costAlertAdvisory`, env `AGENTV3_COST_ALERT_USD`) is wired into
+   `BuildDiagnostics.ts` — a build whose spend crosses the threshold records an advisory. (Prior #1771.)
 4. **Daily-spend quota gauge (T1-cost-transparency remainder)** — a `/api/usage/tokens` endpoint + a
    daily-spend-vs-quota gauge. OPEN. *Needs a quota definition first (small product decision).*
 5. **Network-request capture for the auto-fix loop (B5 remainder)** — console + runtime-error classifier
-   are DONE (`console_errors`, `RuntimeErrorClassify.ts`); add captured **failed network requests** as a
-   distinct signal into the same repair loop. OPEN.
+   are DONE (`console_errors`, `RuntimeErrorClassify.ts`). ✅ **HTTP 5xx server responses now captured**
+   (2026-07-21, #1793): the E2B daemon's `page.on('response')` records an `httperror` for status ≥ 500 (a
+   completed-but-500 fetch does not fire `requestfailed`), classified via the `http-status` rule. REMAINING
+   (narrow): richer per-request structured capture (method/timing/body) — needs deeper daemon/E2B-template
+   work, so honestly infra-adjacent, not a code-only slice.
 6. **Runtime route/API/auth/DB smoke-hitter (P-PIPE)** — after a successful backend build, hit key routes
    (health, an auth flow, a DB read) and report honest pass/fail. OPEN (post-deploy liveness + browser
    verify exist; a server-route smoke-hitter does not). *Borderline: the hitter logic is code; it needs a
@@ -64,7 +68,9 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
     (`generate_readme`/`generate_architecture_docs` exist; no dedicated dev-guide).
 16. **Cap-2: auto-run E2E by default** — `generate_e2e` (Playwright) exists but is on-request; force-run a
     starter E2E after a successful build (like the U-2 defaults / auto-test pass). PARTIAL.
-17. **Ansible IaC target** — `generate_iac` emits Terraform + K8s + Docker; add Ansible. PARTIAL.
+17. **~~Ansible IaC target~~ — ✅ DONE (stale audit line, verified 2026-07-21).** `generateAnsiblePlaybook`
+    (playbook.yml + inventory.ini + README) is already in `IaCGenerator.ts` and wired into `generateIaC`
+    alongside K8s/Helm/Terraform.
 18. **`--ignore-scripts` on the audit/scan install (P-SEC.4 half)** — add to the CI **audit/scan** job only
     (NOT the deploy install — postinstall builds are legit there). Small, safe. OPEN in CI.
 
@@ -73,7 +79,9 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
     now all exist to compose them). PARTIAL — no packaged domain recipe yet.
 20. **Service-split generator + named paradigms** — Clean/DDD/MVC/Hexagonal scaffold + a microservice split
     path. OPEN (coupling is scored; no split generator). *Lower priority.*
-21. **Pure-code polish** (pull per surface, each small): CSP header on generated apps · SRI for CDN scripts ·
+21. **Pure-code polish** (pull per surface, each small): ~~CSP for generated apps~~ (✅ CSP-meta analyzer,
+    #1791) · ~~SRI for CDN scripts~~ (✅ done, prior) · ~~server-side upload MIME validation~~ (✅ multer
+    fileFilter analyzer, #1794) · ~~open redirect~~ (✅ already two rules in `SecurityAnalysis.ts`) ·
     "report ALL build errors, don't stop on first" · component-name (not URL) in preview errors + highlight
     the failing file · "cannot find module X → install suggestion" · 429 countdown · logout-on-inactivity ·
     server-side upload MIME validation · block secrets in generated code. *(Verify each vs live code first —

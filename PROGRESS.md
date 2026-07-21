@@ -20226,3 +20226,61 @@ entries → no change needed.
 
 **Verification (both PRs):** `npx tsc --noEmit` ✅ · `npx vitest run` ✅ **8642/8642 passed (870 files)** ·
 CI green before each merge (hard gate).
+
+---
+
+## 2026-07-21 — Engine-hardening conveyor: 5 real slices + honest roadmap reconciliation
+
+A single autonomous conveyor session (branch → verification gate → PR → background CI → merge on green, five
+times). All five shipped real, verified, advisory-only capability — none blocks a build, none touches the moat
+(routing / billing / white-label / coherence). Each: server `tsc` clean + full `AgentV3` vitest suite green
+before merge.
+
+**Shipped + merged (in order):**
+1. **#1790 — AP-4 slice 2: flag-gated parallel frontend/backend build.** The builder can now dispatch
+   `frontend`/`backend` writer sub-agents in parallel when `AGENTV3_PARALLEL_BUILD=on`, guarded by a
+   `PathWriteLock` (per-path serializer) so concurrent writes to the same file can never clobber. Off by
+   default → today's serial behaviour byte-identical. Closed the earlier over-cautious defer (#1788): the
+   shared WorkspaceState mutations are synchronous point-updates (atomic under single-threaded JS), and the
+   only async shared write is file I/O, which the lock covers; worst case (mis-partition) degrades to serial,
+   never corruption.
+2. **#1791 — CSP-meta analyzer.** Flags a STATIC SPA (no backend files) that loads a third-party
+   `<script src="https://…">` with no `<meta http-equiv="Content-Security-Policy">`. Complements SRI (integrity
+   of a known script) + SecurityHeaders (server CSP header) — covers the case both miss (a serverless SPA has
+   no place to set a header). High-precision: server-backed builds skipped; silent when a CSP meta or only
+   first-party scripts are present.
+3. **#1792 — generated-comment language guard.** Flags Hindi/Devanagari in code COMMENTS (a CLAUDE.md
+   professional-English-comments violation on generated apps). **Critical precision boundary:** Hindi UI is a
+   FEATURE — string literals, JSX/HTML body text, `//` inside URLs are never flagged; only pure comment lines
+   (`//`, or `#` in py/rb/sh/yaml) and block comments (`/* */`, `<!-- -->`) are scanned.
+4. **#1793 — capture HTTP 5xx into the runtime auto-fix loop.** The E2B browser daemon already hooked
+   console/pageerror/requestfailed, but a `fetch` that COMPLETES with a 500 does not fire `requestfailed`
+   (transport-only) — so a broken API call was invisible to the repair loop. Added a `page.on('response')` 5xx
+   capture (`httperror` NDJSON) + extended the `http-status` classifier to the daemon's format. 4xx deliberately
+   excluded (auth/probing noise). Try/caught, advisory — can never affect the build.
+5. **#1794 — file-upload MIME-validation analyzer.** Flags a `multer(` upload with no `fileFilter` / MIME check
+   (accepts any file type → stored-XSS / malware). High-precision: skipped when a `fileFilter` or any `mimetype`
+   reference is present; backend files only.
+
+**Honest roadmap reconciliation (safeguards #1/#6 — stale `ROADMAP_REMAINING.md` corrected so the next session
+does not rebuild what exists):**
+- **Already built (docs were stale):** Ansible IaC target (#17 — `generateAnsiblePlaybook` already in
+  `IaCGenerator.ts`, wired into `generateIaC`); Open-redirect (already two rules in `SecurityAnalysis.ts`:
+  `open-redirect` + `open-redirect-header`); Cap-4 cost-alerting thresholds (`costAlert.ts`, prior #1771);
+  GraphQL recipe + CRM recipe + codemod cap (confirmed done in prior probes).
+- **Infra-blocked (recorded per rule 6, NOT attempted):** more framework languages (Rust/Ruby/PHP — #7) need
+  the toolchain in the E2B fullstack template (admin-only image; a scaffold that can't compile/run would be a
+  rule-2 "built but not working" violation); network-request capture beyond 5xx (#5 remainder) needs
+  daemon/template changes; runtime smoke-hitter (#6) needs a live sandbox.
+- **Deliberate design decision, NOT an autonomous change (safeguard #3):** the bounded `ask_user` gate (#1,
+  admin's #1 category) — the existing `clarify` emit is intentionally FRICTION-FREE (no blocking round-trip,
+  honouring the "text reply > build app" rule). A blocking interactive gate would contradict that
+  admin-approved design → confirm with admin before building.
+- **Marginal / declined (rule 3, no busywork):** `--ignore-scripts` on the CI audit job (#18) — every install
+  in `ci.yml`/`dast.yml` feeds a build where postinstall scripts are legitimately needed; there is no scan-only
+  install to harden without breaking the build or adding a duplicate job for negligible benefit.
+
+**Net:** 5 new advisory evaluate dimensions / engine capabilities, ~6 regression-test files, zero moat contact,
+all env-gated or advisory (never blocks a build). The clean, code-only, high-precision analyzer vein is now
+largely exhausted — remaining roadmap value is concentrated in infra-unblocks (admin) and larger multi-PR
+architectural work (ask_user gate, design-to-code, parallel-build deepening) that needs deliberate scoping.

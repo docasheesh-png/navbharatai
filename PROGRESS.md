@@ -20226,3 +20226,46 @@ entries → no change needed.
 
 **Verification (both PRs):** `npx tsc --noEmit` ✅ · `npx vitest run` ✅ **8642/8642 passed (870 files)** ·
 CI green before each merge (hard gate).
+
+## 2026-07-21 — Hosting: Firebase-NATIVE custom-domain serving layer — Slice 1 (tested core primitive)
+
+Closes the honest gap the design doc flagged (`NAVBHARATAI_PRO_V3_DESIGN.md:478`): the old Cloudflare-for-SaaS
+connect flow provisioned a hostname + returned DNS records but **nothing routed the domain → the user's
+published app** (a `custom_domains` mapping was written but never read). Admin decision (2026-07-21, asked +
+confirmed): use the **Firebase-native** mechanism — the user's own domain points directly at their published
+Firebase Hosting site, Firebase serves it and auto-issues SSL.
+
+**Real architectural constraint surfaced honestly (rule 3):** a Firebase custom domain attaches to a Hosting
+**site**, NOT to a preview **channel**. Today every app publishes as a preview channel on ONE shared site
+(`<project>--<channel>.web.app`), which cannot carry a custom domain. So a custom-domain app needs its OWN
+dedicated Firebase site (multi-site). Firebase enforces a **~36 sites/project quota (raisable)** → dedicated
+sites MUST be reserved for apps that actually connect a domain (never one-per-app, or we'd break the
+"never break" rule at 36 apps). At large scale (thousands of custom domains) the Cloudflare-proxy design
+(one origin, unlimited hostnames) is the eventual upgrade; Firebase-native is the right, most-reliable choice
+for the current stage.
+
+**Slice 1 shipped (this PR) — the tested core primitive, additive, nothing user-facing claimed done yet:**
+- `src/server/lib/firebaseCustomDomain.ts`:
+  - `siteIdForWorkspace(ws)` — stable, valid Firebase site id (`nbai-<20hex>`, ≤30 chars, `[a-z0-9-]`, no edge
+    hyphen), derived from a hash of the FULL workspaceId (same collision class the channel-id fix guarded).
+  - `customDomainRecords(cd)` / `customDomainStatus(domain, cd)` — pure mappers over the real
+    firebasehosting v1beta1 `CustomDomain` shape: surface exactly the `requiredDnsUpdates.desiredDnsState`
+    records the user must ADD, and report `active` ONLY when ownership + host + cert are ALL `*_ACTIVE`
+    (honest pending otherwise — never a fake "connected").
+  - `ensureSite` / `attachCustomDomain` / `customDomainStatusLive` — real `projects.sites[.customDomains]`
+    calls via ADC (same auth as `Deployment.ts`); idempotent (409 = success), 404 = not-attached. When the
+    service account lacks the role / API, they throw an HONEST error — never a fabricated success.
+- `src/server/lib/firebaseCustomDomain.test.ts` — 8 unit tests locking the pure logic (site-id stability +
+  uniqueness + format, ADD-only record filtering, all-desired fallback, active-only-when-all-active).
+
+**Honest boundary (rule 6):** the live Firebase API cannot be exercised from the dev sandbox (no ADC / no
+live project), so slice 1 ships the fully-tested pure core + the real API calls, but the end-to-end connect
+is NOT claimed working until Slice 2 wires it and the admin runs the one live test.
+
+**Slice 2 (next, needs an admin live test):** deploy a custom-domain workspace's built dist to its dedicated
+site at PUBLISH time (so the domain serves the app), a `/api/domains/nbai/connect` + `/status` route pair
+(auth-guarded, reuses the `custom_domains` mapping), and the ConnectDomainPanel switch from Cloudflare records
+to Firebase's real records for the "Host on NavBharatAI" case. `AppKnowledgeBase` updated when the user-facing
+surface lands.
+
+**Verification (slice 1):** `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run src/server/lib/firebaseCustomDomain.test.ts` ✅ 8/8.

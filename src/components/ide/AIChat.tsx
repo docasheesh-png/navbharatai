@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { AttachMenu } from '../AttachMenu';
-import axios from 'axios';
+import { saveSecret } from '../../lib/secretsApi';
 import { AgentProgress, BuildStep } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
@@ -115,16 +115,13 @@ export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, us
 
     setStatus('saving');
     try {
-      await axios.post(`/api/secrets/${userId}`, {
-        secret_name: secretName,
-        secret_value: secretValue
-      });
+      await saveSecret(userId, secretName, secretValue);
       setStatus('success');
       setSecretValue('');
     } catch (err: any) {
       console.error('Failed to save API Key:', err);
       setStatus('error');
-      setErrorMessage(err.response?.data?.error || 'Failed to save secret key. Please try again.');
+      setErrorMessage(err?.message || 'Failed to save secret key. Please try again.');
     }
   };
 

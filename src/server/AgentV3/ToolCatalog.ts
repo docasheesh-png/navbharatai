@@ -1642,6 +1642,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_teams',
+      description:
+        'Add a real teams / workspaces (multi-tenant membership) backend to the app (server/teams/) — a packaged ' +
+        'domain vertical for any B2B SaaS. The real guarantee is MEMBERSHIP INTEGRITY: a user can be a member of ' +
+        'MANY workspaces with a per-workspace role (owner|admin|member), a workspace ALWAYS keeps at least one ' +
+        'owner (removing or demoting the last owner is rejected), and invites are SINGLE-USE (accepting a token ' +
+        'twice fails). Emits a dependency-free TeamService (node:crypto for invite tokens) with createWorkspace / ' +
+        'invite / acceptInvite / setRole / removeMember / workspacesForUser / roleOf + an Express router (POST ' +
+        '/api/workspaces, GET /api/workspaces ?user=, GET /api/workspaces/:id/members, POST ' +
+        '/api/workspaces/:id/invites, POST /api/workspaces/invites/accept, PATCH/DELETE ' +
+        '/api/workspaces/:id/members/:userId). Distinct from generate_rbac / generate_abac (a permission MODEL, ' +
+        'not tenancy/membership) — pair them to check what a role may DO. In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2735,6 +2750,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_contact_form',
   'generate_pageviews',
   'generate_gift_cards',
+  'generate_teams',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

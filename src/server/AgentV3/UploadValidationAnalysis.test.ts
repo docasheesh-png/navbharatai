@@ -17,6 +17,35 @@ describe('scanUploadValidation — flag an unrestricted multer upload', () => {
     expect(scanUploadValidation('upload.js', "const upload = multer();")).toHaveLength(1);
   });
 
+  it('flags formidable with no mimetype check', () => {
+    const code = [
+      "import formidable from 'formidable';",
+      "const form = formidable({ multiples: true });",
+      "form.parse(req, (err, fields, files) => res.json(files));",
+    ].join('\n');
+    const issues = scanUploadValidation('src/server/upload.ts', code);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].library).toBe('formidable');
+  });
+
+  it('flags express-fileupload (fileUpload middleware) with no mimetype check', () => {
+    const code = [
+      "import fileUpload from 'express-fileupload';",
+      "app.use(fileUpload({ limits: { fileSize: 5 * 1024 * 1024 } }));",
+    ].join('\n');
+    const issues = scanUploadValidation('src/server/app.ts', code);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].library).toBe('express-fileupload');
+  });
+
+  it('does NOT flag formidable when a mimetype allowlist check is present', () => {
+    const code = [
+      "const form = formidable({});",
+      "if (!['image/png','image/jpeg'].includes(files.photo.mimetype)) return res.status(400).end();",
+    ].join('\n');
+    expect(scanUploadValidation('upload.ts', code)).toHaveLength(0);
+  });
+
   it('does NOT flag multer with a fileFilter (built-in type gate)', () => {
     const code = [
       "const upload = multer({",

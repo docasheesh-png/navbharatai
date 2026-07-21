@@ -124,6 +124,10 @@ export interface ViewPanelsProps {
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
   /** Snapshot of the files taken before the last v5.0 build — the Diff Viewer's "previous version". */
   previousFiles?: Record<string, string>;
+  /** Whether the current user is a platform admin — gates the raw prod-DB console (DatabaseUI). */
+  isAdmin?: boolean;
+  /** Open Settings → Database (the user's own-app / BYOD database). */
+  onOpenAppDatabase?: () => void;
   /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
   /** Hand a build prompt to the REAL engine: prefills the Pro v5.0 composer and switches to that
@@ -146,7 +150,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -320,7 +324,7 @@ export function ViewPanels({
       {/* Phase 3 — Database UI */}
       {activeView === 'database' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DatabaseUI userId={user?.uid} userTier={activeAgent} />
+          <DatabaseUI userId={user?.uid} userTier={activeAgent} isAdmin={isAdmin} onOpenAppDatabase={onOpenAppDatabase} />
         </div>
       )}
 

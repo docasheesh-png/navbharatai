@@ -389,7 +389,7 @@ export function ViewPanels({
       {/* Phase 6 — Performance Analyzer */}
       {activeView === 'performance' && (
         <div className="flex-1 h-full overflow-hidden">
-          <PerformanceAnalyzer generatedCode={generatedCode} />
+          <PerformanceAnalyzer generatedCode={generatedCode} files={files as Record<string, string>} />
         </div>
       )}
 
@@ -451,7 +451,7 @@ export function ViewPanels({
       {/* Phase 8 — Code Minifier */}
       {activeView === 'minifier' && (
         <div className="flex-1 h-full overflow-hidden">
-          <CodeMinifier generatedCode={generatedCode} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
+          <CodeMinifier generatedCode={generatedCode} files={files as Record<string, string>} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
         </div>
       )}
 

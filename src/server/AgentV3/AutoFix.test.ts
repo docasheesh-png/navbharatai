@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   autoFixEnabled, reviewerAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors,
   formatRuntimeErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome,
+  reviewCriticalUnresolvedSummary,
   runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError,
 } from './AutoFix';
 
@@ -61,6 +62,35 @@ describe('reviewerAutofixOutcome — never claim "Auto-fixed" when the repair fa
     expect(r.autoResolved).toBe(false);          // shows up as a real unresolved problem, not a green tick
     expect(r.message).not.toMatch(/Auto-fixed/);  // the exact fake-success string must never appear
     expect(r.message).toMatch(/may still be present/);
+  });
+});
+
+describe('reviewCriticalUnresolvedSummary — honest verdict when reviewer criticals ship unfixed (deep-test 2026-07-21)', () => {
+  it('never claims success/"console clean" and states the app is not fully working', () => {
+    const s = reviewCriticalUnresolvedSummary(2);
+    expect(s).not.toMatch(/console is clean|no runtime errors|✅|successful/i);
+    expect(s).toMatch(/isn't fully working/);
+    expect(s).toMatch(/2 critical issues/);
+  });
+  it('promises the user was NOT charged (the "working app or free" law is visible)', () => {
+    expect(reviewCriticalUnresolvedSummary(3)).toMatch(/have NOT been charged/);
+  });
+  it('is actionable — tells the user how to get them fixed', () => {
+    expect(reviewCriticalUnresolvedSummary(1)).toMatch(/fix it|continue/i);
+  });
+  it('grammatical for the singular case (1 critical issue / it / isn\'t)', () => {
+    const s = reviewCriticalUnresolvedSummary(1);
+    expect(s).toMatch(/1 critical issue that isn't/);
+    expect(s).not.toMatch(/issues/);
+  });
+  it('WHITE-LABEL: never names a provider/model (findings stay admin-only)', () => {
+    const s = reviewCriticalUnresolvedSummary(2).toLowerCase();
+    for (const v of ['glm', 'kimi', 'claude', 'sonnet', 'opus', 'gemini', 'grok', 'moonshot', 'anthropic', 'vertex']) {
+      expect(s).not.toContain(v);
+    }
+  });
+  it('clamps a zero/negative count to at least one (never "0 critical issues")', () => {
+    expect(reviewCriticalUnresolvedSummary(0)).toMatch(/1 critical issue that/);
   });
 });
 

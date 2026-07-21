@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1543,6 +1543,35 @@ describe('emptyBuildFailureSummary (deep-test App #7) — an empty build is neve
   it('does NOT fail a chat/analysis/import turn (no artifacts expected), even if the sandbox was down', () => {
     expect(emptyBuildFailureSummary(false, 0, true)).toBeNull();
     expect(emptyBuildFailureSummary(false, 5, true)).toBeNull();
+  });
+});
+
+describe('finalSyntaxErrorSummary (sibling of the reviewer-CRITICAL false-success fix, 2026-07-21)', () => {
+  it('never claims success — states the app does not compile / is not runnable', () => {
+    const s = finalSyntaxErrorSummary(2);
+    expect(s).not.toMatch(/✅|successful|console is clean/i);
+    expect(s).toMatch(/don't compile yet/);
+    expect(s).toMatch(/isn't runnable/);
+    expect(s).toMatch(/2 files/);
+  });
+  it('promises the user was NOT charged (working app or free)', () => {
+    expect(finalSyntaxErrorSummary(1)).toMatch(/have NOT been charged/);
+  });
+  it('is actionable + grammatical for the singular case (1 file / doesn\'t)', () => {
+    const s = finalSyntaxErrorSummary(1);
+    expect(s).toMatch(/\b1 file\b/);
+    expect(s).toMatch(/doesn't compile yet/);
+    expect(s).toMatch(/continue/);
+    expect(s).not.toMatch(/\bfiles\b/);
+  });
+  it('WHITE-LABEL: never names a provider/model', () => {
+    const s = finalSyntaxErrorSummary(3).toLowerCase();
+    for (const v of ['glm', 'kimi', 'claude', 'sonnet', 'opus', 'gemini', 'grok', 'moonshot', 'anthropic', 'vertex']) {
+      expect(s).not.toContain(v);
+    }
+  });
+  it('clamps a zero/negative count to at least one', () => {
+    expect(finalSyntaxErrorSummary(0)).toMatch(/\b1 file\b.*doesn't compile yet/);
   });
 });
 

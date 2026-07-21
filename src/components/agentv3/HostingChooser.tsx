@@ -69,6 +69,7 @@ export function HostingChooser({ providers, onDeploy, onClose, busy }: HostingCh
             <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
               <li>• Instant publish — nothing to set up</li>
               <li>• Frontend now · full app (backend + DB) coming soon</li>
+              <li>• Fair-use limits apply (per-publish size + safety scan)</li>
             </ul>
             <button
               onClick={() => onDeploy(NBAI_HOST_ID)}

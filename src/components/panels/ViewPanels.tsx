@@ -32,7 +32,9 @@ const ComponentLibrary  = _lz(() => import('../ide/ComponentLibrary'),   'Compon
 const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOptimizer');
 const APKBuilder        = _lz(() => import('../ide/APKBuilder'),         'APKBuilder');
 const FigmaImporter     = _lz(() => import('../ide/FigmaImporter'),      'FigmaImporter');
-const CustomDomain      = _lz(() => import('../ide/CustomDomain'),       'CustomDomain');
+// Custom Domain now uses the REAL Cloudflare-backed panel (admin autopsy 2026-07-21) — the old
+// ide/CustomDomain wizard faked a "domain is live" state without any SSL/ownership verification.
+const ConnectDomainPanel = _lz(() => import('./ConnectDomainPanel'),     'ConnectDomainPanel');
 const TeamCollaboration = _lz(() => import('../ide/TeamCollaboration'),  'TeamCollaboration');
 const PWANotifications  = _lz(() => import('../ide/PWANotifications'),   'PWANotifications');
 const CodeMinifier      = _lz(() => import('../ide/CodeMinifier'),       'CodeMinifier');
@@ -420,7 +422,7 @@ export function ViewPanels({
       {/* Phase 6 — SEO Optimizer */}
       {activeView === 'seo' && (
         <div className="flex-1 h-full overflow-hidden">
-          <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
@@ -441,10 +443,11 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 7 — Custom Domain */}
+      {/* Custom Domain — the REAL Cloudflare-backed connect flow (honest pending/active/not-configured
+          states via /api/domains/*), replacing the old wizard that faked "your domain is live". */}
       {activeView === 'domain' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <CustomDomain />
+        <div className="flex-1 h-full overflow-y-auto">
+          <ConnectDomainPanel onBack={() => toggleTab('studio')} />
         </div>
       )}
 

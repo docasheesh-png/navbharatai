@@ -42,15 +42,6 @@ const STEP_TYPE_OPTIONS: { type: StepType; label: string; defaultCmd: string }[]
   { type: 'custom', label: 'Custom', defaultCmd: 'echo "custom step"' },
 ];
 
-const STEP_LOGS: Record<StepType, string> = {
-  checkout: '$ git checkout main\nAlready on \'main\'\nYour branch is up to date.',
-  install: '$ npm ci\nadded 847 packages in 12.3s\n✓ Dependencies installed.',
-  test: '$ npm test\n✓ App renders without crashing\n✓ Login form validates input\n✓ API returns correct data\nTests: 3 passed, 0 failed.',
-  build: '$ npm run build\nCreating optimized production build...\nCompiled successfully.\nFile sizes: main.js 142.3 kB gzipped',
-  deploy: '$ gcloud run deploy\nBuilding container image...\nDeploying to Cloud Run...\n✓ Service URL: https://navbharat-ai.run.app',
-  notify: '$ curl -X POST $WEBHOOK_URL\n✓ Notification sent.',
-  custom: '$ echo "custom step"\ncustom step\n✓ Done.',
-};
 
 function generateYAML(steps: PipelineStep[], platform: Platform, appName: string, envName: string): string {
   if (platform === 'github') {
@@ -77,11 +68,9 @@ function generateYAML(steps: PipelineStep[], platform: Platform, appName: string
   return `stages:\n${stagesYml}\n\n${jobsYml}`;
 }
 
-let runId = 0;
 
 export function CICDPipeline() {
   const [steps, setSteps] = useState<PipelineStep[]>(DEFAULT_STEPS.map(s => ({ ...s })));
-  const [running, setRunning] = useState(false);
   const [platform, setPlatform] = useState<Platform>('github');
   const [appName, setAppName] = useState('NavBharat AI');
   const [envName, setEnvName] = useState('production');
@@ -92,40 +81,9 @@ export function CICDPipeline() {
 
   const yaml = generateYAML(steps, platform, appName, envName);
 
-  const runPipeline = () => {
-    if (running) return;
-    runId++;
-    setRunning(true);
-    setSteps(prev => prev.map(s => ({ ...s, status: 'idle', duration: undefined, log: undefined })));
-
-    const enabledSteps = steps.filter(s => s.enabled);
-    let failed = false;
-
-    const updatedSteps = enabledSteps.map(step => {
-      if (failed) return { ...step, status: 'skip' as StepStatus };
-      // Instant validation: pass if command is non-empty
-      const pass = step.command.trim().length > 0 && step.type !== 'test' ? true : step.command.trim().length > 0;
-      // Compute a realistic duration based on command complexity
-      const words = step.command.split(/\s+/).length;
-      const duration = 500 + words * 120 + step.type.length * 50;
-      if (!pass) failed = true;
-      return {
-        ...step,
-        status: (pass ? 'pass' : 'fail') as StepStatus,
-        duration,
-        log: STEP_LOGS[step.type],
-      };
-    });
-
-    // Build full updated list including disabled steps unchanged
-    setSteps(prev => prev.map(s => {
-      const updated = updatedSteps.find(u => u.id === s.id);
-      return updated || s;
-    }));
-    setRunning(false);
-  };
-
-  const stopPipeline = () => { runId++; setRunning(false); setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'skip' } : s)); };
+  // The fake runPipeline / stopPipeline simulation was removed (admin autopsy 2026-07-21): it
+  // fabricated pass/fail + console logs in the browser without executing anything. This tool builds
+  // real, committable CI YAML (downloadYaml / copyYaml) — the provider runs it for real.
 
   const toggleStep = (id: string) => setSteps(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
 
@@ -177,8 +135,6 @@ export function CICDPipeline() {
   };
 
   const selectedStepData = steps.find(s => s.id === selectedStep);
-  const passed = steps.filter(s => s.status === 'pass').length;
-  const failed = steps.filter(s => s.status === 'fail').length;
 
   return (
     <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
@@ -192,15 +148,12 @@ export function CICDPipeline() {
           <p className="text-xs text-white/40">Visual pipeline builder — GitHub Actions, Cloud Build, GitLab CI</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {running ? (
-            <button onClick={stopPipeline} className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 rounded-xl text-sm font-medium transition-all">
-              <X className="w-4 h-4" /> Stop
-            </button>
-          ) : (
-            <button onClick={runPipeline} className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-all">
-              <Play className="w-4 h-4" /> Run Pipeline
-            </button>
-          )}
+          {/* This is a pipeline BUILDER — the real deliverable is the CI YAML, which your provider
+              runs (admin autopsy 2026-07-21). The old "Run Pipeline" button faked pass/fail + console
+              logs in the browser; nothing was ever executed. Download the real YAML instead. */}
+          <button onClick={downloadYaml} className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-all">
+            <Download className="w-4 h-4" /> Download YAML
+          </button>
         </div>
       </div>
 
@@ -221,12 +174,6 @@ export function CICDPipeline() {
             </button>
           ))}
         </div>
-        {(passed > 0 || failed > 0) && (
-          <div className="flex items-center gap-2 text-xs">
-            {passed > 0 && <span className="text-emerald-400">✓ {passed}</span>}
-            {failed > 0 && <span className="text-red-400">✗ {failed}</span>}
-          </div>
-        )}
       </div>
 
       <div className="flex flex-1 overflow-hidden">

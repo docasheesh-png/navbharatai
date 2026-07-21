@@ -250,7 +250,7 @@ export function dateContextBlock(nowIso: string): string {
   ].join('\n');
 }
 
-export function architectSystemPrompt(framework?: string): string {
+export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
   return [
     'You are NavBharatAI Pro v5.0 — a friendly, capable AI app builder, like Claude',
@@ -398,8 +398,20 @@ export function architectSystemPrompt(framework?: string): string {
     '  independent REVIEW specialists together in ONE turn — emit several task',
     '  calls at once (e.g. qa, security, performance, accessibility, reviewer).',
     '  They only read and report, so they run in parallel and all findings come',
-    '  back together — much faster than one-at-a-time. Then assign the fixes',
-    '  yourself (or to a builder) one file at a time, so fixes never collide.',
+    // AP-4: with parallel building on, a per-path write lock (PathWriteLock) serializes same-file
+    // writes, so independent fixes to DIFFERENT files can now dispatch together too — not just reads.
+    // Flag OFF (default) keeps the original serial-writer guidance byte-for-byte (cache-prefix stable).
+    ...(opts?.parallelBuild
+      ? [
+          '  back together — much faster than one-at-a-time. Then dispatch the fixes:',
+          '  independent fixes to DIFFERENT files can go together in ONE turn — a',
+          '  per-file write lock serializes same-path writes, so different-file fixes',
+          '  never collide; multiple edits to the SAME file still go one at a time.',
+        ]
+      : [
+          '  back together — much faster than one-at-a-time. Then assign the fixes',
+          '  yourself (or to a builder) one file at a time, so fixes never collide.',
+        ]),
     '',
     '- For a risky decision or a finished piece of work, you can call',
     '  second_opinion to get an independent cross-model review (a DIFFERENT AI',

@@ -20269,3 +20269,196 @@ to Firebase's real records for the "Host on NavBharatAI" case. `AppKnowledgeBase
 surface lands.
 
 **Verification (slice 1):** `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run src/server/lib/firebaseCustomDomain.test.ts` ✅ 8/8.
+
+---
+
+## 2026-07-21 — Engine-hardening conveyor: 5 real slices + honest roadmap reconciliation
+
+A single autonomous conveyor session (branch → verification gate → PR → background CI → merge on green, five
+times). All five shipped real, verified, advisory-only capability — none blocks a build, none touches the moat
+(routing / billing / white-label / coherence). Each: server `tsc` clean + full `AgentV3` vitest suite green
+before merge.
+
+**Shipped + merged (in order):**
+1. **#1790 — AP-4 slice 2: flag-gated parallel frontend/backend build.** The builder can now dispatch
+   `frontend`/`backend` writer sub-agents in parallel when `AGENTV3_PARALLEL_BUILD=on`, guarded by a
+   `PathWriteLock` (per-path serializer) so concurrent writes to the same file can never clobber. Off by
+   default → today's serial behaviour byte-identical. Closed the earlier over-cautious defer (#1788): the
+   shared WorkspaceState mutations are synchronous point-updates (atomic under single-threaded JS), and the
+   only async shared write is file I/O, which the lock covers; worst case (mis-partition) degrades to serial,
+   never corruption.
+2. **#1791 — CSP-meta analyzer.** Flags a STATIC SPA (no backend files) that loads a third-party
+   `<script src="https://…">` with no `<meta http-equiv="Content-Security-Policy">`. Complements SRI (integrity
+   of a known script) + SecurityHeaders (server CSP header) — covers the case both miss (a serverless SPA has
+   no place to set a header). High-precision: server-backed builds skipped; silent when a CSP meta or only
+   first-party scripts are present.
+3. **#1792 — generated-comment language guard.** Flags Hindi/Devanagari in code COMMENTS (a CLAUDE.md
+   professional-English-comments violation on generated apps). **Critical precision boundary:** Hindi UI is a
+   FEATURE — string literals, JSX/HTML body text, `//` inside URLs are never flagged; only pure comment lines
+   (`//`, or `#` in py/rb/sh/yaml) and block comments (`/* */`, `<!-- -->`) are scanned.
+4. **#1793 — capture HTTP 5xx into the runtime auto-fix loop.** The E2B browser daemon already hooked
+   console/pageerror/requestfailed, but a `fetch` that COMPLETES with a 500 does not fire `requestfailed`
+   (transport-only) — so a broken API call was invisible to the repair loop. Added a `page.on('response')` 5xx
+   capture (`httperror` NDJSON) + extended the `http-status` classifier to the daemon's format. 4xx deliberately
+   excluded (auth/probing noise). Try/caught, advisory — can never affect the build.
+5. **#1794 — file-upload MIME-validation analyzer.** Flags a `multer(` upload with no `fileFilter` / MIME check
+   (accepts any file type → stored-XSS / malware). High-precision: skipped when a `fileFilter` or any `mimetype`
+   reference is present; backend files only.
+
+**Honest roadmap reconciliation (safeguards #1/#6 — stale `ROADMAP_REMAINING.md` corrected so the next session
+does not rebuild what exists):**
+- **Already built (docs were stale):** Ansible IaC target (#17 — `generateAnsiblePlaybook` already in
+  `IaCGenerator.ts`, wired into `generateIaC`); Open-redirect (already two rules in `SecurityAnalysis.ts`:
+  `open-redirect` + `open-redirect-header`); Cap-4 cost-alerting thresholds (`costAlert.ts`, prior #1771);
+  GraphQL recipe + CRM recipe + codemod cap (confirmed done in prior probes).
+- **Infra-blocked (recorded per rule 6, NOT attempted):** more framework languages (Rust/Ruby/PHP — #7) need
+  the toolchain in the E2B fullstack template (admin-only image; a scaffold that can't compile/run would be a
+  rule-2 "built but not working" violation); network-request capture beyond 5xx (#5 remainder) needs
+  daemon/template changes; runtime smoke-hitter (#6) needs a live sandbox.
+- **Deliberate design decision, NOT an autonomous change (safeguard #3):** the bounded `ask_user` gate (#1,
+  admin's #1 category) — the existing `clarify` emit is intentionally FRICTION-FREE (no blocking round-trip,
+  honouring the "text reply > build app" rule). A blocking interactive gate would contradict that
+  admin-approved design → confirm with admin before building.
+- **Marginal / declined (rule 3, no busywork):** `--ignore-scripts` on the CI audit job (#18) — every install
+  in `ci.yml`/`dast.yml` feeds a build where postinstall scripts are legitimately needed; there is no scan-only
+  install to harden without breaking the build or adding a duplicate job for negligible benefit.
+
+**Net:** 5 new advisory evaluate dimensions / engine capabilities, ~6 regression-test files, zero moat contact,
+all env-gated or advisory (never blocks a build). The clean, code-only, high-precision analyzer vein is now
+largely exhausted — remaining roadmap value is concentrated in infra-unblocks (admin) and larger multi-PR
+architectural work (ask_user gate, design-to-code, parallel-build deepening) that needs deliberate scoping.
+
+---
+
+## 2026-07-21 (later) — Restaurant-build forensic autopsy (rule 5) → GLM-429 storm killed at 3 layers + honest file-reveal UX
+
+**The evidence:** the admin ran the requested full-stack test build (restaurant management + GST billing,
+44 files, `buildId e4c483bb`) and sent the diagnostics JSON. Ledger: 367 events, 0 errors, 17 warnings,
+2 unresolved; ✅ 3 genuine self-heals (JS→TS rename, missing import, missing dep); 🥵 the build ran 27+ min
+against an 11-min estimate. Dominant root cause: **GLM 429'd 32×** ("service temporarily overloaded"),
+`builtBy: KIMI` (GLM 21 / KIMI 73 / VERTEX 1 deliveries) — every remaining defect (fast-lane 240s timeout →
+BUILD_FAILED handoff, the Vertex `max_tokens` truncation, the salvage-path read miss) was downstream of the
+429 latency. Secondary root cause: **domain misclassified restaurant→ecommerce** (first-match-wins let
+ecommerce's `\border\b` steal the prompt).
+
+**Shipped fixes (each: root-cause + regression tests + CI green + merged):**
+1. **#1800 — best-scoring domain selection** (`RequirementGapAnalyzer`): among all matching domains, the one
+   with the highest feature-signal overlap wins (array order breaks ties, so existing classifications change
+   ONLY when a later domain is strictly more specific). The real failing prompt now → `restaurant`; a genuine
+   online store still → `ecommerce`.
+2. **#1801 — escalating 429 re-probe bench** (`createRateLimitCooldowns`): the short cooldown was FIXED 60s →
+   a saturated GLM was re-probed (and 429'd) ~once a minute all build long — the exact 32-failure drip, which
+   the 8-in-120s circuit breaker structurally never sees. Now each bench re-arm LINKED to the previous one
+   (within 2× base of expiry) doubles the window (60→120→240→… cap `AGENTV3_RATE_LIMIT_COOLDOWN_MAX_MS`,
+   default 10× base); a rare spread-out 429 starts fresh; a success resets; concurrent stragglers = one
+   episode. ~32 wasted probes collapse to ~5.
+3. **#1802 — floor balance** (admin directive "GLM par pura load na dalo — 4 me smartly divide"):
+   `cheapBuildFloorRunners` alternates the GLM↔KIMI lead per construction (~50/50 first-attempt spread);
+   health-awareness comes free from the shared cooldowns; Vertex/Gemini/Haiku stay strictly error-only
+   backstops (cost order + no-Claude ladder untouched). Supersedes the fixed GLM-first order (2026-07-01) per
+   the newer directive; kill switch `AGENTV3_FLOOR_BALANCE=off`.
+4. **#1803 — honest file-by-file reveal** (admin: "user ko ek ek file banti dikhe"): an order-preserving
+   pacing queue (`revealPacer.ts`) between the NDJSON stream and the reducer drips burst `✓ file (n/m)` lines
+   at 600ms. HONESTY: only real events, exact order, terminal events flush instantly, deep backlog drains 4×,
+   nothing ever dropped. Backend build speed untouched.
+
+**Admin infra actions (same session, hand-to-hand):** `AGENTV3_RATE_PACER=on` set in Cloud Run (wakes the
+already-built proactive token-bucket + AIMD pacer) and the **GLM key-pool** (comma-separated Z.ai keys) set —
+both recorded in the CLAUDE.md env registry.
+
+**Honestly recorded, not silently dropped (rule 6):**
+- The fast lane running on a complex app is BY DESIGN (manifest lane > free-form loop) — its timeout here was
+  a symptom of the 429 latency, not a gating bug. Not changed.
+- Vertex `max_tokens` truncation + the salvage-path read miss are low-frequency downstream symptoms; the final
+  syntax re-verify gate already catches a truncated file that breaks parsing. Watch the next real build report
+  before adding machinery.
+- Remaining approved-but-unshipped slices from the admin's directive: **hedged text requests** (GLM-vs-Kimi
+  race for fast-lane text calls, flag-gated canary) and **micro-file batching** in SimpleBuilder — planned
+  follow-ups now that the 3-layer fix + pacer + key-pool should be measured on a real build first.
+
+---
+
+## 2026-07-21 — LearnLoop autopsy: SQLite scalar-list guard (DNA fix, branch `claude/ai-teacher-student-profiles-8bg002`)
+
+**Report:** LearnLoop LMS (full-stack Vite + Express + Prisma/SQLite) build FAILED (`ok:none`,
+`rootCause: BUILD_FAILED`). Autopsy decisive blockers were the Prisma-7 datasource skew (P1012 loop) — now
+already closed by prior sessions' `^6` pin + install-command pin + package.json pin + `--legacy-peer-deps` —
+PLUS a schema-modeling class that NO guard fixed: **scalar lists on SQLite**. The builder modelled
+`attachments String[]` (and enum lists rewritten to `String[]` by `stripPrismaSqliteEnums` line 48, which
+deliberately "kept shape"). SQLite's connector does not support lists of primitive types, so
+`prisma validate` / `prisma generate` fails with *"Field '…' can't be a list. The current connector does not
+support lists of primitive types"*, looping the DB setup.
+
+**Root-cause fix (DNA level, class not instance):** new pure guard `fixPrismaSqliteScalarList(path, content)`
+in `FullStackGuards.ts`. On a SQLite datasource it collapses every scalar list field (`<name> <Scalar>[]`,
+for the nine Prisma primitive scalars) to a single nullable `String?` (Prisma's own SQLite guidance — store
+serialized) and drops the now-invalid `@default([...])`. RELATION lists (`Lesson[]`, `User[]`) are left
+untouched because only the scalar type tokens are matched — relations are valid on SQLite. Runs AFTER
+`stripPrismaSqliteEnums` in `applyFullStackGuards`, so an enum LIST it turned into `String[]` is also
+collapsed (line 48's leftover invalid shape is now finished off). No-op for Postgres/MySQL (they support
+scalar lists) and non-schema files. Flag-gated by the existing `AGENTV3_FULLSTACK_GUARDS` kill switch.
+
+**Regression tests:** 7 new cases in `FullStackGuards.test.ts` encoding the exact LearnLoop inputs —
+`String[]`→`String?`, `Int[]/Float[]/Boolean[]/Json[]` + `@default([])` drop, relation lists preserved,
+enum-list→`String?` end-to-end, Postgres/non-schema/no-list no-ops, and full `applyFullStackGuards` ride.
+Whole file green (35 tests); `tsc --noEmit` (frontend) + `tsc -p tsconfig.server.json` clean.
+
+**Still open (out of this PR's mechanical reach):** one-to-one relations missing `@unique`, and a field
+referencing an undefined model (LearnLoop's `Certificate`) — these need a real `prisma validate` preflight
+that surfaces exact errors to a heal pass, not a blind mechanical rewrite (can't invent a missing model). The
+Prisma-7 skew, npm ERESOLVE / legacy-peer-deps, and the GLM 429 storm are already closed by prior sessions.
+
+## 2026-07-16 — Deeper capabilities COMPLETE: every professional now has its own signature method (batches 4,5,6)
+
+Final push of the signature-`method` rollout on the EXPERT_METHOD_LAYER foundation. AgentV3 untouched.
+- **Batch 4 (advisory/service, 12):** kisan, business, realestate, insurance, stocks, techhelp, budget, freelance, govt-schemes, sarkari, cybersafety, civic.
+- **Batch 5 (lifestyle/creative, 18):** astrologer, vastu, spiritual, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, writing, calligraphy, crafts, games, adventure, nature.
+- **Batch 6 (service/utility/misc, 18):** driving, homerepair, vehicle, sports, events, productivity, relationship, disability, techbuy, translate, babynames, astronomy, disaster, environment, festival, hygiene, safety, volunteer.
+
+**MILESTONE: every config-driven professional (Teacher + 72) now works like a top expert with a real, step-by-step signature method** — e.g. Lawyer=IRAC, CA=classify→provision→worked-calc, Kisan=agronomy+IPM, Astrologer=entertainment-framed+free-will, Safety=empower-not-fearmonger, Translate=meaning-not-word-for-word. Each method also bakes in the domain's safety boundaries and honesty rules (medical→doctor, legal→advocate, no fabrication, no dose/diagnosis, scam warnings). All 72 carry a `method` field; Teacher keeps its inline concept-mastery method. The test is REGISTRY-WIDE: every professional must have a deep method or CI fails, so the invariant can't regress. Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅. Combined with the earlier work, every professional is now a real personal AI agent (memory + intake) AND a real expert (depth + signature method).
+
+---
+
+## 2026-07-21 — PaisaTrack "fix all error" autopsy: a SUCCESSFUL build must never report false failures (honesty DNA fix)
+
+**Report:** PaisaTrack (expense tracker), prompt "fix the all error", free/weak tier (GLM+Kimi, noClaude).
+The build **SUCCEEDED** — app live at the e2b URL, `ok:true`, summary "✅ All Errors Fixed!". YET the
+downloaded diagnostics report was dishonest:
+- `rootCause: "Tool call failed: Unterminated string in JSON at position 98299"` — a truncated large
+  tool-call the agent RETRIED and recovered from, wrongly named as the build's root cause on a *successful*
+  build.
+- `counts.unresolved: 3` — the truncated tool-call plus two benign `npm run build | grep -i error` exit-1
+  probes (grep exit 1 = "no errors found" = SUCCESS), all shown as unresolved failures.
+- `counts.errors: 1` — the narration "Now I'll fix both errors: … fix the TypeScript type error" recorded
+  severity=error because the bare noun "error" matched, inflating a clean build to "1 error".
+
+**5-bucket ledger:** ✅ self-healed: 130 (incl. the retried truncated tool-call, the sandbox data-loss
+restore of 20 files from the durable store). 🔀 worked-around: the flagship-vs-cheap provider fallbacks
+(12 GLM failures → Kimi/retry) — normal resilience. ⏭️ skipped: 0. ❌ still-broken **in the app**: 0 — the
+app works. The real defects were all in the **report's honesty**, exactly the class rule 5 targets.
+
+**Missing subsystem:** the "recovered-on-success" truth lived only in a one-shot `finish()` back-fill that a
+finalize/serialize path could bypass — so it was not a guaranteed property of the report.
+
+**Root-cause fix (DNA, single source of truth):**
+- New exported `isRecoverableOnSuccess(code)` + `RECOVERABLE_ON_SUCCESS` set (TOOL_ERROR / NO_BUILD_NUDGE /
+  EMPTY_BUILD_RETRY / SANDBOX_CMD_FAILED) — shared by all three consumers so they can never disagree.
+- `resolveRecoveredOnSuccess()` now runs at **serialization time** (inside `report()`), not only in
+  `finish()` — idempotent, gated on `ok===true` — so counts, `issues[]` and the derived root cause are
+  honest even when a finalize path skips `finish()` (the exact bug that produced this report).
+- `deriveRootCause` is now **ok-aware**: on `ok:true` it excludes recovered-on-success codes AND never uses
+  the autoResolved-inclusive fallbacks, so a successful build reports "Build completed successfully" instead
+  of a recovered transient. A GENUINE unresolved non-recoverable error (e.g. DB_UNREACHABLE) still wins.
+- Narration classifier: a **remediation** note ("Now I'll fix…", "Removed the unused import") with no real
+  failure verb is now an info AGENT_STEP, not a severity=error AGENT_NOTE; the bare noun "error" no longer
+  forces error severity (only a real failure verb does).
+
+**Regression tests:** 12 new cases in `BuildDiagnostics.test.ts` — the exact PaisaTrack inputs (ok:true +
+"Unterminated string in JSON" + exit-1 → 0 unresolved, success root cause), the bypassed-finalize
+serialization path, a genuine error still winning on ok:true, ok-undefined/false behaviour unchanged, and
+the remediation-narration downgrade. Full AgentV3 suite green (3676), frontend + server tsc clean.
+
+**Noted (not this PR — self-healed, larger effort):** the underlying 🥵 struggle was a ~98KB single
+tool-call argument hitting max_tokens ("Unterminated string in JSON"), driving 12 GLM failures before the
+retry recovered. Preventing it (chunked large-file writes / lower per-call file size) is a separate,
+larger engine change; the honesty fix above ensures it is always reported truthfully meanwhile.

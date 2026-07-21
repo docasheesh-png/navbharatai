@@ -9,6 +9,9 @@ describe('classifyRuntimeError', () => {
     ["Access to fetch at 'https://api.x' has been blocked by CORS policy", 'cors'],
     ['GET https://api.x/orders 404 (Not Found)', 'http-status'],
     ['the server responded with a status of 500 (Internal Server Error)', 'http-status'],
+    // The browser-daemon 'response' capture format for a 5xx server error (network-5xx-capture slice).
+    ['HTTP 500 from http://localhost:5173/api/orders', 'http-status'],
+    ['HTTP 503 from http://localhost:8080/api/checkout', 'http-status'],
     ['Warning: Maximum update depth exceeded', 'react-render'],
     ['Objects are not valid as a React child', 'react-render'],
     ['Invalid hook call. Hooks can only be called inside of the body of a function component', 'react-hooks'],

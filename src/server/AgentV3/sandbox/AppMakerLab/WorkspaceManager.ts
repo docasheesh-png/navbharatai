@@ -43,10 +43,6 @@ export class WorkspaceManager implements IWorkspaceManager {
         await fs.writeFile(fullPath, content, 'utf8');
     }
 
-    async snapshotWorkspace(workspaceId: string): Promise<string> {
-        throw new Error('Not implemented');
-    }
-
     async readFile(workspaceId: string, filePath: string): Promise<string> {
         const workspacePath = FileSanitizer.resolveSafePath(this.workspacesRoot, workspaceId);
         const fullPath = FileSanitizer.resolveSafePath(workspacePath, filePath);

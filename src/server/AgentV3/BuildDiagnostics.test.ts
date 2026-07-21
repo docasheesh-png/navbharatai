@@ -448,6 +448,95 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     ];
     expect(deriveRootCause({ issues })).toBe('transient error, later recovered');
   });
+
+  // PaisaTrack "fix all error" autopsy 2026-07-21: the build SUCCEEDED (app live, ok:true) yet the report
+  // named a recovered transient — "Tool call failed: Unterminated string in JSON" (a truncated large
+  // tool-call the agent retried) — as the build's rootCause, and showed the two benign exit-1 tool probes
+  // as unresolved. On a successful build a recovered transient is NEVER the root cause.
+  it('on ok:true, a recovered TOOL_ERROR is NOT the root cause — the success message wins', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: Unterminated string in JSON at position 98299', autoResolved: true },
+      { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: exit status 1', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('on ok:true, a recovered TOOL_ERROR is skipped even if its autoResolved flag was never back-filled', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: Unterminated string in JSON', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('on ok:true, a GENUINE unresolved non-recoverable error STILL wins (never hide a real defect)', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: retried', autoResolved: false },
+      { ts: 2, phase: 'build' as const, severity: 'error' as const, code: 'DB_UNREACHABLE', message: 'prisma migrate → the database was NOT reachable (P1001).', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toContain('database was NOT reachable');
+  });
+
+  it('when ok is NOT true, a recovered-code fallback is unchanged (still surfaces something on a failure)', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'npm install failed', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues })).toBe('npm install failed'); // ok undefined → today's behaviour
+    expect(deriveRootCause({ issues, ok: false })).toBe('npm install failed');
+  });
+});
+
+// PaisaTrack "fix all error" autopsy 2026-07-21 — the end-to-end honesty of a SUCCESSFUL build's report.
+describe('recovered-on-success honesty (PaisaTrack: an ok:true build never shows false "unresolved")', () => {
+  const fresh = () => new BuildDiagnostics({ now: () => 1, buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'fix the all error', model: 'x', framework: 'react' });
+
+  it('finish(true) resolves recovered TOOL_ERRORs → 0 unresolved, success root cause', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: false, summary: 'Unterminated string in JSON at position 98299', ts: 1 } as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c2', ok: false, summary: 'exit status 1', ts: 2 } as AgentEvent);
+    d.finish(true, '✅ All Errors Fixed!');
+    const r = d.report();
+    expect(r.counts.unresolved).toBe(0);
+    expect(r.counts.errors).toBe(0);
+    expect(r.rootCause).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('SERIALIZATION-time normalization: even without finish(), an ok:true report is honest (the bypassed-finalize bug)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: false, summary: 'Unterminated string in JSON at position 98299', ts: 1 } as AgentEvent);
+    // The `done` event flips ok:true but does NOT run finish()'s back-fill — the exact path that produced
+    // the dishonest downloaded report. report() must still normalize at serialization time.
+    d.ingestEvent({ type: 'done', ok: true, summary: 'live', ts: 2 } as AgentEvent);
+    const r = d.report();
+    expect(r.counts.unresolved).toBe(0);
+    expect(r.rootCause).not.toMatch(/Unterminated string/);
+  });
+});
+
+// PaisaTrack "fix all error" autopsy 2026-07-21: "Now I'll fix both errors: … Fix the TypeScript type
+// error" is the agent DOING remediation work — not a failure. It was recorded severity=error, inflating a
+// successful build's count to "1 error" under an "All Errors Fixed!" summary. Remediation intent with no
+// real failure verb is a STEP, not a problem.
+describe('AGENT_NOTE — remediation narration is progress, not an error', () => {
+  const fresh = () => new BuildDiagnostics({ now: () => 1 });
+  it('"Now I\'ll fix both errors" is a plain AGENT_STEP, not an AGENT_NOTE error', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'frontend', text: "Now I'll fix both errors: remove the unused Expense import and fix the TypeScript type error.", ts: 1 } as AgentEvent);
+    const r = d.report();
+    expect(r.issues.filter((i) => i.code === 'AGENT_NOTE')).toHaveLength(0);
+    expect(r.issues.filter((i) => i.code === 'AGENT_STEP')).toHaveLength(1);
+    expect(r.counts.errors).toBe(0);
+  });
+  it('"Removed the unused useEffect import" is a step, not a problem', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'frontend', text: 'Removed the unused useEffect import — no more warning.', ts: 1 } as AgentEvent);
+    expect(d.report().issues.filter((i) => i.code === 'AGENT_STEP')).toHaveLength(1);
+  });
+  it('but a GENUINE failure the agent is fixing STAYS a problem (real failure verb present)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'frontend', text: 'The build failed — fixing the missing import now.', ts: 1 } as AgentEvent);
+    const note = d.report().issues.find((i) => i.code === 'AGENT_NOTE');
+    expect(note?.severity).toBe('error');
+  });
 });
 
 describe('renderDiagnosticsText — root cause first, problems (not the full noisy timeline) by default', () => {

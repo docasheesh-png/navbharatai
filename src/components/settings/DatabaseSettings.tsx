@@ -14,56 +14,59 @@ const DB_PROVIDERS: {
   id: DbProvider;
   label: string;
   keyLink: string;
-  fields: { key: string; label: string; placeholder: string }[];
+  // `where` is a short, per-field navigation hint (admin 2026-07-18): shown next to each input so the
+  // user knows EXACTLY where in their provider's dashboard that specific value lives — not just one link
+  // for the whole provider. Written from the real provider consoles.
+  fields: { key: string; label: string; placeholder: string; where?: string }[];
 }[] = [
   {
     id: 'supabase', label: 'Supabase',
     keyLink: 'https://supabase.com/dashboard/project/_/settings/api',
     fields: [
-      { key: 'url',     label: 'Project URL', placeholder: 'https://xxxx.supabase.co' },
-      { key: 'anonKey', label: 'Anon Key',     placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…' },
+      { key: 'url',     label: 'Project URL', placeholder: 'https://xxxx.supabase.co', where: 'Project Settings → API → Project URL' },
+      { key: 'anonKey', label: 'Anon Key',     placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…', where: 'Project Settings → API → Project API keys → anon / public' },
     ],
   },
   {
     id: 'firebase', label: 'Firebase',
     keyLink: 'https://console.firebase.google.com/',
     fields: [
-      { key: 'apiKey',            label: 'API Key',             placeholder: 'AIzaSy…' },
-      { key: 'authDomain',        label: 'Auth Domain',         placeholder: 'your-project.firebaseapp.com' },
-      { key: 'projectId',         label: 'Project ID',          placeholder: 'your-project-id' },
-      { key: 'storageBucket',     label: 'Storage Bucket',      placeholder: 'your-project.appspot.com' },
-      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789' },
-      { key: 'appId',             label: 'App ID',              placeholder: '1:123:web:abc' },
+      { key: 'apiKey',            label: 'API Key',             placeholder: 'AIzaSy…',                         where: 'Project Settings → General → Your apps → SDK setup and configuration → apiKey' },
+      { key: 'authDomain',        label: 'Auth Domain',         placeholder: 'your-project.firebaseapp.com',    where: 'Project Settings → General → Your apps → authDomain' },
+      { key: 'projectId',         label: 'Project ID',          placeholder: 'your-project-id',                 where: 'Project Settings → General → Project ID' },
+      { key: 'storageBucket',     label: 'Storage Bucket',      placeholder: 'your-project.appspot.com',        where: 'Project Settings → General → Your apps → storageBucket' },
+      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789',                       where: 'Project Settings → Cloud Messaging → Sender ID' },
+      { key: 'appId',             label: 'App ID',              placeholder: '1:123:web:abc',                   where: 'Project Settings → General → Your apps → appId' },
     ],
   },
   {
     id: 'mongodb', label: 'MongoDB Atlas',
     keyLink: 'https://cloud.mongodb.com/',
     fields: [
-      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb' },
+      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb', where: 'Atlas → Database → Connect → Drivers → copy the SRV string (replace <password> with your DB user password)' },
     ],
   },
   {
     id: 'neon', label: 'Neon (Postgres)',
     keyLink: 'https://console.neon.tech/',
     fields: [
-      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb' },
+      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb', where: 'Neon Console → your project → Dashboard → Connection Details → Connection string (Pooled)' },
     ],
   },
   {
     id: 'appwrite', label: 'Appwrite',
     keyLink: 'https://cloud.appwrite.io/',
     fields: [
-      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1' },
-      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id' },
+      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1', where: 'Appwrite Console → your project → Settings → API Endpoint (Cloud users: https://cloud.appwrite.io/v1)' },
+      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id',            where: 'Appwrite Console → your project → Settings → Project ID' },
     ],
   },
   {
     id: 'other', label: 'Other',
     keyLink: '',
     fields: [
-      { key: 'platformName',     label: 'Platform Name',               placeholder: 'e.g. PlanetScale, Turso…' },
-      { key: 'connectionString', label: 'Connection String / API Key',  placeholder: 'mysql://… or your API key' },
+      { key: 'platformName',     label: 'Platform Name',               placeholder: 'e.g. PlanetScale, Turso…', where: 'The name of your database provider — used only as a label so v5.0 knows which SDK to wire' },
+      { key: 'connectionString', label: 'Connection String / API Key',  placeholder: 'mysql://… or your API key', where: "Your provider's dashboard → Connect / Connection string (or API key)" },
     ],
   },
 ];
@@ -255,6 +258,14 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
                 autoComplete="off"
                 className="w-full bg-[#0d1117] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500/50 font-mono"
               />
+              {/* Per-field "where to find this" hint (admin 2026-07-18) — points at the exact spot in the
+                  provider's own dashboard where THIS value lives. */}
+              {field.where && (
+                <p className="mt-1.5 text-[11px] text-[#6e7681] leading-relaxed flex items-start gap-1.5">
+                  <ExternalLink className="w-3 h-3 shrink-0 mt-0.5 text-[#484f58]" />
+                  <span>Where to find this: <span className="text-[#8b949e]">{field.where}</span></span>
+                </p>
+              )}
             </div>
           ))}
         </div>

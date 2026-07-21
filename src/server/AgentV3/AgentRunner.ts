@@ -10,6 +10,7 @@ import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
+import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -39,6 +40,10 @@ export interface AgentRunnerOptions {
   /** Max model turns before the loop stops (backstop). Default 50. */
   maxSteps?: number;
   maxTokensPerTurn?: number;
+  /** AP-4 (flag-gated, default off): allow frontend/backend WRITER sub-agents to run in parallel. Safe
+   *  only when the actuator is wrapped with the per-path write lock (lockedActuator) — the caller pairs
+   *  the two. When false/unset, writer sub-agents dispatch serially exactly as before. */
+  parallelBuild?: boolean;
   /** D6 — bill at the Only-Opus rate instead of the standard rate. Legacy boolean. */
   onlyOpus?: boolean;
   /**
@@ -181,12 +186,18 @@ const PARALLEL_SAFE_TASK_ROLES = new Set<string>([
 /**
  * A tool call is parallel-safe when it cannot mutate shared sandbox state: a read-only tool, or
  * a `task` spawn of a review-only specialist. Everything else (write/edit/bash, todo/preview
- * updates, generators, and builder sub-agents) runs serially.
+ * updates, generators) runs serially.
+ *
+ * AP-4 (opts.parallelBuild, flag-gated): when parallel building is enabled, the WRITER task roles
+ * (frontend/backend) also become parallel-eligible — their same-path file writes are serialized by the
+ * lockedActuator write-lock and disjoint paths run concurrently, so two builder sub-agents can work at
+ * once safely. Default OFF ⇒ writers stay serial exactly as before.
  */
-export function isParallelSafeToolUse(toolUse: ToolUse): boolean {
+export function isParallelSafeToolUse(toolUse: ToolUse, opts?: { parallelBuild?: boolean }): boolean {
   if (toolUse.name === 'task') {
     const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
-    return PARALLEL_SAFE_TASK_ROLES.has(role);
+    if (PARALLEL_SAFE_TASK_ROLES.has(role)) return true;
+    return opts?.parallelBuild === true && PARALLEL_WRITER_ROLES.has(role);
   }
   return PARALLEL_SAFE_TOOLS.has(toolUse.name);
 }
@@ -698,7 +709,7 @@ export class AgentRunner {
         };
         const serialIdx: number[] = [];
         const parallelIdx: number[] = [];
-        turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu) ? parallelIdx : serialIdx).push(i));
+        turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu, { parallelBuild: this.opts.parallelBuild }) ? parallelIdx : serialIdx).push(i));
         for (const i of serialIdx) {
           resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
         }

@@ -27,16 +27,23 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
    questions BEFORE building (multi-tenant? RBAC? offline? which DB?), bounded so it never over-asks or
    breaks the fast default path. OPEN (grep: no `ask_user` tool; `DialogueStateManager` has a requirements
    phase but no interactive gate). *The admin's #1-priority category. Coherent + bounded → not a downgrade.*
-2. **Prompt-cache stable prefixes for GLM/Kimi (AP-5)** — byte-identical stable system/prefix blocks for the
-   cheap providers. OPEN (grep: `cache_control` only in `ClaudeClient.ts`, none in `AgentV3/providers/`).
-   Real speed + cost win on the cheap floor that leads every free/paid build.
-3. **Cap-4 cost-alerting thresholds** — the one remaining Cap-4 half (injection trio already shipped).
-   OPEN (grep empty). Emit a build-report advisory when a build's spend crosses a threshold.
+2. **Prompt-cache stable prefixes for GLM/Kimi (AP-5)** — the stable-prefix STRUCTURE is **already built**
+   (`systemPromptCache.ts` + `AGENTV3_CACHE_PREFIX`: it splits the volatile prefix out and keeps the large
+   static body as a byte-stable prefix; the 2026-07-21 AP-4 fix-dispatch change preserves that byte-stability
+   when its flag is off). REMAINING = per-provider cache MARKERS in the GLM/Kimi adapters. ⚠️ **Held (moat +
+   unverifiable):** the provider adapters are part of the routing moat ("CONFIRM WITH ADMIN BEFORE CHANGING"),
+   and the benefit is unmeasurable without provider cache-hit telemetry — do NOT change autonomously.
+3. **~~Cap-4 cost-alerting thresholds~~ — ✅ DONE (verified 2026-07-21).** `costAlert.ts`
+   (`costAlertThresholdUsd` / `costAlertAdvisory`, env `AGENTV3_COST_ALERT_USD`) is wired into
+   `BuildDiagnostics.ts` — a build whose spend crosses the threshold records an advisory. (Prior #1771.)
 4. **Daily-spend quota gauge (T1-cost-transparency remainder)** — a `/api/usage/tokens` endpoint + a
    daily-spend-vs-quota gauge. OPEN. *Needs a quota definition first (small product decision).*
 5. **Network-request capture for the auto-fix loop (B5 remainder)** — console + runtime-error classifier
-   are DONE (`console_errors`, `RuntimeErrorClassify.ts`); add captured **failed network requests** as a
-   distinct signal into the same repair loop. OPEN.
+   are DONE (`console_errors`, `RuntimeErrorClassify.ts`). ✅ **HTTP 5xx server responses now captured**
+   (2026-07-21, #1793): the E2B daemon's `page.on('response')` records an `httperror` for status ≥ 500 (a
+   completed-but-500 fetch does not fire `requestfailed`), classified via the `http-status` rule. REMAINING
+   (narrow): richer per-request structured capture (method/timing/body) — needs deeper daemon/E2B-template
+   work, so honestly infra-adjacent, not a code-only slice.
 6. **Runtime route/API/auth/DB smoke-hitter (P-PIPE)** — after a successful backend build, hit key routes
    (health, an auth flow, a DB read) and report honest pass/fail. OPEN (post-deploy liveness + browser
    verify exist; a server-route smoke-hitter does not). *Borderline: the hitter logic is code; it needs a
@@ -64,7 +71,9 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
     (`generate_readme`/`generate_architecture_docs` exist; no dedicated dev-guide).
 16. **Cap-2: auto-run E2E by default** — `generate_e2e` (Playwright) exists but is on-request; force-run a
     starter E2E after a successful build (like the U-2 defaults / auto-test pass). PARTIAL.
-17. **Ansible IaC target** — `generate_iac` emits Terraform + K8s + Docker; add Ansible. PARTIAL.
+17. **~~Ansible IaC target~~ — ✅ DONE (stale audit line, verified 2026-07-21).** `generateAnsiblePlaybook`
+    (playbook.yml + inventory.ini + README) is already in `IaCGenerator.ts` and wired into `generateIaC`
+    alongside K8s/Helm/Terraform.
 18. **`--ignore-scripts` on the audit/scan install (P-SEC.4 half)** — add to the CI **audit/scan** job only
     (NOT the deploy install — postinstall builds are legit there). Small, safe. OPEN in CI.
 
@@ -73,7 +82,9 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
     now all exist to compose them). PARTIAL — no packaged domain recipe yet.
 20. **Service-split generator + named paradigms** — Clean/DDD/MVC/Hexagonal scaffold + a microservice split
     path. OPEN (coupling is scored; no split generator). *Lower priority.*
-21. **Pure-code polish** (pull per surface, each small): CSP header on generated apps · SRI for CDN scripts ·
+21. **Pure-code polish** (pull per surface, each small): ~~CSP for generated apps~~ (✅ CSP-meta analyzer,
+    #1791) · ~~SRI for CDN scripts~~ (✅ done, prior) · ~~server-side upload MIME validation~~ (✅ multer
+    fileFilter analyzer, #1794) · ~~open redirect~~ (✅ already two rules in `SecurityAnalysis.ts`) ·
     "report ALL build errors, don't stop on first" · component-name (not URL) in preview errors + highlight
     the failing file · "cannot find module X → install suggestion" · 429 countdown · logout-on-inactivity ·
     server-side upload MIME validation · block secrets in generated code. *(Verify each vs live code first —
@@ -84,13 +95,17 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
 ---
 
 ## 🔵 LARGER — real upgrade, but multi-PR / architectural (scope before starting)
-- **Full-builder frontend/backend sub-agent parallelism + merged heal pass (AP-4)** — the builder does not
-  yet auto-run frontend/backend sub-agents in parallel, and the heal gates (integrity/preview/C9/runtime)
-  each fire their own LLM round instead of one merged pass. Big **speed** win (medium app 20 → 5–7 min).
-- **Cross-restart build resume (AP-3 / T1-session-rehydrate)** — durable checkpoint of plan+todo state so a
-  mid-build process restart CONTINUES instead of restarting. Substrate exists (`CheckpointStore`,
-  `FirestoreWorkspaceMemoryStore`, `GitManager`); the resume wiring does not. *Higher-risk — touches the
-  build loop; scope carefully.*
+- **~~Full-builder frontend/backend sub-agent parallelism (AP-4)~~ — ✅ parallel-build DONE (2026-07-21).**
+  The parallel FE/BE dispatch primitive shipped in #1790 (`isParallelSafeToolUse` for writer roles under a
+  per-path `PathWriteLock`, flag `AGENTV3_PARALLEL_BUILD`), and #1798 made the architect's fix-dispatch
+  guidance parallel-aware (byte-identical when the flag is off). Flip the flag in prod + measure to enable.
+  ⚠️ **The "merged heal pass" sub-idea is DELIBERATELY NOT DONE (declined 2026-07-21, rule 3):** the 5
+  post-build heal passes fire *conditionally* (a clean build triggers none) and carry genuine render-ordering
+  deps + billing/moat threading — a merge is high-risk / low-reward. Revisit only with a specific admin call.
+- **~~Cross-restart build resume (AP-3 / T1-session-rehydrate)~~ — ✅ DONE (verified 2026-07-21, task #57).**
+  `CheckpointStore` (save/load) + `SandboxStore` sandbox-resume + server-restart AUTO-resume (honest
+  "server is restarting — your build resumes automatically" narration) + D7 plan/todo restore on cold reopen
+  are all wired in `routes/agentv3.ts`. The "resume wiring does not exist" audit line is stale.
 - **~~1000+ file codemod (lift the ~50-file cap)~~ — ✅ the 50-cap is DONE (stale audit line).** The codemod
   path is relevance-scoped with a 2000-file per-pass safety cap + honest truncation ("re-run ~N more times
   to finish", converges); the old blind first-50 survives only behind `AGENTV3_CODEMOD_SCOPED=off`
@@ -102,7 +117,11 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
   drives weak-tier cost ≈ 0.
 - **P-INTEG: OAuth-connector framework + credential vault + plugin/MCP/SDK** — a generic OAuth connector
   framework + secret vault + plugin/MCP registry. OPEN, large (per-service recipes exist; no generic
-  framework). *Note: a user-facing local `nbai` CLI is a 🚫 non-goal — the SDK/MCP half is fine.*
+  framework). *Note: a user-facing local `nbai` CLI is a 🚫 non-goal — the SDK/MCP half is fine.* ⚠️ **Partly
+  infra-gated (rule 2):** the framework + vault + registry CODE is buildable, but a *working* OAuth connector
+  needs a REGISTERED OAuth app per provider (client-id/secret + redirect-URI) — that is admin infra. Building
+  a vault/registry with no working connector would ship an empty shell; do it only alongside real OAuth-app
+  credentials, or behind an explicit "not available yet" state.
 - **Scaling / server-load / DB-growth estimators** — quantitative estimates (tradeoff critique exists; no
   numbers). Lower value.
 

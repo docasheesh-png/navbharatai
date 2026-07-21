@@ -20,6 +20,7 @@ import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
+import { STARTER_TEMPLATES } from './starterTemplates';
 import { checkAttachmentSizes } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
@@ -2586,6 +2587,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   : chatMode === 'advisor'
                   ? <>🔍 <b className="text-zinc-300">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
+                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
+                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {chatMode === 'build' && (
+                  <div className="mt-5">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                      {STARTER_TEMPLATES.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          title={t.prompt}
+                          onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300 hover:border-indigo-500/60 hover:text-indigo-200 hover:bg-indigo-500/10 transition-colors"
+                        >
+                          <span aria-hidden>{t.icon}</span>{t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {chatBlocks.map((b) => {

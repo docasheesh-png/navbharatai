@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
 
 type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
 
@@ -168,8 +169,9 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
     // provider marker; blank fields are left untouched so nothing is accidentally wiped).
     setSaving(true);
     try {
-      const existingRes = await fetch(`/api/secrets/${userId}`);
-      const existing: { id: string; secret_name: string }[] = existingRes.ok ? await existingRes.json() : [];
+      // All vault calls go through the authenticated client (attaches the Firebase token) — raw fetches
+      // here previously omitted it, so requireUserMatch rejected the sync (401) and nothing saved.
+      const existing = await listSecrets(userId);
 
       const envKeys = buildEnvKeys(provider, enteredCreds);
       const upserts: { name: string; value: string }[] = [{ name: 'ENGINEER_DB_PROVIDER', value: provider }];
@@ -178,13 +180,9 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
       // Upsert each: delete any existing secret with that name, then write the new value.
       for (const u of upserts) {
         await Promise.all(
-          existing.filter(s => s.secret_name === u.name).map(s => fetch(`/api/secrets/${userId}/${s.id}`, { method: 'DELETE' }))
+          existing.filter(s => s.secret_name === u.name).map(s => deleteSecret(userId, s.id))
         );
-        await fetch(`/api/secrets/${userId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ secret_name: u.name, secret_value: u.value }),
-        });
+        await saveSecret(userId, u.name, u.value);
       }
 
       // Clear the sensitive inputs from memory once they are safely in the encrypted vault.

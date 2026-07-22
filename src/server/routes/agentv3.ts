@@ -222,6 +222,7 @@ import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } f
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
+import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -6911,7 +6912,7 @@ export function registerAgentV3Routes(app: Express): void {
             // Fix 38b — the old command hid a tsc that never ran (`--no-install … || true` → no
             // "error TS" → fake "verified ✓"). The __TSC_CLEAN__ marker prints ONLY when tsc really
             // ran and exited 0; no errors AND no marker now means UNVERIFIED, which fails honestly.
-            const r = await actuator.runCommand(workspaceId, 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; if npx --no-install tsc --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true');
+            const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             const hasErrors = /error TS\d+/.test(out);
             if (hasErrors) {
@@ -7262,7 +7263,7 @@ export function registerAgentV3Routes(app: Express): void {
             // PERMISSIVE tsconfig (strict:false, skipLibCheck) so tsc actually verifies — without
             // introducing new strictness errors. Never overwrites an existing config. Best-effort.
             const ensureCfg = "if [ ! -f tsconfig.json ] && [ ! -f tsconfig.app.json ] && find src -name '*.ts' -o -name '*.tsx' 2>/dev/null | head -1 | grep -q .; then printf '%s' '{\"compilerOptions\":{\"target\":\"ES2020\",\"lib\":[\"ES2020\",\"DOM\",\"DOM.Iterable\"],\"module\":\"ESNext\",\"moduleResolution\":\"bundler\",\"jsx\":\"react-jsx\",\"strict\":false,\"skipLibCheck\":true,\"noEmit\":true,\"esModuleInterop\":true,\"allowSyntheticDefaultImports\":true,\"isolatedModules\":true},\"include\":[\"src\"]}' > tsconfig.json; fi";
-            const r = await actuator.runCommand(workspaceId, `${ensureCfg}; if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; npx --no-install tsc --noEmit 2>&1 | tail -200 || true`);
+            const r = await actuator.runCommand(workspaceId, `${ensureCfg}; ${TSC_ENSURE}; ${TSC_BIN} --noEmit 2>&1 | tail -200 || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             // A help-page result means tsc STILL didn't really run (e.g. no src TS files) — treat as
             // "unverified, don't block", never as a clean pass (no fake success).

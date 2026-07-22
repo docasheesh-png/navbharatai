@@ -7,7 +7,7 @@ import {
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search, Mic,
+  Star, Search, Mic, Camera,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -252,6 +252,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  // INLINE voice dictation (admin 2026-07-22): the mic types speech straight into the composer on this
+  // page — no separate Voice-to-App page. Same Web Speech engine the standalone tool uses.
+  const [listening, setListening] = useState(false);
+  // Web Speech API types aren't in this project's TS lib — use `any`, as the standalone Voice tool does.
+  const voiceRef = useRef<any>(null);
+  const voiceBaseRef = useRef(''); // composer text captured when dictation started (interim appends after it)
+  const voiceFinalRef = useRef(''); // finalized transcript accumulated this dictation session
+  const speechSupported = typeof window !== 'undefined'
+    && !!((window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition
+      || (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+  // INLINE "Screenshot → App": pick a screenshot from the gallery → build from it, right here (admin
+  // 2026-07-22). A hidden gallery input drives BOTH entry points (the glowing template button AND the
+  // Attach-menu option) — 2 entries, one system.
+  const screenshotInputRef = useRef<HTMLInputElement | null>(null);
+  const [screenshotBusy, setScreenshotBusy] = useState(false);
+  // Stop any live dictation when the panel unmounts (never leave the mic hot).
+  useEffect(() => () => { try { voiceRef.current?.stop(); } catch { /* already stopped */ } }, []);
   // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
   // second while the premium card is visible. FREEZE-ON-STOP (admin 2026-07-21 — "time reset ho
   // jata hai, error ane par nahi hona chahiye"): the old effect zeroed the clock the moment
@@ -987,6 +1004,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
+    // Stop live voice dictation the moment the message is sent (never leave the mic recording).
+    if (listening) { try { voiceRef.current?.stop(); } catch { /* already stopped */ } setListening(false); }
     setInterruptedResume(false); // AP-3 — a new build/turn resolves any "unfinished build" offer
     // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
     // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
@@ -1061,6 +1080,80 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       return;
     }
     launch(sel.framework, false);
+  };
+
+  // ── INLINE VOICE DICTATION (admin 2026-07-22) ────────────────────────────────────────────────
+  // Tap the mic → speech types straight into the composer on THIS page (interim + final), tap again to
+  // stop. Same Web Speech engine as the standalone tool. On a platform without Web Speech, fall back to
+  // the dedicated Voice-to-App page so the feature still works.
+  const stopVoice = () => {
+    try { voiceRef.current?.stop(); } catch { /* already stopped */ }
+    setListening(false);
+  };
+  const toggleVoice = () => {
+    if (!speechSupported) {
+      window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }));
+      return;
+    }
+    if (listening) { stopVoice(); return; }
+    const w = window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any };
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) return;
+    const sr = new SR();
+    sr.continuous = true;
+    sr.interimResults = true;
+    sr.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-IN';
+    voiceBaseRef.current = prompt ? prompt.replace(/\s+$/, '') + ' ' : '';
+    voiceFinalRef.current = '';
+    sr.onresult = (event: any) => {
+      let interim = '';
+      let newFinal = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) newFinal += t; else interim += t;
+      }
+      if (newFinal) voiceFinalRef.current += (voiceFinalRef.current ? ' ' : '') + newFinal.trim();
+      setPrompt((voiceBaseRef.current + voiceFinalRef.current + (interim ? ' ' + interim : '')).replace(/^\s+/, ''));
+    };
+    sr.onerror = () => setListening(false);
+    sr.onend = () => setListening(false);
+    voiceRef.current = sr;
+    try { sr.start(); setListening(true); setTimeout(() => composerRef.current?.focus(), 0); } catch { setListening(false); }
+  };
+
+  // ── INLINE "SCREENSHOT → APP" (admin 2026-07-22) ─────────────────────────────────────────────
+  // Open the gallery, read the chosen screenshot, turn it into a build spec (/api/screenshot/to-prompt,
+  // which appends the intent-aware clone/anti-phishing policy), and start the build right here. Drives
+  // both the glowing template button and the Attach-menu option.
+  const openScreenshotGallery = () => { if (!running && !screenshotBusy) screenshotInputRef.current?.click(); };
+  const handleScreenshotPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file || running || screenshotBusy) return;
+    setScreenshotBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(String(r.result || ''));
+        r.onerror = () => reject(new Error('read failed'));
+        r.readAsDataURL(file);
+      });
+      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      const res = await fetch('/api/screenshot/to-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, imageType: file.type || 'image/png' }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || typeof data.prompt !== 'string') {
+        throw new Error((data && typeof data.error === 'string' && data.error) || 'Could not read the screenshot — try a clearer image.');
+      }
+      await send({ text: data.prompt, importUrl: '' });
+    } catch (err) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${err instanceof Error ? err.message : 'Screenshot could not be read. Try again.'}`, ts: Date.now() }]);
+    } finally {
+      setScreenshotBusy(false);
+    }
   };
 
   // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
@@ -2671,6 +2764,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         </button>
                       ))}
                     </div>
+                    {/* GLOWING "Screenshot → App" button (admin 2026-07-22) — sits with the templates as a
+                        highlighted starter: tap → open the gallery → build an app from that screenshot,
+                        inline. Second entry to the SAME flow as the Attach-menu option. */}
+                    <div className="flex justify-center mt-3">
+                      <button
+                        type="button"
+                        onClick={openScreenshotGallery}
+                        disabled={screenshotBusy || running}
+                        title="Pick a website/app screenshot from your gallery — v5.0 builds it"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+                        {screenshotBusy ? 'Reading screenshot…' : 'Screenshot → App'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3276,9 +3384,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
-              {/* Attach — now also carries the "Screenshot → App" option (admin 2026-07-22): people send
-                  photos through Attach anyway, so building an app from a website screenshot lives inside
-                  this menu (opens the tool via the `navbharat:navigate` channel App.tsx already handles). */}
+              {/* Attach — also carries the "Screenshot → App" option (admin 2026-07-22): people send photos
+                  through Attach anyway, so it opens the gallery and builds from the screenshot right here
+                  (the SAME flow as the glowing template button — 2 entries, one system). */}
               <AttachMenu
                 onFiles={(fl) => addFiles(fl)}
                 fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
@@ -3286,19 +3394,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 badge={files.length}
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
-                onScreenshotToApp={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'screenshot' } }))}
+                onScreenshotToApp={openScreenshotGallery}
               />
-              {/* Voice to App — its OWN dedicated mic button (admin 2026-07-22): a small icon by the input
-                  that opens the voice→app tool, which reads speech and builds via v5. Separate from Attach. */}
+              {/* Voice to App — INLINE dictation (admin 2026-07-22): tap to speak → text types into THIS
+                  input box live; tap again to stop. No separate page. Turns red/pulsing while listening. */}
               <button
                 type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }))}
+                onClick={toggleVoice}
                 disabled={running}
-                title="Voice to App — bolkar app banao"
-                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+                title={listening ? 'Listening… tap to stop' : 'Voice to App — bolkar type karo'}
+                aria-pressed={listening}
+                className={`h-7 w-9 flex items-center justify-center rounded border disabled:opacity-40 ${listening ? 'border-red-500 text-red-400 bg-red-500/10 animate-pulse' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
               >
                 <Mic className="w-4 h-4" />
               </button>
+              {/* Hidden gallery picker — drives the inline "Screenshot → App" flow for BOTH entry points
+                  (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
+                  it opens the photo gallery/library. */}
+              <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
               </div>{/* /settings + attach row */}
               </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
               <div className="relative w-full order-1" data-tour="chat">

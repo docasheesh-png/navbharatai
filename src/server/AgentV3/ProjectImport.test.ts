@@ -13,7 +13,8 @@ import {
   envTemplateNote,
   assetMimeFor,
   parseDataUri,
-  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace } from './ProjectImport';
+  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace,
+  detectFrameworkFromSourceExtensions, frameworkFamily, checkFrameworkCoherence, frameworkCoherenceGuidance } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -680,5 +681,88 @@ describe('zip-bomb DoS guard (SECURITY) — a hostile archive is refused before 
     const buf = await zip.generateAsync({ type: 'nodebuffer' });
     const out = await extractZipProject(buf);
     expect(Object.keys(out.files).sort()).toEqual(['package.json', 'src/App.tsx']);
+  });
+});
+
+// The reported Frankenstein workspace (buildId a4be5a05): a SvelteKit source tree on a React package.json.
+const REACT_PKG = JSON.stringify({
+  name: 'project',
+  scripts: { dev: 'vite', build: 'tsc && vite build' },
+  dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+  devDependencies: { '@vitejs/plugin-react': '^4.3.1', typescript: '^5.5.3', vite: '^5.4.1' },
+});
+const FRANKENSTEIN = {
+  'package.json': REACT_PKG,
+  'src/routes/+layout.svelte': '<slot />',
+  'src/routes/+page.svelte': '<h1>Home</h1>',
+  'src/routes/+layout.server.ts': "import type { LayoutServerLoad } from './$types';\nexport const load: LayoutServerLoad = () => ({});",
+  'src/lib/stores/theme.ts': "import { writable } from 'svelte/store';\nexport const theme = writable('light');",
+};
+
+describe('detectFrameworkFromSourceExtensions', () => {
+  it('classifies a .svelte + $lib/+page tree as sveltekit', () => {
+    expect(detectFrameworkFromSourceExtensions(FRANKENSTEIN)).toBe('sveltekit');
+  });
+  it('plain .svelte (no SvelteKit markers) is svelte', () => {
+    expect(detectFrameworkFromSourceExtensions({ 'src/App.svelte': '<h1>hi</h1>' })).toBe('svelte');
+  });
+  it('.vue files are vue', () => {
+    expect(detectFrameworkFromSourceExtensions({ 'src/App.vue': '<template><div/></template>' })).toBe('vue');
+  });
+  it('a plain React .tsx tree is NOT claimed (returns null — react is the default)', () => {
+    expect(detectFrameworkFromSourceExtensions({ 'src/App.tsx': "export default () => <div/>;" })).toBeNull();
+  });
+});
+
+describe('frameworkFamily', () => {
+  it('collapses react-family ids together', () => {
+    expect(frameworkFamily('nextjs')).toBe('react');
+    expect(frameworkFamily('vite-react')).toBe('react');
+    expect(frameworkFamily('sveltekit')).toBe('svelte');
+    expect(frameworkFamily('nuxt')).toBe('vue');
+  });
+});
+
+describe('checkFrameworkCoherence', () => {
+  it('flags the Frankenstein workspace (svelte source, react package.json that cannot build it)', () => {
+    const c = checkFrameworkCoherence(FRANKENSTEIN);
+    expect(c.ok).toBe(false);
+    expect(c.sourceFramework).toBe('sveltekit');
+    expect(c.packageFramework).toBe('vite-react');
+    expect(c.evidence.join(' ')).toMatch(/\.svelte/);
+  });
+
+  it('a LEGITIMATE SvelteKit app (svelte source + svelte deps) is coherent — never false-fires', () => {
+    const legit = {
+      'package.json': JSON.stringify({ name: 'app', devDependencies: { '@sveltejs/kit': '^2.0.0', svelte: '^4.0.0', vite: '^5.0.0' } }),
+      'src/routes/+page.svelte': '<h1>ok</h1>',
+      'src/lib/x.ts': "export const x = 1;",
+    };
+    expect(checkFrameworkCoherence(legit).ok).toBe(true);
+  });
+
+  it('a plain React app is coherent', () => {
+    expect(checkFrameworkCoherence({ 'package.json': REACT_PKG, 'src/App.tsx': 'export default () => <div/>;' }).ok).toBe(true);
+  });
+
+  it('a Vue source tree on a React package.json is flagged', () => {
+    const c = checkFrameworkCoherence({ 'package.json': REACT_PKG, 'src/App.vue': '<template><div/></template>' });
+    expect(c.ok).toBe(false);
+    expect(c.sourceFramework).toBe('vue');
+  });
+
+  it('no package.json → coherent (nothing to contradict)', () => {
+    expect(checkFrameworkCoherence({ 'src/App.svelte': '<h1/>' }).ok).toBe(true);
+  });
+});
+
+describe('frameworkCoherenceGuidance', () => {
+  it('produces an actionable non-mutating warning for a mismatch, empty for a coherent workspace', () => {
+    const g = frameworkCoherenceGuidance(checkFrameworkCoherence(FRANKENSTEIN));
+    expect(g).toContain('WORKSPACE FRAMEWORK MISMATCH');
+    expect(g).toContain('sveltekit');
+    expect(g).toContain('ONE framework');
+    expect(g).toMatch(/do NOT mass-rewrite/i);
+    expect(frameworkCoherenceGuidance(checkFrameworkCoherence({ 'package.json': REACT_PKG, 'src/App.tsx': 'export default () => <div/>;' }))).toBe('');
   });
 });

@@ -406,6 +406,126 @@ export function detectFrameworkFromWorkspace(files: Record<string, string>): str
   return null;
 }
 
+export type FrameworkFamily = 'react' | 'vue' | 'svelte' | 'angular' | 'solid' | 'other';
+
+/** Collapse a framework id to its toolchain FAMILY, so nextjs+react source (same family) is NOT a mismatch
+ *  but svelte source + react package (different families) IS. Pure. */
+export function frameworkFamily(fw: string | null | undefined): FrameworkFamily {
+  switch (fw) {
+    case 'vite-react':
+    case 'nextjs':
+    case 'remix':
+    case 'gatsby':
+      return 'react';
+    case 'vue':
+    case 'nuxt':
+      return 'vue';
+    case 'svelte':
+    case 'sveltekit':
+      return 'svelte';
+    case 'angular':
+      return 'angular';
+    case 'solid':
+      return 'solid';
+    default:
+      return 'other';
+  }
+}
+
+/**
+ * Classify a workspace by its SOURCE FILE signals (extensions + framework-specific markers), independently
+ * of package.json. This is the missing counterpart to detectImportedFramework (which reads package.json deps
+ * only): nothing else in the engine maps `.svelte`/`.vue`/Angular source to a framework, which is why a
+ * Svelte source tree on a React package.json read as `vite-react`. Returns a framework id ONLY on an
+ * UNAMBIGUOUS extension signal (`.svelte`, `.vue`, an Angular component + @angular/core), else null — it
+ * never tries to claim `react` from a `.tsx` file (too weak; react is already the default). Pure.
+ */
+export function detectFrameworkFromSourceExtensions(files: Record<string, string>): string | null {
+  if (!files || typeof files !== 'object') return null;
+  const paths = Object.keys(files);
+  if (paths.some((p) => /\.svelte$/i.test(p))) {
+    // SvelteKit vs plain Svelte: routing/marker files or SvelteKit-only imports.
+    const svelteKit = paths.some((p) => /(?:^|\/)\+(page|layout|server|error)\.(svelte|[jt]sx?)$/i.test(p))
+      || Object.values(files).some(
+        (c) => typeof c === 'string' && /(from\s+['"]\$(app|lib|env)\/|['"]@sveltejs\/kit['"]|['"]\.\/\$types['"])/.test(c),
+      );
+    return svelteKit ? 'sveltekit' : 'svelte';
+  }
+  if (paths.some((p) => /\.vue$/i.test(p))) return 'vue';
+  const hasNgComponent = paths.some((p) => /\.component\.ts$/i.test(p));
+  const hasNgImport = Object.values(files).some((c) => typeof c === 'string' && /from\s+['"]@angular\/core['"]/.test(c));
+  if (hasNgComponent && hasNgImport) return 'angular';
+  return null;
+}
+
+export interface FrameworkCoherence {
+  ok: boolean;
+  sourceFramework: string | null;
+  packageFramework: string | null;
+  evidence: string[];
+}
+
+/**
+ * Detect a "Frankenstein" workspace whose SOURCE files are one framework but whose package.json/build config
+ * genuinely CANNOT build that framework (autopsy buildId a4be5a05: a `.svelte`/`+page.server.ts`/`$lib`
+ * source tree on a React package.json with `tsc && vite build` — so `tsc` isn't found, `$types` is never
+ * generated, `$lib` is unresolvable, and the builder thrashes for ~18 min then fails). Conservative by
+ * construction — flags ONLY when ALL hold: (1) the source framework is unambiguous (.svelte/.vue/Angular),
+ * (2) package.json genuinely LACKS that framework's toolchain (a real Svelte app HAS `svelte`/`@sveltejs/kit`
+ * deps, so it never fires on a legitimate project), and (3) the package framework is a DIFFERENT family.
+ * Pure + unit-testable. Never mutates.
+ */
+export function checkFrameworkCoherence(files: Record<string, string>): FrameworkCoherence {
+  const coherent = (): FrameworkCoherence => ({ ok: true, sourceFramework: null, packageFramework: null, evidence: [] });
+  if (!files || typeof files !== 'object' || typeof files['package.json'] !== 'string') return coherent();
+  const sourceFramework = detectFrameworkFromSourceExtensions(files);
+  if (!sourceFramework) return coherent();
+  const packageFramework = detectImportedFramework(files);
+  const srcFam = frameworkFamily(sourceFramework);
+  if (srcFam === frameworkFamily(packageFramework)) return coherent();
+  let deps: Record<string, unknown> = {};
+  try {
+    const pkg = JSON.parse(files['package.json']) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+    deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  } catch {
+    return coherent();
+  }
+  const has = (n: string) => Object.prototype.hasOwnProperty.call(deps, n);
+  // Does package.json actually carry the SOURCE framework's toolchain? If so, it's buildable → coherent.
+  const buildableForSource =
+    srcFam === 'svelte' ? has('svelte') || has('@sveltejs/kit')
+    : srcFam === 'vue' ? has('vue') || has('nuxt')
+    : srcFam === 'angular' ? has('@angular/core')
+    : srcFam === 'solid' ? has('solid-js')
+    : true;
+  if (buildableForSource) return coherent();
+  const evidence: string[] = [];
+  if (srcFam === 'svelte') {
+    const n = Object.keys(files).filter((p) => /\.svelte$/i.test(p)).length;
+    evidence.push(`${n} .svelte file(s)${sourceFramework === 'sveltekit' ? ' + SvelteKit markers ($lib/$app/+page)' : ''}`);
+  } else if (srcFam === 'vue') {
+    evidence.push(`${Object.keys(files).filter((p) => /\.vue$/i.test(p)).length} .vue file(s)`);
+  } else if (srcFam === 'angular') {
+    evidence.push('Angular component files + @angular/core imports');
+  }
+  evidence.push(`package.json declares ${packageFramework} and lacks ${srcFam} tooling`);
+  return { ok: false, sourceFramework, packageFramework, evidence };
+}
+
+/** Build the agent-facing warning for an incoherent workspace (empty string when coherent). Non-mutating —
+ *  it tells the builder to reconcile to ONE framework BEFORE writing features, instead of thrashing. Pure. */
+export function frameworkCoherenceGuidance(c: FrameworkCoherence): string {
+  if (c.ok || !c.sourceFramework) return '';
+  return [
+    `[WORKSPACE FRAMEWORK MISMATCH — read before writing any code]`,
+    `This project's SOURCE files are ${c.sourceFramework} (${c.evidence.join('; ')}), but its package.json / build config is ${c.packageFramework}. As-is it CANNOT build — the two toolchains conflict.`,
+    `Do NOT pile new files of either framework on top, and do NOT mass-rewrite every source file to "reconcile" them (that thrashes and usually fails). FIRST commit to ONE framework:`,
+    `• To extend THIS project, keep the framework its source files already use (${c.sourceFramework}) and fix package.json + the dev/build scripts + config to match it (add the right deps, correct the build script), then write features.`,
+    `• If the user's request clearly wants a different framework, rebuild BOTH the config and the sources consistently in that one framework — never a mix.`,
+    `Make package.json, the build config, and the source files all agree on ONE framework and verify the dev server actually starts BEFORE writing feature code.`,
+  ].join('\n');
+}
+
 /**
  * Validate that an extracted project is something v5.0 can actually run — fail FAST and honestly
  * (before any sandbox time is spent) instead of producing a mystery dead preview later.

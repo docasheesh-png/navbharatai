@@ -191,6 +191,24 @@ const DOMAINS: DomainDef[] = [
       { label: 'admin dashboard & reports', re: /admin|dashboard|report|analytics/i },
     ],
   },
+  // Appended (2026-07-22, autopsy of buildId a4be5a05) — a textbook CRM prompt ("manage contacts + a sales
+  // pipeline, kanban deal stages lead → qualified → won/lost, contact profiles, notes & tasks, pipeline-value
+  // dashboard") was misclassified as 'social' because the ONLY firing headline was social's `profile` (from
+  // "contact profiles"), so the build was handed social implicit features (realtime feed / moderation / media
+  // upload) instead of CRM ones. No CRM domain existed. Placed LAST so best-feature-score keeps every existing
+  // classification byte-identical unless a prompt is STRICTLY more CRM than its prior match. Pure + deterministic.
+  {
+    key: 'crm',
+    re: /\bcrm\b|sales pipeline|sales funnel|deal (stage|pipeline|flow)|\bpipeline\b.*\bdeal|\bdeal\b.*\bpipeline|lead.*(qualif|pipeline|convert|nurtur|won|lost)|\b(manage|track)\s+(contacts|leads|deals)|customer relationship/i,
+    features: [
+      { label: 'contact / lead management (profiles, company, activity history)', re: /contact|lead|customer|client|account|company/i },
+      { label: 'sales pipeline with deal stages (kanban: lead → qualified → won/lost)', re: /pipeline|deal|stage|kanban|funnel|opportunit|\bwon\b|\blost\b|qualif/i },
+      { label: 'activity timeline, notes & tasks per contact', re: /activit|note|task|follow.?up|reminder|timeline|interaction|\blog\b/i },
+      { label: 'pipeline-value dashboard & sales reporting', re: /dashboard|report|pipeline value|revenue|forecast|metric|analytic/i },
+      { label: 'search & filters across contacts and deals', re: /search|filter|sort|segment/i },
+      { label: 'roles (sales rep / manager / admin)', re: /role|rbac|permission|\brep\b|manager|team|admin/i },
+    ],
+  },
 ];
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [

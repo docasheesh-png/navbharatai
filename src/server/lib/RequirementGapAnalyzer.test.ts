@@ -97,6 +97,34 @@ describe('analyzeRequirementGaps', () => {
     expect(analyzeRequirementGaps('a ticket reservation app').domain).toBe('booking');
   });
 
+  it('classifies a CRM / sales-pipeline prompt as crm — not social (autopsy buildId a4be5a05)', () => {
+    // The EXACT reported prompt. It used to resolve to 'social' because "contact profiles" fired social's
+    // `profile` keyword and no CRM domain existed → the build got realtime-feed/moderation/media-upload
+    // implicit features instead of CRM ones.
+    const g = analyzeRequirementGaps(
+      'Build a CRM to manage contacts and a sales pipeline: kanban deal stages (lead → qualified → won/lost), ' +
+        'contact profiles with activity history, notes and tasks, and a dashboard of pipeline value. Include search and filters.',
+    );
+    expect(g.domain).toBe('crm');
+    // it must NOT hand this build social-only implicit features
+    expect(g.likelyMissing).not.toContain('realtime feed / updates');
+    expect(g.likelyMissing).not.toContain('media upload');
+    // the CRM essentials the prompt already covers are recognized as MENTIONED (not asked about)
+    expect(g.mentioned).toContain('sales pipeline with deal stages (kanban: lead → qualified → won/lost)');
+    expect(g.mentioned).toContain('contact / lead management (profiles, company, activity history)');
+  });
+
+  it('a bare "build a CRM" surfaces CRM implicit features and never over-asks', () => {
+    const g = analyzeRequirementGaps('Build a CRM');
+    expect(g.domain).toBe('crm');
+    expect(g.likelyMissing).toContain('sales pipeline with deal stages (kanban: lead → qualified → won/lost)');
+    expect(g.clarifyingQuestions.length).toBeLessThanOrEqual(6);
+  });
+
+  it('a genuine social prompt still classifies as social (CRM domain did not steal it)', () => {
+    expect(analyzeRequirementGaps('a social app with a feed, posts, likes, comments and friends').domain).toBe('social');
+  });
+
   it('buildRequirementGuidance produces INCLUDE guidance for a domain gap, empty for a generic prompt', () => {
     const g = buildRequirementGuidance(analyzeRequirementGaps('build a hospital system'));
     expect(g).toContain('REQUIREMENT AWARENESS');

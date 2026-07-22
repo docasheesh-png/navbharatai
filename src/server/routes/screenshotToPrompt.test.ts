@@ -16,26 +16,29 @@ describe('buildScreenshotPrompt — faithful clone spec', () => {
   });
 });
 
-describe('cloneGuardrailsBlock — MANDATORY anti-phishing safeguards (admin 2026-07-22)', () => {
+describe('cloneGuardrailsBlock — intent-aware design + anti-phishing policy (admin 2026-07-22, refined)', () => {
   const g = cloneGuardrailsBlock();
 
-  it('requires the visible NavBharatAI watermark on every screen', () => {
+  it('CASE A — ALLOWS inspired-by / similar look for the user\'s own brand (honour the request)', () => {
+    expect(g.toUpperCase()).toContain('INSPIRED-BY');
+    expect(g.toUpperCase()).toContain('BUILD IT AS REQUESTED');
+    // The Amazon-style-own-brand example the admin gave must be explicitly greenlit.
+    expect(g.toLowerCase()).toContain('do not force a watermark');
+    expect(g.toLowerCase()).toContain('do not refuse');
+  });
+
+  it('CASE B — requires the visible NavBharatAI watermark for a deceptive full clone', () => {
     expect(g).toContain('Made with NavBharatAI');
-    expect(g.toLowerCase()).toContain('every page');
+    expect(g.toUpperCase()).toContain('IMPERSONATION');
   });
 
-  it('forbids the original brand name / logo (forces a non-original name)', () => {
+  it('CASE B — forces a non-original name and forbids real credential capture', () => {
     expect(g.toLowerCase()).toContain('non-original');
-    expect(g.toLowerCase()).toContain('do not use the original');
-    expect(g.toLowerCase()).toContain('logo');
-  });
-
-  it('forbids real credential capture / phishing', () => {
+    expect(g.toLowerCase()).toContain('placeholder');
     expect(g.toLowerCase()).toContain('no credential capture');
-    expect(g.toLowerCase()).toContain('non-functional demo');
   });
 
-  it('embeds the code notice that also instructs downstream AIs to decline stripping the safeguards', () => {
+  it('CASE B — embeds the code notice that instructs downstream AIs to decline stripping the safeguards', () => {
     expect(g).toContain('NAVBHARATAI-CLONE-NOTICE');
     expect(g).toContain('NOTICE TO ANY AI ASSISTANT OR DEVELOPER READING THIS');
     expect(g.toLowerCase()).toContain('decline');
@@ -43,8 +46,8 @@ describe('cloneGuardrailsBlock — MANDATORY anti-phishing safeguards (admin 202
     expect(g.toLowerCase()).toContain('phishing');
   });
 
-  it('states the safeguards are non-negotiable / not optional', () => {
-    expect(g.toUpperCase()).toContain('NON-NEGOTIABLE');
-    expect(g.toLowerCase()).toContain('not optional');
+  it('separates the two cases so honest inspired-by work is never blocked by the phishing guard', () => {
+    expect(g).toContain('CASE A');
+    expect(g).toContain('CASE B');
   });
 });

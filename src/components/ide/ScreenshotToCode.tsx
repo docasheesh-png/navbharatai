@@ -466,10 +466,11 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
           )}
         </button>
 
-        {/* Honest anti-phishing note — the clone always ships as a watermarked demo, never a real-brand copy. */}
+        {/* Honest, intent-aware note — inspired-by is built as asked; only a deceptive real-brand clone is guarded. */}
         <p className="text-[11px] text-amber-300/70 leading-relaxed">
-          Skill demo: the clone is built with a visible <span className="font-semibold">“Made with NavBharatAI”</span> watermark and a
-          placeholder (non-original) name, and forms are non-functional — so it can’t be used to impersonate or phish the real site.
+          Want a page in <span className="font-semibold">your own</span> app to just <span className="font-semibold">look like</span> this
+          (your brand, your name)? It’s built exactly as you ask. A pixel-perfect clone of a real branded site (login/payment) ships as a
+          watermarked, non-original demo — so it can’t be used to impersonate or phish the real site.
         </p>
 
         {/* History */}

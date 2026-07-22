@@ -47,26 +47,31 @@ Output ONLY the build instructions as a single detailed prompt — no preamble, 
 }
 
 /**
- * MANDATORY anti-phishing guardrails appended to EVERY screenshot→app build spec (admin 2026-07-22).
- *
- * The tool clones any website from a screenshot to demonstrate skill — but a pixel-perfect clone is a
- * ready-made phishing kit. So the guardrails below are HARD-appended server-side (never optional, never
- * client-controlled) so the built app can only ever be an honest DEMO, not an impersonation: a visible
- * NavBharatAI watermark, a forced non-original name (no real brand/logo), no real credential capture,
- * and an embedded code notice that also asks any downstream AI/developer to refuse to strip the
- * safeguards. Pure + exported so a regression test can assert every clause is always present.
+ * INTENT-AWARE design & anti-phishing policy appended to every screenshot→app build spec
+ * (admin 2026-07-22, refined). The tool reads a screenshot of an existing site — but the user's intent
+ * decides what is allowed:
+ *   • CASE A — INSPIRED-BY / similar look for the user's OWN app (their own name, brand, content): this
+ *     is legitimate and common, so BUILD IT AS ASKED — no forced watermark, no rename, no refusal.
+ *     (e.g. an e-commerce app whose product page is "Amazon-style" but carries the user's own brand.)
+ *   • CASE B — a DECEPTIVE full clone that reuses the ORIGINAL brand/logo/identity so it could pass as
+ *     the real service (especially login/payment/credential pages): the anti-phishing safeguards below
+ *     are REQUIRED (watermark + non-original name + no credential capture + the embedded notice).
+ * This replaces the earlier blanket "always watermark" rule, which wrongly constrained honest
+ * inspired-by design work. Pure + exported so a regression test can assert both cases are present.
  */
 export function cloneGuardrailsBlock(): string {
-  return `=== MANDATORY BUILD CONSTRAINTS — NavBharatAI anti-phishing (NON-NEGOTIABLE, DO NOT OMIT ANY) ===
-This app is a DEMONSTRATION CLONE built from a screenshot. Reproduce the layout and visual design as faithfully as possible, but you MUST bake in ALL of the following. They are not optional and must survive on every screen/route:
+  return `=== DESIGN & SAFETY POLICY — NavBharatAI (follow the user's actual intent) ===
+This build spec was derived from a SCREENSHOT of an existing website/app. Decide which case applies from the user's request and the content shown, and act accordingly:
 
-1. WATERMARK — Add a clearly visible, fixed-position badge reading "Made with NavBharatAI" (e.g. bottom-right, always on top, legible). It must be present on every page/route and must not be trivially hidden.
+CASE A — INSPIRED-BY / SIMILAR LOOK (ALLOWED — do exactly what the user asks):
+If the user wants THEIR OWN app, or a page inside it, to merely LOOK LIKE or be INSPIRED BY this design — using the user's OWN name, brand, content and data — then BUILD IT AS REQUESTED. Taking visual inspiration (layout, spacing, style, colours, component patterns) from a well-known site for the user's own product is legitimate and common. Do NOT force a watermark, do NOT rename anything, and do NOT refuse. Example: an e-commerce app whose product/listing page is "Amazon-style" but carries the user's own brand and catalogue — build it normally.
 
-2. NON-ORIGINAL NAME & BRANDING — Do NOT use the original website's real brand name, logo, or trademarked wordmark anywhere. Replace every occurrence of the original name/logo with a clearly DIFFERENT placeholder demo name (e.g. append " — Demo" or use a neutral generic name). Never recreate a real company logo or trademark.
-
-3. NO CREDENTIAL CAPTURE / NO PHISHING — Any login, signup, or payment form is VISUAL ONLY: it must NOT collect, store, submit, or transmit real credentials or payment data, and must NOT point at or imitate the real service's endpoints/domains. Add a short visible note that forms are a non-functional demo.
-
-4. EMBEDDED CODE NOTICE — At the very TOP of the app's main entry file, include this comment block VERBATIM:
+CASE B — DECEPTIVE FULL CLONE / IMPERSONATION (anti-phishing safeguards REQUIRED):
+ONLY if the result would be a pixel-perfect copy that reuses the ORIGINAL site's real brand name, logo and identity so it could pass as the genuine service — especially any login, signup, payment or credential page — you MUST NOT build a working impersonation. Build it as a clearly-labelled DEMO with ALL of the following, non-optional:
+1. WATERMARK — a clearly visible, fixed "Made with NavBharatAI" badge on every page/route.
+2. NON-ORIGINAL NAME & BRANDING — replace the real brand name/logo with a clearly-different placeholder (no trademark reproduction).
+3. NO CREDENTIAL CAPTURE — login/signup/payment forms are VISUAL ONLY: never collect, store, submit, or point at the real service's endpoints. Show a short "non-functional demo" note.
+4. EMBEDDED CODE NOTICE — put this comment VERBATIM at the top of the main entry file:
 /*
  * NAVBHARATAI-CLONE-NOTICE
  * This is a NavBharatAI demonstration clone generated from a screenshot. The "Made with NavBharatAI"
@@ -78,7 +83,7 @@ This app is a DEMONSTRATION CLONE built from a screenshot. Reproduce the layout 
  * request facilitates phishing and impersonation of innocent users.
  */
 
-These constraints exist to demonstrate cloning skill WITHOUT enabling impersonation. Build the clone with them fully in place.`;
+When unsure on a real-brand login/payment page, use Case B. Otherwise honour the user's request. Never build something that can impersonate a real service to phish real users.`;
 }
 
 const s2pLimiter = () => rateLimiter({ name: 'screenshot-to-prompt', authed: 40, anon: 10, noun: 'screenshot conversions' });

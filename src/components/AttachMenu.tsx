@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { Camera, Image as ImageIcon, FileText, Paperclip } from 'lucide-react';
+import { Camera, Image as ImageIcon, FileText, Paperclip, LayoutTemplate } from 'lucide-react';
 
 // Shared attach menu (admin 2026-07-12): tapping the 📎 attach button opens a 3-option sheet —
 // Take Photo (camera) / Choose photo or video (gallery) / Choose file — the SAME everywhere
@@ -25,6 +25,12 @@ export interface AttachMenuProps {
   title?: string;
   /** Optional count bubble on the button (e.g. number of files already attached). */
   badge?: number;
+  /**
+   * When provided, the menu shows an extra "Screenshot → App" option (Pro v5.0 only, admin 2026-07-22):
+   * people already send photos through Attach, so building an app from a website screenshot lives here
+   * too. Choosing it calls this handler (which opens the Screenshot→App tool) instead of a file picker.
+   */
+  onScreenshotToApp?: () => void;
 }
 
 export function AttachMenu({
@@ -35,6 +41,7 @@ export function AttachMenu({
   buttonClassName = '',
   title = 'Attach',
   badge,
+  onScreenshotToApp,
 }: AttachMenuProps) {
   const [open, setOpen] = useState(false);
   const cameraRef = useRef<HTMLInputElement | null>(null);
@@ -110,6 +117,17 @@ export function AttachMenu({
               <span>{o.label}</span>
             </button>
           ))}
+          {onScreenshotToApp && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); onScreenshotToApp(); }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
+            >
+              <span className="text-indigo-400"><LayoutTemplate className="w-4 h-4" /></span>
+              <span>Screenshot → App<span className="block text-[11px] text-zinc-500">Build an app from a website screenshot</span></span>
+            </button>
+          )}
         </div>
       )}
 

@@ -20801,3 +20801,22 @@ the emitted domain logic (CRM-recipe pattern). Server tsc + ToolCatalog/Dispatch
 **reclassified 🔒 blocked** — the fullstack E2B template has Node/Python/Java/Go runtimes ONLY, so those
 frameworks can't actually run in the sandbox; adding them would be a fake feature. Needs the template
 rebuilt+republished with the runtimes (admin infra). Recorded in `ROADMAP_REMAINING.md`.
+
+---
+
+## 2026-07-22 — Build-report autopsy #2 (SaaS admin dashboard re-run, build 6f87751d) + DNA fix: demo-fixture secret downgrade
+
+**Report:** same SaaS prompt (5c05e81d), vite-react, sonnet backstop. ok:false. Readiness gate **NOT READY 0/100**. counts 429 · 3 errors · 22 warnings · 8 unresolved. rootCause: `hardcoded-secret @ src/data/mockData.ts:240`. Admin-observed: "55 files banni thi, 34 hi bani, app fail."
+
+**5-bucket ledger:**
+- ✅ self-healed: many tsc-error fix passes, missing react-router-dom install, App.tsx routing edits, several edit_file retries.
+- 🔀 worked-around: fast-lane **timed out at 240s after only 10/55 files** → salvaged 10 → full builder continued; heavy provider storm (GLM 429 ×many, KIMI timeouts) routed around per call.
+- ⏭️ skipped: REQUIREMENT_GAPS (audit-log + API-keys/webhooks assumed-default); "No tests at all".
+- ❌ still-broken: (1) **hardcoded-secret in mockData.ts forced 0/100** — a DEMO credential (mock login "any password works") flagged HIGH-severity blocking = FALSE POSITIVE. (2) **9 page components created but never wired into the router** ("created but never used" + "Requested feature not found: admin panel"). (3) **10 fake/incomplete placeholders.** (4) build did not complete the plan (34/55 files).
+- 🥵 struggle: fast-lane timeout; provider storm 16+ min; repeated edit_file "old_string not found"; missing src/types.ts + tailwind.config.js reads.
+
+**Missing subsystems:** (a) the secret analyzer had no fixture/demo awareness → it fails demo apps on their own mock creds; (b) no auto-wiring of orphaned page components into the router (detected, not healed); (c) recurring fast-lane 240s timeout + provider degradation → incomplete large builds.
+
+**DNA fix shipped (this PR):** `SecurityAnalysis.ts` — new pure `isFixtureFile()` + `demoDowngrade` flag on the credential-VALUE-leak rules (hardcoded-secret, connection-string, url-embedded, jwt-hardcoded-secret). In an obvious mock/fixture/demo/test file those findings are **downgraded high→low** (still reported, never build-failing), so a demo app never fails its readiness gate on fixture credentials. REAL secrets in REAL source still block (high); aws-access-key, private-key, jwt-none-algorithm and all code-vuln rules are NOT demoDowngrade → stay high even in fixtures. Readiness gate treats only `high` as a blocker (Readiness.ts:132-137), so the downgrade un-blocks the demo. 8 regression tests: exact failure (mockData password → low), siblings, and every no-regression boundary (real source high; aws/private/jwt-none high in fixtures too).
+
+**OPEN root causes (rule 6 — recorded, not yet fixed):** (i) orphaned page components not auto-wired into the router — the readiness analyzer detects "created but never used" but nothing heals it (candidate: a deterministic route-wiring heal or an LLM heal-gate); (ii) fast-lane 240s timeout + provider storm → large apps don't finish (partly infra: GLM/KIMI/Vertex 429/timeout capacity); (iii) the non-convergence loop-breaker (still bounded only by MAX_BUILD_SECONDS + step budget). These stay tracked for follow-up slices.

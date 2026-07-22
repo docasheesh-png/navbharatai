@@ -20923,3 +20923,41 @@ flag in their output HTML.
    root cause tracked in autopsy #2. OPEN.
 
 Gate: frontend tsc 0 · server tsc 0 · new regression suite green · full suite green (branch CI).
+
+---
+
+## 2026-07-22 — Follow-up to Autopsy #3: preview-compile guard (verification now covers the Babel path)
+
+Open item #1 from autopsy #3 (the `declare`-fields white-screen) was: **the engine's "✅ Preview verified"
+checks the E2B/vite path but NOT the in-browser Babel path the user actually opens** — so any
+tsc-passes-but-Babel-throws divergence shipped as "verified". This slice closes that blind spot.
+
+**New module `src/server/runtime/PreviewCompileCheck.ts`** (pure, 9 tests):
+- `checkPreviewCompiles(files)` — dry-compiles every source file through the SAME `@babel/standalone`
+  config the in-browser preview uses (`[react{dev}, typescript{allowDeclareFields}]` + `transform-modules-
+  commonjs`, sourceType module). A throw here reproduces a real in-browser white-screen — faithful mirror,
+  so no false divergence (the fixed `declare` case now COMPILES here, a regression test asserts it).
+- `previewCompileRepairInstruction(errors)` — focused, smallest-edit repair prompt for the heal pass.
+- Honest limitation recorded (rule 6): checks ALL source files, whereas the preview lazily compiles only
+  reachable files — a broken-but-unimported file would be flagged though the live preview never requires
+  it. Consequence is safe (admin diagnostic + optional bounded heal, never a build failure or bill change).
+  Reachability-scoping is a future refinement.
+
+**Wiring (`routes/agentv3.ts`, modeled on the proven integrity-heal block):** after the build, a
+PREVIEW-COMPILE GUARD runs `checkPreviewCompiles` on `writtenFiles`. On a divergence it records an honest
+admin diagnostic `PREVIEW_COMPILE_DIVERGENCE` (phase preview / severity error), and — when the auto-fix
+gate (`AGENTV3_AUTOFIX`) is on and there's time — makes ONE bounded repair pass (same cheap-coder/no-Claude
+routing as the other heal gates), then re-checks and records `PREVIEW_COMPILE_HEALED`. Purely additive +
+best-effort: it never changes `result.ok`, the bill, or the browser-verify verdict — so it cannot break a
+working build or alter billing. Kill switch `AGENTV3_PREVIEW_COMPILE_CHECK=off`. (`@babel/standalone` has
+no types → ambient `declare module` added for the server tsconfig.)
+
+**Still OPEN (honest, carried forward):** the browser self-check still emits "✅ Preview verified" for the
+E2B surface even when a divergence remains unhealed — fully gating that user-facing narration is coupled to
+the billing `previewVerifiedFailed` path, so it needs a dedicated billing-coupling review before changing
+(rule: ⚠️ confirm billing changes with admin). The guard makes the engine AWARE + able to heal; tightening
+the narration is the next step. Also still open from autopsy #3: upstream prevention of `declare`-as-a-
+tsc-silencing-hack, and the weak-tier provider-storm/loop root cause (shared with autopsy #2).
+
+Gate: frontend tsc (only pre-existing `@capacitor/*` env errors in untouched AIImageGenerator.tsx) + server
+tsc 0 + new suites green + full suite green.

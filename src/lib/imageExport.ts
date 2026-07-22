@@ -27,6 +27,14 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
+/** Extract the raw base64 payload from a `data:<mime>;base64,<...>` URL (for a native file write).
+ *  Throws on a non-base64 / non-data URL so callers can fall back to reading the Blob instead. */
+export function dataUrlToBase64(dataUrl: string): string {
+  const match = /^data:[^;,]*;base64,([\s\S]*)$/.exec(dataUrl || '');
+  if (!match) throw new Error('Not a base64 data URL');
+  return match[1];
+}
+
 /** The file extension for an image mime type (defaults to png). */
 export function extForMime(mime: string): string {
   const m = (mime || '').toLowerCase();

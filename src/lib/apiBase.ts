@@ -79,7 +79,12 @@ export function installNativeApiRewrite(w: ShellWindow, apiOrigin: string = NATI
 
   const originalFetch = w.fetch.bind(w);
   w.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    if (typeof input === 'string') return originalFetch(rewriteApiUrl(input, apiOrigin), init);
+    // A string can be site-relative ('/api/…') OR an ABSOLUTE local-origin URL
+    // ('capacitor://localhost/api/…', produced by `new URL(location.origin + '/api/…').toString()` —
+    // the GitHub-connect and firebase-auth flows do exactly this). Apply BOTH rewrites (as the XHR path
+    // below already does): rewriteAbsolute handles the local-absolute case, rewriteApiUrl the relative
+    // one. Missing rewriteAbsolute here is why native GitHub connect silently failed to even start.
+    if (typeof input === 'string') return originalFetch(rewriteApiUrl(rewriteAbsolute(input), apiOrigin), init);
     if (input instanceof URL) return originalFetch(rewriteAbsolute(input.toString()), init);
     if (typeof Request !== 'undefined' && input instanceof Request) {
       const target = rewriteAbsolute(input.url);

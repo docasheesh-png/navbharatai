@@ -472,8 +472,14 @@ ${babelTag}
     // back to its exact position in the REAL source file, so an edit lands there instead of on a
     // disposable compiled copy the next build would overwrite. Same mechanism React DevTools' own
     // "open in editor" feature uses.
+    // allowDeclareFields:true — Babel's preset-typescript otherwise THROWS on a declare class field
+    // ("The 'declare' modifier is only allowed when 'allowDeclareFields' is enabled"), even though tsc
+    // and vite/esbuild accept it silently. Without this the in-browser preview white-screens on any app
+    // whose class components use declare-state/declare-props (a legal, common TS pattern), while the
+    // build's own tsc gate and the E2B/vite preview pass — a compiler divergence that shipped a broken
+    // preview as "verified". Enabling it erases the type-only fields exactly like tsc does.
     var presets = isTs
-      ? [['react', { runtime: 'automatic', development: true }], ['typescript', { isTSX: isTsx, allExtensions: true }]]
+      ? [['react', { runtime: 'automatic', development: true }], ['typescript', { isTSX: isTsx, allExtensions: true, allowDeclareFields: true }]]
       : [['react', { runtime: 'automatic', development: true }]];
     var transformed;
     try { transformed = Babel.transform(code, { filename: path, presets: presets, plugins: ['transform-modules-commonjs'], sourceType: 'module' }).code; }

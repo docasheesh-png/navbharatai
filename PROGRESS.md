@@ -20871,3 +20871,55 @@ already-shipped or not autonomously-shippable. Genuine status of the remaining i
 
 Net: the safe, autonomous, clearly-valuable roadmap is now essentially complete. Further high-signal work
 comes from real build-report autopsies (rule 5) and the admin-decision items above.
+
+---
+
+## 2026-07-22 — Autopsy #3: `declare` class fields white-screen the in-browser preview (compiler divergence) — DNA fix
+
+**Report:** buildId `91694679` (RHOTKI-clinic CRM, KIMI, weak tier). User asked to fix an existing
+`Duplicate declaration "ErrorBoundary"` error. Build reported `ok:true`, "✅ Preview verified — Done!",
+E2B/vite preview up — but the final event was a `PREVIEW_ERROR`:
+`Compile src/ErrorBoundary.tsx: The 'declare' modifier is only allowed when the 'allowDeclareFields'
+option of @babel/plugin-transform-typescript or @babel/preset-typescript is enabled.`
+
+**Ledger (5 buckets):**
+- ✅ Self-heal (1): removed the duplicate `main.tsx` import — genuinely correct.
+- 🔀 Workaround (1): to silence tsc's `Property 'state'/'props'/'setState' does not exist` errors on the
+  class ErrorBoundary, KIMI added `declare state`/`declare props`/`declare setState` fields — a
+  tsc-silencing hack that INTRODUCED a new (Babel) bug. DEFERRED root cause.
+- 🥵 Struggle (3): 7 min for a 2-file edit; oscillated functional↔class ErrorBoundary; one KIMI call
+  timed out at 126s → `PROVIDER_FALLBACK` (KIMI→next).
+- ❌ Still-broken (1): the in-browser preview white-screened on `declare` fields — shipped as "verified".
+
+**Missing subsystem (Step 2):** the in-browser preview transpiles with **Babel standalone**, a DIFFERENT
+compiler from both the build's `tsc --noEmit` gate AND the E2B/vite (esbuild) preview. Babel's
+preset-typescript omitted `allowDeclareFields`, so it REJECTED a `declare` class field that tsc + esbuild
+accept silently. Result: code that passes tsc + renders in E2B can still white-screen in the in-browser
+Babel preview the user actually opens — a compiler divergence, and "✅ Preview verified" never covered the
+Babel path (it verified E2B/vite only). `declare` fields are a LEGAL, common TS pattern, so any such app
+was affected, not just this one.
+
+**DNA fix (50% #1 — kill the class):** `allowDeclareFields: true` added to the `['typescript', …]`
+preset in BOTH in-browser Babel builders (sibling hunt, rule 3):
+- `src/server/runtime/ReactPreview.ts:476` — the server builder that threw (`requireModule@about:srcdoc`).
+- `src/lib/previewUtils.ts:125` — the client mirror (`requireMod`).
+This aligns the in-browser preview with tsc + vite/esbuild (and modern Babel, where the flag defaults on):
+the type-only `declare` fields are ERASED exactly like tsc does, instead of throwing. The whole class of
+`declare`-modifier preview white-screens is dead. A third Babel surface (`AppEngine.ts` `text/babel`) is
+JSX-only and unaffected. Regression test `src/server/runtime/ReactPreview.declareFields.test.ts` (4 tests)
+locks it: the EXACT reported ErrorBoundary compiles cleanly WITH the flag (and `declare` is erased),
+THROWS the exact `/allowDeclareFields/` error WITHOUT it (encodes the failure), and both builders emit the
+flag in their output HTML.
+
+**50% #2 (why did it arise at all) — OPEN items, honestly recorded (rule 6):**
+1. The engine's "✅ Preview verified" checks the E2B/vite path but NOT the in-browser Babel path the user
+   opens. Enabling `allowDeclareFields` removes the specific divergence that bit here, but the two
+   compilers can still diverge on other constructs. True fix: route the readiness/verification through the
+   SAME in-browser Babel transform (or converge on one compiler). OPEN.
+2. Upstream: the builder reached for `declare` fields as a tsc-silencing workaround instead of fixing the
+   real cause (a class not resolving its `React.Component<Props,State>` base types). A prompt/contract-level
+   nudge away from error-silencing hacks is the upstream half. OPEN.
+3. Weak-tier (KIMI) struggle: oscillation + a 126s provider timeout — shares the provider-storm / loop
+   root cause tracked in autopsy #2. OPEN.
+
+Gate: frontend tsc 0 · server tsc 0 · new regression suite green · full suite green (branch CI).

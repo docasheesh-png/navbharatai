@@ -2793,7 +2793,27 @@ export function registerAgentV3Routes(app: Express): void {
           : undefined;
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-        if (Object.keys(saved).length > 0) await writeWorkspaceFiles(actuator, workspaceId, saved);
+        // SELF-HEAL the recurring "No package.json found" (admin, 2026-07-21). A hydrated vite-react
+        // project that has real source files but LOST its package.json (a scaffold gap, or a save that
+        // dropped it) is RUNNABLE the moment the foundation is synthesized — so heal it here instead of
+        // dead-ending the preview with a scary "the project has no defined dependencies" verdict. The
+        // build path already runs this; the Diagnose/preview path did NOT, which is why the error kept
+        // recurring. ensureViteReactFoundation is idempotent + SELF-GUARDED (isViteReactTarget → no-op for
+        // non-React or genuinely-empty projects, so a Vue app is never given a vite package.json, and a
+        // truly-empty project still gets the honest missingPreviewReason below). It synthesizes
+        // package.json from the code's REAL imports (+ entry/index.html/vite.config as needed). Persist the
+        // healed files to the durable store so the fix STICKS across future sandboxes, not just this boot.
+        if (Object.keys(saved).length > 0) {
+          try {
+            const foundation = ensureViteReactFoundation(saved, { framework });
+            if (foundation.added.length > 0) {
+              Object.assign(saved, foundation.files);
+              await mergeWorkspaceFiles(workspaceId, foundation.files).catch(() => {});
+              sendStage(`Restoring your project (recovered ${foundation.added.length} missing file(s): ${foundation.added.join(', ')})`, 7);
+            }
+          } catch { /* foundation heal is best-effort — the structure check below still runs */ }
+          await writeWorkspaceFiles(actuator, workspaceId, saved);
+        }
         // Re-materialize durable binary assets (logo/icons/fonts) into the re-seeded sandbox.
         await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
       } catch { /* hydration is best-effort — the structure check below still runs */ }

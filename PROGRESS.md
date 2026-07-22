@@ -21046,3 +21046,62 @@ auto-repair the package.json/config to match the sources — a deterministic aut
 provider storm; SvelteKit virtual modules flagged as unresolved imports) remain open.
 
 Gate: server tsc 0 · ProjectImport 77/77 · full suite (running/green).
+
+---
+
+## 2026-07-22 — Autopsy: multi-tenant SaaS admin dashboard (weak/GLM, 26.2 min, NOT READY 54/100) → the readiness-gate's only high-severity compliance class now self-heals deterministically
+
+**Report:** `53ecfe66-…json` — one build, prompt "multi-tenant SaaS admin dashboard (team accounts,
+RBAC owner/admin/member, analytics charts, settings, subscription billing)". `powerLevel=weak`,
+`noClaude=true` (policy honoured — no Sonnet/Opus ran), `builtBy=GLM`, delivered GLM 67 / KIMI 13,
+GLM failures 31 (429/timeout storm). 26.2 min. `ok=false`, readiness **54/100 NOT READY**. `billedInr=0`
+("working app or free" — correctly not charged). 354 issues (351 auto-resolved, 3 unresolved, 1 error).
+
+**5-bucket ledger:**
+- ❌ **1 still-broken = THE decisive failure:** `READINESS_BLOCKER "1 serious privacy/compliance
+  issue(s)"`. This is the ONLY high-severity class `scanCompliance` emits — `pii-in-logs`: a `console.*`
+  line that logs a credential/token (the weak model's login/`useAuth` debug-logged the password). In
+  `BuildConfidence`, `compliance.high > 0` is a HARD BLOCK → score capped ≤60 → NOT READY → `ok=false`.
+  So a complete, rendering app was marked FAILED by ONE mechanically-fixable debug log. **There was no
+  heal for it** — the gate detected and blocked; nothing repaired it. THIS is the "sari app fail ho rahi
+  hai" class: a finished app killed by a trivial leak.
+- ⏭️ 2 skipped (unresolved TOOL_ERRORs, non-fatal): a write/edit to `DashboardPage.tsx` before it existed;
+  an `edit_file` old_string miss in `useAuth.ts`. Both recovered; app still built. (tool-arg repair +
+  endgame rollback from earlier autopsies already cover this class.)
+- 🔀 11 workarounds: `PROVIDER_FALLBACK` GLM→next on 429/timeout (the known GLM-429 storm — pacer / key
+  pool / circuit breaker already merged; weak-tier + storm = the 26-min duration).
+- 🥵 struggle: heavy TS-error repair loop on a ~24-file app (Button/Input/Select typing, incomplete
+  function bodies) — weak-flash-on-complex-app, the systemic routing item still open (below).
+- ⏭️ 2 advisory warnings: "Requested feature not found: admin panel" (feature-detector literal-name miss;
+  downgraded to warning) and "No tests at all".
+
+**DNA fix (50/50 law):** deterministic **credential-log redaction** now runs in the pre-readiness
+deterministic-fix region (beside the CSS-import guard), over the full project map, before the readiness
+verdict:
+- `src/server/AgentV3/credentialLogRedaction.ts` (NEW) — `redactCredentialLogs(files)`: for each line the
+  detector would flag, rewrites a **standalone, single-line, paren-balanced** `console.<method>(…)`
+  statement to `console.<method>()` (drops the leaked args, keeps a valid statement). Provably
+  non-breaking: multi-line calls, non-statement-leading calls, and template-literal lines are SKIPPED and
+  left as honest findings. Idempotent. It removes the REAL leak AND clears the hard block — a security
+  fix, not a cosmetic patch (rule 4).
+- Detector/heal share ONE definition (rule 2 — no drift): `ComplianceAnalysis.ts` now exports
+  `lineLogsCredential`, `CONSOLE_CALL`, `CODE_EXT`, `SKIP_PATH`, and the `pii-in-logs` detector site calls
+  `lineLogsCredential`.
+- Wired in `routes/agentv3.ts` gated `AGENTV3_CRED_LOG_GUARD` (default on), writes back to
+  store + sandbox + `writtenFiles`, records `COMPLIANCE_LOG_REDACTED` honestly.
+- Regression tests: `credentialLogRedaction.test.ts` (13) encode the exact failure (a `useAuth` that logs
+  the password → healed; readiness blocker reproduced then cleared via `scanCompliance`) + every safety
+  boundary (multi-line/template/non-standalone skipped; real logic untouched; test/vendor skipped;
+  idempotent). ComplianceAnalysis suite (20) still green after the refactor.
+
+**50% #2 (why did it arise at all) — OPEN, honestly recorded (rule 6):**
+1. **Upstream prevention:** the weak build PRODUCED a credential-logging line at all. A build-contract
+   nudge ("never console.log credentials/tokens") is the upstream half; the deterministic heal is the
+   100%-reliable last line of defence. OPEN (prompt-level).
+2. **Systemic routing:** weak flash/cheap models struggle on complex multi-file apps (26 min, heavy repair
+   loop). Complexity-aware routing (skip the flash rung for genuinely-complex weak-tier prompts; Sonnet/
+   Opus still NEVER on weak) is the systemic cure — but it changes the admin-CONFIRMED Model Routing
+   Policy, so it stays OPEN pending explicit admin sign-off (⚠️ CONFIRM WITH ADMIN BEFORE CHANGING).
+
+Gate: frontend tsc 0 · server tsc 0 · new suite (13) + ComplianceAnalysis (20) + ToolDispatcher/
+BuildDiagnostics (271) green.

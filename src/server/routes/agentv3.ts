@@ -139,6 +139,7 @@ import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
+import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
@@ -7646,6 +7647,27 @@ export function registerAgentV3Routes(app: Express): void {
               try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
+          }
+        }
+        // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness
+        // gate's ONE high-severity privacy/compliance class is `pii-in-logs`: a console.* line that logs a
+        // credential/token. A single one hard-blocks the readiness verdict (NOT READY) → the whole app is
+        // marked failed. A debug log that prints a password is never app logic, so stripping its arguments
+        // both removes the real leak AND unblocks the build — a real security fix, not a cosmetic patch.
+        // Provably non-breaking (single-line, statement-leading, paren-balanced calls only; anything
+        // ambiguous is left as an honest finding). Kill: AGENTV3_CRED_LOG_GUARD=off.
+        if (process.env.AGENTV3_CRED_LOG_GUARD !== 'off') {
+          const redacted = redactCredentialLogs(integrityFiles);
+          for (const r of redacted.redactions) {
+            const newContent = redacted.files[r.file];
+            if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
+            integrityFiles[r.file] = newContent;
+            writtenFiles.set(r.file, newContent);
+            try { await actuator.writeFile(workspaceId, r.file, newContent); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+          }
+          if (redacted.redactions.length > 0) {
+            const files = [...new Set(redacted.redactions.map((r) => r.file))];
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'COMPLIANCE_LOG_REDACTED', message: `Redacted ${redacted.redactions.length} console log(s) that leaked a credential/token (would have hard-blocked the readiness gate) across ${files.length} file(s).`, autoResolved: true, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
           }
         }
         const integrity = analyzeProjectIntegrity(integrityFiles);

@@ -50,8 +50,12 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
    live sandbox to run against (degrade honestly when absent).*
 
 ### B. Breadth recipes & scaffolds (isolated, low-risk, clear upgrades)
-7. **More framework languages** — Rust/Cargo, Ruby/Rails, PHP/Laravel, C/C++/CMake (+ Ansible for IaC).
-   OPEN (`FrameworkRegistry` has only TS, Python, Java, Go, static). Each = a scaffold + registry entry.
+7. **More framework languages** — Rust/Cargo, Ruby/Rails, PHP/Laravel, C/C++/CMake. ⚠️ **RECLASSIFIED
+   🔒 BLOCKED (verified 2026-07-21):** the fullstack E2B template (`infra/e2b/e2b-fullstack.Dockerfile`)
+   ships Node/Python/Java+Maven/Go ONLY — NO Rust/Ruby/PHP runtimes. Registering these frameworks would
+   create build options the sandbox CANNOT run (a "Rust" build that 403s = a fake feature, rule 2). Real
+   fix needs the multi-GB template rebuilt + republished with those runtimes (`E2B_TEMPLATE_ID`) — admin
+   infra, not a code-only slice. Do NOT add the registry entries until the template carries the runtime.
 8. **More deploy targets** — AWS, Azure, Railway, Render. OPEN (`DeployProviders` has Firebase/Vercel/
    Netlify/Cloudflare/GH-Pages only). Each = a provider module.
 9. **GraphQL backend recipe** — OPEN (REST CRUD recipe exists; no GraphQL). A `generate_graphql` schema +
@@ -79,7 +83,9 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
 
 ### C. Domain & polish (real, pick per surface)
 19. **Packaged domain recipes** — Hospital-ERP / CRM / EMR starters (RBAC + admin + dashboard + audit recipes
-    now all exist to compose them). PARTIAL — no packaged domain recipe yet.
+    now all exist to compose them). ✅ **CRM done** (`generate_crm`) + ✅ **Hospital-ERP / EMR done
+    (2026-07-21, `generate_hospital_erp` → `HospitalErpGenerator.ts`):** no doctor double-booking (409),
+    RBAC on patient-record writes (403), immutable audit log. Remaining: more verticals as demand shows.
 20. **Service-split generator + named paradigms** — Clean/DDD/MVC/Hexagonal scaffold + a microservice split
     path. OPEN (coupling is scored; no split generator). *Lower priority.*
 21. **Pure-code polish** (pull per surface, each small): ~~CSP for generated apps~~ (✅ CSP-meta analyzer,

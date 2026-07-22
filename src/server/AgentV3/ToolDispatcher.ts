@@ -143,6 +143,7 @@ import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateBookingIntegration } from '../lib/BookingGenerator';
 import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateCrmIntegration } from '../lib/CrmGenerator';
+import { generateHospitalErpIntegration } from '../lib/HospitalErpGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3478,6 +3479,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('crm starter');
         const crmDeps = crmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a CRM / lead-pipeline backend:\n${crmWritten.join('\n')}\nAdd the dependencies: ${crmDeps}\n\n${crmcfg.instructions}`;
+      }
+
+      case 'generate_hospital_erp': {
+        // Breadth recipe (domain vertical) — Hospital-ERP / EMR (server/hospital/): a real HospitalService
+        // with THREE guarantees — no doctor double-booking (409), RBAC on patient-record writes (403), and an
+        // immutable audit log — plus an Express router. Pure gen in HospitalErpGenerator.ts.
+        const hospcfg = generateHospitalErpIntegration();
+        const hospWritten: string[] = [];
+        for (const [path, content] of Object.entries(hospcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          hospWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('hospital-erp starter');
+        const hospDeps = hospcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Hospital-ERP / EMR backend:\n${hospWritten.join('\n')}\nAdd the dependencies: ${hospDeps}\n\n${hospcfg.instructions}`;
       }
 
       case 'generate_events': {

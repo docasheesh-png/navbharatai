@@ -69,6 +69,19 @@ describe('installNativeApiRewrite — transport-layer patch', () => {
     expect(inner).toHaveBeenCalledWith(`${NATIVE_API_ORIGIN}/api/wallet/u1`, { method: 'GET' });
   });
 
+  it('bundled shell: an ABSOLUTE local-origin /api STRING is re-targeted (the GitHub-connect bug)', async () => {
+    // connectGitHub / useGitHubConnect / firebase-auth build the URL as
+    // `new URL(window.location.origin + '/api/…').toString()` and pass that STRING to fetch. On native
+    // the origin is the local shell, so without rewriteAbsolute the request hit capacitor/localhost and
+    // GitHub connect never even started. This locks the fix.
+    const w = fakeWindow({ Capacitor: { isNativePlatform: () => true }, origin: 'capacitor://localhost' });
+    const inner = w.fetch;
+    installNativeApiRewrite(w);
+    const built = new URL('capacitor://localhost/api/auth/github/url?redirect_uri=x').toString();
+    await w.fetch(built);
+    expect(inner).toHaveBeenCalledWith(`${NATIVE_API_ORIGIN}/api/auth/github/url?redirect_uri=x`, undefined);
+  });
+
   it('bundled shell: non-API fetches pass through untouched (local assets stay local)', async () => {
     const w = fakeWindow({ Capacitor: { isNativePlatform: () => true }, origin: 'https://localhost' });
     const inner = w.fetch;

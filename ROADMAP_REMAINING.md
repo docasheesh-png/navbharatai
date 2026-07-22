@@ -82,10 +82,11 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
     (NOT the deploy install — postinstall builds are legit there). Small, safe. OPEN in CI.
 
 ### C. Domain & polish (real, pick per surface)
-19. **Packaged domain recipes** — Hospital-ERP / CRM / EMR starters (RBAC + admin + dashboard + audit recipes
-    now all exist to compose them). ✅ **CRM done** (`generate_crm`) + ✅ **Hospital-ERP / EMR done
-    (2026-07-21, `generate_hospital_erp` → `HospitalErpGenerator.ts`):** no doctor double-booking (409),
-    RBAC on patient-record writes (403), immutable audit log. Remaining: more verticals as demand shows.
+19. **Packaged domain recipes** — ✅ **DONE (2026-07-21) — a strong batch shipped:** `generate_crm` (sales
+    state-machine), `generate_hospital_erp` (#1819 — double-booking/RBAC/audit), `generate_school_erp`
+    (#1831 — attendance/grades/fees), `generate_courier` (#1832 — shipment state-machine/tracking),
+    `generate_restaurant_pos` (#1833 — table state-machine/KOT/GST). Each is real + test-locked. Further
+    verticals only as real demand shows (don't churn recipes for their own sake — rule 3).
 20. **Service-split generator + named paradigms** — Clean/DDD/MVC/Hexagonal scaffold + a microservice split
     path. OPEN (coupling is scored; no split generator). *Lower priority.*
 21. **Pure-code polish** (pull per surface, each small): ~~CSP for generated apps~~ (✅ CSP-meta analyzer,

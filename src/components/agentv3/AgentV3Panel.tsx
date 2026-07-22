@@ -351,6 +351,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Immediate feedback for the "Connect GitHub" tap: the async connect (fetch → redirect) gave NO
   // visual response on mobile (no active/hover on touch), so users tapped it 5-6× (admin 2026-07-22).
   const [ghConnecting, setGhConnecting] = useState(false);
+  // Paste-a-token fallback (admin 2026-07-22): the OAuth redirect can't return the token to the bundled
+  // native app, so a user who "connected" still had no token → their PRIVATE repo failed to clone. A
+  // pasted GitHub token (repo scope) is stored the same way and works on EVERY platform.
+  const [showTokenPaste, setShowTokenPaste] = useState(false);
+  const [pastedToken, setPastedToken] = useState('');
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenError, setTokenError] = useState('');
   const [repoSearch, setRepoSearch] = useState('');
   const [importSending, setImportSending] = useState(false);
   // ── Push mode (admin 2026-07-20): the SAME repo picker can PUSH the current app to a repo, so
@@ -436,6 +443,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setGhRepos(null);
     setGhReposError('auth');
   }, []);
+
+  // Verify a pasted GitHub token against the real GitHub API, then store it exactly like the OAuth
+  // token so the build request (which reads localStorage.gh_token) and the repo list both use it. This
+  // is the reliable path when the OAuth redirect can't complete (e.g. inside the native app).
+  const submitPastedToken = useCallback(async () => {
+    const tok = pastedToken.trim();
+    if (!tok || tokenBusy) return;
+    setTokenBusy(true);
+    setTokenError('');
+    try {
+      const res = await fetch('/api/github/user', { headers: { Authorization: `Bearer ${tok}` } });
+      if (!res.ok) {
+        throw new Error(res.status === 401
+          ? 'GitHub rejected that token. Make sure it has the "repo" scope and hasn\'t expired.'
+          : `GitHub returned ${res.status} — please try again.`);
+      }
+      try {
+        localStorage.setItem('gh_token', tok);
+        localStorage.setItem('gh_token_signal', tok); // notify other tabs, same as the OAuth flow
+      } catch { /* storage unavailable */ }
+      setPastedToken('');
+      setShowTokenPaste(false);
+      setGhReposError('');
+      void loadGhRepos();
+    } catch (e) {
+      setTokenError(e instanceof Error ? e.message : 'Could not verify that token.');
+    } finally {
+      setTokenBusy(false);
+    }
+  }, [pastedToken, tokenBusy, loadGhRepos]);
 
   // 1-CLICK IMPORT: picking a repo sends the import message itself — the user just watches the
   // clone → Files/IDE → preview → AI survey happen (the #886/#890 Landing Pipeline server-side).
@@ -3910,6 +3947,40 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     : <><Github className="w-4 h-4" /> Connect GitHub</>}
                 </button>
                 <p className="text-[10px] text-[#484f58]">You'll be taken to GitHub to sign in and approve access (private repos included), then brought right back here.</p>
+                {/* Reliable fallback (works even inside the app, where the OAuth redirect can't return): */}
+                <button
+                  type="button"
+                  onClick={() => setShowTokenPaste((v) => !v)}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300 underline touch-manipulation"
+                >
+                  {showTokenPaste ? 'Hide token option' : 'Not working? Paste a GitHub token instead'}
+                </button>
+                {showTokenPaste && (
+                  <div className="space-y-2 text-left bg-white/5 border border-white/10 rounded-xl p-3">
+                    <p className="text-[10px] text-[#8b949e] leading-relaxed">
+                      Create a token at{' '}
+                      <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=NavBharatAI" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">github.com/settings/tokens</a>{' '}
+                      with the <span className="font-mono text-indigo-300">repo</span> scope, then paste it here — this works for your private repos on any device.
+                    </p>
+                    <input
+                      type="password"
+                      value={pastedToken}
+                      onChange={(e) => setPastedToken(e.target.value)}
+                      placeholder="ghp_… or github_pat_…"
+                      autoComplete="off"
+                      className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#484f58] font-mono focus:outline-none focus:border-indigo-500/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void submitPastedToken()}
+                      disabled={!pastedToken.trim() || tokenBusy}
+                      className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait text-white text-xs font-bold rounded-lg transition-all touch-manipulation"
+                    >
+                      {tokenBusy ? <><TirangaLoader className="w-3.5 h-3.5" /> Verifying…</> : 'Use this token'}
+                    </button>
+                    {tokenError && <p className="text-[10px] text-amber-300">{tokenError}</p>}
+                  </div>
+                )}
               </div>
             ) : ghReposLoading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-[#8b949e] text-xs">

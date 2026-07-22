@@ -1166,6 +1166,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_courier',
+      description:
+        'Add a real Courier / Logistics backend to the app (server/courier/) — a packaged domain vertical for ' +
+        'delivery, courier and last-mile apps. THREE real guarantees: (1) SHIPMENT STATE-MACHINE — status moves ' +
+        'created → picked_up → in_transit → out_for_delivery → delivered along allowed transitions only (a ' +
+        'failed_attempt loops back; delivered/returned/cancelled are terminal), an invalid jump rejected (409); ' +
+        '(2) APPEND-ONLY tracking history — every status change appends an immutable event; (3) UNIQUE tracking ' +
+        'numbers with exact lookup. Emits a dependency-free CourierService (createShipment, advanceStatus, ' +
+        'assignDriver, getByTracking, history, list) + an Express router (POST/GET /shipments, GET ' +
+        '/shipments/:id, PATCH /shipments/:id/status → 409 on invalid, PATCH /shipments/:id/driver, GET ' +
+        '/shipments/:id/history, GET /track/:trackingNo public) + a README. In-memory by default — swap the Maps ' +
+        'for your DB. Pairs with the auth/notification/maps recipes. Use for courier / delivery / logistics prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2779,6 +2794,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_crm',
   'generate_hospital_erp',
   'generate_school_erp',
+  'generate_courier',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

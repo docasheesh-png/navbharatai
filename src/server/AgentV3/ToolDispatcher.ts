@@ -146,6 +146,7 @@ import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateHospitalErpIntegration } from '../lib/HospitalErpGenerator';
 import { generateSchoolErpIntegration } from '../lib/SchoolErpGenerator';
+import { generateCourierIntegration } from '../lib/CourierGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3546,6 +3547,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('school-erp starter');
         const schoolDeps = schoolcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a School / Education-ERP backend:\n${schoolWritten.join('\n')}\nAdd the dependencies: ${schoolDeps}\n\n${schoolcfg.instructions}`;
+      }
+
+      case 'generate_courier': {
+        // Breadth recipe (domain vertical) — Courier / Logistics (server/courier/): a real CourierService
+        // with a shipment STATE-MACHINE (invalid jumps → 409), append-only tracking history and unique
+        // tracking numbers, plus an Express router. Pure gen in CourierGenerator.ts.
+        const courriercfg = generateCourierIntegration();
+        const courierWritten: string[] = [];
+        for (const [path, content] of Object.entries(courriercfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          courierWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('courier starter');
+        const courierDeps = courriercfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Courier / Logistics backend:\n${courierWritten.join('\n')}\nAdd the dependencies: ${courierDeps}\n\n${courriercfg.instructions}`;
       }
 
       case 'generate_events': {

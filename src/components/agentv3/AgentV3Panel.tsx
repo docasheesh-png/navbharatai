@@ -3276,34 +3276,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
-              <AttachMenu
-                onFiles={(fl) => addFiles(fl)}
-                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
-                disabled={running}
-                badge={files.length}
-                title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
-                buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
-              />
-              {/* Voice-to-App + Screenshot-to-App entry points (moved here from Settings → AI Tools,
-                  admin 2026-07-22). Each opens its tool, which reads the input and builds via v5 — so
-                  they belong in Pro v5.0, not buried in Settings. Uses the same `navbharat:navigate`
-                  event ProV3Surface already relies on (App.tsx) — no prop threading needed. */}
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }))}
-                title="Voice to App — bolkar app banao"
-                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white"
-              >
-                <Mic className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'screenshot' } }))}
-                title="Screenshot to App — kisi bhi website ka screenshot se app banao"
-                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white"
-              >
-                <Camera className="w-4 h-4" />
-              </button>
+              {/* Input-source tools — ONE native Pro v5.0 cluster: Attach · Voice · Screenshot. Voice
+                  and Screenshot moved here from Settings (admin 2026-07-22) and merged into a single
+                  bordered frame with the attach control so they read as first-class v5.0 buttons, not
+                  loose add-ons. Voice/Screenshot dispatch `navbharat:navigate` (the channel ProV3Surface
+                  already uses in App.tsx) to open their tool, which reads the input and builds via v5. */}
+              <div className="flex items-center gap-0.5 shrink-0 rounded-lg border border-zinc-700 bg-zinc-800/40 p-0.5">
+                <AttachMenu
+                  onFiles={(fl) => addFiles(fl)}
+                  fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
+                  disabled={running}
+                  badge={files.length}
+                  title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
+                  buttonClassName="h-7 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-white hover:bg-zinc-700/60 disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }))}
+                  disabled={running}
+                  title="Voice to App — bolkar app banao"
+                  className="h-7 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-white hover:bg-zinc-700/60 disabled:opacity-40"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'screenshot' } }))}
+                  disabled={running}
+                  title="Screenshot to App — kisi bhi website ka screenshot se app banao"
+                  className="h-7 w-8 flex items-center justify-center rounded-md text-zinc-400 hover:text-white hover:bg-zinc-700/60 disabled:opacity-40"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
+              </div>
               </div>{/* /settings + attach row */}
               </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
               <div className="relative w-full order-1" data-tour="chat">

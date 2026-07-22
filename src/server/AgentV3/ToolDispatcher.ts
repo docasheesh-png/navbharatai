@@ -52,6 +52,7 @@ import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
+import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
@@ -1872,6 +1873,22 @@ export class ToolDispatcher {
           const blockMsg = destructiveSourceDeletionMessage(destructiveTarget);
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-DESTRUCTIVE] refused source-dir delete: ${command.slice(0, 200)}`,
+          );
+          this.state?.appendTerminal(blockMsg);
+          return blockMsg;
+        }
+        // DESTRUCTIVE DEPENDENCY MUTATION — BLOCKED (deep-test SaaS dashboard, build 5ed0424a). The
+        // preview was LIVE (Vite v5, dev server up), then the agent ran `npm audit fix --force` to "fix
+        // vulnerabilities" — which force-upgraded Vite v5→v8 (a MAJOR break), crashed the running dev
+        // server and KILLED the live preview, costing ~7 min to recover. A preview build never needs a
+        // security audit, and force/moving-tag upgrades of a core tool only break the working app. Refuse
+        // it and tell the model to keep the pinned versions. Checked BEFORE the generic risk classifier so
+        // the message is the actionable one (pure guard: DependencyMutationGuard.ts).
+        const depMutation = dependencyMutationGuard(command);
+        if (depMutation) {
+          const blockMsg = dependencyMutationGuardMessage(depMutation);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DEPMUTATION:${depMutation.kind}] refused: ${command.slice(0, 200)}`,
           );
           this.state?.appendTerminal(blockMsg);
           return blockMsg;

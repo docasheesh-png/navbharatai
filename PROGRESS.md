@@ -20756,3 +20756,21 @@ replaceState. Server + frontend tsc clean, runtime suite green.
 (navbar has text but the main content region is empty) so a genuinely-blank-body app can never read
 "renders correctly" — deferred (needs a precise, false-positive-safe heuristic). (2) alias the cheap-model
 `write` → `write_file`. (3) the 64 KB tool-arg truncation ("position 65536") — the larger chunked-write item.
+
+---
+
+## 2026-07-22 — Build-report autopsy (SaaS admin dashboard, build 5ed0424a) + DNA fix: DependencyMutationGuard
+
+**Report:** vite-react multi-tenant SaaS admin dashboard. counts 323 · 0 errors · 14 warnings · 1 unresolved. App built + preview published, BUT the preview died mid-build and the run looped to 31+ min (vs 8-min estimate).
+
+**Issue the admin flagged — "preview chala fir band ho gaya" — ROOT CAUSE (evidence-based):**
+1. Min 16: preview LIVE (`PREVIEW_PUBLISHED`, Vite v5.4.21, dev server up).
+2. Min ~20: agent ran **`npm audit fix --force`** to "fix vulnerabilities" → force-upgraded **Vite v5 → v8.1.5 (MAJOR breaking)** → agent's own log: *"The vite package version has been updated to ^8.1.5, which is a major change."*
+3. Dev server crashed ("conflict with the vite version", "class-variance-authority not installed") → **live preview DEAD**.
+4. ~7 min of downgrade/`--force` fighting to recover.
+
+**5-bucket ledger:** ✅ self-healed 8 (App.tsx redeclare, malformed lucide import, TeamPage JSX paren, missing React import, missing tailwind.config.js, missing class-variance-authority, all provider fallbacks) · 🔀 worked-around 2 (fast-lane 240s timeout → full builder; provider storm GLM 429 / KIMI+VERTEX+GEMINI timeouts) · ⏭️ skipped 1 (REQUIREMENT_GAPS: audit-log + API-keys/webhooks assumed-default) · ❌ still-broken 2 (`npm audit fix --force`→Vite v5→v8→preview death; build never converged — Team-page rebuild loop min 17-31) · 🥵 struggle 5 (fast-lane timeout, update_preview 83s "hiccup", vite-break 7-min recovery, Team-page loop, 31+ min total).
+
+**Missing subsystem:** a "dependency-tree integrity guard during a build" — nothing stopped a destructive dep mutation from breaking a working preview.
+
+**DNA fix (PR — this change):** new pure, unit-tested `src/server/AgentV3/DependencyMutationGuard.ts`, wired into the ToolDispatcher `bash` case (before the risk classifier, after destructive-source). BLOCKS during a build: the `npm/pnpm/yarn/bun audit fix` family (with or without `--force`), and installing a CORE tool (vite/react/react-dom/typescript/next/@vitejs/plugin-react/@types…) at a MOVING tag (`@latest`/`@next`/`@canary`/…). Zero false positives — normal installs, pinned numeric versions, `npm ci`, read-only `npm audit`, non-core `@latest` all pass. The blocked agent gets an actionable redirect ("preview sandbox — audits don't apply; keep pinned versions; install only the missing package"). 11 regression tests lock the exact failure + siblings + boundaries. Sibling coverage: origin is the agent's own `bash` tool call (ToolDispatcher choke point); route `fast-install`/`fast-reconcile` also flow through it. (Open/secondary: the Team-page non-convergence loop is bounded only by the generic `AGENTV3_MAX_BUILD_SECONDS` + step budget, not a dependency-aware loop-breaker — recorded for a later slice.)

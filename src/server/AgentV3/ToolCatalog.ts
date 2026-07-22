@@ -1151,6 +1151,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_school_erp',
+      description:
+        'Add a real School / Education-ERP backend to the app (server/school/) — a packaged domain vertical ' +
+        'for schools, coaching institutes and LMS apps. THREE real guarantees: (1) IDEMPOTENT ATTENDANCE — ' +
+        'marking a (student, class, date) is idempotent (a repeat mark updates the same record, never a ' +
+        'duplicate; 404 if the student is not enrolled in the class); (2) VALID GRADES — a score must be within ' +
+        '0..maxMarks (409 otherwise) and a student percentage is computed exactly; (3) EXACT FEE LEDGER — a ' +
+        'balance = invoiced − paid, a payment over the balance is rejected (409, never negative), append-only. ' +
+        'Emits a dependency-free SchoolService (classes, enrollment, attendance, assessments, grades, fee ledger) ' +
+        '+ an Express router (POST /classes, /students, /attendance, /assessments, /grades, /fees/invoice, ' +
+        '/fees/pay; GET rosters/attendance/percentage/fees) + a README. In-memory by default — swap the Maps for ' +
+        'your DB. Pairs with the auth/notification/payment recipes. Use for school / coaching / LMS prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2763,6 +2778,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_inventory',
   'generate_crm',
   'generate_hospital_erp',
+  'generate_school_erp',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

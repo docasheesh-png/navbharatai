@@ -145,6 +145,7 @@ import { generateBookingIntegration } from '../lib/BookingGenerator';
 import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateHospitalErpIntegration } from '../lib/HospitalErpGenerator';
+import { generateSchoolErpIntegration } from '../lib/SchoolErpGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3526,6 +3527,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('hospital-erp starter');
         const hospDeps = hospcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Hospital-ERP / EMR backend:\n${hospWritten.join('\n')}\nAdd the dependencies: ${hospDeps}\n\n${hospcfg.instructions}`;
+      }
+
+      case 'generate_school_erp': {
+        // Breadth recipe (domain vertical) — School / Education-ERP (server/school/): a real SchoolService
+        // with THREE guarantees — idempotent attendance, valid grades (0..maxMarks), and an exact fee ledger
+        // (balance = invoiced − paid, never negative) — plus an Express router. Pure gen in SchoolErpGenerator.ts.
+        const schoolcfg = generateSchoolErpIntegration();
+        const schoolWritten: string[] = [];
+        for (const [path, content] of Object.entries(schoolcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          schoolWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('school-erp starter');
+        const schoolDeps = schoolcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a School / Education-ERP backend:\n${schoolWritten.join('\n')}\nAdd the dependencies: ${schoolDeps}\n\n${schoolcfg.instructions}`;
       }
 
       case 'generate_events': {

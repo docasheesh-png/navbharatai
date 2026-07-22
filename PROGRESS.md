@@ -21009,3 +21009,40 @@ never over-asks). All 35 analyzer/coverage tests green; no existing classificati
    the unresolved-import analyzer should be framework-aware.
 
 Gate: server tsc 0 · analyzer+coverage 35/35 · full suite (running/green).
+
+---
+
+## 2026-07-22 — Autopsy #4 follow-up: project-coherence pre-flight (the framework-Frankenstein root cause)
+
+Autopsy #4's TOP open root cause was: buildId `a4be5a05` failed because it built into a **Frankenstein
+workspace** — a SvelteKit source tree (`.svelte`, `+page.server.ts`, `$lib`) on a **React package.json**
+(`tsc && vite build`) — and no detector caught it (they all trust package.json deps; nothing classified
+source files by extension). This slice adds the missing detection.
+
+**New pure helpers in `ProjectImport.ts`** (12 tests):
+- `detectFrameworkFromSourceExtensions(files)` — the missing counterpart to `detectImportedFramework`
+  (deps-only): classifies by SOURCE signals, returning a framework ONLY on an unambiguous extension signal
+  (`.svelte`/`.vue`/Angular component + `@angular/core`), else null (never claims `react` from a `.tsx` —
+  too weak).
+- `frameworkFamily(fw)` — collapses ids to families (nextjs+vite-react = react; sveltekit = svelte; …) so a
+  same-family pairing is never a mismatch.
+- `checkFrameworkCoherence(files)` — flags a mismatch ONLY when ALL hold: (1) source framework unambiguous,
+  (2) package.json genuinely LACKS that framework's toolchain (a real Svelte app HAS svelte deps → never
+  false-fires on a legit project), (3) package framework is a different family. Pure, never mutates.
+- `frameworkCoherenceGuidance(c)` — an actionable, non-mutating warning telling the builder to reconcile to
+  ONE framework (fix package.json/config to match the source, or rebuild both consistently) BEFORE writing
+  features — instead of thrashing.
+
+**Wiring (`agentv3.ts`, DETECT + RECORD + GUIDE, never auto-mutate):** in the FileGuardian framework-drift
+block (where `union` — the restored workspace — is already in scope), run `checkFrameworkCoherence(union)`;
+on a mismatch, record an honest admin diagnostic `FRAMEWORK_SOURCE_MISMATCH` (phase plan / warning) and stash
+the guidance, which is prepended to `buildPrompt` (same mechanism as `buildRequirementGuidance`) so the agent
+is warned up front. Deliberately does NOT touch files, `result.ok`, or billing — it can't break a working
+build. Kill switch `AGENTV3_FRAMEWORK_COHERENCE=off`.
+
+Scope honesty (rule 6): this WARNS the agent (which would have prevented the 18-min thrash) but does not yet
+auto-repair the package.json/config to match the sources — a deterministic auto-reconcile is a future slice
+(riskier: mutating build config). The other autopsy-#4 open items (agent running browser code in node; GLM
+provider storm; SvelteKit virtual modules flagged as unresolved imports) remain open.
+
+Gate: server tsc 0 · ProjectImport 77/77 · full suite (running/green).

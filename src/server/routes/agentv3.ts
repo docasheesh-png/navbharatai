@@ -103,7 +103,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
@@ -4661,6 +4661,9 @@ export function registerAgentV3Routes(app: Express): void {
     // `let` — a zip import below adopts the DETECTED framework of the imported app (persisted
     // durably by persistSessionTimeline), overriding whatever the client's picker defaulted to.
     let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
+    // Agent-facing warning when the restored workspace's source files and package.json disagree on the
+    // framework (set by the coherence pre-flight in the FileGuardian block below; prepended to buildPrompt).
+    let frameworkCoherenceMsg = '';
     // BIDIRECTIONAL FRAMEWORK SELECTION (admin 2026-07-20: "chahe user settings se select kare ya chat me
     // bol de … dono se apne aap select ho jaye"). Two paths, one deterministic reconcile:
     //   • SETTINGS pick — `frameworkExplicit === true` means the user actually chose in the picker; that
@@ -5822,6 +5825,21 @@ export function registerAgentV3Routes(app: Express): void {
                   events.emit({ type: 'narration', agent: 'architect', text: `🧭 Detected this is a ${detected} app (not the default) — switching to the ${detected} toolchain so the preview and checks match your code.`, ts: Date.now() });
                 }
               }
+              // PROJECT-COHERENCE PRE-FLIGHT (autopsy buildId a4be5a05): a workspace whose SOURCE files are
+              // one framework (e.g. a .svelte/+page.server.ts/$lib tree) but whose package.json can't build
+              // it (React + `tsc && vite build`, no svelte deps) makes the builder thrash ~18 min then fail
+              // (tsc-not-found, $types unresolved, $lib unresolvable). No detector caught this because they
+              // all trust package.json deps and never classify source files by extension. Here we DETECT it
+              // and WARN the agent (prepended to buildPrompt) to reconcile to ONE framework before writing
+              // features — we never auto-mutate files (that's the risky part). Kill switch:
+              // AGENTV3_FRAMEWORK_COHERENCE=off.
+              if (process.env.AGENTV3_FRAMEWORK_COHERENCE !== 'off') {
+                const coherence = checkFrameworkCoherence(union);
+                if (!coherence.ok) {
+                  frameworkCoherenceMsg = frameworkCoherenceGuidance(coherence);
+                  buildDiag.record({ phase: 'plan', severity: 'warning', code: 'FRAMEWORK_SOURCE_MISMATCH', message: `Workspace source is ${coherence.sourceFramework} but package.json is ${coherence.packageFramework} — reconcile to one framework before building.`.slice(0, 400), autoResolved: false, detail: coherence.evidence.join('; ') });
+                }
+              }
               if (typeof union['package.json'] === 'string') {
                 const depRes = applyWellKnownMissingDeps(union);
                 if (depRes.added.length) {
@@ -6391,6 +6409,11 @@ export function registerAgentV3Routes(app: Express): void {
       // prompt ride the user turn instead, so the model still receives every one — just not in the
       // cached system prefix. '' (flag off) leaves buildPrompt exactly as today.
       if (cachePrefixPreamble) buildPrompt = `${cachePrefixPreamble}\n\n---\n\n${buildPrompt}`;
+
+      // Framework-mismatch warning (from the coherence pre-flight above) rides the user turn so the builder
+      // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
+      // '' (coherent, or flag off) leaves buildPrompt unchanged.
+      if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
 
       // REQUIREMENT-AWARE BUILD (admin-approved option A, 2026-07-20; flag AGENTV3_REQUIREMENT_AWARE, default
       // OFF): on a FRESH build of an ambiguous domain prompt, proactively tell the builder to INCLUDE the

@@ -147,6 +147,7 @@ import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateHospitalErpIntegration } from '../lib/HospitalErpGenerator';
 import { generateSchoolErpIntegration } from '../lib/SchoolErpGenerator';
 import { generateCourierIntegration } from '../lib/CourierGenerator';
+import { generateRestaurantPosIntegration } from '../lib/RestaurantPosGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3566,6 +3567,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('courier starter');
         const courierDeps = courriercfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Courier / Logistics backend:\n${courierWritten.join('\n')}\nAdd the dependencies: ${courierDeps}\n\n${courriercfg.instructions}`;
+      }
+
+      case 'generate_restaurant_pos': {
+        // Breadth recipe (domain vertical) — Restaurant / POS (server/restaurant/): a real RestaurantService
+        // with a table STATE-MACHINE + KOT order lifecycle (invalid jumps → 409) + an EXACT GST bill, plus an
+        // Express router. Pure gen in RestaurantPosGenerator.ts.
+        const restcfg = generateRestaurantPosIntegration();
+        const restWritten: string[] = [];
+        for (const [path, content] of Object.entries(restcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          restWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('restaurant-pos starter');
+        const restDeps = restcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Restaurant / POS backend:\n${restWritten.join('\n')}\nAdd the dependencies: ${restDeps}\n\n${restcfg.instructions}`;
       }
 
       case 'generate_events': {

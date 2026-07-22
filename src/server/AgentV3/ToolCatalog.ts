@@ -1181,6 +1181,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_restaurant_pos',
+      description:
+        'Add a real Restaurant / POS backend to the app (server/restaurant/) — a packaged domain vertical for ' +
+        'restaurants, cafés and cloud kitchens. THREE real guarantees: (1) TABLE STATE-MACHINE — a table moves ' +
+        'free → occupied → billing → free along allowed transitions only (seating an occupied table is rejected, ' +
+        '409); (2) KOT ORDER LIFECYCLE — an order moves placed → preparing → served → closed and items can be ' +
+        'added only while it is open (409 otherwise); (3) EXACT GST BILL — subtotal + CGST + SGST (split from the ' +
+        'per-item or default GST rate) + grand total, computed exactly. Emits a dependency-free RestaurantService ' +
+        '(menu, tables, openOrder, addLine, setOrderStatus, bill, closeOrder) + an Express router (GET/POST /menu ' +
+        '+ /tables, POST /orders, POST /orders/:id/lines, PATCH /orders/:id/status, GET /orders/:id/bill, POST ' +
+        '/orders/:id/close) + a README. In-memory by default — swap the Maps for your DB. Pairs with the ' +
+        'auth/payment/notification recipes. Use for restaurant / café / menu / KOT / POS prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2795,6 +2810,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_hospital_erp',
   'generate_school_erp',
   'generate_courier',
+  'generate_restaurant_pos',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

@@ -406,7 +406,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <Upload className="w-8 h-8 text-gray-600" />
                 <p className="text-sm text-gray-500">
-                  Screenshot upload karo, AI code generate karega
+                  Kisi bhi website ka screenshot upload karo — AI same-to-same app bana dega
                 </p>
               </div>
             )}
@@ -415,7 +415,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <ImageIcon className="w-8 h-8 text-indigo-500" />
                 <p className="text-sm text-gray-400">
-                  Image ready hai — "Code Generate Karo" dabao
+                  Image ready hai — "Build from Screenshot" dabao
                 </p>
               </div>
             )}
@@ -465,6 +465,13 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
             'Build from Screenshot'
           )}
         </button>
+
+        {/* Honest, intent-aware note — inspired-by is built as asked; only a deceptive real-brand clone is guarded. */}
+        <p className="text-[11px] text-amber-300/70 leading-relaxed">
+          Want a page in <span className="font-semibold">your own</span> app to just <span className="font-semibold">look like</span> this
+          (your brand, your name)? It’s built exactly as you ask. A pixel-perfect clone of a real branded site (login/payment) ships as a
+          watermarked, non-original demo — so it can’t be used to impersonate or phish the real site.
+        </p>
 
         {/* History */}
         {history.length > 0 && (

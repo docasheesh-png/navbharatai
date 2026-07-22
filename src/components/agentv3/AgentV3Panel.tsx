@@ -7,7 +7,7 @@ import {
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search,
+  Star, Search, Mic,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -3276,14 +3276,29 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
+              {/* Attach — now also carries the "Screenshot → App" option (admin 2026-07-22): people send
+                  photos through Attach anyway, so building an app from a website screenshot lives inside
+                  this menu (opens the tool via the `navbharat:navigate` channel App.tsx already handles). */}
               <AttachMenu
                 onFiles={(fl) => addFiles(fl)}
                 fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
                 disabled={running}
                 badge={files.length}
-                title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
+                title="Attach (photo, gallery, file, or a website screenshot → app)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+                onScreenshotToApp={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'screenshot' } }))}
               />
+              {/* Voice to App — its OWN dedicated mic button (admin 2026-07-22): a small icon by the input
+                  that opens the voice→app tool, which reads speech and builds via v5. Separate from Attach. */}
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }))}
+                disabled={running}
+                title="Voice to App — bolkar app banao"
+                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+              >
+                <Mic className="w-4 h-4" />
+              </button>
               </div>{/* /settings + attach row */}
               </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
               <div className="relative w-full order-1" data-tour="chat">

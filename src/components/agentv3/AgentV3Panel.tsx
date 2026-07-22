@@ -348,6 +348,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [ghReposLoading, setGhReposLoading] = useState(false);
   // 'auth' = not connected / token expired (show Connect); anything else = a real fetch error.
   const [ghReposError, setGhReposError] = useState<string>('');
+  // Immediate feedback for the "Connect GitHub" tap: the async connect (fetch → redirect) gave NO
+  // visual response on mobile (no active/hover on touch), so users tapped it 5-6× (admin 2026-07-22).
+  const [ghConnecting, setGhConnecting] = useState(false);
   const [repoSearch, setRepoSearch] = useState('');
   const [importSending, setImportSending] = useState(false);
   // ── Push mode (admin 2026-07-20): the SAME repo picker can PUSH the current app to a repo, so
@@ -395,6 +398,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // callback returns to this exact URL with #gh_token, which App.tsx stores in localStorage).
   // A redirect can't be killed by mobile popup blockers, unlike window.open.
   const connectGitHub = useCallback(async () => {
+    if (ghConnecting) return; // guard against the 5-6 rapid taps — one connect at a time
+    setGhConnecting(true);
+    setGhReposError('');
     try {
       const state = window.location.href.split('#')[0];
       const redirectUri = 'https://navbharatai.com/api/github/callback';
@@ -410,10 +416,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       if (data.scope) githubUrl.searchParams.set('scope', String(data.scope));
       if (data.state) githubUrl.searchParams.set('state', String(data.state));
       window.location.href = githubUrl.toString();
+      // NOTE: on success the line above navigates away, so `ghConnecting` intentionally stays true
+      // (the button keeps showing "Connecting…") until the page leaves — never flickers back to idle.
     } catch (e) {
       setGhReposError(e instanceof Error ? e.message : 'Could not start GitHub sign-in.');
+      setGhConnecting(false); // real failure → let the user tap again
     }
-  }, []);
+  }, [ghConnecting]);
 
   // "Wrong account?" — drop the current GitHub connection so the user can connect a DIFFERENT one
   // (without logging out of NavBharatAI). Clears the same keys App.tsx binds to the user, then
@@ -3892,9 +3901,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button
                   type="button"
                   onClick={() => void connectGitHub()}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all touch-manipulation"
+                  disabled={ghConnecting}
+                  aria-busy={ghConnecting}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait text-white text-sm font-bold rounded-xl transition-all touch-manipulation"
                 >
-                  <Github className="w-4 h-4" /> Connect GitHub
+                  {ghConnecting
+                    ? <><TirangaLoader className="w-4 h-4" /> Connecting…</>
+                    : <><Github className="w-4 h-4" /> Connect GitHub</>}
                 </button>
                 <p className="text-[10px] text-[#484f58]">You'll be taken to GitHub to sign in and approve access (private repos included), then brought right back here.</p>
               </div>

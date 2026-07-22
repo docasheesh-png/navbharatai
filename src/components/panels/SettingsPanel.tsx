@@ -2,8 +2,8 @@ import React, { lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database,
-  GitFork, Terminal, Activity, GitBranch, Bot, Mic, MessageSquare, Wand2, Bug, Code,
-  TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Camera, Layout, Puzzle, LayoutTemplate,
+  GitFork, Terminal, Activity, GitBranch, Bot, MessageSquare, Wand2, Bug, Code,
+  TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Layout, Puzzle, LayoutTemplate,
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
@@ -425,7 +425,8 @@ export function SettingsPanel({
                       // 'Doctor AI' tile removed (admin 2026-07-20): Doctor AI is a Professionals-hub
                       // AI (Sidebar → Professionals), not an app-building tool — the tile here was a
                       // redundant shortcut in the wrong group.
-                      { id: 'voice', label: 'Voice to App', icon: Mic, tab: true },
+                      // 'Voice to App' moved to Pro v5.0 (admin 2026-07-22): it reads voice → builds via
+                      // v5, so it lives in the Pro v5.0 composer now, not here in Settings.
                       { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, tab: true },
                       { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, tab: true },
                       { id: 'debugger', label: 'AI Debugger', icon: Bug, tab: true },
@@ -450,7 +451,8 @@ export function SettingsPanel({
                     color: 'text-pink-400',
                     icon: Palette,
                     items: [
-                      { id: 'screenshot', label: 'Screenshot→App', icon: Camera, tab: true },
+                      // 'Screenshot→App' moved to Pro v5.0 (admin 2026-07-22): screenshot → clone-build
+                      // runs through v5, so its entry point now lives in the Pro v5.0 composer.
                       { id: 'multipages', label: 'Multi-Page', icon: Layout, tab: true },
                       { id: 'components', label: 'Components', icon: Puzzle, tab: true },
                       { id: 'designsys', label: 'Design System', icon: LayoutTemplate, tab: true },

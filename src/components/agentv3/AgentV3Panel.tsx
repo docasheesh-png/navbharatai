@@ -7,7 +7,7 @@ import {
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search,
+  Star, Search, Mic, Camera,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -3284,6 +3284,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
               />
+              {/* Voice-to-App + Screenshot-to-App entry points (moved here from Settings → AI Tools,
+                  admin 2026-07-22). Each opens its tool, which reads the input and builds via v5 — so
+                  they belong in Pro v5.0, not buried in Settings. Uses the same `navbharat:navigate`
+                  event ProV3Surface already relies on (App.tsx) — no prop threading needed. */}
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }))}
+                title="Voice to App — bolkar app banao"
+                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white"
+              >
+                <Mic className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'screenshot' } }))}
+                title="Screenshot to App — kisi bhi website ka screenshot se app banao"
+                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white"
+              >
+                <Camera className="w-4 h-4" />
+              </button>
               </div>{/* /settings + attach row */}
               </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
               <div className="relative w-full order-1" data-tour="chat">

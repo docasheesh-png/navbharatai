@@ -13,13 +13,16 @@ describe('dependencyMutationGuard — the `npm audit fix --force` that killed a 
     expect(msg).toMatch(/preview/i);
   });
 
-  it('BLOCKS `npm audit fix` even WITHOUT --force (it still mutates the tree; useless in a preview)', () => {
-    expect(dependencyMutationGuard('npm audit fix')).not.toBeNull();
+  it('ALLOWS plain `npm audit fix` WITHOUT --force (semver-safe, not destructive — only --force is blocked)', () => {
+    // admin 2026-07-22: "only destructive command ko rokna chahiye". Plain audit fix stays within the
+    // declared ranges and cannot cross a major, so it is deliberately NOT blocked.
+    expect(dependencyMutationGuard('npm audit fix')).toBeNull();
+    expect(dependencyMutationGuard('npm audit fix -f')).not.toBeNull(); // -f IS the force short flag → blocked
   });
 
-  it('BLOCKS the pnpm / yarn / bun audit-fix variants (siblings)', () => {
+  it('BLOCKS the pnpm / yarn / bun audit-fix --force variants (siblings)', () => {
     expect(dependencyMutationGuard('pnpm audit fix --force')).not.toBeNull();
-    expect(dependencyMutationGuard('yarn audit fix')).not.toBeNull();
+    expect(dependencyMutationGuard('yarn audit fix --force')).not.toBeNull();
     expect(dependencyMutationGuard('bun audit fix --force')).not.toBeNull();
   });
 

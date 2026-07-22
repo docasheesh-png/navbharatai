@@ -41,9 +41,11 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// `npm|pnpm|yarn|bun audit fix` (with or without --force). `audit fix` ALWAYS mutates the tree; `--force`
-// makes it cross majors. Blocked as a family — a preview build never needs a security audit.
-const AUDIT_FIX_RE = /\b(?:npm|pnpm|yarn|bun)\s+audit\s+fix\b/i;
+// `npm|pnpm|yarn|bun audit fix --force` (or `-f`) ONLY. The `--force` flag is what makes `audit fix`
+// DESTRUCTIVE — it applies fixes that require crossing a MAJOR version (this is what bumped Vite v5→v8).
+// Plain `npm audit fix` WITHOUT --force stays within the declared semver ranges (safe) and is deliberately
+// NOT blocked — only the destructive variant is (admin 2026-07-22: "only destructive command ko rokna chahiye").
+const AUDIT_FIX_FORCE_RE = /\b(?:npm|pnpm|yarn|bun)\s+audit\s+fix\b[^\n;&|]*?(?:--force\b|-f\b)/i;
 
 // Installing a CORE tool at a MOVING dist-tag (latest/next/canary/beta/rc) — resolves to an unpredictable,
 // possibly-major version that breaks the scaffold's pinned baseline (e.g. `npm i vite@latest` → v8).
@@ -66,10 +68,10 @@ const BULK_UPGRADE_RE = /\b(?:npm-check-updates|ncu)\b[^\n;&|]*(?:\s-u\b|--upgra
 export function dependencyMutationGuard(command: string): DependencyMutationBlock | null {
   const cmd = (command || '').trim();
   if (!cmd) return null;
-  if (AUDIT_FIX_RE.test(cmd)) {
+  if (AUDIT_FIX_FORCE_RE.test(cmd)) {
     return {
       kind: 'audit-fix',
-      reason: '`npm audit fix` (especially `--force`) upgrades dependencies — it can cross a MAJOR version (a real incident bumped Vite v5→v8) and crash the running dev server, killing the live preview',
+      reason: '`npm audit fix --force` upgrades dependencies ACROSS a MAJOR version (a real incident bumped Vite v5→v8) and crashes the running dev server, killing the live preview — plain `npm audit fix` (no --force) is fine and is allowed',
     };
   }
   if (CORE_MOVING_TAG_RE.test(cmd)) {
@@ -92,8 +94,8 @@ export function dependencyMutationGuardMessage(block: DependencyMutationBlock): 
   return [
     `BLOCKED (dependency guard): ${block.reason}.`,
     '',
-    'This app runs in an EPHEMERAL PREVIEW sandbox — npm-audit advisories do not apply here, and a force/major dependency upgrade only breaks the working preview (zero upside, catastrophic downside).',
-    'Do NOT run `npm audit fix`, `--force` reinstalls, or `@latest`/`@next` on core tools (vite/react/typescript…) during a build. Keep the scaffold\'s pinned versions.',
-    'If a package the code imports is genuinely missing, install THAT one package at a compatible version (e.g. `npm install <pkg>`), then continue building the app\'s features.',
+    'This app runs in an EPHEMERAL PREVIEW sandbox — a force/major dependency upgrade only breaks the working preview (zero upside, catastrophic downside). ONLY the destructive variant is blocked.',
+    'Avoid: `npm audit fix --force`, `@latest`/`@next` on core tools (vite/react/typescript…), and bulk upgrades (`ncu -u`, `npm update --latest`). All of these can cross a MAJOR version and break the build.',
+    'These ARE allowed: plain `npm audit fix` (no --force), installing a specific missing package (e.g. `npm install <pkg>`), and pinned versions (e.g. `vite@5.4.10`). Keep the scaffold\'s pinned versions and continue building.',
   ].join('\n');
 }

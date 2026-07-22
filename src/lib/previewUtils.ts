@@ -122,7 +122,7 @@ export const PREVIEW_BOOTSTRAP = `
     if(/\\.json$/.test(path)){cache[path]={exports:JSON.parse(src)};return cache[path].exports;}
     if(/\\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(path)){cache[path]={exports:{default:src,__esModule:true}};return cache[path].exports;}
     var isTs=/\\.tsx?$/.test(path),isTsx=/\\.tsx$/.test(path);
-    var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true}]]:[['react',{runtime:'automatic'}]];
+    var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true,allowDeclareFields:true}]]:[['react',{runtime:'automatic'}]];
     // Replace import.meta.* — not valid inside new Function() (non-module context)
     src=src.replace(/import\\.meta\\.env\\b/g,'(window.__importMetaEnv__||{})');
     src=src.replace(/import\\.meta\\.url\\b/g,'location.href');

@@ -5,6 +5,7 @@ import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { robustTscCommand } from './tscCommand';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
@@ -898,7 +899,9 @@ export class ToolDispatcher {
         // STALE "clean" — a synchronous incremental run is always honest about the current tree.
         const r = await this.actuator.runCommand(
           this.workspaceId,
-          'npx --no-install tsc --noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo 2>&1 | head -80',
+          // Robust tsc — the LOCAL binary (never `npx tsc`, which can hit the `tsc@2.0.4` squatter's
+          // help page and never typecheck; build report 2026-07-21). See tscCommand.ts.
+          robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -80'),
         );
         return `${r.stdout || ''}\n${r.stderr || ''}`.trim();
       },

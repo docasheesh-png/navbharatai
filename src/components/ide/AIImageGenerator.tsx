@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
+import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 
 interface GeneratedImage {
   id: string;
@@ -184,9 +184,40 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     }
   };
 
-  // DOWNLOAD / SAVE the image. On the native app the OS share-sheet is the reliable "save to Photos/
-  // Files" path; on the web a blob-URL download is far more reliable than a data: href (which just
-  // opens a tab). Both work off the same decoded Blob.
+  // Raw base64 for a native file write: prefer the data URL's own payload, else read the Blob.
+  const toBase64 = async (url: string, blob: Blob): Promise<string> => {
+    if (url.startsWith('data:')) {
+      try { return dataUrlToBase64(url); } catch { /* fall through to FileReader */ }
+    }
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const s = String(reader.result || '');
+        resolve(s.slice(s.indexOf(',') + 1));
+      };
+      reader.onerror = () => reject(new Error('read failed'));
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // ONE-TAP Save to Photos on the native app: write a temp file (Filesystem), then hand its file URI to
+  // the media plugin (savePhoto → the device Photo gallery). Plugins are dynamically imported so the web
+  // bundle never loads native code. Throws on any failure so the caller falls back to the share sheet.
+  const saveToPhotosNative = async (base64: string, filename: string): Promise<void> => {
+    const [{ Filesystem, Directory }, { Media }] = await Promise.all([
+      import('@capacitor/filesystem'),
+      import('@capacitor-community/media'),
+    ]);
+    const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
+    try {
+      await Media.savePhoto({ path: written.uri });
+    } finally {
+      try { await Filesystem.deleteFile({ path: filename, directory: Directory.Cache }); } catch { /* best-effort cleanup */ }
+    }
+  };
+
+  // DOWNLOAD / SAVE the image. Native: ONE-TAP Save to Photos (media plugin) → OS share sheet fallback.
+  // Web: a blob-URL download (far more reliable than a data: href, which just opens a tab).
   const handleDownload = async () => {
     if (!generatedUrl) return;
     setActionNote('');
@@ -194,8 +225,15 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       const blob = await resolveBlob(generatedUrl);
       const filename = imageFilename(prompt, blob.type);
 
-      // Native (Capacitor iOS/Android WebView): open the OS share sheet → Save to Photos / Files.
       if (Capacitor.isNativePlatform()) {
+        // 1) Primary: save straight to the Photos gallery, one tap.
+        try {
+          const base64 = await toBase64(generatedUrl, blob);
+          await saveToPhotosNative(base64, filename);
+          flashNote('Saved to your Photos ✓');
+          return;
+        } catch { /* permission denied / plugin error → fall through to the share sheet */ }
+        // 2) Fallback: OS share sheet (Save Image / Save to Files).
         try {
           const file = new File([blob], filename, { type: blob.type });
           const nav = navigator as Navigator & { canShare?: (d?: unknown) => boolean };
@@ -209,7 +247,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         }
       }
 
-      // Web (and native fallback): trigger a real file download from a blob URL.
+      // Web (and native final fallback): trigger a real file download from a blob URL.
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

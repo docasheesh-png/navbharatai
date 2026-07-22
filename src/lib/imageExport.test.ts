@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dataUrlToBlob, extForMime, imageFilename } from './imageExport';
+import { dataUrlToBlob, dataUrlToBase64, extForMime, imageFilename } from './imageExport';
 
 // A 1x1 transparent PNG as a base64 data URL.
 const PNG_1x1 =
@@ -23,6 +23,19 @@ describe('imageExport — dataUrlToBlob (regression: Copy pasted the base64 link
   it('throws on a plain http URL (so callers fall back to fetch, never mis-decode)', () => {
     expect(() => dataUrlToBlob('https://example.com/a.png')).toThrow();
     expect(() => dataUrlToBlob('')).toThrow();
+  });
+});
+
+describe('imageExport — dataUrlToBase64 (raw base64 for the native temp-file write)', () => {
+  it('returns just the base64 payload of a data URL', () => {
+    const b64 = dataUrlToBase64(PNG_1x1);
+    expect(b64).toBe(PNG_1x1.split(',')[1]);
+    expect(b64.startsWith('data:')).toBe(false);
+  });
+
+  it('throws on a non-base64 or http URL (caller falls back to reading the Blob)', () => {
+    expect(() => dataUrlToBase64('data:image/svg+xml,%3Csvg%3E')).toThrow();
+    expect(() => dataUrlToBase64('https://example.com/a.png')).toThrow();
   });
 });
 

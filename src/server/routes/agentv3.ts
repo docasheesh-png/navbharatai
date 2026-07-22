@@ -224,6 +224,7 @@ import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
+import { checkPreviewCompiles, previewCompileRepairInstruction } from '../runtime/PreviewCompileCheck';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
@@ -7685,6 +7686,47 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* integrity analysis is best-effort — never blocks a build */ }
+
+      // PREVIEW-COMPILE GUARD (autopsy 2026-07-22, buildId 91694679): the in-browser preview transpiles
+      // with Babel — a DIFFERENT compiler from both the build's tsc gate AND the E2B/vite (esbuild)
+      // preview. Code can pass tsc, render in E2B, and still white-screen in the in-browser Babel preview
+      // the user actually opens (the reported `declare`-class-field case). The old "✅ Preview verified"
+      // only ever exercised the E2B surface, so this whole class of compiler-divergence shipped as
+      // "verified". This guard dry-compiles every source file through the SAME Babel config the in-browser
+      // preview uses (checkPreviewCompiles) — a throw here reproduces a real in-browser failure — and,
+      // when the auto-fix gate is on, makes ONE bounded repair pass. Additive + best-effort: it records an
+      // honest admin diagnostic and never changes result.ok, the bill, or the browser-verify verdict below.
+      // Disable with AGENTV3_PREVIEW_COMPILE_CHECK=off.
+      if (process.env.AGENTV3_PREVIEW_COMPILE_CHECK !== 'off' && result.ok && expectsArtifacts && writtenFiles.size > 0) {
+        try {
+          let compile = checkPreviewCompiles(Object.fromEntries(writtenFiles));
+          if (!compile.ok) {
+            const firstMsg = compile.errors[0] ? `${compile.errors[0].file}: ${compile.errors[0].message}` : 'in-browser preview compile failed';
+            buildDiag.record({ phase: 'preview', severity: 'error', code: 'PREVIEW_COMPILE_DIVERGENCE', message: `in-browser preview would not compile — ${firstMsg}`.slice(0, 400), autoResolved: false, detail: `${compile.errors.length} file(s)` });
+            // Bounded LLM self-heal — same gate/pattern as the runtime auto-fix loop and the integrity
+            // heal. Only fires when a REAL divergence exists (the app already white-screens in-browser),
+            // once, with time to spare. Never blocks or fails the build.
+            const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+            if (autoFixEnabled() && !abort.signal.aborted && timeLeft) {
+              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a preview compile issue so the live preview renders…', ts: Date.now() });
+              const compileHealRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                model: resolveModel(powerLevelReqEffective),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await compileHealRunner.run(previewCompileRepairInstruction(compile.errors));
+              if (healed.ok) {
+                result = { ...healed, summary: result.summary }; // keep the REAL build summary; take the heal's edits
+                compile = checkPreviewCompiles(Object.fromEntries(writtenFiles));
+                if (compile.ok) {
+                  buildDiag.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_COMPILE_HEALED', message: 'in-browser preview compile issue fixed — the live preview now compiles.', autoResolved: true });
+                }
+              }
+            }
+          }
+        } catch { /* preview-compile guard is best-effort — never blocks a build */ }
+      }
 
       // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v5.0 used to
       // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it

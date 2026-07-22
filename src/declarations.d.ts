@@ -635,3 +635,4 @@ declare module 'cheerio';
 declare module 'openai';
 declare module 'vite';
 declare module 'multer';
+declare module '@babel/standalone';

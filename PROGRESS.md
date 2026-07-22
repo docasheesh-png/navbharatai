@@ -20830,3 +20830,44 @@ rebuilt+republished with the runtimes (admin infra). Recorded in `ROADMAP_REMAIN
 **DNA fix — orphaned-page auto-wiring (the reported "9 pages created but never used" + "admin panel not found"):** new pure, unit-tested `orphanPageWiring.ts` (`wireOrphanPages`) — deterministically wires each orphaned page component into the app's react-router `<Routes>` (an import + a `<Route>` with a kebab path derived from the name). SAFE BY CONSTRUCTION: additive-only (never edits an existing route/import), idempotent, single-router-only, and a no-op the moment anything is ambiguous — so it can never break a working router. 9 regression tests (the exact defect, named-export form, path-collision avoidance, idempotence, and every safe no-op boundary). Wired at BOTH build paths: (1) SimpleBuilder's deterministic guard chain (fast lane), and (2) — per the 50/50 HEAL-THEN-JUDGE — `dispatcher.healOrphanPages()` runs in AgentRunner BEFORE `assessBuildReadiness()` (full builder, the reported case), so the page is made reachable and stops being an orphan blocker rather than merely being reported. Kill switch: `AGENTV3_ORPHAN_PAGE_GUARD=off`.
 
 This is the last-line-of-defence heal (100%, deterministic). The upstream-prevention half — the builder wiring pages AS it creates them so this heal never needs to fire — remains an OPEN item (system-prompt / plan change), plus the other open causes from autopsy #2 (fast-lane 240s timeout / provider storm; loop-breaker). Tracked for follow-up.
+
+---
+
+## 2026-07-21 — Domain-vertical breadth batch: 4 new packaged ERPs (roadmap remaining #19)
+
+Continuing the "complete the remaining roadmap" conveyor after the false-success verdict fix (#1812). The
+genuinely-open, safe, high-value vein was more **packaged domain verticals** (CRM already shipped). Shipped
+FOUR real, test-locked, dependency-free starters, each with executable domain invariants (rule 2 — real
+features, not stubs), each wired as a tool + KB entry:
+
+- **Hospital-ERP / EMR** (`generate_hospital_erp`, #1819) — no doctor double-booking (409) + RBAC on
+  patient-record writes (403) + immutable audit log. 7 tests.
+- **School / Education-ERP** (`generate_school_erp`, #1831) — idempotent attendance + valid grades
+  (0..maxMarks) + exact fee ledger (balance = invoiced − paid, never negative). 6 tests.
+- **Courier / Logistics** (`generate_courier`, #1832) — shipment state-machine (created→…→delivered,
+  invalid jumps 409) + append-only tracking history + unique tracking numbers. 7 tests.
+- **Restaurant / POS** (`generate_restaurant_pos`, #1833) — table state-machine + KOT order lifecycle +
+  exact GST bill (CGST+SGST). Directly addresses build report #1's domain. 8 tests.
+
+Each merged green (CI hard-gate) → auto-deploys via Cloud Run.
+
+### Honest roadmap reconciliation (rule 3 — no busywork, no fakes)
+A verification pass (4 investigators vs live code) found the `ROADMAP_REMAINING.md` 🟢 list was mostly
+already-shipped or not autonomously-shippable. Genuine status of the remaining items:
+- ✅ **Already done** (stale roadmap lines, verified): deploy-config all-5 targets, GraphQL recipe,
+  frontend-state recipe, settings + notification-center generators, integration-test generator,
+  comment-language guard, AND #9 template-free fallback (vite-react is the universal fallback +
+  ensureViteReactFoundation — no gap).
+- 🔒 **Blocked on infra** (RECLASSIFIED): #3 "more framework languages" (Rust/Ruby/PHP/C++) — the fullstack
+  E2B template has Node/Python/Java/Go runtimes ONLY, so those frameworks can't run in the sandbox;
+  registering them would be a FAKE feature. Needs the template rebuilt+republished (admin infra).
+- 🧑‍⚖️ **Needs an admin decision** (NOT shipped autonomously — would violate a rule or a moat/cost policy):
+  #11 auto-*run* E2E after every build (real cost per build — measure-first + sign-off), #2 daily-spend
+  quota gauge (needs a quota definition + maps poorly to the ₹-per-build billing model), #1 bounded
+  `ask_user` clarification tool (admin's #1 priority, but a default-on clarify gate conflicts with the
+  friction-free "text reply > build" law — safe only default-OFF; confirm the intended default).
+- ⏸️ **Skipped as low-value** (rule 3): #13 standalone "generate a hexagonal architecture" tool — not real
+  value for an app-builder; not built just to tick a box.
+
+Net: the safe, autonomous, clearly-valuable roadmap is now essentially complete. Further high-signal work
+comes from real build-report autopsies (rule 5) and the admin-decision items above.

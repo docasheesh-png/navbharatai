@@ -406,7 +406,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <Upload className="w-8 h-8 text-gray-600" />
                 <p className="text-sm text-gray-500">
-                  Screenshot upload karo, AI code generate karega
+                  Kisi bhi website ka screenshot upload karo — AI same-to-same app bana dega
                 </p>
               </div>
             )}
@@ -415,7 +415,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <ImageIcon className="w-8 h-8 text-indigo-500" />
                 <p className="text-sm text-gray-400">
-                  Image ready hai — "Code Generate Karo" dabao
+                  Image ready hai — "Build from Screenshot" dabao
                 </p>
               </div>
             )}
@@ -465,6 +465,12 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
             'Build from Screenshot'
           )}
         </button>
+
+        {/* Honest anti-phishing note — the clone always ships as a watermarked demo, never a real-brand copy. */}
+        <p className="text-[11px] text-amber-300/70 leading-relaxed">
+          Skill demo: the clone is built with a visible <span className="font-semibold">“Made with NavBharatAI”</span> watermark and a
+          placeholder (non-original) name, and forms are non-functional — so it can’t be used to impersonate or phish the real site.
+        </p>
 
         {/* History */}
         {history.length > 0 && (

@@ -450,7 +450,7 @@ export function SettingsPanel({
                     color: 'text-pink-400',
                     icon: Palette,
                     items: [
-                      { id: 'screenshot', label: 'Screenshot→Code', icon: Camera, tab: true },
+                      { id: 'screenshot', label: 'Screenshot→App', icon: Camera, tab: true },
                       { id: 'multipages', label: 'Multi-Page', icon: Layout, tab: true },
                       { id: 'components', label: 'Components', icon: Puzzle, tab: true },
                       { id: 'designsys', label: 'Design System', icon: LayoutTemplate, tab: true },

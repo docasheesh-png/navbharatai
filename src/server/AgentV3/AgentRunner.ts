@@ -606,6 +606,10 @@ export class AgentRunner {
           let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
           if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
             try {
+              // HEAL-THEN-JUDGE (CLAUDE.md 50/50 law): make orphaned pages reachable BEFORE the gate
+              // judges them — a page the builder created but forgot to route is wired into <Routes>
+              // deterministically, so it stops being an orphan blocker instead of merely being reported.
+              try { const w = await dispatcher.healOrphanPages(); if (w) events.emit({ type: 'narration', agent: 'architect', text: w, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };

@@ -124,6 +124,7 @@ import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/S
 import { dependencyHealthVerdict } from './DependencyHealthGate';
 import { prettierGateResult, prettierAdvisory } from './PrettierGate';
 import { injectObservabilityFixes } from './ObservabilityInjector';
+import { wireOrphanPages } from './orphanPageWiring';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
@@ -734,6 +735,33 @@ export class ToolDispatcher {
    * declines those). Best-effort + timeout-bounded — a read/write error degrades to '' and never fails a
    * build. AgentRunner only calls this when AGENTV3_OBSERVABILITY_INJECT is enabled.
    */
+  /** HEAL-THEN-JUDGE (CLAUDE.md 50/50 law): wire orphaned page components into the app's react-router
+   *  <Routes> BEFORE the readiness gate judges — so a page the builder created but forgot to route is
+   *  made reachable and stops being an orphan blocker, rather than the gate merely REPORTING it. A real
+   *  deterministic fix, additive-only + idempotent + a no-op on an ambiguous router (orphanPageWiring.ts),
+   *  so it can never break a working router. Best-effort. Kill switch: AGENTV3_ORPHAN_PAGE_GUARD=off. */
+  async healOrphanPages(): Promise<string> {
+    if (process.env.AGENTV3_ORPHAN_PAGE_GUARD === 'off') return '';
+    try {
+      return await withTimeout((async () => {
+        const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const result = wireOrphanPages(files);
+        if (result.wired.length === 0) return '';
+        for (const [path, content] of Object.entries(result.files)) {
+          if (files[path] === content) continue; // only the one router file actually changed
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+        }
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`orphan-page wiring: routed ${result.wired.join(', ')}.`); } catch { /* audit best-effort */ }
+        const names = result.wired.map((w) => (w.split(' ')[0].split('/').pop() || '').replace(/\.(?:t|j)sx$/, '')).filter(Boolean);
+        return `🧭 Wired ${result.wired.length} page(s) into the router so they are actually reachable: ${names.join(', ')}.`;
+      })(), 20_000, 'healOrphanPages');
+    } catch {
+      return '';
+    }
+  }
+
   async injectObservability(): Promise<string> {
     try {
       return await withTimeout((async () => {

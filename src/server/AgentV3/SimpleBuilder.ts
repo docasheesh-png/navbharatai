@@ -23,6 +23,7 @@ import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
+import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
 
 export interface SimpleFileSpec {
@@ -766,6 +767,22 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           if (wired.injected.length > 0) {
             for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🎨 Wired ${wired.injected.length} orphaned global stylesheet(s) into the entry so the app is actually styled.`);
+          }
+        } catch { /* best-effort — a failure just leaves the files as generated */ }
+      }
+      // DETERMINISTIC ORPHAN-PAGE WIRING before write/preview (deep-test SaaS dashboard 6f87751d): the
+      // builder wrote page components (AnalyticsPage/ApiKeysPage/AuditLogPage/…) but never imported or
+      // routed them → the app cannot reach them and readiness flags "N created but never used" +
+      // "Requested feature not found". Wire each orphaned page into the react-router <Routes> (an import
+      // + a <Route>). Additive-only, idempotent, and a no-op the moment the router is ambiguous, so it can
+      // never break a working router. Best-effort. Kill: AGENTV3_ORPHAN_PAGE_GUARD=off.
+      if (process.env.AGENTV3_ORPHAN_PAGE_GUARD !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const wired = wireOrphanPages(before);
+          if (wired.wired.length > 0) {
+            for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.(`🧭 Wired ${wired.wired.length} orphaned page(s) into the router so they are actually reachable.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }

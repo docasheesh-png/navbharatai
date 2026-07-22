@@ -183,6 +183,30 @@ it in `PROGRESS.md` as an open root cause (rule 6) — never ship a cosmetic pat
 the fix. Time and credit pressure never shrink this autopsy; a skipped autopsy is a guaranteed
 repeat failure on the one absolute rule.
 
+**Step 5 — THE 50/50 LAW: fixing the root cause is only HALF the work; the other half is "why did
+the problem arise AT ALL?" (admin-mandated 2026-07-22).** DNA-level root-causing the reported failure
+is 50%. The other 50% is going one level DEEPER and killing the CONDITION that let the problem exist —
+so the app is built RIGHT the first time and the failure can never recur. Apply this to every bucket,
+especially the ones that look "harmless":
+- **✅ Self-heal is NOT a success — it is a RED FLAG.** For every self-healed item ask: *why did the
+  builder not produce this correctly in the FIRST attempt? Why did a heal need to run at all?* The
+  goal is **100% correct in ONE pass, with ZERO heals needed.** Fix the upstream cause (the prompt/
+  contract/scaffold/plan that let the bug be generated) so the heal becomes DEAD CODE that never fires.
+  A heal that keeps firing is an unfixed root cause wearing a green checkmark.
+- **THEN, and only as the last line of defence:** IF a problem still somehow slips through, the
+  self-heal must be **100% reliable** (a real, deterministic fix that always works — never a partial or
+  best-effort patch). Two layers: (1) prevent it upstream so it never happens; (2) if it still happens,
+  heal it completely.
+- **🔀 workaround / ⏭️ skip must be ARCHITECTURALLY IMPOSSIBLE.** These are not acceptable outcomes to
+  record and move on from — they are design failures. The engine must be built so that routing around a
+  problem or skipping it CANNOT happen: the correct path is the only path. When a report shows a
+  workaround or a skip, the fix is not "handle it better" — it is "re-architect so this branch cannot
+  exist." Until that architecture exists, it stays an OPEN root cause (rule 6), never a closed item.
+
+An autopsy that only patches the reported symptom (the first 50%) and leaves the "why did it arise / why
+was a heal needed / why was a workaround possible" half undone is an INCOMPLETE autopsy — it guarantees
+the sibling failure returns. Both halves, every time.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every

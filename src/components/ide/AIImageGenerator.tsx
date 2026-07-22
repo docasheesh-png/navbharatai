@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
 
 interface GeneratedImage {
   id: string;
@@ -70,6 +72,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const [errorMsg, setErrorMsg] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [copied, setCopied] = useState(false);
+  const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
 
   // REAL generation (admin autopsy 2026-07-20): images come from NavBharatAI's own server route
   // (/api/image/generate) on our configured image engine — the old code hot-linked a third-party
@@ -120,12 +123,104 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     }
   };
 
-  const handleCopyUrl = () => {
+  // Resolve the generated image to a real Blob. It is almost always a data: URL (the server returns
+  // `data:<mime>;base64,<...>`), but fall back to fetch for any http(s) URL so both cases work.
+  const resolveBlob = async (url: string): Promise<Blob> => {
+    if (url.startsWith('data:')) return dataUrlToBlob(url);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Could not fetch the image');
+    return res.blob();
+  };
+
+  // The clipboard image API only accepts PNG in most browsers — convert anything else via a canvas.
+  const toPngBlob = async (blob: Blob): Promise<Blob> => {
+    if (blob.type === 'image/png') return blob;
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new window.Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('image decode failed'));
+        el.src = url;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 512;
+      canvas.height = img.naturalHeight || 512;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return blob;
+      ctx.drawImage(img, 0, 0);
+      return await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b || blob), 'image/png'));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const flashNote = (msg: string) => {
+    setActionNote(msg);
+    setTimeout(() => setActionNote(''), 3500);
+  };
+
+  // COPY THE ACTUAL IMAGE (not the URL). Puts a real PNG on the clipboard so it pastes as a picture
+  // into any app. Falls back to copying the link only if the browser can't do image clipboard.
+  const handleCopyImage = async () => {
     if (!generatedUrl) return;
-    navigator.clipboard.writeText(generatedUrl).then(() => {
+    setActionNote('');
+    try {
+      const hasClipboardImage = typeof navigator !== 'undefined' && !!navigator.clipboard
+        && typeof (window as unknown as { ClipboardItem?: unknown }).ClipboardItem !== 'undefined';
+      if (!hasClipboardImage) throw new Error('no image clipboard');
+      // Pass a Promise<Blob> into ClipboardItem (not an already-awaited Blob): Safari/iOS WebView keeps
+      // the user-gesture alive across the async decode this way, so image copy works there too.
+      const pngPromise = (async () => toPngBlob(await resolveBlob(generatedUrl)))();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } catch {
+      // Honest fallback — tell the user we copied the link (not the image) so they know what they got.
+      try { await navigator.clipboard.writeText(generatedUrl); } catch { /* clipboard fully blocked */ }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      flashNote('This device can’t copy the image itself — the image link was copied instead. Use Download to save the picture.');
+    }
+  };
+
+  // DOWNLOAD / SAVE the image. On the native app the OS share-sheet is the reliable "save to Photos/
+  // Files" path; on the web a blob-URL download is far more reliable than a data: href (which just
+  // opens a tab). Both work off the same decoded Blob.
+  const handleDownload = async () => {
+    if (!generatedUrl) return;
+    setActionNote('');
+    try {
+      const blob = await resolveBlob(generatedUrl);
+      const filename = imageFilename(prompt, blob.type);
+
+      // Native (Capacitor iOS/Android WebView): open the OS share sheet → Save to Photos / Files.
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const file = new File([blob], filename, { type: blob.type });
+          const nav = navigator as Navigator & { canShare?: (d?: unknown) => boolean };
+          if (nav.canShare && nav.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: filename });
+            return;
+          }
+        } catch (e) {
+          if ((e as { name?: string })?.name === 'AbortError') return; // user cancelled the share sheet
+          // else fall through to the blob-URL download
+        }
+      }
+
+      // Web (and native fallback): trigger a real file download from a blob URL.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch {
+      flashNote('Could not save the image automatically — long-press the image to save it.');
+    }
   };
 
   const handleClearHistory = () => {
@@ -311,26 +406,27 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   />
                   <div className="absolute bottom-2 right-2 flex gap-1.5">
                     <button
-                      onClick={handleCopyUrl}
+                      onClick={handleCopyImage}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"
-                      title="Copy URL"
+                      title="Copy image"
                     >
                       {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-white/70" />}
                     </button>
-                    <a
-                      href={generatedUrl}
-                      download="navbharat-ai-image.png"
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={handleDownload}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"
-                      title="Download"
+                      title="Download image"
                     >
                       <Download className="w-3.5 h-3.5 text-white/70" />
-                    </a>
+                    </button>
                   </div>
                 </>
               )}
             </div>
+            {/* Honest fallback note (e.g. device can't copy the raw image, or save needs a long-press). */}
+            {actionNote && (
+              <p className="mt-2 text-[11px] text-amber-300/80 leading-relaxed">{actionNote}</p>
+            )}
           </div>
 
           {/* Recent History */}

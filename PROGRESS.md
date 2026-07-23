@@ -21407,3 +21407,25 @@ popup, and minimizes to a 🤖 bubble in the bottom-right corner.
   its source link right next to it.
 
 Gate: frontend tsc 0 · server tsc 0 (unchanged) · `npm run build` ✓ · full suite 9013/9013 green.
+## 2026-07-23 — Build-UI UX (admin request): diff no longer auto-opens + file reveals paced one-by-one
+
+Two admin-requested tweaks to the Pro v5.0 build feed (both frontend-only, both honest — real events only):
+
+1. **"View changes" diff never auto-opens.** `ActivityTimelineRow.tsx` used to auto-open the inline diff for
+   a small change (≤3 files); the admin asked for it off ("View changes … auto off karo"). Now
+   `diffOpen = diffUserOverride ?? false` — the diff stays collapsed behind the "View changes" button until
+   the user taps it (a tap still sticks). The +/- stats remain in the button; only the patch body is hidden.
+   Regression test in `ActivityTimelineRow.test.tsx` (patch body absent by default).
+
+2. **Files reveal one-by-one (~6s gap), not in a burst.** The reveal pacer (`revealPacer.ts`) already existed
+   at 600ms; the admin wanted ~5–10s between files so the user watches files land while the backend keeps
+   building ("one by one user ko dikhe … background me kaam ho jaye"). Raised the call-site config in
+   `useAgentV3Build.ts` to `{ minIntervalMs: 6000, maxQueue: 60 }` on BOTH stream paths (start + resume).
+   HONEST by construction: only real events in real order, and the terminal result/done/error event still
+   FLUSHES everything instantly — a finished build is never held back; the drip only fills time the build is
+   genuinely still working. maxQueue raised so a ~40-file fast-lane burst drips at the full interval instead
+   of tripping the 4×-speedup. Tunable in one place (`FILE_REVEAL_PACER_OPTS`; set minIntervalMs 0 to disable).
+   2 regression tests in `revealPacer.test.ts` (6s cadence + instant terminal flush).
+
+Gate: frontend tsc (only pre-existing @capacitor env errors) · revealPacer 14/14 · ActivityTimelineRow 4/4 ·
+full suite (running/green).

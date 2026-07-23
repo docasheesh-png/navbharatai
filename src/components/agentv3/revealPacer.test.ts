@@ -129,3 +129,24 @@ describe('createRevealPacer — the honest drip', () => {
     expect(out).toHaveLength(4); // queue flushed + the gate dispatched — the user is never kept waiting
   });
 });
+
+describe('createRevealPacer — admin file-reveal cadence (2026-07-23: ~6s gap, instant terminal flush)', () => {
+  it('paces file reveals at the configured 6s interval (one by one, not a burst)', () => {
+    const { pacer, out, advance } = harness(6000);
+    pacer.push(file(1)); pacer.push(file(2)); pacer.push(file(3)); // land together
+    expect(out).toHaveLength(1); // first shows instantly
+    advance(5999); expect(out).toHaveLength(1); // still waiting the ~6s gap
+    advance(1); expect(out).toHaveLength(2); // revealed at 6s
+    advance(6000); expect(out).toHaveLength(3);
+    expect(out.map((e) => e.text)).toEqual([file(1).text, file(2).text, file(3).text]); // real order
+  });
+
+  it('a terminal result flushes every queued file instantly — a finished build is never held back', () => {
+    const { pacer, out } = harness(6000);
+    pacer.push(file(1)); pacer.push(file(2)); pacer.push(file(3)); pacer.push(file(4));
+    expect(out.length).toBeLessThan(4); // still dripping while the build runs
+    pacer.push({ type: 'result' }); // build finished
+    expect(out.filter((e) => e.type !== 'result')).toHaveLength(4); // all real files now shown
+    expect(out[out.length - 1].type).toBe('result');
+  });
+});

@@ -83,11 +83,11 @@ export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Ex
   // INLINE PERSISTENT DIFF (admin 2026-07-21 — "har edit/create file wale response ke niche diff …
   // gayab na ho"): the real colorized patch of every created/edited file, shown right under the
   // response and NEVER removed once the build finishes (it survives the next message via the
-  // archived activityLog). Auto-open for a small change (the common single-file edit) so the user
-  // SEES the diff immediately; a large initial build stays one tap away so the chat isn't a wall.
+  // archived activityLog). NEVER auto-opens (admin 2026-07-23 — "View changes … auto off karo"): the
+  // diff stays collapsed behind the "View changes" button until the user opens it; a tap sticks.
   const files = block.files ?? [];
   const [diffUserOverride, setDiffUserOverride] = useState<boolean | null>(null);
-  const diffOpen = diffUserOverride ?? (files.length > 0 && files.length <= 3);
+  const diffOpen = diffUserOverride ?? false;
   const shownFiles = files.slice(0, MAX_DIFF_FILES);
   return (
     <div className="flex justify-start">

@@ -9,6 +9,15 @@ import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } fro
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../App';
 
+// FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
+// reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
+// building, instead of a burst-then-stall. HONEST (rule 2): only real events, in real order — the terminal
+// result/done/error event still FLUSHES everything instantly (a finished build is never held back), so the
+// drip only fills the time the build is genuinely still working. maxQueue is raised so a fast-lane burst
+// (~40 files landing at once) drips at the full interval rather than tripping the 4×-speedup guard. Tune
+// the cadence here; set minIntervalMs to 0 to disable pacing (instant, pre-2026-07-21 behavior).
+const FILE_REVEAL_PACER_OPTS = { minIntervalMs: 6000, maxQueue: 60 } as const;
+
 /**
  * Build JSON headers carrying the signed-in user's Firebase ID token when available.
  * The server derives identity from the VERIFIED token; a missing/unverifiable token degrades to an
@@ -383,7 +392,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     // FILE-REVEAL PACING (admin 2026-07-21): burst-completed "✓ file (n/m)" lines drip into the feed
     // one-by-one (order-preserving, real events only; a terminal event flushes instantly). The build
     // itself is untouched — this paces only what the user SEES. See revealPacer.ts for the honesty rules.
-    const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)));
+    const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)), FILE_REVEAL_PACER_OPTS);
     for (;;) {
       if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
       const { done, value } = await reader.read();
@@ -1163,7 +1172,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         // any event already in-flight when that happens must still be dropped, exactly like
         // pumpStream/subscribeLive, or it silently repopulates the session the user just switched to.
         // FILE-REVEAL PACING (admin 2026-07-21): same honest drip as the attach stream — see revealPacer.ts.
-        const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)));
+        const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)), FILE_REVEAL_PACER_OPTS);
         for (;;) {
           if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
           const { done, value } = await reader.read();

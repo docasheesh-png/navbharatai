@@ -104,6 +104,7 @@ import {
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
+import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
@@ -5736,10 +5737,12 @@ export function registerAgentV3Routes(app: Express): void {
                 events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
               }
             } else if (h.skipped) {
-              // The clone genuinely failed AND added no files — a bad URL, a PRIVATE repo without
-              // access, or git being unavailable. Say so instead of silently building empty.
-              failedImport = { url: cleanImportUrl, reason: 'the clone failed — most likely a PRIVATE repo the connected GitHub account cannot access, or the URL is wrong' };
-              events.emit({ type: 'narration', agent: 'architect', text: `I couldn't clone ${cleanImportUrl}. If it's private, connect the GitHub account that owns it (⚙ → GitHub) so I have access; otherwise check the URL. Starting with an empty workspace for now.`, ts: Date.now() });
+              // The clone genuinely failed AND added no files. Instead of one generic guess, give the
+              // user the ACCURATE cause git reported (no connection / expired token / wrong account /
+              // network) — classified inside the sandbox so the token never leaks (admin 2026-07-23).
+              const diagCtx = { reason: h.reason, hadToken: !!githubToken, url: cleanImportUrl };
+              failedImport = { url: cleanImportUrl, reason: importFailureModelReason({ reason: h.reason, hadToken: !!githubToken }) };
+              events.emit({ type: 'narration', agent: 'architect', text: importFailureNarration(diagCtx), ts: Date.now() });
             } else {
               // Cloned successfully but the repo had no content beyond .git (a brand-new empty repo).
               events.emit({ type: 'narration', agent: 'architect', text: `${cleanImportUrl} looks like an empty repository — there was nothing to import. Tell me what you'd like to build in it.`, ts: Date.now() });

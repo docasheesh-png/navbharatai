@@ -78,7 +78,7 @@ describe('GitRepoSync sink refuses an unsafe URL before it reaches git', () => {
   it('hydrateFromRepo skips (no command run) on an injection URL', async () => {
     const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
     const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo('https://github.com/o/r"; rm -rf / ; echo "');
-    expect(res).toEqual({ hydrated: false, hadFiles: false, skipped: true });
+    expect(res).toEqual({ hydrated: false, hadFiles: false, skipped: true, reason: 'bad-url' });
     expect(commands.length).toBe(0); // NEVER handed to the shell
   });
   it('pushAll skips (no command run) on an injection URL', async () => {
@@ -122,6 +122,36 @@ describe('GitRepoSync.hydrateFromRepo', () => {
     const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
     expect(res.skipped).toBe(true);
     expect(res.hydrated).toBe(false);
+    expect(res.reason).toBe('unknown');
+  });
+
+  it('classifies WHY the clone failed from git stderr — auth / not-found / network / no-git', async () => {
+    const cases: Array<[string, string]> = [
+      ['NB_CLONE_AUTH', 'auth'],
+      ['NB_CLONE_NOTFOUND', 'not-found'],
+      ['NB_CLONE_NETWORK', 'network'],
+      ['NB_NO_GIT', 'no-git'],
+    ];
+    for (const [marker, reason] of cases) {
+      const { runner } = fakeRunner(() => ({ stdout: marker }));
+      const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+      expect(res).toMatchObject({ hydrated: false, skipped: true, reason });
+    }
+  });
+
+  it('sets GIT_TERMINAL_PROMPT=0 so a private clone fails fast instead of hanging on a prompt', async () => {
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_CLONE_AUTH' }));
+    await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
+    expect(commands[0]).toContain('GIT_TERMINAL_PROMPT=0');
+  });
+
+  it('never echoes the git stderr out of the sandbox — only a NB_CLONE_* code crosses the boundary', async () => {
+    // The classification greps errFile IN the shell; the raw error (which can contain the token URL)
+    // is written to a temp file and removed — it must never be part of what the command returns.
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_CLONE_AUTH' }));
+    await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
+    expect(commands[0]).toContain('2>>/tmp/nbhyerr');      // stderr captured to a temp file
+    expect(commands[0]).toContain('rm -rf /tmp/nbhydrate /tmp/nbhyerr'); // and cleaned up
   });
 
   it('own-repo hydrate tries the WORK branch, then the base branch, then the default clone (in order)', async () => {
@@ -149,7 +179,7 @@ describe('GitRepoSync.hydrateFromRepo', () => {
 
   it('skips with no url, and never throws when the runner rejects', async () => {
     const noUrl = await new GitRepoSync(fakeRunner(() => ({})).runner, 'ws1').hydrateFromRepo('');
-    expect(noUrl).toEqual({ hydrated: false, hadFiles: false, skipped: true });
+    expect(noUrl).toEqual({ hydrated: false, hadFiles: false, skipped: true, reason: 'bad-url' });
 
     const throwing: CommandRunner = { async runCommand() { throw new Error('no shell'); } };
     const res = await new GitRepoSync(throwing, 'ws1').hydrateFromRepo(URL);

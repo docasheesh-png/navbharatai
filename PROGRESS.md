@@ -21158,3 +21158,21 @@ same generic guess.
 OPEN (recorded, low priority): naming the CONNECTED account (not just the owner) needs the login threaded
 from client → build body (or a server GET /user on the failure path); the owner-naming already resolves the
 common confusion, so deferred.
+
+## 2026-07-23 — Home page 4th card "Other AI": builder tools MOVED from Settings (admin) — session claude/move-tools-to-home
+
+Admin: home page par 4th option (Other AI) — Free/Pro/Professionals ke saath — aur Settings ke 5
+tool-groups usme move (cut, not copy).
+
+- New `homeToolGroups.ts` = the 5 groups (AI Tools / Developer Tools / Design & Build / Publish &
+  Deploy / Monetization & Team) with their EXACT tab ids (destinations unchanged, doorway moved).
+- `HomeView` gets a 4th product card "Other AI · Builder Tools & Utilities" (grid now fits 4). Tapping
+  reveals the groups below (Hide button + smooth scroll); tiles open via a new `onOpenTool` handler
+  (App gates: signed-in → toggleTab, else login).
+- `SettingsPanel`: the 5 groups REMOVED (cut). Settings keeps only Account & Profile + App Settings.
+- AppKnowledgeBase synced: moved-tool paths (AI Debugger/Image Gen/Bot Builder/Team/Live Collab/
+  Insights & Webhooks + sub-cards) → "Home → Other AI → …"; Settings-hub entry notes the move; new
+  `home_other_ai_tools` entry so every AI knows the 4th card.
+- Verify: frontend tsc 0 errors + server tsc + `vite build` ✓ (confirmed locally after installing the
+  two @capacitor deps that were only missing from the scratch node_modules; CI's npm ci always has them);
+  new homeToolGroups test; vitest green.

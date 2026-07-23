@@ -42,7 +42,7 @@ describe('AI Debugger — real analysis, no fake fallback', () => {
   it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
     const entry = kb('ai_debugger');
     expect(entry).toBeTruthy();
-    expect(entry!.path).toContain('AI Tools → AI Debugger');
+    expect(entry!.path).toContain('Other AI → AI Debugger'); // moved from Settings → Home "Other AI" (2026-07-23)
     expect(entry!.description).toMatch(/REAL AI analysis/i);
     expect(entry!.description).toMatch(/never shows a canned fake/i);
     expect(navFor(entry!)).toEqual({ view: 'debugger' });
@@ -67,7 +67,7 @@ describe('AI Image Gen — our own engine, no third-party hotlink', () => {
   it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
     const entry = kb('ai_image_gen');
     expect(entry).toBeTruthy();
-    expect(entry!.path).toContain('AI Tools → AI Image Gen');
+    expect(entry!.path).toContain('Other AI → AI Image Gen'); // moved from Settings → Home "Other AI" (2026-07-23)
     expect(entry!.description).toMatch(/REAL images/i);
     expect(entry!.description).toMatch(/never shows a placeholder/i);
     expect(navFor(entry!)).toEqual({ view: 'imagegen' });
@@ -91,7 +91,7 @@ describe('Bot Builder — real build handoff', () => {
   it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
     const entry = kb('bot_builder');
     expect(entry).toBeTruthy();
-    expect(entry!.path).toContain('AI Tools → Bot Builder');
+    expect(entry!.path).toContain('Other AI → Bot Builder'); // moved from Settings → Home "Other AI" (2026-07-23)
     expect(entry!.description).toMatch(/BUILD it for real/i);
     expect(entry!.description).toMatch(/Pro v5\.0/);
     expect(navFor(entry!)).toEqual({ view: 'botbuilder' });

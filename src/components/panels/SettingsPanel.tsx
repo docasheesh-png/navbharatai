@@ -417,76 +417,11 @@ export function SettingsPanel({
                       { id: 'logs', label: 'Logs', icon: Activity },
                     ],
                   },
-                  {
-                    title: 'AI Tools',
-                    color: 'text-violet-400',
-                    icon: Bot,
-                    items: [
-                      // 'Doctor AI' tile removed (admin 2026-07-20): Doctor AI is a Professionals-hub
-                      // AI (Sidebar → Professionals), not an app-building tool — the tile here was a
-                      // redundant shortcut in the wrong group.
-                      // 'Voice to App' moved to Pro v5.0 (admin 2026-07-22): it reads voice → builds via
-                      // v5, so it lives in the Pro v5.0 composer now, not here in Settings.
-                      { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, tab: true },
-                      { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, tab: true },
-                      { id: 'debugger', label: 'AI Debugger', icon: Bug, tab: true },
-                      { id: 'codereview', label: 'Code Review', icon: Code, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Developer Tools',
-                    color: 'text-emerald-400',
-                    icon: Code,
-                    items: [
-                      { id: 'testing', label: 'Test Runner', icon: TestTube, tab: true },
-                      { id: 'api', label: 'API Tester', icon: Globe, tab: true },
-                      { id: 'diff', label: 'Diff Viewer', icon: GitMerge, tab: true },
-                      { id: 'versioning', label: 'Versioning', icon: GitBranch, tab: true },
-                      { id: 'performance', label: 'Performance', icon: Gauge, tab: true },
-                      { id: 'minifier', label: 'Minifier', icon: Minimize2, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Design & Build',
-                    color: 'text-pink-400',
-                    icon: Palette,
-                    items: [
-                      // 'Screenshot→App' moved to Pro v5.0 (admin 2026-07-22): screenshot → clone-build
-                      // runs through v5, so its entry point now lives in the Pro v5.0 composer.
-                      { id: 'multipages', label: 'Multi-Page', icon: Layout, tab: true },
-                      { id: 'components', label: 'Components', icon: Puzzle, tab: true },
-                      { id: 'designsys', label: 'Design System', icon: LayoutTemplate, tab: true },
-                      { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, tab: true },
-                      { id: 'figma', label: 'Figma Import', icon: Figma, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Publish & Deploy',
-                    color: 'text-cyan-400',
-                    icon: Rocket,
-                    items: [
-                      { id: 'apk', label: 'APK Builder', icon: Smartphone, tab: true },
-                      { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, tab: true },
-                      { id: 'cloudeploy', label: 'Multi-Cloud', icon: CloudUpload, tab: true },
-                      { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, tab: true },
-                      { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, tab: true },
-                      { id: 'appstore', label: 'App Store', icon: Package, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Monetization & Team',
-                    color: 'text-amber-400',
-                    icon: IndianRupee,
-                    items: [
-                      { id: 'monetize', label: 'Monetize', icon: IndianRupee, tab: true },
-                      { id: 'team', label: 'Team', icon: Users2, tab: true },
-                      { id: 'collab', label: 'Live Collab', icon: Users2, tab: true },
-                      { id: 'whitelabel', label: 'Whitelabel', icon: Palette, tab: true },
-                      { id: 'analytics', label: 'Analytics', icon: TrendingUp, tab: true },
-                      { id: 'insights', label: 'Insights & Webhooks', icon: TrendingUp, tab: true },
-                      { id: 'database', label: 'Database', icon: Database, tab: true },
-                    ],
-                  },
+                  // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
+                  // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card
+                  // (admin 2026-07-23) — see src/components/home/homeToolGroups.ts. Settings now keeps
+                  // only genuine settings (Account & Profile, App Settings). The tool destinations
+                  // (toggleTab ids) are unchanged; only the doorway moved.
                 ].map(group => (
                   <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
                     <div className="flex items-center gap-2 mb-3">

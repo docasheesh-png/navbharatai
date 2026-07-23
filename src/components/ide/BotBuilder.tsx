@@ -2,9 +2,10 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Play, Download, Webhook, Trash2, Plus, X, ChevronRight,
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
-  Send, Bot, User, Copy, Check, Link2, Pencil, Move
+  Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink
 } from 'lucide-react';
 import { botFlowToBuildPrompt } from '../../lib/botFlowPrompt';
+import { auth } from '../../App';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -125,6 +126,16 @@ export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [platform, setPlatform] = useState<Platform>('whatsapp');
   const [showWebhookModal, setShowWebhookModal] = useState(false);
+  // Go-Live (real Telegram/WhatsApp connect) state.
+  const [showConnect, setShowConnect] = useState(false);
+  const [connPlatform, setConnPlatform] = useState<'telegram' | 'whatsapp'>('telegram');
+  const [tgToken, setTgToken] = useState('');
+  const [waToken, setWaToken] = useState('');
+  const [waPhoneId, setWaPhoneId] = useState('');
+  const [connBusy, setConnBusy] = useState(false);
+  const [connErr, setConnErr] = useState('');
+  const [connResult, setConnResult] = useState<{ platform: 'telegram' | 'whatsapp'; link?: string | null; username?: string | null; callbackUrl?: string; verifyToken?: string } | null>(null);
+  const [copiedField, setCopiedField] = useState('');
   const [showSimulator, setShowSimulator] = useState(false);
   const [copied, setCopied] = useState(false);
   // Node-connection state (mobile autopsy 2026-07-23): the designer could ADD nodes but there was NO way
@@ -285,6 +296,36 @@ Content-Type: application/json
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  }
+
+  function copyField(field: string, value: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(''), 2000);
+    });
+  }
+
+  // ——— GO LIVE — publish the designed flow as a REAL Telegram/WhatsApp bot ———
+  async function goLive() {
+    setConnBusy(true); setConnErr(''); setConnResult(null);
+    try {
+      const tok = await auth.currentUser?.getIdToken();
+      if (!tok) { setConnErr('Please sign in first to publish your bot.'); setConnBusy(false); return; }
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` };
+      const flow = { platform: connPlatform, nodes, edges };
+      if (connPlatform === 'telegram') {
+        const res = await fetch('/api/bots/telegram/connect', { method: 'POST', headers, body: JSON.stringify({ token: tgToken.trim(), flow }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setConnResult({ platform: 'telegram', link: data.link, username: data.botUsername });
+      } else {
+        const res = await fetch('/api/bots/whatsapp/connect', { method: 'POST', headers, body: JSON.stringify({ token: waToken.trim(), phoneNumberId: waPhoneId.trim(), flow }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setConnResult({ platform: 'whatsapp', callbackUrl: data.callbackUrl, verifyToken: data.verifyToken });
+      }
+    } catch { setConnErr('Network error — please try again.'); }
+    setConnBusy(false);
   }
 
   // ——— Simulator ———
@@ -538,8 +579,8 @@ Content-Type: application/json
         <button onClick={startSim} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Zap size={13} /> Simulate
         </button>
-        <button onClick={() => setShowWebhookModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-purple-700 hover:bg-purple-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
-          <Webhook size={13} /> Export Webhook
+        <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex-shrink-0 whitespace-nowrap">
+          <Rocket size={13} /> Go Live
         </button>
         <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Download size={13} /> Export JSON
@@ -733,35 +774,80 @@ Content-Type: application/json
         ))}
       </div>
 
-      {/* ——— Webhook Modal ——— */}
-      {showWebhookModal && (
+      {/* ——— GO LIVE — real Telegram / WhatsApp connect ——— */}
+      {showConnect && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] flex flex-col gap-4" style={{ background: '#161b22' }}>
+          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] max-h-[85vh] overflow-y-auto flex flex-col gap-4" style={{ background: '#161b22' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Webhook size={16} className="text-purple-400" />
-                <h2 className="text-sm font-semibold">Webhook Setup</h2>
+                <Rocket size={16} className="text-emerald-400" />
+                <h2 className="text-sm font-semibold">Go Live — publish your bot</h2>
               </div>
-              <button onClick={() => setShowWebhookModal(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
+              <button onClick={() => setShowConnect(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
             </div>
-            <p className="text-xs text-gray-400">Send your exported JSON flow to your server via a POST request:</p>
-            <div className="relative rounded-lg p-4 font-mono text-xs text-green-300 border border-white/10 overflow-x-auto" style={{ background: '#0d1117' }}>
-              <pre className="whitespace-pre-wrap">{webhookSnippet}</pre>
-              <button onClick={copyWebhook} className="absolute top-2 right-2 p-1 rounded text-gray-500 hover:text-white transition-colors">
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-              </button>
-            </div>
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Steps</p>
-              {['1. Export your flow as JSON', '2. Host your webhook endpoint', '3. POST the JSON to your endpoint', '4. Parse and execute the flow server-side'].map(s => (
-                <div key={s} className="flex items-center gap-2 text-xs text-gray-400">
-                  <ChevronRight size={12} className="text-purple-400" /> {s}
-                </div>
+
+            {/* Platform toggle */}
+            <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">
+              {(['telegram', 'whatsapp'] as const).map(p => (
+                <button key={p} onClick={() => { setConnPlatform(p); setConnResult(null); setConnErr(''); }}
+                  className={`px-4 py-1.5 text-xs capitalize transition-colors ${connPlatform === p ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>{p}</button>
               ))}
             </div>
-            <button onClick={() => setShowWebhookModal(false)} className="w-full py-2 rounded-lg text-xs bg-purple-700 hover:bg-purple-600 text-white transition-colors">
-              Close
-            </button>
+
+            {connResult ? (
+              connResult.platform === 'telegram' ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Your bot is LIVE on Telegram!</div>
+                  <p className="text-xs text-gray-400">Anyone can now message {connResult.username ? `@${connResult.username}` : 'your bot'} and it will run your exact flow.</p>
+                  {connResult.link && (
+                    <a href={connResult.link} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 text-white transition-colors">
+                      <ExternalLink size={14} /> Open your bot in Telegram
+                    </a>
+                  )}
+                  <p className="text-[11px] text-gray-500">Edit the flow anytime and hit Go Live again to update the live bot.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Almost done — finish in Meta</div>
+                  <p className="text-xs text-gray-400">In your Meta app → WhatsApp → Configuration → Edit the webhook, paste these two values, then click Verify and Save:</p>
+                  {[{ label: 'Callback URL', value: connResult.callbackUrl || '' }, { label: 'Verify token', value: connResult.verifyToken || '' }].map(({ label, value }) => (
+                    <div key={label} className="flex flex-col gap-1">
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</span>
+                      <div className="flex gap-1.5">
+                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono" style={{ background: '#0d1117' }} />
+                        <button onClick={() => copyField(label, value)} className="px-2 rounded-lg border border-white/10 text-gray-400 hover:text-white">{copiedField === label ? <Check size={12} /> : <Copy size={12} />}</button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-gray-500">Then subscribe to the <span className="text-gray-300">messages</span> field. After that, message your WhatsApp business number and the bot runs your flow.</p>
+                </div>
+              )
+            ) : connPlatform === 'telegram' ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5 text-xs text-gray-400">
+                  {['Open @BotFather in Telegram and send /newbot', 'Choose a name + username for your bot', 'Copy the token BotFather gives you (looks like 123456789:ABC-def…)', 'Paste it below and tap Connect'].map((s, i) => (
+                    <div key={i} className="flex items-start gap-2"><span className="text-emerald-400 font-bold">{i + 1}.</span> {s}</div>
+                  ))}
+                </div>
+                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                  {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect &amp; Go Live</>}
+                </button>
+                <a href="https://core.telegram.org/bots/features#botfather" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">How to create a Telegram bot <ExternalLink size={10} /></a>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-gray-400">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Paste your <span className="text-gray-200">permanent access token</span> and <span className="text-gray-200">Phone Number ID</span> from the Meta app dashboard:</p>
+                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                  {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
+                </button>
+                <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">How to set up WhatsApp Cloud API <ExternalLink size={10} /></a>
+              </div>
+            )}
           </div>
         </div>
       )}

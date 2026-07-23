@@ -21357,3 +21357,31 @@ button + a double-tap.
   all unchanged.
 
 Gate: frontend tsc 0 · `npm run build` ✓ · full suite 8992/8992 green.
+
+---
+
+## 2026-07-23 — Bot Builder: REAL Telegram/WhatsApp deployment (admin: "user sach me bot bana kar WhatsApp/Telegram par add kar sake")
+
+Honest audit had found the tool only STYLED chats like WhatsApp/Telegram and its "Export Webhook" was a
+dummy `your-server.com` placeholder — no real platform integration. Now built a genuine hosted connector:
+
+- **`src/server/bots/botFlowRunner.ts`** — pure, deterministic conversation engine (MESSAGE/MENU/CONDITION/
+  API/END all run for real; API nodes actually fetch; `input ==/!=/contains` conditions; step-budget guard).
+  Platform-agnostic, 9 tests.
+- **`telegramApi.ts`** — real Telegram Bot API client (getMe/setWebhook/deleteWebhook/sendMessage with
+  quick-reply keyboards). **`whatsappApi.ts`** — real WhatsApp Cloud API client (send text + ≤3 interactive
+  buttons, Meta webhook verify handshake, incoming-message parse). 7 tests.
+- **`BotStore.ts`** — Firestore store (`bots`, `bot_sessions`); the bot TOKEN is encrypted at rest
+  (lib/secrets AES-256-GCM) and never returned to a client. Per-chat session state.
+- **`routes/bots.ts`** — `POST /api/bots/telegram/connect` (validate token → store → setWebhook → LIVE),
+  `POST /api/bots/telegram/webhook/:botId` (auth = per-bot secret header; runs the flow, replies for real),
+  WhatsApp connect + GET/POST webhook (verify + receive), shared `GET /api/bots` + `/disconnect`. Wired in
+  `server.ts` as `registerBotRoutes`.
+- **UI** — Bot Builder toolbar's fake "Export Webhook" replaced with **"Go Live"**: a real connect modal.
+  Telegram = paste @BotFather token → bot is instantly live (shows the t.me link). WhatsApp = paste Cloud
+  API token + Phone Number ID → returns the exact Callback URL + Verify token to paste in the Meta dashboard.
+- Architecture note: Telegram bots are HOSTED on NavBharatAI's Cloud Run (turnkey — user only brings the
+  BotFather token). This uses our compute + stores the user's (encrypted) token — a deliberate hosted-feature
+  cost/security tradeoff, gated to signed-in users. WhatsApp requires the user's own Meta app (heavier).
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9013/9013 green (incl. 16 new bot tests).

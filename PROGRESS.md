@@ -21333,3 +21333,77 @@ dynamic footer (HOME/AI/PREVIEW/STUDIO/MORE) bot builder ke andar se hata do."
   Pro v5.0 handoff. AppKnowledgeBase entry updated for the new touch/connect/footer UX.
 
 Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 8992/8992 green.
+
+---
+
+## 2026-07-23 — Bot Builder: tap a node → floating action toolbar (Edit · Connect · Move · Duplicate · Delete)
+
+Admin: tapping a node jumped STRAIGHT into the full editor (bottom sheet covered the canvas). Requested that
+a tap instead pops small action buttons around the node (link/move/open/…), and asked me to enhance the idea
+rather than copy it. Confirmed set: Edit + Connect + Move + Duplicate + Delete; editor opens via the Edit
+button + a double-tap.
+
+**Change (`src/components/ide/BotBuilder.tsx`, UI-only):**
+- New `editorOpen` state. A single **tap now SELECTS + shows a floating toolbar** pinned above the node
+  (canvas-content coords, so it scrolls with the node; flips below when the node hugs the top). It no longer
+  auto-opens the editor.
+- Toolbar actions: **Edit** (opens the properties editor), **Connect** (start wiring), **Move** (a drag grip
+  — press & drag to reposition precisely), **Duplicate** (clone with data — my addition beyond the admin's
+  list), **Delete**.
+- Editor (desktop side panel + mobile bottom sheet) now opens ONLY when `editorOpen` — via the toolbar's
+  Edit or a **double-tap** on the node. Empty-canvas tap deselects + closes.
+- Removed the always-on bottom link handle (folded into the toolbar's Connect — less clutter, all actions in
+  one place). Node body drag, connections, tap-line-to-delete, simulator, export, and Build-Bot-App handoff
+  all unchanged.
+
+Gate: frontend tsc 0 · `npm run build` ✓ · full suite 8992/8992 green.
+
+---
+
+## 2026-07-23 — Bot Builder: REAL Telegram/WhatsApp deployment (admin: "user sach me bot bana kar WhatsApp/Telegram par add kar sake")
+
+Honest audit had found the tool only STYLED chats like WhatsApp/Telegram and its "Export Webhook" was a
+dummy `your-server.com` placeholder — no real platform integration. Now built a genuine hosted connector:
+
+- **`src/server/bots/botFlowRunner.ts`** — pure, deterministic conversation engine (MESSAGE/MENU/CONDITION/
+  API/END all run for real; API nodes actually fetch; `input ==/!=/contains` conditions; step-budget guard).
+  Platform-agnostic, 9 tests.
+- **`telegramApi.ts`** — real Telegram Bot API client (getMe/setWebhook/deleteWebhook/sendMessage with
+  quick-reply keyboards). **`whatsappApi.ts`** — real WhatsApp Cloud API client (send text + ≤3 interactive
+  buttons, Meta webhook verify handshake, incoming-message parse). 7 tests.
+- **`BotStore.ts`** — Firestore store (`bots`, `bot_sessions`); the bot TOKEN is encrypted at rest
+  (lib/secrets AES-256-GCM) and never returned to a client. Per-chat session state.
+- **`routes/bots.ts`** — `POST /api/bots/telegram/connect` (validate token → store → setWebhook → LIVE),
+  `POST /api/bots/telegram/webhook/:botId` (auth = per-bot secret header; runs the flow, replies for real),
+  WhatsApp connect + GET/POST webhook (verify + receive), shared `GET /api/bots` + `/disconnect`. Wired in
+  `server.ts` as `registerBotRoutes`.
+- **UI** — Bot Builder toolbar's fake "Export Webhook" replaced with **"Go Live"**: a real connect modal.
+  Telegram = paste @BotFather token → bot is instantly live (shows the t.me link). WhatsApp = paste Cloud
+  API token + Phone Number ID → returns the exact Callback URL + Verify token to paste in the Meta dashboard.
+- Architecture note: Telegram bots are HOSTED on NavBharatAI's Cloud Run (turnkey — user only brings the
+  BotFather token). This uses our compute + stores the user's (encrypted) token — a deliberate hosted-feature
+  cost/security tradeoff, gated to signed-in users. WhatsApp requires the user's own Meta app (heavier).
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9013/9013 green (incl. 16 new bot tests).
+
+---
+
+## 2026-07-23 — Bot Builder: simpler connect (inline "get it here" links) + a NavBharatAI Help widget
+
+Admin: make connecting simpler — give the link right where each value is pasted — and add a "Help" button
+that works like NavBharatAI Free, guides a non-technical user step-by-step (accepts SCREENSHOTS), opens as a
+popup, and minimizes to a 🤖 bubble in the bottom-right corner.
+
+- **`src/components/ide/BotBuildHelp.tsx`** (NEW) — a floating help chat that IS NavBharatAI Free (same
+  `/api/chat/navbharatai` brain, vision-capable) primed with a hidden framing turn to act as a step-by-step
+  Bot-Builder guide. Screenshot attach (base64 → `fileAttachments`), typing indicator, non-streaming
+  `{reply}`. Three modes: closed → open popup (bottom-right) → **minimize collapses to a 🤖 bubble** that
+  reopens it. No new backend — reuses Free chat (which already knows the Bot Builder, per the awareness lock).
+- **BotBuilder**: a **Help** button in the toolbar (opens the widget); the widget is rendered once and
+  persists across the builder. The connect modal now also has "Stuck? Ask NavBharatAI" links.
+- **Simpler connect**: Telegram modal has a prominent **"Open @BotFather"** button (t.me/BotFather) right by
+  the token field; WhatsApp has **"Open Meta App Dashboard"** by its fields + the WhatsApp success view still
+  hands back the exact Callback URL + Verify token to paste in Meta. Every value the user must paste now has
+  its source link right next to it.
+
+Gate: frontend tsc 0 · server tsc 0 (unchanged) · `npm run build` ✓ · full suite 9013/9013 green.

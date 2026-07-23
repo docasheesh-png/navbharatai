@@ -2,9 +2,11 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Play, Download, Webhook, Trash2, Plus, X, ChevronRight,
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
-  Send, Bot, User, Copy, Check, Link2
+  Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle
 } from 'lucide-react';
 import { botFlowToBuildPrompt } from '../../lib/botFlowPrompt';
+import { auth } from '../../App';
+import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -125,11 +127,26 @@ export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [platform, setPlatform] = useState<Platform>('whatsapp');
   const [showWebhookModal, setShowWebhookModal] = useState(false);
+  // Go-Live (real Telegram/WhatsApp connect) state.
+  const [showConnect, setShowConnect] = useState(false);
+  const [connPlatform, setConnPlatform] = useState<'telegram' | 'whatsapp'>('telegram');
+  const [tgToken, setTgToken] = useState('');
+  const [waToken, setWaToken] = useState('');
+  const [waPhoneId, setWaPhoneId] = useState('');
+  const [connBusy, setConnBusy] = useState(false);
+  const [connErr, setConnErr] = useState('');
+  const [connResult, setConnResult] = useState<{ platform: 'telegram' | 'whatsapp'; link?: string | null; username?: string | null; callbackUrl?: string; verifyToken?: string } | null>(null);
+  const [copiedField, setCopiedField] = useState('');
+  const [helpMode, setHelpMode] = useState<HelpMode>('closed');
   const [showSimulator, setShowSimulator] = useState(false);
   const [copied, setCopied] = useState(false);
   // Node-connection state (mobile autopsy 2026-07-23): the designer could ADD nodes but there was NO way
   // to WIRE them — tap a node's link handle to start a connection, then tap the target node to finish it.
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  // A single tap now SELECTS a node and shows a floating action toolbar around it (Edit · Connect · Move ·
+  // Duplicate · Delete) instead of jumping straight into the full editor (admin 2026-07-23). The editor
+  // opens explicitly — the toolbar's Edit button or a double-tap.
+  const [editorOpen, setEditorOpen] = useState(false);
 
   // Drag state
   const dragging = useRef<{ id: string; ox: number; oy: number; pointerId: number } | null>(null);
@@ -208,6 +225,26 @@ export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
     setEdges(prev => prev.filter(e => e.id !== id));
   }
 
+  function openEditor(id: string) {
+    setSelectedId(id);
+    setEditorOpen(true);
+  }
+
+  function duplicateNode(id: string) {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+    const nid = genId();
+    setNodes(prev => [...prev, {
+      ...node,
+      id: nid,
+      x: node.x + 40,
+      y: node.y + 40,
+      data: { ...node.data, options: node.data.options ? [...node.data.options] : undefined },
+    }]);
+    setSelectedId(nid);
+    setEditorOpen(false);
+  }
+
   function addNode(type: NodeType) {
     const id = genId();
     // Drop new nodes into the CURRENT view of the canvas so they're visible on a small screen (not off in
@@ -261,6 +298,36 @@ Content-Type: application/json
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  }
+
+  function copyField(field: string, value: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(''), 2000);
+    });
+  }
+
+  // ——— GO LIVE — publish the designed flow as a REAL Telegram/WhatsApp bot ———
+  async function goLive() {
+    setConnBusy(true); setConnErr(''); setConnResult(null);
+    try {
+      const tok = await auth.currentUser?.getIdToken();
+      if (!tok) { setConnErr('Please sign in first to publish your bot.'); setConnBusy(false); return; }
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` };
+      const flow = { platform: connPlatform, nodes, edges };
+      if (connPlatform === 'telegram') {
+        const res = await fetch('/api/bots/telegram/connect', { method: 'POST', headers, body: JSON.stringify({ token: tgToken.trim(), flow }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setConnResult({ platform: 'telegram', link: data.link, username: data.botUsername });
+      } else {
+        const res = await fetch('/api/bots/whatsapp/connect', { method: 'POST', headers, body: JSON.stringify({ token: waToken.trim(), phoneNumberId: waPhoneId.trim(), flow }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setConnResult({ platform: 'whatsapp', callbackUrl: data.callbackUrl, verifyToken: data.verifyToken });
+      }
+    } catch { setConnErr('Network error — please try again.'); }
+    setConnBusy(false);
   }
 
   // ——— Simulator ———
@@ -514,8 +581,11 @@ Content-Type: application/json
         <button onClick={startSim} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Zap size={13} /> Simulate
         </button>
-        <button onClick={() => setShowWebhookModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-purple-700 hover:bg-purple-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
-          <Webhook size={13} /> Export Webhook
+        <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex-shrink-0 whitespace-nowrap">
+          <Rocket size={13} /> Go Live
+        </button>
+        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-100 transition-colors flex-shrink-0 whitespace-nowrap">
+          <HelpCircle size={13} /> Help
         </button>
         <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Download size={13} /> Export JSON
@@ -534,7 +604,7 @@ Content-Type: application/json
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
           onPointerLeave={handleCanvasPointerUp}
-          onClick={() => { setSelectedId(null); if (connectingFrom) setConnectingFrom(null); }}
+          onClick={() => { setSelectedId(null); setEditorOpen(false); if (connectingFrom) setConnectingFrom(null); }}
         >
           <svg style={{ position: 'absolute', top: 0, left: 0, width: canvasW, height: canvasH }}>
             <defs>
@@ -598,6 +668,7 @@ Content-Type: application/json
                   }}
                   onPointerDown={e => handleNodePointerDown(e, node.id)}
                   onClick={e => e.stopPropagation()}
+                  onDoubleClick={e => { e.stopPropagation(); openEditor(node.id); }}
                 >
                   <div
                     className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-white/40' : ''} ${isConnectTarget ? 'ring-2 ring-emerald-400/70' : ''}`}
@@ -611,21 +682,46 @@ Content-Type: application/json
                       {node.data.text || node.data.apiUrl || node.data.condition || ''}
                     </p>
                   </div>
-                  {/* Connect handle (bottom-center): starts wiring from this node. `end` nodes have no outgoing. */}
-                  {node.type !== 'end' && (
-                    <button
-                      onPointerDown={e => { e.stopPropagation(); setSelectedId(node.id); setConnectingFrom(isConnectSource ? null : node.id); }}
-                      title={isConnectSource ? 'Tap a target node to connect' : 'Connect this node to another'}
-                      aria-label="Connect node"
-                      className={`absolute left-1/2 -translate-x-1/2 -bottom-2.5 w-5 h-5 rounded-full flex items-center justify-center border-2 transition-all ${isConnectSource ? 'bg-emerald-500 border-emerald-300 text-white' : 'bg-[#0d1117] border-white/30 text-gray-400 hover:border-emerald-400 hover:text-emerald-400'}`}
-                      style={{ touchAction: 'none' }}
-                    >
-                      <Link2 size={10} />
-                    </button>
-                  )}
                 </div>
               );
             })}
+
+            {/* Floating node action toolbar (admin 2026-07-23): a single tap selects a node and pops
+                these actions right above it — Edit · Connect · Move · Duplicate · Delete — instead of
+                jumping straight into the full editor. Positioned in canvas-content coordinates so it stays
+                pinned to the node while the canvas scrolls; flips below when the node hugs the top edge. */}
+            {selectedNode && !connectingFrom && (() => {
+              const TB_W = 224;
+              const below = selectedNode.y < 60;
+              const top = below ? selectedNode.y + NODE_HEIGHT + 12 : selectedNode.y - 52;
+              const left = Math.max(4, selectedNode.x + NODE_WIDTH / 2 - TB_W / 2);
+              return (
+                <div
+                  className="absolute z-20 flex items-center gap-0.5 p-1 rounded-xl border border-white/15 shadow-2xl"
+                  style={{ left, top, width: TB_W, background: '#1c2230' }}
+                  onClick={e => e.stopPropagation()}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <button title="Edit" aria-label="Edit node" onClick={e => { e.stopPropagation(); openEditor(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Pencil size={15} /></button>
+                  <button title="Connect" aria-label="Connect node" onClick={e => { e.stopPropagation(); setConnectingFrom(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-emerald-400 hover:bg-white/10 active:scale-90 transition-all"><Link2 size={15} /></button>
+                  <button title="Move — drag to reposition" aria-label="Move node"
+                    onPointerDown={e => {
+                      e.stopPropagation();
+                      const node = nodes.find(n => n.id === selectedNode.id);
+                      if (!node) return;
+                      const p = canvasPoint(e.clientX, e.clientY);
+                      dragging.current = { id: node.id, ox: p.x - node.x, oy: p.y - node.y, pointerId: e.pointerId };
+                    }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-sky-400 hover:bg-white/10 active:scale-90 transition-all cursor-grab" style={{ touchAction: 'none' }}><Move size={15} /></button>
+                  <button title="Duplicate" aria-label="Duplicate node" onClick={e => { e.stopPropagation(); duplicateNode(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Copy size={15} /></button>
+                  <button title="Delete" aria-label="Delete node" onClick={e => { e.stopPropagation(); deleteNode(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/15 active:scale-90 transition-all"><Trash2 size={15} /></button>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Connecting banner */}
@@ -639,24 +735,24 @@ Content-Type: application/json
 
         {/* Desktop properties (hidden on mobile — the mobile sheet below takes over) */}
         <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-white/10 flex-col overflow-y-auto" style={{ background: '#161b22' }}>
-          {selectedNode ? renderProperties(selectedNode) : (
+          {editorOpen && selectedNode ? renderProperties(selectedNode) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
               <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
                 <Bot size={22} className="text-gray-500" />
               </div>
-              <p className="text-sm text-gray-400">Select a node to edit its properties</p>
-              <p className="text-xs text-gray-600">Tap any node in the canvas</p>
+              <p className="text-sm text-gray-400">{selectedNode ? 'Tap Edit ✏️ on the node toolbar to edit it here' : 'Select a node to edit its properties'}</p>
+              <p className="text-xs text-gray-600">Tap a node, or double-tap to edit</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ——— Mobile properties sheet (in-flow, above the palette footer) ——— */}
-      {selectedNode && (
+      {/* ——— Mobile properties sheet (opens only via the toolbar's Edit / a double-tap) ——— */}
+      {editorOpen && selectedNode && (
         <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] overflow-y-auto" style={{ background: '#161b22' }}>
           <div className="flex items-center justify-between px-4 pt-3">
             <span className="text-xs text-gray-500 uppercase tracking-wider">Edit node</span>
-            <button onClick={() => setSelectedId(null)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
+            <button onClick={() => setEditorOpen(false)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
           </div>
           {renderProperties(selectedNode)}
         </div>
@@ -683,35 +779,89 @@ Content-Type: application/json
         ))}
       </div>
 
-      {/* ——— Webhook Modal ——— */}
-      {showWebhookModal && (
+      {/* ——— GO LIVE — real Telegram / WhatsApp connect ——— */}
+      {showConnect && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] flex flex-col gap-4" style={{ background: '#161b22' }}>
+          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] max-h-[85vh] overflow-y-auto flex flex-col gap-4" style={{ background: '#161b22' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Webhook size={16} className="text-purple-400" />
-                <h2 className="text-sm font-semibold">Webhook Setup</h2>
+                <Rocket size={16} className="text-emerald-400" />
+                <h2 className="text-sm font-semibold">Go Live — publish your bot</h2>
               </div>
-              <button onClick={() => setShowWebhookModal(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
+              <button onClick={() => setShowConnect(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
             </div>
-            <p className="text-xs text-gray-400">Send your exported JSON flow to your server via a POST request:</p>
-            <div className="relative rounded-lg p-4 font-mono text-xs text-green-300 border border-white/10 overflow-x-auto" style={{ background: '#0d1117' }}>
-              <pre className="whitespace-pre-wrap">{webhookSnippet}</pre>
-              <button onClick={copyWebhook} className="absolute top-2 right-2 p-1 rounded text-gray-500 hover:text-white transition-colors">
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-              </button>
-            </div>
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Steps</p>
-              {['1. Export your flow as JSON', '2. Host your webhook endpoint', '3. POST the JSON to your endpoint', '4. Parse and execute the flow server-side'].map(s => (
-                <div key={s} className="flex items-center gap-2 text-xs text-gray-400">
-                  <ChevronRight size={12} className="text-purple-400" /> {s}
-                </div>
+
+            {/* Platform toggle */}
+            <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">
+              {(['telegram', 'whatsapp'] as const).map(p => (
+                <button key={p} onClick={() => { setConnPlatform(p); setConnResult(null); setConnErr(''); }}
+                  className={`px-4 py-1.5 text-xs capitalize transition-colors ${connPlatform === p ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>{p}</button>
               ))}
             </div>
-            <button onClick={() => setShowWebhookModal(false)} className="w-full py-2 rounded-lg text-xs bg-purple-700 hover:bg-purple-600 text-white transition-colors">
-              Close
-            </button>
+
+            {connResult ? (
+              connResult.platform === 'telegram' ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Your bot is LIVE on Telegram!</div>
+                  <p className="text-xs text-gray-400">Anyone can now message {connResult.username ? `@${connResult.username}` : 'your bot'} and it will run your exact flow.</p>
+                  {connResult.link && (
+                    <a href={connResult.link} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 text-white transition-colors">
+                      <ExternalLink size={14} /> Open your bot in Telegram
+                    </a>
+                  )}
+                  <p className="text-[11px] text-gray-500">Edit the flow anytime and hit Go Live again to update the live bot.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Almost done — finish in Meta</div>
+                  <p className="text-xs text-gray-400">In your Meta app → WhatsApp → Configuration → Edit the webhook, paste these two values, then click Verify and Save:</p>
+                  {[{ label: 'Callback URL', value: connResult.callbackUrl || '' }, { label: 'Verify token', value: connResult.verifyToken || '' }].map(({ label, value }) => (
+                    <div key={label} className="flex flex-col gap-1">
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</span>
+                      <div className="flex gap-1.5">
+                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono" style={{ background: '#0d1117' }} />
+                        <button onClick={() => copyField(label, value)} className="px-2 rounded-lg border border-white/10 text-gray-400 hover:text-white">{copiedField === label ? <Check size={12} /> : <Copy size={12} />}</button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-gray-500">Then subscribe to the <span className="text-gray-300">messages</span> field. After that, message your WhatsApp business number and the bot runs your flow.</p>
+                </div>
+              )
+            ) : connPlatform === 'telegram' ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5 text-xs text-gray-400">
+                  {['Tap "Open @BotFather" below and send /newbot', 'Choose a name + username for your bot', 'Copy the token BotFather gives you (looks like 123456789:ABC-def…)', 'Paste it below and tap Connect'].map((s, i) => (
+                    <div key={i} className="flex items-start gap-2"><span className="text-emerald-400 font-bold">{i + 1}.</span> {s}</div>
+                  ))}
+                </div>
+                <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                  <ExternalLink size={13} /> Open @BotFather to get your token
+                </a>
+                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                  {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect &amp; Go Live</>}
+                </button>
+                <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 self-center"><HelpCircle size={11} /> Stuck? Ask NavBharatAI to guide you step-by-step</button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-gray-400">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-gray-200">permanent access token</span> and <span className="text-gray-200">Phone Number ID</span> from the Meta dashboard, then paste them here:</p>
+                <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                  <ExternalLink size={13} /> Open Meta App Dashboard (WhatsApp → API Setup)
+                </a>
+                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                  {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
+                </button>
+                <div className="flex items-center justify-between">
+                  <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">Setup guide <ExternalLink size={10} /></a>
+                  <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1"><HelpCircle size={11} /> Ask NavBharatAI to help</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -802,6 +952,9 @@ Content-Type: application/json
           </div>
         </div>
       )}
+
+      {/* ——— Help widget — NavBharatAI Free, primed to guide bot building/connecting (minimizes to a 🤖 bubble) ——— */}
+      <BotBuildHelp mode={helpMode} onModeChange={setHelpMode} />
     </div>
   );
 };

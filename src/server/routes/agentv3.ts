@@ -139,6 +139,7 @@ import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
+import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
@@ -7646,6 +7647,28 @@ export function registerAgentV3Routes(app: Express): void {
               try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
+          }
+        }
+        // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness
+        // gate's ONE high-severity privacy/compliance class is `pii-in-logs`: a console.* line that logs a
+        // credential/token, which hard-blocks the readiness verdict. The PRIMARY fix runs earlier, as a
+        // heal-then-judge step INSIDE the mandatory gate (ToolDispatcher.healCredentialLogs, called from
+        // AgentRunner before assessBuildReadiness) so the verdict is never falsely blocked. THIS pass is
+        // defense-in-depth: it also cleans the SHIPPED app on paths where the mandatory gate is skipped
+        // (fast-lane type-checked, salvage, edit builds). Idempotent, so it's a no-op after the in-gate
+        // heal already ran. Provably non-breaking. Kill: AGENTV3_CRED_LOG_GUARD=off.
+        if (process.env.AGENTV3_CRED_LOG_GUARD !== 'off') {
+          const redacted = redactCredentialLogs(integrityFiles);
+          for (const r of redacted.redactions) {
+            const newContent = redacted.files[r.file];
+            if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
+            integrityFiles[r.file] = newContent;
+            writtenFiles.set(r.file, newContent);
+            try { await actuator.writeFile(workspaceId, r.file, newContent); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+          }
+          if (redacted.redactions.length > 0) {
+            const files = [...new Set(redacted.redactions.map((r) => r.file))];
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'COMPLIANCE_LOG_REDACTED', message: `Redacted ${redacted.redactions.length} console log(s) that leaked a credential/token (would have hard-blocked the readiness gate) across ${files.length} file(s).`, autoResolved: true, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
           }
         }
         const integrity = analyzeProjectIntegrity(integrityFiles);

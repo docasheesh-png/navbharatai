@@ -1647,6 +1647,56 @@ error: Error validating field \`user\` in model \`Order\`: The relation field \`
   });
 });
 
+// SaaS-dashboard autopsy 2026-07-22: a weak build's login/useAuth debug-logged the password
+// (`console.log('login', email, password)`). That single pii-in-logs line is the readiness gate's ONLY
+// high-severity privacy/compliance HARD block, so a complete, rendering app was marked NOT READY / failed.
+// The dispatcher now redacts credential-logging console statements BEFORE the gate scans (heal-then-judge),
+// so the leak is gone AND the block is cleared — a real security fix, not a cosmetic patch.
+describe('healCredentialLogs — heal-then-judge credential-in-logs before the readiness gate', () => {
+  function healDispatcher() {
+    const act = new FakeActuator();
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const d = new ToolDispatcher(act, 'ws-cred-heal', state, stream);
+    return { act, d };
+  }
+
+  it('redacts the leaked password log and persists it, leaving real logic intact', async () => {
+    const { act, d } = healDispatcher();
+    act.files.set(
+      'src/hooks/useAuth.ts',
+      `export function useAuth() {\n  const login = (email, password) => {\n    console.log('login', email, password);\n    return api.login(email, password);\n  };\n  return { login };\n}`,
+    );
+    const note = await d.healCredentialLogs();
+    expect(note).toContain('Redacted');
+    const healed = act.files.get('src/hooks/useAuth.ts')!;
+    expect(healed).toContain('console.log();');          // leak stripped
+    expect(healed).not.toMatch(/console\.log\([^)]*password/); // no credential arg left
+    expect(healed).toContain('return api.login(email, password);'); // real logic untouched
+  });
+
+  it('is a no-op (empty note, no write) on a clean project', async () => {
+    const { act, d } = healDispatcher();
+    act.files.set('src/App.tsx', `export default function App() { console.log('mounted'); return null; }`);
+    const before = act.files.get('src/App.tsx');
+    expect(await d.healCredentialLogs()).toBe('');
+    expect(act.files.get('src/App.tsx')).toBe(before);
+  });
+
+  it('honours the AGENTV3_CRED_LOG_GUARD=off kill switch', async () => {
+    const { act, d } = healDispatcher();
+    act.files.set('src/a.ts', `console.log('secret', s);`);
+    const prev = process.env.AGENTV3_CRED_LOG_GUARD;
+    process.env.AGENTV3_CRED_LOG_GUARD = 'off';
+    try {
+      expect(await d.healCredentialLogs()).toBe('');
+      expect(act.files.get('src/a.ts')).toBe(`console.log('secret', s);`);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTV3_CRED_LOG_GUARD; else process.env.AGENTV3_CRED_LOG_GUARD = prev;
+    }
+  });
+});
+
 // TaskForge fresh-build autopsy 2026-07-18: a seed step (`prisma db seed` / `tsx prisma/seed.ts`) that
 // runs BEFORE `prisma generate` fails with "@prisma/client did not initialize yet — run `prisma generate`".
 // TaskForge looped this and burned wall-clock budget. The dispatcher now runs `prisma generate` once and

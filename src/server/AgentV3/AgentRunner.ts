@@ -610,6 +610,10 @@ export class AgentRunner {
               // judges them — a page the builder created but forgot to route is wired into <Routes>
               // deterministically, so it stops being an orphan blocker instead of merely being reported.
               try { const w = await dispatcher.healOrphanPages(); if (w) events.emit({ type: 'narration', agent: 'architect', text: w, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
+              // Redact credential-logging console statements BEFORE the gate scans compliance — a single
+              // pii-in-logs line is the gate's only high-severity privacy/compliance HARD block, so a
+              // complete app was failing on one debug log. Deterministic, non-breaking, best-effort.
+              try { const c = await dispatcher.healCredentialLogs(); if (c) events.emit({ type: 'narration', agent: 'architect', text: c, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };

@@ -60,6 +60,14 @@ export function sanitizeRepoUrl(raw: string): string | null {
   return safe;
 }
 
+/**
+ * Why a clone failed — classified from git's real stderr INSIDE the sandbox (the raw error, which can
+ * echo the token-embedded remote URL, is NEVER returned; only this code crosses the boundary). Lets the
+ * caller tell the user the ACTUAL reason (expired/no credentials vs wrong account vs network) instead of
+ * a single generic guess.
+ */
+export type HydrateFailReason = 'auth' | 'not-found' | 'network' | 'no-git' | 'bad-url' | 'unknown';
+
 export interface HydrateResult {
   /** True when repo content was cloned into an empty sandbox this run. */
   hydrated: boolean;
@@ -67,6 +75,8 @@ export interface HydrateResult {
   hadFiles: boolean;
   /** True when git was unavailable / the operation failed (degraded to a no-op). */
   skipped: boolean;
+  /** Set on a failed clone (`skipped:true` from a real attempt) — the classified cause. */
+  reason?: HydrateFailReason;
 }
 
 export interface PushResult {
@@ -102,7 +112,7 @@ export class GitRepoSync {
     // SECURITY (C2): validate + rebuild the URL before it reaches the shell. An unacceptable URL
     // (non-github host, wrong scheme, injection metachars) degrades to a safe no-op — never runs.
     const safeUrl = sanitizeRepoUrl(authedUrl);
-    if (!safeUrl) return { hydrated: false, hadFiles: false, skipped: true };
+    if (!safeUrl) return { hydrated: false, hadFiles: false, skipped: true, reason: 'bad-url' };
     // Which cloned repos are worth overlaying onto the sandbox:
     //  • auto-hydrate of the per-project mirror → only a REAL project (package.json/src), so an
     //    auto-init README doesn't replace the fresh scaffold on a first build;
@@ -116,29 +126,51 @@ export class GitRepoSync {
     // before the work branch exists), then the plain default clone. Each attempt cleans the temp dir
     // first so a failed `-b <missing-branch>` clone never blocks the next. With no branch opts this is
     // exactly the original single plain clone (backward-compatible).
+    // GIT_TERMINAL_PROMPT=0 (admin 2026-07-23 clone-diagnosis fix): a private-repo clone with no/expired
+    // credentials must FAIL FAST with a clean "could not read Username" error instead of hanging on an
+    // interactive password prompt in the non-interactive sandbox.
+    const gitPrefix = 'GIT_TERMINAL_PROMPT=0';
+    const errFile = '/tmp/nbhyerr';
     const attempts: string[] = [];
-    if (opts?.branch) attempts.push(`git clone --depth 1 -b "${sanitizeBranch(opts.branch)}" "${safeUrl}" /tmp/nbhydrate`);
-    if (opts?.fallbackBranch && opts.fallbackBranch !== opts.branch) attempts.push(`git clone --depth 1 -b "${sanitizeBranch(opts.fallbackBranch)}" "${safeUrl}" /tmp/nbhydrate`);
-    attempts.push(`git clone --depth 1 "${safeUrl}" /tmp/nbhydrate`);
-    const cloneChain = attempts.map((c) => `{ rm -rf /tmp/nbhydrate 2>/dev/null; ${c} >/dev/null 2>&1; }`).join(' || ');
+    if (opts?.branch) attempts.push(`${gitPrefix} git clone --depth 1 -b "${sanitizeBranch(opts.branch)}" "${safeUrl}" /tmp/nbhydrate`);
+    if (opts?.fallbackBranch && opts.fallbackBranch !== opts.branch) attempts.push(`${gitPrefix} git clone --depth 1 -b "${sanitizeBranch(opts.fallbackBranch)}" "${safeUrl}" /tmp/nbhydrate`);
+    attempts.push(`${gitPrefix} git clone --depth 1 "${safeUrl}" /tmp/nbhydrate`);
+    // Each attempt appends its stderr to errFile so the LAST (default-branch) failure's real reason is
+    // classified below. stderr stays INSIDE the sandbox — only a NB_CLONE_* code is ever echoed out.
+    const cloneChain = attempts.map((c) => `{ rm -rf /tmp/nbhydrate 2>/dev/null; ${c} >/dev/null 2>>${errFile}; }`).join(' || ');
     try {
       const cmd =
-        'rm -rf /tmp/nbhydrate 2>/dev/null; ' +
+        `rm -rf /tmp/nbhydrate ${errFile} 2>/dev/null; ` +
         `if ${cloneChain}; then ` +
         `if ${contentTest}; then ` +
         'cp -a /tmp/nbhydrate/. ./ >/dev/null 2>&1 && echo NB_HYDRATED || echo NB_HYDRATE_FAIL; ' +
         'else echo NB_EMPTY_REPO; fi; ' +
-        'else echo NB_CLONE_FAIL; fi; ' +
-        'rm -rf /tmp/nbhydrate 2>/dev/null';
+        'else ' +
+        // Classify the failure from git's stderr WITHOUT leaking it (only the code is echoed). Order
+        // matters: auth + network are checked before the broad "not found" so `git: command not found`
+        // (no-git) and a real "Repository not found" (wrong account/private) don't collide.
+        `if grep -qiE 'could not read Username|terminal prompts disabled|Authentication failed|invalid username or password|Bad credentials|403 Forbidden|Permission( to| denied)|Support for password authentication' ${errFile} 2>/dev/null; then echo NB_CLONE_AUTH; ` +
+        `elif grep -qiE 'Could not resolve host|unable to access|Failed to connect|Connection timed out|Could not read from remote|network is unreachable|Operation timed out' ${errFile} 2>/dev/null; then echo NB_CLONE_NETWORK; ` +
+        `elif grep -qiE 'command not found|No such file or directory.*git|git: not found' ${errFile} 2>/dev/null; then echo NB_NO_GIT; ` +
+        `elif grep -qiE 'Repository not found|remote: Not Found|repository .* not found|does not exist' ${errFile} 2>/dev/null; then echo NB_CLONE_NOTFOUND; ` +
+        `else echo NB_CLONE_FAIL; fi; ` +
+        'fi; ' +
+        `rm -rf /tmp/nbhydrate ${errFile} 2>/dev/null`;
       const r = await this.run(cmd);
       const out = r.stdout || '';
       if (out.includes('NB_HYDRATED')) return { hydrated: true, hadFiles: false, skipped: false };
       // Repo had no real content yet (first build) — kept the scaffold; ran fine, nothing to restore.
       if (out.includes('NB_EMPTY_REPO')) return { hydrated: false, hadFiles: false, skipped: false };
-      // Clone/copy failed (network, no git) — best-effort no-op.
-      return { hydrated: false, hadFiles: false, skipped: true };
+      // Clone failed — classify the real cause so the caller can tell the user exactly what to fix.
+      const reason: HydrateFailReason =
+        out.includes('NB_CLONE_AUTH') ? 'auth'
+        : out.includes('NB_CLONE_NETWORK') ? 'network'
+        : out.includes('NB_NO_GIT') ? 'no-git'
+        : out.includes('NB_CLONE_NOTFOUND') ? 'not-found'
+        : 'unknown';
+      return { hydrated: false, hadFiles: false, skipped: true, reason };
     } catch {
-      return { hydrated: false, hadFiles: false, skipped: true };
+      return { hydrated: false, hadFiles: false, skipped: true, reason: 'unknown' };
     }
   }
 

@@ -48,7 +48,7 @@ import {
   Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
   Wand2, Package,
   Kanban, CloudUpload, LayoutTemplate, HeartPulse,
-  Briefcase, FileText
+  Briefcase, FileText, LayoutGrid
 } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
@@ -1930,6 +1930,10 @@ export default function App() {
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v5.0', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
+    // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
+    // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
+    // header window. Same LayoutGrid icon as its Home card, for consistency.
+    { id: 'other_ai',     label: 'Other AI',           icon: LayoutGrid },
     { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },

@@ -21429,3 +21429,58 @@ Two admin-requested tweaks to the Pro v5.0 build feed (both frontend-only, both 
 
 Gate: frontend tsc (only pre-existing @capacitor env errors) · revealPacer 14/14 · ActivityTimelineRow 4/4 ·
 full suite (running/green).
+
+---
+
+## 2026-07-23 — Bot Builder autopsy: no "Add button" + the Help AI only 50% knew the tool (admin conversation)
+
+Admin pasted the full Help-AI conversation: they added a Message node, asked how to add a button, and the
+Help AI (NavBharatAI Free) HALLUCINATED — "scroll down in the panel and tap Add Button" (no such control),
+then flailed, then wrongly deflected the user to Pro v5.0 and claimed "no external engineer can fix this."
+Two real root causes:
+
+- ❌ **UX gap:** a Message node had NO way to add buttons — buttons lived only in a separate "Button Menu"
+  node, which wasn't discoverable. **Fix:** the Message node editor now has a **"Add button"** section
+  (WhatsApp/Telegram-style quick replies on a message). `botFlowRunner` emits those buttons and routes on
+  the tapped one (pickEdge now handles message options too). 3 new runner tests.
+- ❌ **Help AI only ~50% accurate:** it was grounded only in a high-level KB blurb, so it invented specifics.
+  **Fix:** the Help widget's hidden primer is now the EXACT Bot-Builder manual — the real controls (palette,
+  node toolbar, "Add button", Connect, Simulate, Go Live) — and explicitly forbids inventing controls,
+  deflecting to Pro v5.0, or claiming the tool "can't be fixed." `AppKnowledgeBase` howToUse also now spells
+  out how to add buttons, so EVERY AI (Free/Pro/Offline) answers correctly.
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9016/9016 green (incl. 3 new).
+
+---
+
+## 2026-07-23 — Bot Builder: removed the misleading "Build Bot App" button (admin request)
+
+Admin: "Build Bot App" ka naam misleading hai — click karne se pura flow Pro v5.0 me ek prompt ban jaata
+hai aur send karne se bas ek WEB app banta hai; asli bot deployment to ab "Go Live" karta hai. Isko hatao.
+
+Correct (rule 3): with real "Go Live" (Telegram/WhatsApp) shipped, the "Build Bot App" Pro-v5.0 handoff was
+redundant AND its name implied it built the bot when it only produced a generic web-app clone.
+
+- Removed the **"Build Bot App"** button + its `onBuildViaV5` prop from `BotBuilder`; `ViewPanels` renders
+  `<BotBuilder />`. Deleted the now-unused `src/lib/botFlowPrompt.ts` (+ its test).
+- `AppKnowledgeBase` bot_builder description/howToUse rewritten around **Go Live** as the real ship path
+  (no more Pro-v5.0 handoff / "web app" language).
+- Updated `tests/aiToolsReal.test.ts` (asserts Go-Live wiring + no "Build Bot App") and
+  `botBuilderAwareness.test.ts` (asserts 'go live'/'telegram' instead of 'build bot app').
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9012/9012 green.
+
+---
+
+## 2026-07-23 — "Other AI" now opens its OWN header tab like Free/Pro/Professionals (admin request)
+
+Admin: NavBharatAI's header has a window/tab system — Free, Pro, Professionals each open in their own header
+tab so several features can be used side-by-side. But opening "Other AI" showed NO header tab.
+
+Root cause: TopNav renders each open tab only if it has a `menuItems` entry (`const item = menuItems.find(...);
+if (!item) return null;`). `other_ai` was added to `openTabs` by `toggleTab('other_ai')` but had NO menuItems
+entry, so TopNav silently dropped it — no header window. Fix: add `{ id: 'other_ai', label: 'Other AI', icon:
+LayoutGrid }` to `menuItems` (same icon as its Home card). Now Other AI opens a real header tab (label + icon +
+close ✕) exactly like the other three, and also appears in the sidebar for consistency. tabClose 8/8 green.
+
+Gate: frontend tsc 0 · `npm run build` ✓ · tabClose 8/8 green.

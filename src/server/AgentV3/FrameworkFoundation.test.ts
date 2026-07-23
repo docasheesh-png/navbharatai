@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureViteReactFoundation, isViteReactTarget } from './FrameworkFoundation';
+import { ensureViteReactFoundation, isViteReactTarget, sanitizeTsconfigExtends } from './FrameworkFoundation';
 
 // The EXACT file set the deep-test Level-1 planner produced (build 7c56b35a) — 5 files, NO package.json.
 const LEVEL1_PLANNER_OUTPUT: Record<string, string> = {
@@ -159,5 +159,80 @@ describe('isViteReactTarget — only touches vite-react, leaves other stacks alo
     const res = ensureViteReactFoundation({ 'app/page.tsx': 'export default () => null;' }, { framework: 'nextjs' });
     expect(res.added).toEqual([]);
     expect(Object.keys(res.files)).toEqual([]);
+  });
+});
+
+describe('sanitizeTsconfigExtends — strip a dangling tsconfig `extends` (autopsy buildId 9245f090)', () => {
+  const REACT_PKG = JSON.stringify({
+    name: 'saas-admin-dashboard',
+    dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+    devDependencies: { typescript: '^5.5.3', vite: '^5.4.1', '@vitejs/plugin-react': '^4.3.1' },
+  });
+
+  it('removes an `extends` to a package NOT in package.json (the phantom @tsconfig/react)', () => {
+    const files = {
+      'package.json': REACT_PKG,
+      'tsconfig.app.json': JSON.stringify({ extends: '@tsconfig/react/tsconfig.json', compilerOptions: { jsx: 'react-jsx', strict: true } }, null, 2),
+    };
+    const res = sanitizeTsconfigExtends(files);
+    expect(res.fixes).toHaveLength(1);
+    expect(res.fixes[0].file).toBe('tsconfig.app.json');
+    expect(res.fixes[0].removed).toEqual(['@tsconfig/react/tsconfig.json']);
+    const out = JSON.parse(res.patch['tsconfig.app.json']);
+    expect(out.extends).toBeUndefined(); // dangling extends gone
+    expect(out.compilerOptions.jsx).toBe('react-jsx'); // the file's own options are preserved
+  });
+
+  it('KEEPS an `extends` whose package IS a declared dependency', () => {
+    const files = {
+      'package.json': JSON.stringify({ devDependencies: { '@tsconfig/node20': '^20.0.0' } }),
+      'tsconfig.json': JSON.stringify({ extends: '@tsconfig/node20/tsconfig.json', compilerOptions: {} }),
+    };
+    expect(sanitizeTsconfigExtends(files).fixes).toHaveLength(0);
+  });
+
+  it('KEEPS a relative `extends` (a local base file), never treats it as a package', () => {
+    const files = {
+      'package.json': REACT_PKG,
+      'tsconfig.json': JSON.stringify({ extends: './tsconfig.base.json', compilerOptions: {} }),
+    };
+    expect(sanitizeTsconfigExtends(files).fixes).toHaveLength(0);
+  });
+
+  it('filters only the dangling entry from an `extends` ARRAY, keeping resolvable ones', () => {
+    const files = {
+      'package.json': JSON.stringify({ devDependencies: { '@tsconfig/strictest': '^2.0.0' } }),
+      'tsconfig.json': JSON.stringify({ extends: ['@tsconfig/strictest/tsconfig.json', '@tsconfig/react/tsconfig.json', './base.json'], compilerOptions: {} }),
+    };
+    const res = sanitizeTsconfigExtends(files);
+    expect(res.fixes[0].removed).toEqual(['@tsconfig/react/tsconfig.json']);
+    const out = JSON.parse(res.patch['tsconfig.json']);
+    expect(out.extends).toEqual(['@tsconfig/strictest/tsconfig.json', './base.json']);
+  });
+
+  it('leaves a coherent project untouched (no extends, or only resolvable ones)', () => {
+    const files = {
+      'package.json': REACT_PKG,
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }),
+      'tsconfig.app.json': JSON.stringify({ compilerOptions: { jsx: 'react-jsx' } }),
+    };
+    const res = sanitizeTsconfigExtends(files);
+    expect(res.fixes).toHaveLength(0);
+    expect(Object.keys(res.patch)).toHaveLength(0);
+  });
+
+  it('handles a tsconfig with comments (JSONC) and still strips the phantom extends', () => {
+    const files = {
+      'package.json': REACT_PKG,
+      'tsconfig.app.json': '{\n  // app config\n  "extends": "@tsconfig/react/tsconfig.json",\n  "compilerOptions": { "strict": true }, // trailing comma ok\n}',
+    };
+    const res = sanitizeTsconfigExtends(files);
+    expect(res.fixes).toHaveLength(1);
+    expect(JSON.parse(res.patch['tsconfig.app.json']).extends).toBeUndefined();
+  });
+
+  it('skips an unparseable tsconfig rather than corrupting it', () => {
+    const files = { 'package.json': REACT_PKG, 'tsconfig.json': 'this is not json at all {{{' };
+    expect(sanitizeTsconfigExtends(files).fixes).toHaveLength(0);
   });
 });

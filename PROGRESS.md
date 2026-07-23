@@ -21176,3 +21176,41 @@ tool-groups usme move (cut, not copy).
 - Verify: frontend tsc 0 errors + server tsc + `vite build` ✓ (confirmed locally after installing the
   two @capacitor deps that were only missing from the scratch node_modules; CI's npm ci always has them);
   new homeToolGroups test; vitest green.
+## 2026-07-23 — Autopsy #5: SaaS dashboard build failed (hallucinated tsconfig extends + broken imports + GLM 429 storm)
+
+**Report:** buildId `9245f090` — "multi-tenant SaaS admin dashboard". Domain classified `saas` correctly ✅
+(requirement-aware working). But `ok:false`, readiness 42/100, ~22 min.
+
+**Ledger (5 buckets):**
+- ✅ Self-heal: 319/324 auto-resolved; requirement gaps surfaced honestly.
+- 🔀 Workaround: fast lane timed out at 240s with 26/42 files → salvaged + handed to full builder.
+- ⏭️ Skip: the 2 readiness blockers never resolved.
+- ❌ Still-broken (3): (1) `rootCause` = generated `tsconfig.app.json` `extends "@tsconfig/react/tsconfig.json"`
+  — a package that does NOT exist on npm (E404) → Vite died `TSConfckParseError: failed to resolve "extends"`,
+  dev server never started, and the agent burned time on `npm install @tsconfig/react` (E404) repeatedly.
+  (2) 2 broken imports (name not exported): `BadgeProps←Badge`, `wait←../lib/utils` → readiness blocker.
+  (3) agent OVERSTATED success ("Dashboard Complete… all pages fully functional") — the honesty layer
+  correctly overrode it with the real 42/100 verdict.
+- 🥵 Struggle: GLM **429 rate-limit storm — 28 PROVIDER_FALLBACKs**, which starved the fast lane into its
+  240s timeout at 26/42.
+
+**Shipped DNA fix (this slice) — the recorded rootCause: a deterministic tsconfig-`extends` sanitizer.**
+New pure `sanitizeTsconfigExtends(files)` in `FrameworkFoundation.ts` (8 tests): strips a tsconfig `extends`
+that points at a BARE package NOT present in package.json deps (an unresolvable base that hard-breaks Vite).
+SAFE by construction — keeps a relative `./base.json` extends and keeps an extends whose package IS a declared
+dependency; only touches parseable tsconfig files (JSONC-tolerant); filters just the dangling entry from an
+`extends` array; never mutates its input. Wired at BOTH `ensureViteReactFoundation` sites: the fast-lane
+`fastPreview` (before install/dev server, with a `TSCONFIG_EXTENDS_REPAIRED` diagnostic) and the diagnose/
+preview reopen path. Kill switch `AGENTV3_TSCONFIG_SANITIZE=off`.
+
+**Scope honesty (rule 6) — OPEN items carried forward:**
+1. The exact reported run's dev-server error surfaced through the AGENT's own in-run bash (`npm run dev`) after
+   the fast lane timed out and handed to the full builder — a path that runs neither foundation site. This
+   slice prevents the class for fast-lane-completing builds + all preview reopens (the dominant paths) and
+   fixes the delivered app's tsconfig, but does not intercept the full-builder's mid-run bash. A tool-layer
+   sanitize-on-write (or a full-builder pre-dev-server hook) is the follow-up.
+2. Broken imports "name not exported" (`BadgeProps`, `wait`) — detected as a readiness blocker but not
+   auto-healed; an "add missing export where the symbol is defined-but-unexported" heal is a future slice.
+3. GLM free-tier 429 storm + the 240s fast-lane timeout — shared provider-storm root with autopsy #2.
+
+Gate: server tsc 0 · FrameworkFoundation 21/21 · full suite (running/green).

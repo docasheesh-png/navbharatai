@@ -48,8 +48,8 @@ const PRODUCT_CARDS = [
     Icon: MessageSquare,
     title: 'NavBharatAI',
     subtitle: 'Free AI Chat',
-    description: 'Ask anything in Hindi, English, or Hinglish. Powered by advanced AI — instant answers, creative writing, coding help, and more.',
-    features: ['Chat in Hindi, English & Hinglish', 'Code, write, research & learn', 'App builder for simple projects'],
+    description: 'Ask anything in Hindi, English, or Hinglish — instant answers, explanations, ideas, creative writing, and everyday help. Your free AI companion to learn and get things done. (For building apps, use NavBharatAI Pro.)',
+    features: ['Chat in Hindi, English & Hinglish', 'Instant answers, research & learning', 'Creative writing, summaries & translation'],
     featureIcon: CheckCircle2,
     featureColor: 'text-orange-400',
     btnClass: 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-white',
@@ -68,8 +68,8 @@ const PRODUCT_CARDS = [
     Icon: Bot,
     title: 'NavBharatAI Pro',
     subtitle: 'Agentic App Builder',
-    description: 'Describe any app in plain language. Pro v5.0 plans, codes, previews and deploys it — automatically, end-to-end.',
-    features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', 'Powered by Claude Opus (best AI)'],
+    description: 'Describe any app in plain language and NavBharatAI Pro v5.0 plans, codes, previews and deploys it — automatically, end-to-end. This is the coding & app-building engine.',
+    features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', "NavBharatAI's most powerful AI engine"],
     featureIcon: Zap,
     featureColor: 'text-indigo-400',
     btnClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white',
@@ -95,6 +95,29 @@ const PRODUCT_CARDS = [
     btnClass: 'bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white',
     btnLabel: 'Explore Professionals',
     btnIcon: ChevronRight,
+  },
+  {
+    // 4th option (admin 2026-07-22) — a hub for more NavBharatAI AI tools. Content is being added;
+    // shown as an honest "Coming Soon" until it's wired, so it's never a dead/fake button.
+    id: 'other',
+    badge: 'Coming Soon',
+    badgeColor: 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30',
+    gradient: 'from-fuchsia-600/20 via-pink-500/10 to-transparent',
+    border: 'border-fuchsia-500/20 hover:border-fuchsia-400/50',
+    glow: 'shadow-fuchsia-500/10',
+    iconBg: 'bg-fuchsia-500/15',
+    iconColor: 'text-fuchsia-400',
+    Icon: Sparkles,
+    title: 'Other AI',
+    subtitle: 'More AI Tools',
+    description: 'A growing collection of specialized NavBharatAI tools. New AI utilities will appear here — coming soon.',
+    features: ['New AI tools, one tap away', 'Made for Bharat', 'More added regularly'],
+    featureIcon: CheckCircle2,
+    featureColor: 'text-fuchsia-400',
+    btnClass: 'bg-white/5 text-fuchsia-200 border border-fuchsia-500/20',
+    btnLabel: 'Coming Soon',
+    btnIcon: Sparkles,
+    comingSoon: true,
   },
 ];
 
@@ -186,12 +209,13 @@ export const HomeView = ({
         </motion.div>
 
         {/* ── Product Cards ── */}
-        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           {PRODUCT_CARDS.map((card, i) => {
             const CardIcon = card.Icon;
             const BtnIcon = card.btnIcon;
             const FeatIcon = card.featureIcon;
             const handler = handlers[card.id];
+            const comingSoon = (card as { comingSoon?: boolean }).comingSoon === true;
 
             return (
               <motion.div
@@ -253,17 +277,19 @@ export const HomeView = ({
 
                   {/* CTA Button */}
                   <button
-                    onClick={handler || onShowLogin}
+                    onClick={comingSoon ? undefined : (handler || onShowLogin)}
+                    disabled={comingSoon}
                     className={cn(
                       'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl sm:rounded-2xl',
                       'font-black text-xs uppercase tracking-widest transition-all duration-200',
-                      'active:scale-95 select-none',
+                      'select-none',
+                      comingSoon ? 'opacity-70 cursor-not-allowed' : 'active:scale-95',
                       card.btnClass
                     )}
                   >
                     <BtnIcon className="w-4 h-4 shrink-0" />
                     <span className="truncate">{card.btnLabel}</span>
-                    <ArrowRight className="w-3.5 h-3.5 shrink-0 ml-auto" />
+                    {!comingSoon && <ArrowRight className="w-3.5 h-3.5 shrink-0 ml-auto" />}
                   </button>
                 </div>
               </motion.div>

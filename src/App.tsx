@@ -141,6 +141,7 @@ export { sanitizeFirestoreData };
 // ReportProblemComponent → lazy above
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
+import { OtherAIView } from './components/home/OtherAIView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
@@ -1205,7 +1206,7 @@ export default function App() {
       // Remember which tab OPENED this one when it is launched from inside Settings or Professionals,
       // so ✕-closing that parent also closes the option it spawned (admin bug 2026-07-11). Opened from
       // anywhere else → no parent link (it's an independent tab).
-      if ((activeView === 'settings' || activeView === 'professionals') && view !== activeView) {
+      if ((activeView === 'settings' || activeView === 'professionals' || activeView === 'other_ai') && view !== activeView) {
         setTabOpeners(prev => ({ ...prev, [view]: activeView }));
       }
     }
@@ -2490,7 +2491,7 @@ export default function App() {
                  toggleTab('nbi_pro_chat');
                }}
                onStartProfessionals={() => toggleTab('professionals')}
-               onOpenTool={(id) => { if (user) { toggleTab(id as any); } else { setShowAuth(true); } }}
+               onOpenOtherAI={() => toggleTab('other_ai')}
                isAdmin={isAdmin}
                data={homeData}
                onUpdate={(newData) => setHomeData(newData)}
@@ -2498,6 +2499,13 @@ export default function App() {
                user={user}
                onShowLogin={() => setShowAuth(true)}
              />
+          )}
+          {activeView === 'other_ai' && (
+            <OtherAIView
+              theme={theme}
+              onBack={() => toggleTab('home')}
+              onOpenTool={(id) => { if (user) { toggleTab(id as any); } else { setShowAuth(true); } }}
+            />
           )}
           {activeView === 'settings' && (
             <SettingsPanel

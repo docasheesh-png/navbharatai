@@ -7651,11 +7651,12 @@ export function registerAgentV3Routes(app: Express): void {
         }
         // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness
         // gate's ONE high-severity privacy/compliance class is `pii-in-logs`: a console.* line that logs a
-        // credential/token. A single one hard-blocks the readiness verdict (NOT READY) → the whole app is
-        // marked failed. A debug log that prints a password is never app logic, so stripping its arguments
-        // both removes the real leak AND unblocks the build — a real security fix, not a cosmetic patch.
-        // Provably non-breaking (single-line, statement-leading, paren-balanced calls only; anything
-        // ambiguous is left as an honest finding). Kill: AGENTV3_CRED_LOG_GUARD=off.
+        // credential/token, which hard-blocks the readiness verdict. The PRIMARY fix runs earlier, as a
+        // heal-then-judge step INSIDE the mandatory gate (ToolDispatcher.healCredentialLogs, called from
+        // AgentRunner before assessBuildReadiness) so the verdict is never falsely blocked. THIS pass is
+        // defense-in-depth: it also cleans the SHIPPED app on paths where the mandatory gate is skipped
+        // (fast-lane type-checked, salvage, edit builds). Idempotent, so it's a no-op after the in-gate
+        // heal already ran. Provably non-breaking. Kill: AGENTV3_CRED_LOG_GUARD=off.
         if (process.env.AGENTV3_CRED_LOG_GUARD !== 'off') {
           const redacted = redactCredentialLogs(integrityFiles);
           for (const r of redacted.redactions) {

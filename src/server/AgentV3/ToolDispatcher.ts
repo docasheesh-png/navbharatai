@@ -48,6 +48,7 @@ import {
   detectsPiiCollection, detectsTracker, detectsConsentUI, looksLikePrivacyPolicy,
 } from './ComplianceAnalysis';
 import type { ComplianceIssue, ComplianceSeverity } from './ComplianceAnalysis';
+import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
@@ -761,6 +762,36 @@ export class ToolDispatcher {
         const names = result.wired.map((w) => (w.split(' ')[0].split('/').pop() || '').replace(/\.(?:t|j)sx$/, '')).filter(Boolean);
         return `🧭 Wired ${result.wired.length} page(s) into the router so they are actually reachable: ${names.join(', ')}.`;
       })(), 20_000, 'healOrphanPages');
+    } catch {
+      return '';
+    }
+  }
+
+  /** HEAL-THEN-JUDGE (CLAUDE.md 50/50 law, SaaS-dashboard autopsy 2026-07-22): deterministically redact
+   *  console.* statements that log a credential/token BEFORE the readiness gate judges — so a single
+   *  `pii-in-logs` line (the gate's ONLY high-severity privacy/compliance class, a HARD block) stops
+   *  failing an otherwise-complete app, rather than the gate merely blocking on it. A debug log that
+   *  prints a password is never app logic, so stripping its arguments both removes the real leak AND
+   *  clears the block — a real security fix, not a cosmetic patch. Provably non-breaking (single-line,
+   *  statement-leading, paren-balanced calls only; anything ambiguous is left as an honest finding),
+   *  idempotent, persisted through the same durable write path. Kill switch: AGENTV3_CRED_LOG_GUARD=off. */
+  async healCredentialLogs(): Promise<string> {
+    if (process.env.AGENTV3_CRED_LOG_GUARD === 'off') return '';
+    try {
+      return await withTimeout((async () => {
+        const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const result = redactCredentialLogs(files);
+        if (result.redactions.length === 0) return '';
+        for (const [path, content] of Object.entries(result.files)) {
+          if (files[path] === content) continue; // only the files that actually changed
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+        }
+        const changed = [...new Set(result.redactions.map((r) => r.file))];
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`credential-log redaction: cleared ${result.redactions.length} leak(s) across ${changed.join(', ')}.`); } catch { /* audit best-effort */ }
+        return `🔒 Redacted ${result.redactions.length} console log(s) that leaked a credential/token so nothing sensitive is printed to the browser console (${changed.length} file(s)).`;
+      })(), 20_000, 'healCredentialLogs');
     } catch {
       return '';
     }

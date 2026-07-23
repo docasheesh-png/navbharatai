@@ -21105,3 +21105,16 @@ verdict:
 
 Gate: frontend tsc 0 · server tsc 0 · new suite (13) + ComplianceAnalysis (20) + ToolDispatcher/
 BuildDiagnostics (271) green.
+
+**Correction / hardening (same autopsy, same session):** the FIRST commit placed the redaction in the
+post-build integrity region — which runs AFTER the mandatory readiness gate (`AgentRunner` →
+`dispatcher.assessBuildReadiness`) has already recorded the `READINESS_BLOCKER` and downgraded
+`result.ok`. `buildHealthFromDiagnostics` derives the final verdict from the ALREADY-recorded unresolved
+error problems, so a post-gate heal removed the leak from the code but would NOT flip the verdict. Fixed
+by moving the PRIMARY heal to a HEAL-THEN-JUDGE step INSIDE the gate: `ToolDispatcher.healCredentialLogs()`
+(mirrors `healOrphanPages`), called from `AgentRunner` immediately before `assessBuildReadiness()` — so the
+compliance scan sees clean files, no blocker is recorded, and `ok` is never downgraded. The route-level
+pass is kept as DEFENSE-IN-DEPTH (cleans the shipped app on fast-lane/salvage/edit paths where the gate is
+skipped; idempotent). 3 dispatcher tests added (redact+persist, clean no-op, kill-switch). Gate:
+frontend tsc 0 · server tsc 0 · ToolDispatcher (185) + credentialLogRedaction (13) + ComplianceAnalysis
+(20) green.

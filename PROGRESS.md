@@ -21260,3 +21260,40 @@ still fails for a real reason, the model may improvise a `/tmp` clone whose file
 sandbox → land it" safety net + a survey that doesn't claim success on an empty workspace are the next slice.
 
 Gate: frontend tsc 0 · server tsc 0 · GitRepoSync 26/26 · GitManager + ProjectImport green (111 total).
+
+### Autopsy completion (5th-rule discipline, admin asked "did you do the FULL autopsy?") — honest ledger + missing subsystem + open root causes
+
+I did NOT initially run the full 5-bucket process for `86a5575c` — I went straight to the #1 DNA cause
+(`cp -a`) and fixed it (#1853), but skipped the itemized ledger, the missing-subsystem naming, and DNA
+fixes for the sibling items. Completing it honestly here:
+
+**5-bucket ledger:**
+- ❌ **Still-broken (1):** platform said "couldn't clone" for a cloneable PUBLIC repo — `cp -a` ownership
+  footgun. **FIXED #1853** (ownership-safe + filesystem-verified overlay).
+- ❌ **Fake-success (1):** the survey said *"successfully cloned to /tmp/mitrify-import … ready for further
+  work"* while the workspace held **0 files**. A wrong verdict (rule 5). **OPEN** (below).
+- ⏭️ **Not-landed (1):** the model's `/tmp/mitrify-import` clone was never landed into the workspace. Root
+  trigger was the ❌ above; **#1853 removes the trigger** (the platform import now succeeds and lands). The
+  general "model clones into the sandbox itself" case stays **OPEN** (below).
+- 🔀 **Workaround (2):** GLM 429 storm (8 GLM failures → Kimi fallback, providerDelivery GLM:6/KIMI:3) —
+  ALREADY mitigated by the merged rate-pacer + key-pool + circuit-breaker + GLM↔Kimi floor balance (no new
+  work; a deferred-but-covered class). The model self-cloning to `/tmp` — the not-landed item above.
+- 🥵 **Struggle (1):** `read_file '/home/user/workspace/tmp/mitrify-import/package.json' does not exist` (2×)
+  — the model passed a `/tmp` absolute path and the read_file tool resolved it workspace-relative; the model
+  recovered via bash `cat`. Minor friction; read_file is correctly workspace-scoped by design.
+
+**Step 2 — the MISSING subsystem:** a **post-import reconciliation + honest-outcome** subsystem. After ANY
+import path (platform OR model-improvised), the engine should (a) verify the workspace actually received
+files and land a repo the model cloned into the sandbox, and (b) guarantee the user-facing summary reflects
+REAL workspace state — it must be architecturally impossible to report "imported successfully / ready" when
+the workspace is empty.
+
+**OPEN root causes (rule 6 — recorded, not silently patched; not rushed into the core result path):**
+1. **Honesty backstop:** when `failedImport` is set (the platform KNOWS the import failed), the final
+   user-facing summary must not be reportable as an import success, regardless of the model's prose — the
+   same "verdict FIRST, model claim labelled as may-overstate" pattern the readiness gate already uses, but
+   for imports. Needs careful placement across the several `type:'result'` emit sites; deferred to avoid
+   rushing the core result path (rule 1). #1853 removes the trigger for the reported case.
+2. **Land-the-sandbox-clone safety net:** if the platform import fails but the model clones the repo into the
+   sandbox (e.g. `/tmp/*-import`), detect and land it (or clone-and-land in the platform itself) so files
+   never strand. Largely moot after #1853, but the architectural guarantee is still open.

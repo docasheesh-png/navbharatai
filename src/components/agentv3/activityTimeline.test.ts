@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isProgressNoise, parseFileTick, diffStats, summarizeActions, detailEntries, buildChatBlocks, actionGroupOpen, carryOverActivity, ACTIVITY_LOG_CAP } from './activityTimeline';
+import { isProgressNoise, parseFileTick, diffStats, summarizeActions, detailEntries, buildChatBlocks, actionGroupOpen, carryOverActivity, ACTIVITY_LOG_CAP, groupFileDiffs } from './activityTimeline';
 import type { ActivityEntry } from './agentV3Types';
 
 const tool = (id: string, ts: number, text: string, extra: Partial<ActivityEntry> = {}): ActivityEntry =>
@@ -180,5 +180,38 @@ describe('carryOverActivity — a settled turn\'s action rows survive the next s
     const out = carryOverActivity(many, [file('last', 9_999, 'created last.ts')]);
     expect(out).toHaveLength(ACTIVITY_LOG_CAP);
     expect(out[out.length - 1].id).toBe('last');
+  });
+});
+
+describe('groupFileDiffs — the inline persistent diff data (admin 2026-07-21: "diff gayab na ho")', () => {
+  it('returns real patches for created/edited files, in first-appearance order', () => {
+    const entries = [file('1', 1, 'created src/App.tsx'), file('2', 2, 'edited src/api.ts')];
+    const diffs = { 'src/App.tsx': '@@\n+const a = 1', 'src/api.ts': '@@\n-old\n+new' };
+    const out = groupFileDiffs(entries, diffs);
+    expect(out).toEqual([
+      { path: 'src/App.tsx', patch: '@@\n+const a = 1', op: 'create' },
+      { path: 'src/api.ts', patch: '@@\n-old\n+new', op: 'edit' },
+    ]);
+  });
+
+  it('omits files with no known patch — never fabricates a diff', () => {
+    const out = groupFileDiffs([file('1', 1, 'created a.ts'), file('2', 2, 'created b.ts')], { 'a.ts': '+x' });
+    expect(out.map((f) => f.path)).toEqual(['a.ts']);
+  });
+
+  it('a file created+edited in one group shows once as a create', () => {
+    const entries = [file('1', 1, 'created a.ts'), file('2', 2, 'edited a.ts')];
+    const out = groupFileDiffs(entries, { 'a.ts': '+x' });
+    expect(out).toEqual([{ path: 'a.ts', patch: '+x', op: 'create' }]);
+  });
+
+  it('every actions block carries its files[] so the inline diff persists', () => {
+    const blocks = buildChatBlocks(
+      [{ role: 'agent' as const, text: 'Editing your file…', ts: 1 }],
+      [file('1', 2, 'edited src/App.tsx')],
+      { 'src/App.tsx': '@@\n-a\n+b' },
+    );
+    const act = blocks.find((b) => b.kind === 'actions') as Extract<(typeof blocks)[number], { kind: 'actions' }>;
+    expect(act.files).toEqual([{ path: 'src/App.tsx', patch: '@@\n-a\n+b', op: 'edit' }]);
   });
 });

@@ -21214,3 +21214,49 @@ preview reopen path. Kill switch `AGENTV3_TSCONFIG_SANITIZE=off`.
 3. GLM free-tier 429 storm + the 240s fast-lane timeout — shared provider-storm root with autopsy #2.
 
 Gate: server tsc 0 · FrameworkFoundation 21/21 · full suite (running/green).
+
+---
+
+## 2026-07-23 — Autopsy: GitHub import "couldn't clone" a PUBLIC repo + landed 0 files (mitrify) → the real cause was `cp -a`, not access
+
+**Report:** `86a5575c-…json`. Prompt: "Import this app from my GitHub repository and give me a short
+survey… Do not change any files yet." `powerLevel=weak`, `noClaude=true`, `ok=true`, but the WORKSPACE
+ended with **0 files** while the survey claimed success.
+
+**What the timeline proves (this OVERTURNS the earlier "account mismatch" theory):**
+- The connected account IS `aashishcpmt093-ui` (report: "this build will be saved to aashishcpmt093-ui/…")
+  — the SAME account that owns `mitrify`. NOT a mismatch.
+- The platform's `hydrateFromRepo` failed BOTH the authed clone and the anonymous retry → "I couldn't
+  clone …" → empty workspace.
+- **But the model's own `git clone https://github.com/aashishcpmt093-ui/mitrify /tmp/mitrify-import`
+  succeeded, exit 0, ANONYMOUSLY** (commands[0], stderr just "Cloning into…"). So the repo is public and
+  cloneable — the platform's clone was broken in a way a plain clone is not.
+- The model surveyed from `/tmp/mitrify-import` (correct, detailed survey) but those files were NEVER
+  landed into the workspace → 0 files, and a survey that says "successfully cloned… ready for further
+  work" while the project is empty (a misleading outcome).
+
+**Root cause (rule 4, evidence not guess):** each hydrate attempt ran **~6s** (400408→407267→413106) — an
+auth REJECTION fails in <1s, so 6s means the **clone SUCCEEDED and the failure was the post-clone overlay
+step**. That step was `cp -a /tmp/nbhydrate/. ./ && echo NB_HYDRATED || echo NB_HYDRATE_FAIL`. **`cp -a`
+implies `--preserve=ownership`, which returns a NON-ZERO exit** ("failed to preserve ownership: Operation
+not permitted") in the single-user sandbox **even when every file copied fine** — so a successful clone was
+reported as `NB_HYDRATE_FAIL` → `skipped:true`, on BOTH attempts (deterministic). The model's plain clone
+never `cp`'d into the workspace, so it dodged the footgun (but also never landed the files). Verified
+offline: the plain clone AND `cp -R --preserve=mode,timestamps` both succeed on real mitrify (21/21 top-level
+entries land); `cp -a`'s ownership-preserve is the classic container footgun.
+
+**DNA fix (`src/server/AgentV3/GitRepoSync.ts`):** the overlay is now **ownership-safe + filesystem-verified**:
+`cp -R --preserve=mode,timestamps` (ownership is meaningless in a single-user sandbox), then success is
+judged by the FILESYSTEM — every cloned top-level entry (except `.git`) must now exist in the workspace —
+**never by cp's exit code**. So an ownership-preserve warning can no longer fake an import failure. Genuine
+clone failures still classify (auth/not-found/network/no-git) unchanged. 2 regression tests added
+(ownership-safe command asserted; NB_HYDRATE_FAIL still → skipped). Existing 24 GitRepoSync tests green.
+
+**Honest boundary (rule 6):** I could not reproduce the E2B sandbox offline (same-uid cp preserves
+ownership fine here), but the 6s timing + the `cp -a` ownership footgun is the mechanism the evidence points
+to, and the fix is robust BY CONSTRUCTION — it trusts the filesystem, so even if a different post-clone
+cause existed, a genuinely-landed clone is now reported as success. OPEN follow-up: when the platform import
+still fails for a real reason, the model may improvise a `/tmp` clone whose files never land — a "clone in
+sandbox → land it" safety net + a survey that doesn't claim success on an empty workspace are the next slice.
+
+Gate: frontend tsc 0 · server tsc 0 · GitRepoSync 26/26 · GitManager + ProjectImport green (111 total).

@@ -341,7 +341,7 @@ export function ViewPanels({
           (admin 2026-07-20); previously the designer ended at a JSON export and built nothing. */}
       {activeView === 'botbuilder' && (
         <div className="flex-1 h-full overflow-hidden">
-          <BotBuilder onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)} />
+          <BotBuilder />
         </div>
       )}
 

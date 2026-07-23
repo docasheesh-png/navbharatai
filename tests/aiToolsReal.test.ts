@@ -87,21 +87,23 @@ describe('AI Image Gen — our own engine, no third-party hotlink', () => {
   });
 });
 
-describe('Bot Builder — real build handoff', () => {
+describe('Bot Builder — real Go-Live deployment', () => {
   it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
     const entry = kb('bot_builder');
     expect(entry).toBeTruthy();
     expect(entry!.path).toContain('Other AI → Bot Builder'); // moved from Settings → Home "Other AI" (2026-07-23)
-    expect(entry!.description).toMatch(/BUILD it for real/i);
-    expect(entry!.description).toMatch(/Pro v5\.0/);
+    expect(entry!.description).toMatch(/REAL bot/i);
+    expect(entry!.description).toMatch(/Go Live/i);
+    expect(entry!.description).toMatch(/telegram/i);
     expect(navFor(entry!)).toEqual({ view: 'botbuilder' });
   });
 
-  it('the component wires "Build Bot App" through the v5 prefill signal', () => {
+  it('the component wires "Go Live" to the REAL bot connector (Build Bot App removed 2026-07-23)', () => {
     const src = readFileSync(join(__dirname, '../src/components/ide/BotBuilder.tsx'), 'utf8');
-    expect(src).toContain('botFlowToBuildPrompt');
-    expect(src).toContain('onBuildViaV5');
-    const vp = readFileSync(join(__dirname, '../src/components/panels/ViewPanels.tsx'), 'utf8');
-    expect(vp).toMatch(/BotBuilder onBuildViaV5/);
+    expect(src).toContain('Go Live');
+    expect(src).toContain('/api/bots/telegram/connect');
+    expect(src).not.toContain('Build Bot App'); // the misleading handoff button is gone
+    const server = readFileSync(join(__dirname, '../server.ts'), 'utf8');
+    expect(server).toContain('registerBotRoutes(app)');
   });
 });

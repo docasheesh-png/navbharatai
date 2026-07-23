@@ -21450,3 +21450,22 @@ Two real root causes:
   out how to add buttons, so EVERY AI (Free/Pro/Offline) answers correctly.
 
 Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9016/9016 green (incl. 3 new).
+
+---
+
+## 2026-07-23 — Bot Builder: removed the misleading "Build Bot App" button (admin request)
+
+Admin: "Build Bot App" ka naam misleading hai — click karne se pura flow Pro v5.0 me ek prompt ban jaata
+hai aur send karne se bas ek WEB app banta hai; asli bot deployment to ab "Go Live" karta hai. Isko hatao.
+
+Correct (rule 3): with real "Go Live" (Telegram/WhatsApp) shipped, the "Build Bot App" Pro-v5.0 handoff was
+redundant AND its name implied it built the bot when it only produced a generic web-app clone.
+
+- Removed the **"Build Bot App"** button + its `onBuildViaV5` prop from `BotBuilder`; `ViewPanels` renders
+  `<BotBuilder />`. Deleted the now-unused `src/lib/botFlowPrompt.ts` (+ its test).
+- `AppKnowledgeBase` bot_builder description/howToUse rewritten around **Go Live** as the real ship path
+  (no more Pro-v5.0 handoff / "web app" language).
+- Updated `tests/aiToolsReal.test.ts` (asserts Go-Live wiring + no "Build Bot App") and
+  `botBuilderAwareness.test.ts` (asserts 'go live'/'telegram' instead of 'build bot app').
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9012/9012 green.

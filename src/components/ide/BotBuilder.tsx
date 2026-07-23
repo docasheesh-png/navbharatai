@@ -4,7 +4,6 @@ import {
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
   Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle
 } from 'lucide-react';
-import { botFlowToBuildPrompt } from '../../lib/botFlowPrompt';
 import { auth } from '../../App';
 import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 
@@ -111,17 +110,9 @@ function getNextNodes(edges: BotEdge[], fromId: string, nodes: BotNode[]) {
     .filter(x => x.node) as { node: BotNode; label?: string }[];
 }
 
-interface BotBuilderProps {
-  /**
-   * Hands the designed flow to the REAL build engine (admin autopsy 2026-07-20): converts the
-   * nodes/edges into a full NavBharatAI Pro v5.0 build prompt (composer prefill + view switch) so
-   * "Build Bot App" produces a genuinely working chatbot app — the designer previously ended at a
-   * JSON download and never built anything.
-   */
-  onBuildViaV5?: (prompt: string) => void;
-}
-
-export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
+// The old Pro-v5.0 handoff button was removed (admin 2026-07-23): its name misled (implied it built the bot
+// but it only produced a generic web-app clone), and real deployment now lives in "Go Live" (Telegram/WhatsApp).
+export const BotBuilder: React.FC = () => {
   const [nodes, setNodes] = useState<BotNode[]>(defaultNodes);
   const [edges, setEdges] = useState<BotEdge[]>(defaultEdges);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -595,17 +586,6 @@ Content-Type: application/json
         </div>
 
         <span className="text-xs text-gray-400 border border-white/10 rounded px-2 py-1.5 flex-shrink-0 whitespace-nowrap">{nodes.length} nodes</span>
-
-        {onBuildViaV5 && (
-          <button
-            onClick={() => onBuildViaV5(botFlowToBuildPrompt(nodes, edges, platform))}
-            disabled={nodes.length === 0}
-            title="Hand this flow to NavBharatAI Pro v5.0 — press Send there to build the real chatbot app"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors flex-shrink-0 whitespace-nowrap"
-          >
-            <Bot size={13} /> Build Bot App
-          </button>
-        )}
         <button onClick={startSim} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Zap size={13} /> Simulate
         </button>

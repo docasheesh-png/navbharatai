@@ -39,10 +39,11 @@ describe('Bot Builder — 100% AI awareness (Free · Pro · Offline)', () => {
     expect(navFor(bot!)).toEqual({ view: 'botbuilder' });
   });
 
-  it('every AI describes the CURRENT Bot Builder (connect nodes · simulate · build for real)', () => {
+  it('every AI describes the CURRENT Bot Builder (connect nodes · simulate · Go Live to Telegram/WhatsApp)', () => {
     const text = `${bot!.description} ${bot!.howToUse}`.toLowerCase();
     expect(text).toContain('connect');
-    expect(text).toContain('simulat');   // Simulator / Simulate
-    expect(text).toContain('build bot app');
+    expect(text).toContain('simulat');    // Simulator / Simulate
+    expect(text).toContain('go live');    // the real deployment path (Build Bot App removed)
+    expect(text).toContain('telegram');
   });
 });

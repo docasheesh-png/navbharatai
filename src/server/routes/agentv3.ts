@@ -223,7 +223,7 @@ import { loadUserVaultSecrets } from '../lib/secrets';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
-import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
+import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { checkPreviewCompiles, previewCompileRepairInstruction } from '../runtime/PreviewCompileCheck';
@@ -2816,6 +2816,17 @@ export function registerAgentV3Routes(app: Express): void {
               sendStage(`Restoring your project (recovered ${foundation.added.length} missing file(s): ${foundation.added.join(', ')})`, 7);
             }
           } catch { /* foundation heal is best-effort — the structure check below still runs */ }
+          // Strip any dangling tsconfig `extends` (an uninstalled bare-package base) so a reopened project
+          // whose tsconfig extends a phantom package (e.g. "@tsconfig/react") still boots its dev server.
+          if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
+            try {
+              const ts = sanitizeTsconfigExtends(saved);
+              if (ts.fixes.length > 0) {
+                Object.assign(saved, ts.patch);
+                await mergeWorkspaceFiles(workspaceId, ts.patch).catch(() => {});
+              }
+            } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
+          }
           await writeWorkspaceFiles(actuator, workspaceId, saved);
         }
         // Re-materialize durable binary assets (logo/icons/fonts) into the re-seeded sandbox.
@@ -6849,6 +6860,23 @@ export function registerAgentV3Routes(app: Express): void {
                 );
               }
             } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
+          }
+          // TSCONFIG EXTENDS SANITIZER (autopsy buildId 9245f090): a generated tsconfig can `extends` a
+          // bare package that isn't installed (e.g. the phantom "@tsconfig/react") — Vite then dies at
+          // startup with TSConfckParseError and the dev server never comes up. Strip the dangling extends
+          // (deterministic + safe — a Vite-React tsconfig is self-contained) BEFORE the install/dev server.
+          // Kill switch: AGENTV3_TSCONFIG_SANITIZE=off.
+          if (process.env.AGENTV3_TSCONFIG_SANITIZE !== 'off') {
+            try {
+              const ts = sanitizeTsconfigExtends(Object.fromEntries(writtenFiles));
+              if (ts.fixes.length > 0) {
+                fastLog(`🩹 Repaired ${ts.fixes.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${ts.fixes.map((f) => f.file).join(', ')}`);
+                try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${ts.fixes.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                await mapWithConcurrency(Object.entries(ts.patch), 4, ([p, c], i) =>
+                  dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                );
+              }
+            } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
           }
           // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
           // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/

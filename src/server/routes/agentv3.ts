@@ -107,7 +107,7 @@ import { isZipAttachment, extractZipProject, validateImportedProject, droppedDet
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -4784,6 +4784,23 @@ export function registerAgentV3Routes(app: Express): void {
         const envNote = envTemplateNote(importedFiles);
         if (envNote) emit({ type: 'narration', agent: 'architect', text: envNote, ts: Date.now() });
       } catch { /* the env note is best-effort */ }
+      // PERSISTENT-DATABASE ADVISORY (admin 2026-07-23 — big imported apps must be told clearly "this is the
+      // problem, here's the solution"): if the imported app uses a database and the user has NOT connected
+      // their own persistent DB, say so plainly and point them at the real fix (Settings → Database, the
+      // existing bring-your-own flow the engine auto-wires) — instead of leaving DB guidance only in the
+      // model's hidden system prompt (invisible unless the model relays it). Suppressed when a DB is already
+      // connected. Best-effort + kill-switch AGENTV3_DB_ADVISORY=off.
+      if (process.env.AGENTV3_DB_ADVISORY !== 'off') {
+        try {
+          const provider = detectDatabaseProvider(importedFiles);
+          if (provider) {
+            const vault = userId ? await loadUserVaultSecrets(userId).catch(() => null) : null;
+            const connected = !!userDatabaseContext(vault);
+            const advisory = persistentDatabaseAdvisory({ provider, connected });
+            if (advisory) emit({ type: 'narration', agent: 'architect', text: advisory, ts: Date.now() });
+          }
+        } catch { /* the DB advisory is best-effort — never blocks an import */ }
+      }
       // ROCK-SOLID IMPORT (admin 2026-07-07): an imported repo can itself be INCOMPLETE — a snapshot
       // pushed from an interrupted mid-build state (real case: App.tsx importing five src/pages/*
       // files the repo never contained). Detect unresolved LOCAL imports deterministically at IMPORT

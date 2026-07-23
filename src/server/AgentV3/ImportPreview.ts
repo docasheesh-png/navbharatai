@@ -43,6 +43,70 @@ export function detectNeedsDatabase(files: Record<string, string>): boolean {
   return Object.values(files).some((c) => typeof c === 'string' && c.includes('DATABASE_URL'));
 }
 
+/** Friendly DB-provider label → package/env signals. Ordered most-specific first; the FIRST match wins.
+ *  Broader than detectNeedsDatabase (which only knows SQL/ORM drivers): this also recognises the BaaS
+ *  providers (Supabase / Firebase) an imported app commonly uses. These are the USER'S OWN database
+ *  vendors — naming them is correct and helpful (the white-label rule covers NavBharatAI's AI vendors,
+ *  not the user's chosen database). */
+const DB_PROVIDER_SIGNALS: Array<{ label: string; deps: string[]; envRe?: RegExp }> = [
+  { label: 'Supabase', deps: ['@supabase/supabase-js', '@supabase/ssr'], envRe: /\bSUPABASE_URL\b|\bSUPABASE_ANON_KEY\b|\bVITE_SUPABASE_/ },
+  { label: 'Firebase', deps: ['firebase', 'firebase-admin'], envRe: /\bFIREBASE_|\bVITE_FIREBASE_/ },
+  { label: 'Neon', deps: ['@neondatabase/serverless'] },
+  { label: 'PlanetScale', deps: ['@planetscale/database'] },
+  { label: 'MongoDB', deps: ['mongoose', 'mongodb'], envRe: /\bMONGO(DB)?_URI\b|\bMONGODB_URL\b/ },
+  { label: 'Prisma', deps: ['@prisma/client', 'prisma'] },
+  { label: 'Drizzle', deps: ['drizzle-orm'] },
+  { label: 'PostgreSQL', deps: ['pg', 'postgres', 'pg-promise', 'slonik'] },
+  { label: 'MySQL', deps: ['mysql', 'mysql2'] },
+  { label: 'a SQL database', deps: ['sequelize', 'typeorm', 'knex', 'kysely'] },
+];
+
+/**
+ * The DATABASE provider an imported app uses (for a specific, honest advisory), or null if none is
+ * detected. Reads package.json deps first (most reliable), then falls back to env/source signals
+ * (SUPABASE_URL, MONGODB_URI, DATABASE_URL). PURE.
+ */
+export function detectDatabaseProvider(files: Record<string, string>): string | null {
+  let deps: Record<string, unknown> = {};
+  const pkgRaw = files['package.json'];
+  if (typeof pkgRaw === 'string') {
+    try {
+      const p = JSON.parse(pkgRaw) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+      deps = { ...(p.dependencies ?? {}), ...(p.devDependencies ?? {}) };
+    } catch { /* not valid JSON — fall through to the source/env scan */ }
+  }
+  const has = (d: string) => Object.prototype.hasOwnProperty.call(deps, d);
+  for (const sig of DB_PROVIDER_SIGNALS) {
+    if (sig.deps.some(has)) return sig.label;
+  }
+  // No recognised driver dep — fall back to env/source signals.
+  const allText = Object.values(files).filter((c): c is string => typeof c === 'string').join('\n');
+  for (const sig of DB_PROVIDER_SIGNALS) {
+    if (sig.envRe && sig.envRe.test(allText)) return sig.label;
+  }
+  if (/\bDATABASE_URL\b/.test(allText)) return 'a database';
+  return null;
+}
+
+/**
+ * The deterministic, USER-FACING "problem → solution" advisory for a freshly-imported app that uses a
+ * database (admin 2026-07-23 — big imported apps must be told clearly what's wrong and how to fix it,
+ * instead of DB guidance living only in the model's hidden system prompt). When the user has NOT
+ * connected their own persistent database, it names the provider and points them at the real fix
+ * (Settings → App Settings → Database — the existing bring-your-own flow the engine auto-wires). Returns
+ * '' when a database is already connected (no problem) or none is used. PURE.
+ */
+export function persistentDatabaseAdvisory(opts: { provider: string | null; connected: boolean }): string {
+  if (opts.connected || !opts.provider) return '';
+  const uses = opts.provider === 'a database' || opts.provider === 'a SQL database' ? opts.provider : `**${opts.provider}**`;
+  return (
+    `🗄️ Heads up: this app uses ${uses}, but you haven't connected a database yet — so its data won't ` +
+    `persist. To run your app for real, connect your own database in **Settings → App Settings → Database** ` +
+    `(Supabase, Neon, Firebase, MongoDB, or a connection string) and I'll wire it in on the next build. ` +
+    `Any preview until then runs on temporary data only.`
+  );
+}
+
 /** The env-var NAMES the app documents in its committed .env template (never the values). PURE. */
 export function envVarNames(files: Record<string, string>): string[] {
   const raw = files['.env.example'] ?? files['.env.sample'] ?? files['.env.template'] ?? '';

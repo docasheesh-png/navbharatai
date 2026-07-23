@@ -21118,3 +21118,19 @@ pass is kept as DEFENSE-IN-DEPTH (cleans the shipped app on fast-lane/salvage/ed
 skipped; idempotent). 3 dispatcher tests added (redact+persist, clean no-op, kill-switch). Gate:
 frontend tsc 0 · server tsc 0 · ToolDispatcher (185) + credentialLogRedaction (13) + ComplianceAnalysis
 (20) green.
+
+## 2026-07-21 — Inline PERSISTENT diff under every file response (admin: "diff gayab na ho") — session claude/pro5-inline-diff
+
+Follow-up to the v5.0 chat UX overhaul (#1809). The admin re-flagged that the DIFF under each edit/create
+response was still vanishing. Root cause: the real colorized patch (+/- lines) only ever lived in the
+separate **Diff tab** — under a chat response only a paths-only action row showed, which auto-collapses to
+one line after the build. #1809 stopped the row being *wiped* on the next send; this makes the **diff itself**
+inline and permanent.
+
+- `activityTimeline.groupFileDiffs` (pure, tested) attaches each group's real per-file patches to the
+  `actions` chat block; `ActionGroupRow` renders them as a colorized, per-file-collapsible diff with a
+  `View changes · N files +X -Y` toggle placed OUTSIDE the group's own collapse (so it stays after the build)
+  and carried across sends by the archived `activityLog`. Auto-open ≤3 files (single-file edits show at once);
+  big builds one tap away. Bounded 200 lines/file, 12 files/group (rest → Diff tab). Real patches only.
+- Tests: `groupFileDiffs` order / no-fabrication / create+edit dedupe / block.files carried. Gate: frontend
+  tsc clean (2 pre-existing `@capacitor/*` local-only module errors, resolved by CI's fresh install), vitest green.

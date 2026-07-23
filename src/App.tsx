@@ -2490,6 +2490,7 @@ export default function App() {
                  toggleTab('nbi_pro_chat');
                }}
                onStartProfessionals={() => toggleTab('professionals')}
+               onOpenTool={(id) => { if (user) { toggleTab(id as any); } else { setShowAuth(true); } }}
                isAdmin={isAdmin}
                data={homeData}
                onUpdate={(newData) => setHomeData(newData)}

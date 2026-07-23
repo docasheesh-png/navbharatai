@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Stethoscope,
   Scale, GraduationCap, Activity, Zap, Code2, Rocket,
-  CheckCircle2, ArrowRight, ChevronRight
+  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid, X
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
+import { HOME_TOOL_GROUPS } from './homeToolGroups';
 
 interface HomeData {
   heroTitle: string;
@@ -27,6 +28,8 @@ interface HomeViewProps {
   onStartChat: () => void;
   onStartProChat?: () => void;
   onStartProfessionals?: () => void;
+  /** Open a builder tool by its workspace-tab id (moved here from Settings, admin 2026-07-23). */
+  onOpenTool?: (id: string) => void;
   isAdmin?: boolean;
   data?: HomeData;
   onUpdate?: (newData: HomeData) => void;
@@ -97,27 +100,24 @@ const PRODUCT_CARDS = [
     btnIcon: ChevronRight,
   },
   {
-    // 4th option (admin 2026-07-22) — a hub for more NavBharatAI AI tools. Content is being added;
-    // shown as an honest "Coming Soon" until it's wired, so it's never a dead/fake button.
-    id: 'other',
-    badge: 'Coming Soon',
+    id: 'tools',
+    badge: '20+ Tools',
     badgeColor: 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30',
     gradient: 'from-fuchsia-600/20 via-pink-500/10 to-transparent',
     border: 'border-fuchsia-500/20 hover:border-fuchsia-400/50',
     glow: 'shadow-fuchsia-500/10',
     iconBg: 'bg-fuchsia-500/15',
     iconColor: 'text-fuchsia-400',
-    Icon: Sparkles,
+    Icon: LayoutGrid,
     title: 'Other AI',
-    subtitle: 'More AI Tools',
-    description: 'A growing collection of specialized NavBharatAI tools. New AI utilities will appear here — coming soon.',
-    features: ['New AI tools, one tap away', 'Made for Bharat', 'More added regularly'],
+    subtitle: 'Builder Tools & Utilities',
+    description: 'Every extra AI utility to design, develop, ship and monetize your app — bot builder, image gen, debugger, deploy, SEO, monetization and more.',
+    features: ['Design, develop, test & minify', 'Publish, deploy & custom domain', 'Monetize, analytics & team'],
     featureIcon: CheckCircle2,
     featureColor: 'text-fuchsia-400',
-    btnClass: 'bg-white/5 text-fuchsia-200 border border-fuchsia-500/20',
-    btnLabel: 'Coming Soon',
-    btnIcon: Sparkles,
-    comingSoon: true,
+    btnClass: 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-white',
+    btnLabel: 'Open Tools',
+    btnIcon: LayoutGrid,
   },
 ];
 
@@ -127,6 +127,7 @@ export const HomeView = ({
   onStartChat,
   onStartProChat,
   onStartProfessionals,
+  onOpenTool,
   isAdmin,
   data,
   onUpdate,
@@ -135,11 +136,18 @@ export const HomeView = ({
   onShowLogin,
 }: HomeViewProps) => {
   const colors = getThemeClasses(theme);
+  // "Other AI" (the 4th card) reveals the builder-tool groups moved here from Settings (admin 2026-07-23).
+  const [showTools, setShowTools] = useState(false);
 
   const handlers: Record<string, (() => void) | undefined> = {
     free: onStartChat,
     pro: onStartProChat,
     professionals: onStartProfessionals,
+    tools: () => {
+      setShowTools(true);
+      // Bring the revealed tool grid into view on the next paint.
+      requestAnimationFrame(() => document.getElementById('home-builder-tools')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    },
   };
 
   return (
@@ -208,7 +216,7 @@ export const HomeView = ({
           </p>
         </motion.div>
 
-        {/* ── Product Cards ── */}
+        {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
         <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           {PRODUCT_CARDS.map((card, i) => {
             const CardIcon = card.Icon;
@@ -296,6 +304,64 @@ export const HomeView = ({
             );
           })}
         </div>
+
+        {/* ── Builder Tools — revealed by the "Other AI" card (moved from Settings, admin 2026-07-23) ── */}
+        {showTools && (
+        <motion.div
+          id="home-builder-tools"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="w-full flex flex-col gap-4 scroll-mt-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-full px-4 py-1.5">
+                <LayoutGrid className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
+                <span className="font-black uppercase tracking-[0.25em] text-fuchsia-400 text-[9px] sm:text-[10px]">
+                  Other AI · Builder Tools
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowTools(false)}
+              className="flex items-center gap-1 text-[11px] font-bold text-[#8b949e] hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-white/5"
+              aria-label="Hide builder tools"
+            >
+              <X className="w-3.5 h-3.5" /> Hide
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+            {HOME_TOOL_GROUPS.map((group) => {
+              const GroupIcon = group.icon;
+              return (
+                <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <GroupIcon className={cn('w-3.5 h-3.5', group.color)} />
+                    <span className={cn('text-[10px] font-black uppercase tracking-widest', group.color)}>{group.title}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {group.items.map((item) => {
+                      const ToolIcon = item.icon;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => (onOpenTool ? onOpenTool(item.id) : onShowLogin())}
+                          className="flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
+                        >
+                          <ToolIcon className="w-4 h-4 text-[#8b949e] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                          <span className="text-[11px] font-bold text-[#8b949e] group-hover:text-white transition-colors leading-tight">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+        )}
 
         {/* ── Footer tagline ── */}
         <motion.p

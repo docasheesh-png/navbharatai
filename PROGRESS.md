@@ -21429,3 +21429,24 @@ Two admin-requested tweaks to the Pro v5.0 build feed (both frontend-only, both 
 
 Gate: frontend tsc (only pre-existing @capacitor env errors) · revealPacer 14/14 · ActivityTimelineRow 4/4 ·
 full suite (running/green).
+
+---
+
+## 2026-07-23 — Bot Builder autopsy: no "Add button" + the Help AI only 50% knew the tool (admin conversation)
+
+Admin pasted the full Help-AI conversation: they added a Message node, asked how to add a button, and the
+Help AI (NavBharatAI Free) HALLUCINATED — "scroll down in the panel and tap Add Button" (no such control),
+then flailed, then wrongly deflected the user to Pro v5.0 and claimed "no external engineer can fix this."
+Two real root causes:
+
+- ❌ **UX gap:** a Message node had NO way to add buttons — buttons lived only in a separate "Button Menu"
+  node, which wasn't discoverable. **Fix:** the Message node editor now has a **"Add button"** section
+  (WhatsApp/Telegram-style quick replies on a message). `botFlowRunner` emits those buttons and routes on
+  the tapped one (pickEdge now handles message options too). 3 new runner tests.
+- ❌ **Help AI only ~50% accurate:** it was grounded only in a high-level KB blurb, so it invented specifics.
+  **Fix:** the Help widget's hidden primer is now the EXACT Bot-Builder manual — the real controls (palette,
+  node toolbar, "Add button", Connect, Simulate, Go Live) — and explicitly forbids inventing controls,
+  deflecting to Pro v5.0, or claiming the tool "can't be fixed." `AppKnowledgeBase` howToUse also now spells
+  out how to add buttons, so EVERY AI (Free/Pro/Offline) answers correctly.
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9016/9016 green (incl. 3 new).

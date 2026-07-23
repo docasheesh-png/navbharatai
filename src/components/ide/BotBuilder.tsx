@@ -434,6 +434,34 @@ Content-Type: application/json
           </div>
         )}
 
+        {/* Tappable quick-reply buttons ON a message (admin 2026-07-23) — WhatsApp/Telegram style. */}
+        {node.type === 'message' && (
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-gray-400">Buttons <span className="text-gray-600">(optional — tappable quick replies)</span></label>
+            {(node.data.options || []).map((opt, i) => (
+              <div key={i} className="flex gap-1.5">
+                <input
+                  className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                  style={{ background: '#0d1117' }}
+                  value={opt}
+                  placeholder={`Button ${i + 1}`}
+                  onChange={e => { const opts = [...(node.data.options || [])]; opts[i] = e.target.value; updateNodeData(node.id, { options: opts }); }}
+                />
+                <button onClick={() => updateNodeData(node.id, { options: (node.data.options || []).filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-300 px-1" aria-label="Remove button"><X size={14} /></button>
+              </div>
+            ))}
+            <button
+              onClick={() => updateNodeData(node.id, { options: [...(node.data.options || []), 'New button'] })}
+              className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors self-start"
+            >
+              <Plus size={12} /> Add button
+            </button>
+            {(node.data.options || []).length > 0 && (
+              <p className="text-[10px] text-gray-500 leading-snug">Now connect each button to its next node: tap this node → Connect 🔗 → tap the target. The buttons follow the connections in order.</p>
+            )}
+          </div>
+        )}
+
         {node.type === 'menu' && (
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1.5">

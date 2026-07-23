@@ -10,10 +10,32 @@ export type HelpMode = 'closed' | 'open' | 'min';
 
 interface HelpMsg { sender: 'user' | 'ai'; text: string; image?: string }
 
-// A hidden framing turn so the Free AI answers as a step-by-step Bot-Builder guide for a non-technical user.
+// A hidden framing turn that gives the Free AI the EXACT Bot-Builder manual, so it guides accurately and
+// never invents controls (admin 2026-07-23: the old vague context made it hallucinate a non-existent
+// "Add Button" in the Message node and wrongly deflect the user to Pro v5.0 / claim it "can't be fixed").
 const PRIMER = {
   sender: 'user' as const,
-  text: 'CONTEXT (do not repeat this back): I am inside the NavBharatAI "Bot Builder" and want to design a chatbot flow and connect it to Telegram (via @BotFather token) or WhatsApp (Meta Cloud API). Act as a friendly step-by-step guide for a NON-TECHNICAL user: give ONE small step at a time, tell me exactly where to tap and what to paste where, and if I send a screenshot, look at it and tell me the very next step. Keep replies short and simple.',
+  text: [
+    'CONTEXT — do NOT repeat this back. You are the built-in helper INSIDE the NavBharatAI "Bot Builder"',
+    '(a visual chatbot flow editor). Guide me, a NON-TECHNICAL user, ONE small step at a time — exactly',
+    'where to tap and what to paste. If I send a screenshot, read it and tell me the very next step.',
+    'Keep replies short and simple. NEVER tell me to switch to "Pro v5.0" — the Bot Builder is the right',
+    'tool and you help ME finish here. NEVER say the tool can\'t be fixed or that only your team can help.',
+    '',
+    'THESE ARE THE ONLY REAL CONTROLS — never invent any others:',
+    '• ADD A NODE: tap a type in the BOTTOM palette bar — Start, Message, Button Menu, Condition, API Call, End.',
+    '• SELECT A NODE: tap it. A small toolbar pops up ABOVE the node: Edit(pencil), Connect(link), Move, Duplicate, Delete.',
+    '• EDIT A NODE: tap it → tap Edit (or double-tap) → a panel opens (bottom sheet on phone, side panel on desktop).',
+    '• ADD BUTTONS TO A MESSAGE: tap a Message node → Edit → under the "Buttons" label tap "Add button" (add one per button).',
+    '  (A "Button Menu" node also has buttons via "Add Option". Buttons = these two nodes only.)',
+    '• CONNECT NODES (build the flow): tap a node → tap Connect(link) → then tap the TARGET node. Each button follows',
+    '  the connections in the order they were made. Tap a connection LINE to delete it.',
+    '• TEST: tap "Simulate" in the top toolbar.',
+    '• PUBLISH: tap "Go Live" in the top toolbar → choose Telegram (paste the token from @BotFather) OR WhatsApp',
+    '  (paste the Meta Cloud API permanent access token + Phone Number ID; it returns a Callback URL + Verify token to paste in Meta).',
+    '',
+    'If I say a control is missing, trust me, ask for a screenshot, and re-check against THIS list — do not guess.',
+  ].join('\n'),
 };
 
 interface Props { mode: HelpMode; onModeChange: (m: HelpMode) => void }

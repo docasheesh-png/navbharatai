@@ -55,6 +55,47 @@ describe('runBotTurn — a real conversation', () => {
   });
 });
 
+describe('a MESSAGE node with buttons (admin 2026-07-23)', () => {
+  const BFLOW: BotFlow = {
+    nodes: [
+      { id: 's', type: 'start', data: {} },
+      { id: 'm', type: 'message', data: { text: 'Namaste! How can I help?', options: ['Appointment', 'Services'] } },
+      { id: 'a', type: 'end', data: { text: 'Booking your appointment…' } },
+      { id: 'b', type: 'end', data: { text: 'Here are our services…' } },
+    ],
+    edges: [
+      { id: 'e1', from: 's', to: 'm' },
+      { id: 'e2', from: 'm', to: 'a', label: 'Appointment' },
+      { id: 'e3', from: 'm', to: 'b', label: 'Services' },
+    ],
+  };
+
+  it('shows the message with its buttons and awaits the tap', async () => {
+    const r = await runBotTurn(BFLOW, { nodeId: null, vars: {} }, '');
+    expect(r.replies[0].text).toBe('Namaste! How can I help?');
+    expect(r.replies[0].buttons).toEqual(['Appointment', 'Services']);
+    expect(r.ended).toBe(false);
+    expect(r.session.nodeId).toBe('m');
+  });
+
+  it('routes on the tapped button', async () => {
+    const after = await runBotTurn(BFLOW, { nodeId: null, vars: {} }, '');
+    const r = await runBotTurn(BFLOW, after.session, 'Appointment');
+    expect(r.replies.map(x => x.text)).toContain('Booking your appointment…');
+    expect(r.ended).toBe(true);
+  });
+
+  it('a Message WITHOUT buttons still just flows to the next node', async () => {
+    const plain: BotFlow = {
+      nodes: [{ id: 's', type: 'start', data: {} }, { id: 'm', type: 'message', data: { text: 'hi' } }, { id: 'e', type: 'end', data: { text: 'bye' } }],
+      edges: [{ id: 'e1', from: 's', to: 'm' }, { id: 'e2', from: 'm', to: 'e' }],
+    };
+    const r = await runBotTurn(plain, { nodeId: null, vars: {} }, '');
+    expect(r.replies.map(x => x.text)).toEqual(['hi', 'bye']);
+    expect(r.ended).toBe(true);
+  });
+});
+
 describe('CONDITION + API nodes run for real', () => {
   const CFLOW: BotFlow = {
     nodes: [

@@ -76,7 +76,7 @@ export function pickEdge(flow: BotFlow, node: BotFlowNode, input: string): BotFl
   let hit = edges.find(e => e.label && norm(e.label) === i && i.length > 0);
   if (!hit && i) hit = edges.find(e => e.label && (i.includes(norm(e.label)) || norm(e.label).includes(i)));
 
-  if (!hit && node.type === 'menu' && node.data.options) {
+  if (!hit && (node.type === 'menu' || node.type === 'message') && node.data.options) {
     const idx = node.data.options.findIndex(o => norm(o) === i);
     if (idx >= 0 && edges[idx]) hit = edges[idx];
   }
@@ -136,6 +136,14 @@ export async function runBotTurn(
       return { replies, session: { nodeId: null, vars }, ended: true };
     }
     if (cur.type === 'message') {
+      // A Message can now carry tappable quick-reply BUTTONS (admin 2026-07-23) — like a real
+      // WhatsApp/Telegram message. When it has buttons, show them and await the user's tap (routed by
+      // pickEdge, same as a menu). A plain message just flows to the next node.
+      const btns = menuButtons(flow, cur);
+      if (btns.length > 0) {
+        replies.push({ text: cur.data.text || '', buttons: btns });
+        return { replies, session: { nodeId: cur.id, vars }, ended: false };
+      }
       if (cur.data.text) replies.push({ text: cur.data.text, buttons: [] });
       const nexts = outgoing(flow, cur.id);
       if (nexts.length === 1) { cur = nodeById(flow, nexts[0].to); continue; }

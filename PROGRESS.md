@@ -21134,3 +21134,27 @@ inline and permanent.
   big builds one tap away. Bounded 200 lines/file, 12 files/group (rest → Diff tab). Real patches only.
 - Tests: `groupFileDiffs` order / no-fabrication / create+edit dedupe / block.files carried. Gate: frontend
   tsc clean (2 pre-existing `@capacitor/*` local-only module errors, resolved by CI's fresh install), vitest green.
+
+## 2026-07-23 — Accurate GitHub clone-failure diagnosis (admin: "apni repo clone karne par error kyu") — session claude/fix-repo-clone-auth
+
+The admin's own-repo import (`aashishcpmt093-ui/mitrify`) failed with a vague "I couldn't clone … if it's
+private connect the account". Root cause: `GitRepoSync.hydrateFromRepo` ran `git clone … >/dev/null 2>&1`,
+discarding git's real stderr — so every failure (no creds / expired token / WRONG account / network) got the
+same generic guess.
+
+- hydrateFromRepo now captures the clone stderr to a temp file IN the sandbox and grep-classifies it there
+  into a typed `HydrateFailReason` (auth / not-found / network / no-git / bad-url / unknown). Only the
+  NB_CLONE_* code crosses the boundary — the raw error (which can echo the token-embedded URL) never leaves
+  the sandbox (secret-safe). Adds `GIT_TERMINAL_PROMPT=0` so a credential-less private clone fails fast
+  instead of hanging on a prompt.
+- New pure `importDiagnostics.ts` → precise message from (reason + hadToken + repo owner parsed from URL):
+  no-token → connect; auth → reconnect (expired); not-found → owned by a DIFFERENT account, and NAMES the
+  owner so "it's my own repo!" is resolved at a glance; network → transient retry. Model prompt gets a
+  specific reason too (never re-asks for the URL). White-label safe (GitHub is the user's own provider;
+  vendor-free invariant test).
+- Tests: GitRepoSync classification + no-leak + fail-fast; importDiagnostics per-reason + owner naming +
+  no-vendor. Gate: server tsc ✅, frontend tsc ✅ (2 pre-existing capacitor local-only errors), vitest green.
+
+OPEN (recorded, low priority): naming the CONNECTED account (not just the owner) needs the login threaded
+from client → build body (or a server GET /user on the failure path); the owner-naming already resolves the
+common confusion, so deferred.

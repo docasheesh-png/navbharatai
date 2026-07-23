@@ -21288,12 +21288,16 @@ files and land a repo the model cloned into the sandbox, and (b) guarantee the u
 REAL workspace state — it must be architecturally impossible to report "imported successfully / ready" when
 the workspace is empty.
 
-**OPEN root causes (rule 6 — recorded, not silently patched; not rushed into the core result path):**
-1. **Honesty backstop:** when `failedImport` is set (the platform KNOWS the import failed), the final
-   user-facing summary must not be reportable as an import success, regardless of the model's prose — the
-   same "verdict FIRST, model claim labelled as may-overstate" pattern the readiness gate already uses, but
-   for imports. Needs careful placement across the several `type:'result'` emit sites; deferred to avoid
-   rushing the core result path (rule 1). #1853 removes the trigger for the reported case.
-2. **Land-the-sandbox-clone safety net:** if the platform import fails but the model clones the repo into the
-   sandbox (e.g. `/tmp/*-import`), detect and land it (or clone-and-land in the platform itself) so files
-   never strand. Largely moot after #1853, but the architectural guarantee is still open.
+**Root causes — status:**
+1. **Honesty backstop — ✅ FIXED (same PR).** `importHonestySummaryPrefix(failedImport)` prepends the
+   platform's honest verdict ("⚠️ The GitHub import did not complete — <url> … your workspace does not
+   contain that repository") to `result.summary` whenever `failedImport` is set — applied BEFORE
+   `buildResultRef` captures it, so BOTH the main and watchdog result paths carry the honest summary. `ok`
+   is left untouched (a survey reply is a valid turn); only the reporting is made honest (rule 5). The
+   architect prompt (`failedImportPromptNote`) now also forbids the model from cloning to a temp dir and
+   reporting success. 4 unit tests (prefix leads the model prose; empty on a normal turn; prompt forbids the
+   /tmp workaround). Placement verified safe (string-only, guarded against double-apply).
+2. **Land-the-sandbox-clone safety net — OPEN (rule 6).** If the platform import fails but the model clones
+   the repo into the sandbox (e.g. `/tmp/*-import`), detect and land it. Largely moot after #1853 (the
+   import now succeeds), and the honesty backstop now prevents a false-success even if it recurs — so this
+   is a defense-in-depth enhancement, not a live bug. Recorded for a future slice.

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1587,6 +1587,27 @@ describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never 
     expect(failedImportPromptNote(null)).toBe('');
     expect(failedImportPromptNote(undefined)).toBe('');
     expect(failedImportPromptNote({ url: '', reason: 'x' })).toBe('');
+  });
+  it('forbids the model from cloning to a temp dir and reporting a false success (mitrify autopsy)', () => {
+    const note = failedImportPromptNote({ url: 'https://github.com/o/r', reason: 'the clone failed' });
+    expect(note).toContain('Do NOT clone the repository yourself into a temp');
+    expect(note).toContain('would NOT persist');
+  });
+});
+
+describe('importHonestySummaryPrefix (mitrify autopsy, rule 5) — a failed import can never read as success', () => {
+  it('prepends an honest verdict naming the url + reason, ahead of the model prose', () => {
+    const prefix = importHonestySummaryPrefix({ url: 'https://github.com/aashishcpmt093-ui/mitrify', reason: 'the clone failed' });
+    const summary = `${prefix}## Mitrify App Survey\nSuccessfully cloned — ready for further work.`;
+    expect(summary.startsWith(IMPORT_HONESTY_PREFIX_MARK)).toBe(true);            // truth leads
+    expect(prefix).toContain('aashishcpmt093-ui/mitrify');
+    expect(prefix).toContain('does not contain that repository');                 // no fake success
+    expect(prefix.indexOf(IMPORT_HONESTY_PREFIX_MARK)).toBeLessThan(summary.indexOf('Successfully cloned'));
+  });
+  it('is empty when no import failed — a normal build summary is untouched', () => {
+    expect(importHonestySummaryPrefix(null)).toBe('');
+    expect(importHonestySummaryPrefix(undefined)).toBe('');
+    expect(importHonestySummaryPrefix({ url: '', reason: 'x' })).toBe('');
   });
 });
 

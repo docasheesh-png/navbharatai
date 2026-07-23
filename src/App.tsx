@@ -2478,7 +2478,7 @@ export default function App() {
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
           // rendered — leaving an empty dead strip under the v5.0 composer, above the phone browser bar.
-          effectiveDeviceMode === 'mobile' && !focusMode ? "pb-14" : ""
+          effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
              <HomeView
@@ -3468,7 +3468,7 @@ export default function App() {
           gating) but its ITEMS follow the active view. v5.0 active → its own six items (History ·
           Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
           via onFooterApi. Every other view keeps the default items. */}
-      {effectiveDeviceMode === 'mobile' && !focusMode && (
+      {effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && (
         <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.

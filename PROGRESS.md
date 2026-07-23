@@ -21301,3 +21301,35 @@ the workspace is empty.
    the repo into the sandbox (e.g. `/tmp/*-import`), detect and land it. Largely moot after #1853 (the
    import now succeeds), and the honesty backstop now prevents a false-success even if it recurs — so this
    is a defense-in-depth enhancement, not a live bug. Recorded for a future slice.
+
+---
+
+## 2026-07-23 — Bot Builder: real working + mobile-friendly + palette moved to footer (admin request)
+
+Admin (screenshot of the Bot Builder inside Other AI on a phone): "isko bas dekhne ka nahi, real working
+banao … mobile friendly … left ke node options (Start/Message/Condition/API/End) footer me rakho … app ka
+dynamic footer (HOME/AI/PREVIEW/STUDIO/MORE) bot builder ke andar se hata do."
+
+**What was actually broken (not just cosmetic):**
+- **Dragging was mouse-only** (`onMouseDown`/MouseEvent) — on a phone you literally could not move a node.
+- **No way to CONNECT nodes** — you could add nodes but there was no UI to wire them into a flow (the whole
+  point of a flow builder). Only the seed flow had edges.
+- Fixed 3-column desktop layout (200px palette + canvas + 280px props) squeezed the canvas to nothing on a
+  phone; the app's own mobile bottom nav sat on top of the builder.
+
+**Changes (`src/components/ide/BotBuilder.tsx`, `src/App.tsx`):**
+- **Touch/mouse/pen dragging** via unified Pointer events + `touch-action:none` on nodes + scroll-aware
+  canvas coordinates (a node now lands under the finger regardless of canvas scroll).
+- **Node connections are real:** each node has a round link handle — tap it, then tap a target node to
+  create the edge (self/duplicate edges rejected; Esc/tap-canvas cancels). **Tap a connection line to delete
+  it.** New nodes drop into the current viewport (not off-screen).
+- **Palette moved from the left sidebar to a horizontal-scroll FOOTER bar** (as asked).
+- **Responsive:** toolbar scrolls horizontally; properties are a full side panel on desktop (`md:`) and an
+  in-flow bottom sheet on mobile; modals are `max-w` + padded so they fit a phone.
+- **App's dynamic footer (HOME/AI/PREVIEW/STUDIO/MORE) is hidden inside the Bot Builder** (`activeView !==
+  'botbuilder'` on the mobile `<nav>` + its reserved `pb-14`), so the builder's own palette footer owns the
+  bottom. Every other view is byte-identical.
+- All existing behaviour preserved: Simulator, Export JSON, Export Webhook, and the real "Build Bot App" →
+  Pro v5.0 handoff. AppKnowledgeBase entry updated for the new touch/connect/footer UX.
+
+Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 8992/8992 green.

@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Play, Download, Webhook, Trash2, Plus, X, ChevronRight,
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
-  Send, Bot, User, Copy, Check, Link2
+  Send, Bot, User, Copy, Check, Link2, Pencil, Move
 } from 'lucide-react';
 import { botFlowToBuildPrompt } from '../../lib/botFlowPrompt';
 
@@ -130,6 +130,10 @@ export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
   // Node-connection state (mobile autopsy 2026-07-23): the designer could ADD nodes but there was NO way
   // to WIRE them — tap a node's link handle to start a connection, then tap the target node to finish it.
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  // A single tap now SELECTS a node and shows a floating action toolbar around it (Edit · Connect · Move ·
+  // Duplicate · Delete) instead of jumping straight into the full editor (admin 2026-07-23). The editor
+  // opens explicitly — the toolbar's Edit button or a double-tap.
+  const [editorOpen, setEditorOpen] = useState(false);
 
   // Drag state
   const dragging = useRef<{ id: string; ox: number; oy: number; pointerId: number } | null>(null);
@@ -206,6 +210,26 @@ export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
 
   function deleteEdge(id: string) {
     setEdges(prev => prev.filter(e => e.id !== id));
+  }
+
+  function openEditor(id: string) {
+    setSelectedId(id);
+    setEditorOpen(true);
+  }
+
+  function duplicateNode(id: string) {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+    const nid = genId();
+    setNodes(prev => [...prev, {
+      ...node,
+      id: nid,
+      x: node.x + 40,
+      y: node.y + 40,
+      data: { ...node.data, options: node.data.options ? [...node.data.options] : undefined },
+    }]);
+    setSelectedId(nid);
+    setEditorOpen(false);
   }
 
   function addNode(type: NodeType) {
@@ -534,7 +558,7 @@ Content-Type: application/json
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
           onPointerLeave={handleCanvasPointerUp}
-          onClick={() => { setSelectedId(null); if (connectingFrom) setConnectingFrom(null); }}
+          onClick={() => { setSelectedId(null); setEditorOpen(false); if (connectingFrom) setConnectingFrom(null); }}
         >
           <svg style={{ position: 'absolute', top: 0, left: 0, width: canvasW, height: canvasH }}>
             <defs>
@@ -598,6 +622,7 @@ Content-Type: application/json
                   }}
                   onPointerDown={e => handleNodePointerDown(e, node.id)}
                   onClick={e => e.stopPropagation()}
+                  onDoubleClick={e => { e.stopPropagation(); openEditor(node.id); }}
                 >
                   <div
                     className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-white/40' : ''} ${isConnectTarget ? 'ring-2 ring-emerald-400/70' : ''}`}
@@ -611,21 +636,46 @@ Content-Type: application/json
                       {node.data.text || node.data.apiUrl || node.data.condition || ''}
                     </p>
                   </div>
-                  {/* Connect handle (bottom-center): starts wiring from this node. `end` nodes have no outgoing. */}
-                  {node.type !== 'end' && (
-                    <button
-                      onPointerDown={e => { e.stopPropagation(); setSelectedId(node.id); setConnectingFrom(isConnectSource ? null : node.id); }}
-                      title={isConnectSource ? 'Tap a target node to connect' : 'Connect this node to another'}
-                      aria-label="Connect node"
-                      className={`absolute left-1/2 -translate-x-1/2 -bottom-2.5 w-5 h-5 rounded-full flex items-center justify-center border-2 transition-all ${isConnectSource ? 'bg-emerald-500 border-emerald-300 text-white' : 'bg-[#0d1117] border-white/30 text-gray-400 hover:border-emerald-400 hover:text-emerald-400'}`}
-                      style={{ touchAction: 'none' }}
-                    >
-                      <Link2 size={10} />
-                    </button>
-                  )}
                 </div>
               );
             })}
+
+            {/* Floating node action toolbar (admin 2026-07-23): a single tap selects a node and pops
+                these actions right above it — Edit · Connect · Move · Duplicate · Delete — instead of
+                jumping straight into the full editor. Positioned in canvas-content coordinates so it stays
+                pinned to the node while the canvas scrolls; flips below when the node hugs the top edge. */}
+            {selectedNode && !connectingFrom && (() => {
+              const TB_W = 224;
+              const below = selectedNode.y < 60;
+              const top = below ? selectedNode.y + NODE_HEIGHT + 12 : selectedNode.y - 52;
+              const left = Math.max(4, selectedNode.x + NODE_WIDTH / 2 - TB_W / 2);
+              return (
+                <div
+                  className="absolute z-20 flex items-center gap-0.5 p-1 rounded-xl border border-white/15 shadow-2xl"
+                  style={{ left, top, width: TB_W, background: '#1c2230' }}
+                  onClick={e => e.stopPropagation()}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <button title="Edit" aria-label="Edit node" onClick={e => { e.stopPropagation(); openEditor(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Pencil size={15} /></button>
+                  <button title="Connect" aria-label="Connect node" onClick={e => { e.stopPropagation(); setConnectingFrom(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-emerald-400 hover:bg-white/10 active:scale-90 transition-all"><Link2 size={15} /></button>
+                  <button title="Move — drag to reposition" aria-label="Move node"
+                    onPointerDown={e => {
+                      e.stopPropagation();
+                      const node = nodes.find(n => n.id === selectedNode.id);
+                      if (!node) return;
+                      const p = canvasPoint(e.clientX, e.clientY);
+                      dragging.current = { id: node.id, ox: p.x - node.x, oy: p.y - node.y, pointerId: e.pointerId };
+                    }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-sky-400 hover:bg-white/10 active:scale-90 transition-all cursor-grab" style={{ touchAction: 'none' }}><Move size={15} /></button>
+                  <button title="Duplicate" aria-label="Duplicate node" onClick={e => { e.stopPropagation(); duplicateNode(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Copy size={15} /></button>
+                  <button title="Delete" aria-label="Delete node" onClick={e => { e.stopPropagation(); deleteNode(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/15 active:scale-90 transition-all"><Trash2 size={15} /></button>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Connecting banner */}
@@ -639,24 +689,24 @@ Content-Type: application/json
 
         {/* Desktop properties (hidden on mobile — the mobile sheet below takes over) */}
         <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-white/10 flex-col overflow-y-auto" style={{ background: '#161b22' }}>
-          {selectedNode ? renderProperties(selectedNode) : (
+          {editorOpen && selectedNode ? renderProperties(selectedNode) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
               <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
                 <Bot size={22} className="text-gray-500" />
               </div>
-              <p className="text-sm text-gray-400">Select a node to edit its properties</p>
-              <p className="text-xs text-gray-600">Tap any node in the canvas</p>
+              <p className="text-sm text-gray-400">{selectedNode ? 'Tap Edit ✏️ on the node toolbar to edit it here' : 'Select a node to edit its properties'}</p>
+              <p className="text-xs text-gray-600">Tap a node, or double-tap to edit</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ——— Mobile properties sheet (in-flow, above the palette footer) ——— */}
-      {selectedNode && (
+      {/* ——— Mobile properties sheet (opens only via the toolbar's Edit / a double-tap) ——— */}
+      {editorOpen && selectedNode && (
         <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] overflow-y-auto" style={{ background: '#161b22' }}>
           <div className="flex items-center justify-between px-4 pt-3">
             <span className="text-xs text-gray-500 uppercase tracking-wider">Edit node</span>
-            <button onClick={() => setSelectedId(null)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
+            <button onClick={() => setEditorOpen(false)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
           </div>
           {renderProperties(selectedNode)}
         </div>

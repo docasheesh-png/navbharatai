@@ -21333,3 +21333,27 @@ dynamic footer (HOME/AI/PREVIEW/STUDIO/MORE) bot builder ke andar se hata do."
   Pro v5.0 handoff. AppKnowledgeBase entry updated for the new touch/connect/footer UX.
 
 Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 8992/8992 green.
+
+---
+
+## 2026-07-23 — Bot Builder: tap a node → floating action toolbar (Edit · Connect · Move · Duplicate · Delete)
+
+Admin: tapping a node jumped STRAIGHT into the full editor (bottom sheet covered the canvas). Requested that
+a tap instead pops small action buttons around the node (link/move/open/…), and asked me to enhance the idea
+rather than copy it. Confirmed set: Edit + Connect + Move + Duplicate + Delete; editor opens via the Edit
+button + a double-tap.
+
+**Change (`src/components/ide/BotBuilder.tsx`, UI-only):**
+- New `editorOpen` state. A single **tap now SELECTS + shows a floating toolbar** pinned above the node
+  (canvas-content coords, so it scrolls with the node; flips below when the node hugs the top). It no longer
+  auto-opens the editor.
+- Toolbar actions: **Edit** (opens the properties editor), **Connect** (start wiring), **Move** (a drag grip
+  — press & drag to reposition precisely), **Duplicate** (clone with data — my addition beyond the admin's
+  list), **Delete**.
+- Editor (desktop side panel + mobile bottom sheet) now opens ONLY when `editorOpen` — via the toolbar's
+  Edit or a **double-tap** on the node. Empty-canvas tap deselects + closes.
+- Removed the always-on bottom link handle (folded into the toolbar's Connect — less clutter, all actions in
+  one place). Node body drag, connections, tap-line-to-delete, simulator, export, and Build-Bot-App handoff
+  all unchanged.
+
+Gate: frontend tsc 0 · `npm run build` ✓ · full suite 8992/8992 green.

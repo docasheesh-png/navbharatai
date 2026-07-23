@@ -21469,3 +21469,18 @@ redundant AND its name implied it built the bot when it only produced a generic 
   `botBuilderAwareness.test.ts` (asserts 'go live'/'telegram' instead of 'build bot app').
 
 Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9012/9012 green.
+
+---
+
+## 2026-07-23 — "Other AI" now opens its OWN header tab like Free/Pro/Professionals (admin request)
+
+Admin: NavBharatAI's header has a window/tab system — Free, Pro, Professionals each open in their own header
+tab so several features can be used side-by-side. But opening "Other AI" showed NO header tab.
+
+Root cause: TopNav renders each open tab only if it has a `menuItems` entry (`const item = menuItems.find(...);
+if (!item) return null;`). `other_ai` was added to `openTabs` by `toggleTab('other_ai')` but had NO menuItems
+entry, so TopNav silently dropped it — no header window. Fix: add `{ id: 'other_ai', label: 'Other AI', icon:
+LayoutGrid }` to `menuItems` (same icon as its Home card). Now Other AI opens a real header tab (label + icon +
+close ✕) exactly like the other three, and also appears in the sidebar for consistency. tabClose 8/8 green.
+
+Gate: frontend tsc 0 · `npm run build` ✓ · tabClose 8/8 green.

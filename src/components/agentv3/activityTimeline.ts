@@ -34,6 +34,9 @@ export type ChatBlock<M extends TimelineMsgLike> =
       summary: string;
       /** Real diff stats summed from the patches of files this group created/edited (null = none known). */
       stats: { plus: number; minus: number } | null;
+      /** The created/edited files in this group that have a real diff patch — rendered as the inline,
+       *  PERSISTENT colorized diff under the response (admin 2026-07-21: "diff gayab na ho"). */
+      files: Array<{ path: string; patch: string; op: 'create' | 'edit' }>;
       /** True while any entry in the group is still in-flight (renders a spinner). */
       active: boolean;
       /** True when any entry failed (renders the row with a failure accent). */
@@ -74,6 +77,35 @@ export function diffStats(patch: string): { plus: number; minus: number } {
 }
 
 const basename = (p: string): string => p.split('/').pop() || p;
+
+/**
+ * The created/edited files in a group that have a KNOWN diff patch, in first-appearance order — the
+ * data behind the inline "changes" diff under a response. A file both created and edited in the group
+ * shows once (as 'create'). Only real patches (from the diff map) are included; a file with no patch
+ * yet is omitted (never a fabricated diff).
+ */
+export function groupFileDiffs(
+  entries: ActivityEntry[],
+  diffs: Record<string, string>,
+): Array<{ path: string; patch: string; op: 'create' | 'edit' }> {
+  const created = new Set<string>();
+  for (const e of entries) {
+    const c = classify(e);
+    if (c.op === 'create' || c.op === 'write') created.add(c.path);
+  }
+  const seen = new Set<string>();
+  const out: Array<{ path: string; patch: string; op: 'create' | 'edit' }> = [];
+  for (const e of entries) {
+    const c = classify(e);
+    if (c.op !== 'create' && c.op !== 'edit' && c.op !== 'write' && c.op !== 'editing') continue;
+    if (seen.has(c.path)) continue;
+    const patch = diffs[c.path];
+    if (!patch) continue;
+    seen.add(c.path);
+    out.push({ path: c.path, patch, op: created.has(c.path) ? 'create' : 'edit' });
+  }
+  return out;
+}
 
 /** What a single activity entry means, parsed from the reducer's deterministic text formats. */
 function classify(e: ActivityEntry):
@@ -241,6 +273,7 @@ export function buildChatBlocks<M extends TimelineMsgLike>(
       entries: group,
       summary,
       stats,
+      files: groupFileDiffs(group, diffs),
       active: group.some((e) => e.active === true),
       failed: group.some((e) => e.ok === false),
       progress: null,

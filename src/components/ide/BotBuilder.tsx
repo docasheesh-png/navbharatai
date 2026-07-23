@@ -2,10 +2,11 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Play, Download, Webhook, Trash2, Plus, X, ChevronRight,
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
-  Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink
+  Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle
 } from 'lucide-react';
 import { botFlowToBuildPrompt } from '../../lib/botFlowPrompt';
 import { auth } from '../../App';
+import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -136,6 +137,7 @@ export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
   const [connErr, setConnErr] = useState('');
   const [connResult, setConnResult] = useState<{ platform: 'telegram' | 'whatsapp'; link?: string | null; username?: string | null; callbackUrl?: string; verifyToken?: string } | null>(null);
   const [copiedField, setCopiedField] = useState('');
+  const [helpMode, setHelpMode] = useState<HelpMode>('closed');
   const [showSimulator, setShowSimulator] = useState(false);
   const [copied, setCopied] = useState(false);
   // Node-connection state (mobile autopsy 2026-07-23): the designer could ADD nodes but there was NO way
@@ -582,6 +584,9 @@ Content-Type: application/json
         <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Rocket size={13} /> Go Live
         </button>
+        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-100 transition-colors flex-shrink-0 whitespace-nowrap">
+          <HelpCircle size={13} /> Help
+        </button>
         <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Download size={13} /> Export JSON
         </button>
@@ -825,27 +830,36 @@ Content-Type: application/json
             ) : connPlatform === 'telegram' ? (
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1.5 text-xs text-gray-400">
-                  {['Open @BotFather in Telegram and send /newbot', 'Choose a name + username for your bot', 'Copy the token BotFather gives you (looks like 123456789:ABC-def…)', 'Paste it below and tap Connect'].map((s, i) => (
+                  {['Tap "Open @BotFather" below and send /newbot', 'Choose a name + username for your bot', 'Copy the token BotFather gives you (looks like 123456789:ABC-def…)', 'Paste it below and tap Connect'].map((s, i) => (
                     <div key={i} className="flex items-start gap-2"><span className="text-emerald-400 font-bold">{i + 1}.</span> {s}</div>
                   ))}
                 </div>
-                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                  <ExternalLink size={13} /> Open @BotFather to get your token
+                </a>
+                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
                 {connErr && <p className="text-xs text-red-400">{connErr}</p>}
                 <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect &amp; Go Live</>}
                 </button>
-                <a href="https://core.telegram.org/bots/features#botfather" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">How to create a Telegram bot <ExternalLink size={10} /></a>
+                <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 self-center"><HelpCircle size={11} /> Stuck? Ask NavBharatAI to guide you step-by-step</button>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                <p className="text-xs text-gray-400">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Paste your <span className="text-gray-200">permanent access token</span> and <span className="text-gray-200">Phone Number ID</span> from the Meta app dashboard:</p>
+                <p className="text-xs text-gray-400">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-gray-200">permanent access token</span> and <span className="text-gray-200">Phone Number ID</span> from the Meta dashboard, then paste them here:</p>
+                <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                  <ExternalLink size={13} /> Open Meta App Dashboard (WhatsApp → API Setup)
+                </a>
                 <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
                 <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
                 {connErr && <p className="text-xs text-red-400">{connErr}</p>}
                 <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
                 </button>
-                <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">How to set up WhatsApp Cloud API <ExternalLink size={10} /></a>
+                <div className="flex items-center justify-between">
+                  <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">Setup guide <ExternalLink size={10} /></a>
+                  <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1"><HelpCircle size={11} /> Ask NavBharatAI to help</button>
+                </div>
               </div>
             )}
           </div>
@@ -938,6 +952,9 @@ Content-Type: application/json
           </div>
         </div>
       )}
+
+      {/* ——— Help widget — NavBharatAI Free, primed to guide bot building/connecting (minimizes to a 🤖 bubble) ——— */}
+      <BotBuildHelp mode={helpMode} onModeChange={setHelpMode} />
     </div>
   );
 };

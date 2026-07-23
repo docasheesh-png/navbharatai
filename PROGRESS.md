@@ -21385,3 +21385,25 @@ dummy `your-server.com` placeholder — no real platform integration. Now built 
   cost/security tradeoff, gated to signed-in users. WhatsApp requires the user's own Meta app (heavier).
 
 Gate: frontend tsc 0 · server tsc 0 · `npm run build` ✓ · full suite 9013/9013 green (incl. 16 new bot tests).
+
+---
+
+## 2026-07-23 — Bot Builder: simpler connect (inline "get it here" links) + a NavBharatAI Help widget
+
+Admin: make connecting simpler — give the link right where each value is pasted — and add a "Help" button
+that works like NavBharatAI Free, guides a non-technical user step-by-step (accepts SCREENSHOTS), opens as a
+popup, and minimizes to a 🤖 bubble in the bottom-right corner.
+
+- **`src/components/ide/BotBuildHelp.tsx`** (NEW) — a floating help chat that IS NavBharatAI Free (same
+  `/api/chat/navbharatai` brain, vision-capable) primed with a hidden framing turn to act as a step-by-step
+  Bot-Builder guide. Screenshot attach (base64 → `fileAttachments`), typing indicator, non-streaming
+  `{reply}`. Three modes: closed → open popup (bottom-right) → **minimize collapses to a 🤖 bubble** that
+  reopens it. No new backend — reuses Free chat (which already knows the Bot Builder, per the awareness lock).
+- **BotBuilder**: a **Help** button in the toolbar (opens the widget); the widget is rendered once and
+  persists across the builder. The connect modal now also has "Stuck? Ask NavBharatAI" links.
+- **Simpler connect**: Telegram modal has a prominent **"Open @BotFather"** button (t.me/BotFather) right by
+  the token field; WhatsApp has **"Open Meta App Dashboard"** by its fields + the WhatsApp success view still
+  hands back the exact Callback URL + Verify token to paste in Meta. Every value the user must paste now has
+  its source link right next to it.
+
+Gate: frontend tsc 0 · server tsc 0 (unchanged) · `npm run build` ✓ · full suite 9013/9013 green.

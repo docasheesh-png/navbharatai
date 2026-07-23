@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Stethoscope,
   Scale, GraduationCap, Activity, Zap, Code2, Rocket,
-  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid, X
+  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
-import { HOME_TOOL_GROUPS } from './homeToolGroups';
 
 interface HomeData {
   heroTitle: string;
@@ -28,8 +27,8 @@ interface HomeViewProps {
   onStartChat: () => void;
   onStartProChat?: () => void;
   onStartProfessionals?: () => void;
-  /** Open a builder tool by its workspace-tab id (moved here from Settings, admin 2026-07-23). */
-  onOpenTool?: (id: string) => void;
+  /** Open the "Other AI" page — the builder-tools hub (admin 2026-07-23: a full view, like the other 3). */
+  onOpenOtherAI?: () => void;
   isAdmin?: boolean;
   data?: HomeData;
   onUpdate?: (newData: HomeData) => void;
@@ -127,7 +126,7 @@ export const HomeView = ({
   onStartChat,
   onStartProChat,
   onStartProfessionals,
-  onOpenTool,
+  onOpenOtherAI,
   isAdmin,
   data,
   onUpdate,
@@ -136,18 +135,13 @@ export const HomeView = ({
   onShowLogin,
 }: HomeViewProps) => {
   const colors = getThemeClasses(theme);
-  // "Other AI" (the 4th card) reveals the builder-tool groups moved here from Settings (admin 2026-07-23).
-  const [showTools, setShowTools] = useState(false);
 
   const handlers: Record<string, (() => void) | undefined> = {
     free: onStartChat,
     pro: onStartProChat,
     professionals: onStartProfessionals,
-    tools: () => {
-      setShowTools(true);
-      // Bring the revealed tool grid into view on the next paint.
-      requestAnimationFrame(() => document.getElementById('home-builder-tools')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    },
+    // "Other AI" navigates to its OWN full page (like the other 3 cards) — the tools live INSIDE it.
+    tools: onOpenOtherAI,
   };
 
   return (
@@ -305,63 +299,8 @@ export const HomeView = ({
           })}
         </div>
 
-        {/* ── Builder Tools — revealed by the "Other AI" card (moved from Settings, admin 2026-07-23) ── */}
-        {showTools && (
-        <motion.div
-          id="home-builder-tools"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="w-full flex flex-col gap-4 scroll-mt-4"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="inline-flex items-center gap-2 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-full px-4 py-1.5">
-                <LayoutGrid className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
-                <span className="font-black uppercase tracking-[0.25em] text-fuchsia-400 text-[9px] sm:text-[10px]">
-                  Other AI · Builder Tools
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowTools(false)}
-              className="flex items-center gap-1 text-[11px] font-bold text-[#8b949e] hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-white/5"
-              aria-label="Hide builder tools"
-            >
-              <X className="w-3.5 h-3.5" /> Hide
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-            {HOME_TOOL_GROUPS.map((group) => {
-              const GroupIcon = group.icon;
-              return (
-                <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <GroupIcon className={cn('w-3.5 h-3.5', group.color)} />
-                    <span className={cn('text-[10px] font-black uppercase tracking-widest', group.color)}>{group.title}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {group.items.map((item) => {
-                      const ToolIcon = item.icon;
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => (onOpenTool ? onOpenTool(item.id) : onShowLogin())}
-                          className="flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
-                        >
-                          <ToolIcon className="w-4 h-4 text-[#8b949e] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-                          <span className="text-[11px] font-bold text-[#8b949e] group-hover:text-white transition-colors leading-tight">{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </motion.div>
-        )}
+        {/* The "Other AI" builder tools now live on their OWN page (OtherAIView), opened by the 4th
+            card above — not revealed below the cards (admin 2026-07-23). */}
 
         {/* ── Footer tagline ── */}
         <motion.p

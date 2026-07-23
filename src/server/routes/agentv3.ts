@@ -608,8 +608,25 @@ export function failedImportPromptNote(failed: { url: string; reason: string } |
     'Do NOT ask the user for the repository URL — they already gave it. Acknowledge that this exact',
     'URL could not be accessed, and if it is private tell them to connect the GitHub account that owns',
     'it via ⚙ → GitHub (or double-check the URL). Keep the reply short and do not contradict the',
-    'message the platform already showed them.',
+    'message the platform already showed them. Do NOT clone the repository yourself into a temp',
+    'directory and report success — those files would NOT persist into the workspace.',
   ].join('\n');
+}
+
+/** The leading marker of the honesty-backstop prefix — used to avoid prepending it twice. */
+export const IMPORT_HONESTY_PREFIX_MARK = '⚠️ The GitHub import did not complete';
+
+/**
+ * HONESTY BACKSTOP (mitrify autopsy 2026-07-23, rule 5). When a GitHub import FAILED this turn, the
+ * user-facing summary must NOT read as an import success — even if the model's prose claims it cloned the
+ * repo "successfully". (Real case: the model surveyed a `/tmp` clone that never landed, so the workspace was
+ * empty while the summary said "ready for further work".) This prepends the platform's honest verdict so the
+ * truth is the FIRST thing the user reads; the model's prose still follows but can no longer stand alone as a
+ * false success. Returns '' when no import failed. Pure.
+ */
+export function importHonestySummaryPrefix(failed: { url: string; reason: string } | null | undefined): string {
+  if (!failed || !failed.url) return '';
+  return `${IMPORT_HONESTY_PREFIX_MARK} — ${failed.url} could not be imported (${failed.reason}). Your workspace does not contain that repository, so anything below is not a saved import.\n\n———\n`;
 }
 
 export function rebuildGuardFlipsToEdit(opts: {
@@ -8099,6 +8116,15 @@ export function registerAgentV3Routes(app: Express): void {
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the
       // deadline timer NOW so that if the wall-clock cap fires during that advisory work, the build is
       // finalized as SUCCESS (the app is built + already durably saved), not "paused — type continue".
+      // HONESTY BACKSTOP (mitrify autopsy 2026-07-23, rule 5): a KNOWN-failed GitHub import must never be
+      // reported as a success, whatever the model's prose says (the model surveyed a /tmp clone that never
+      // landed, yet the summary read "successfully cloned … ready for further work" on an EMPTY workspace).
+      // Prepend the platform's honest verdict so the truth leads. Applied to `result` BEFORE buildResultRef
+      // captures it, so both the main and watchdog result paths carry the honest summary. `ok` is left
+      // untouched (a survey-only reply is still a valid turn) — only the reporting is made honest.
+      if (failedImport && !result.summary.startsWith(IMPORT_HONESTY_PREFIX_MARK)) {
+        result = { ...result, summary: `${importHonestySummaryPrefix(failedImport)}${result.summary}` };
+      }
       if (result.ok) {
         buildResultRef = { ok: true, summary: result.summary, steps: result.steps, billedUsd: result.billedUsd };
         // Build succeeded + files saved → cap the remaining ADVISORY work so a hung push/persist can

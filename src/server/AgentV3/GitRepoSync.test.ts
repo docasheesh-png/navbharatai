@@ -177,6 +177,28 @@ describe('GitRepoSync.hydrateFromRepo', () => {
     expect(commands[0]).toContain('git clone --depth 1 "');
   });
 
+  it('overlays OWNERSHIP-SAFELY and verifies success by the filesystem, not cp exit code (mitrify autopsy)', async () => {
+    // `cp -a` implies --preserve=ownership, which returns a NON-ZERO exit in the sandbox even when every
+    // file copied — that false failure made a public, cloneable repo report "couldn't clone" + 0 files.
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+    expect(res.hydrated).toBe(true);
+    const cmd = commands[0];
+    expect(cmd).not.toContain('cp -a');                              // the ownership-preserving footgun is gone
+    expect(cmd).toContain('cp -R --preserve=mode,timestamps');       // preserve mode+timestamps, NOT ownership
+    // Success is judged by the filesystem — every cloned top-level entry must exist in the workspace —
+    // not by cp's exit code, so an ownership-preserve warning no longer fakes a failure.
+    expect(cmd).toContain('NB_HYDRATED');
+    expect(cmd).toContain('NB_HYDRATE_FAIL');
+    expect(cmd).toContain('[ "$got" -eq "$need" ]');
+  });
+
+  it('reports NB_HYDRATE_FAIL as skipped when the overlay genuinely landed nothing', async () => {
+    const { runner } = fakeRunner(() => ({ stdout: 'NB_HYDRATE_FAIL' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+    expect(res).toMatchObject({ hydrated: false, skipped: true });
+  });
+
   it('skips with no url, and never throws when the runner rejects', async () => {
     const noUrl = await new GitRepoSync(fakeRunner(() => ({})).runner, 'ws1').hydrateFromRepo('');
     expect(noUrl).toEqual({ hydrated: false, hadFiles: false, skipped: true, reason: 'bad-url' });

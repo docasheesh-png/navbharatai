@@ -143,7 +143,18 @@ export class GitRepoSync {
         `rm -rf /tmp/nbhydrate ${errFile} 2>/dev/null; ` +
         `if ${cloneChain}; then ` +
         `if ${contentTest}; then ` +
-        'cp -a /tmp/nbhydrate/. ./ >/dev/null 2>&1 && echo NB_HYDRATED || echo NB_HYDRATE_FAIL; ' +
+        // OWNERSHIP-SAFE, FILESYSTEM-VERIFIED OVERLAY (mitrify import autopsy 2026-07-23): `cp -a` implies
+        // --preserve=ownership, which returns a NON-ZERO exit ("failed to preserve ownership: Operation
+        // not permitted") in the sandbox even when every file copied fine — turning a SUCCESSFUL clone into
+        // a FALSE NB_HYDRATE_FAIL. That is exactly what killed the mitrify import: each attempt ran ~6s
+        // (the clone SUCCEEDED), both the authed clone and the anonymous retry died on this cp, so a public,
+        // cloneable repo reported "couldn't clone" and landed 0 files. Copy preserving only mode+timestamps
+        // (ownership is meaningless in the single-user sandbox), then judge success by the FILESYSTEM — did
+        // the workspace actually receive every cloned top-level entry? — NEVER by cp's exit code.
+        'cp -R --preserve=mode,timestamps /tmp/nbhydrate/. ./ 2>/dev/null; ' +
+        'need=$(ls -A /tmp/nbhydrate | grep -vFx ".git" | wc -l); ' +
+        'got=$(ls -A /tmp/nbhydrate | grep -vFx ".git" | while IFS= read -r e; do [ -e "./$e" ] && printf x; done | wc -c); ' +
+        'if [ "$need" -gt 0 ] && [ "$got" -eq "$need" ]; then echo NB_HYDRATED; else echo NB_HYDRATE_FAIL; fi; ' +
         'else echo NB_EMPTY_REPO; fi; ' +
         'else ' +
         // Classify the failure from git's stderr WITHOUT leaking it (only the code is echoed). Order

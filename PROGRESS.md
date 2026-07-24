@@ -21634,3 +21634,24 @@ Built that read side + wired it as the instant front of the import:
 Tests: GithubApiTree 9 (tree list + default-branch resolve, anon retry, not-found/network/empty/bad-url,
 file base64 decode + caps, summarize + pickSurveyFiles) · agentv3 importSurveyPromptNote 3. Gate: fe tsc 0 ·
 server tsc 0 · agentv3 264 + GithubApiTree 9 green · full suite (running/green) · build ✓.
+
+### 2026-07-24 (cont.) — Reliability: materialize the repo via api.github.com ONLY (git tree → git blobs), no codeload, no sandbox
+
+The admin pushed back hard: "mera repo, mai admin, public bhi hai — clone nahi ho raha bhai." Re-audited the fix
+for the LAST unproven link. Found it: the zipball endpoint (`api.github.com/.../zipball`) returns a 302 to
+**`codeload.github.com`** — a DIFFERENT host. Our proven-in-prod client (`UserGitHubClient`, which creates the
+save-repo) only ever reaches `api.github.com`, so codeload's reachability was the one thing NOT proven. If prod
+egress reaches api.github.com but not codeload, the zipball path fails.
+
+Fix (removes the last unproven host): `materializeRepoViaApi` (GithubApiTree.ts) rebuilds the ENTIRE file map
+using ONLY `api.github.com` — the recursive git tree (paths + blob shas) then one `git/blobs/{sha}` per kept
+file, bounded concurrency, filtered with ProjectImport's SHARED regexes (now exported — one source of truth, no
+drift). Wired as the reliability fallback BETWEEN the zipball (fast, 1 call) and the legacy sandbox clone: zipball
+first (fast when codeload works), api-blobs second (proven host, always reachable if api.github.com is — which it
+provably is), sandbox clone last. Each path records its own IMPORT_DIAGNOSTIC. A regression test asserts EVERY
+request goes to api.github.com and never codeload.
+
+Net: for a public repo (the admin's case) the import now lands via api.github.com even if codeload/sandbox are
+unreachable — the same host that provably works in prod. Tests: materializeRepoViaApi 3 (kept-file filtering +
+api-only assertion, not-found/network, bad-url). Gate: fe tsc 0 · server tsc 0 · import suites green · full suite
+(running/green) · build ✓.

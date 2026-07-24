@@ -13,6 +13,7 @@
 // vendor/model name appears. The token is sent only in the Authorization header to api.github.com.
 
 import { parseOwnerRepo, type ZipFetchReason } from './GithubZipFetch';
+import { SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES } from './ProjectImport';
 
 export type TreeFetchReason = ZipFetchReason;
 
@@ -183,6 +184,105 @@ export function summarizeRepoTree(paths: string[], opts?: { maxTopLevel?: number
     .slice(0, 6)
     .map(([ext, count]) => ({ ext, count }));
   return { fileCount: paths.length, topLevel, extensions };
+}
+
+export interface RepoMaterializeResult {
+  ok: boolean;
+  /** The full text-file map, filtered exactly like the zip path (node_modules/binaries/secrets dropped). */
+  files?: Record<string, string>;
+  fetched?: number;
+  skipped?: number;
+  truncated?: boolean;
+  status?: number;
+  reason?: TreeFetchReason;
+}
+
+/** A bounded-concurrency map over items (no dependency). */
+async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let idx = 0;
+  const runners = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
+    while (idx < items.length) {
+      const cur = items[idx++];
+      await worker(cur);
+    }
+  });
+  await Promise.all(runners);
+}
+
+/**
+ * Materialize a repo's ENTIRE text-file map using ONLY api.github.com (git tree → git blobs) — never
+ * codeload.github.com (where the zipball redirects) and never the sandbox. This is the MOST RELIABLE
+ * fetch by construction: api.github.com is the exact host the proven UserGitHubClient already reaches in
+ * production (it creates the user's save-repo). Filters files with ProjectImport's shared rules so the
+ * result matches the zip path. Token-auth with anonymous retry; bounded concurrency; never throws.
+ * (mitrify autopsy 2026-07-24 — the zipball's codeload redirect is the last unproven-reachable host.)
+ */
+export async function materializeRepoViaApi(opts: {
+  url: string;
+  token?: string;
+  maxFiles?: number;
+  concurrency?: number;
+  fetchImpl?: JsonFetcher;
+}): Promise<RepoMaterializeResult> {
+  const parsed = parseOwnerRepo(opts.url);
+  if (!parsed) return { ok: false, reason: 'bad-url' };
+  const doFetch = resolveFetch(opts.fetchImpl);
+  const { owner, repo } = parsed;
+  const maxFiles = opts.maxFiles ?? IMPORT_MAX_FILES;
+  const concurrency = opts.concurrency ?? 8;
+
+  const attempt = async (withToken: boolean): Promise<RepoMaterializeResult> => {
+    const headers = ghHeaders(withToken ? opts.token : undefined);
+    // 1) default branch
+    let defaultBranch = 'main';
+    let metaRes;
+    try { metaRes = await doFetch(`https://api.github.com/repos/${owner}/${repo}`, { headers }); }
+    catch { return { ok: false, reason: 'network' }; }
+    if (!metaRes.ok) return { ok: false, status: metaRes.status, reason: classify(metaRes.status) };
+    try { const m = (await metaRes.json()) as { default_branch?: unknown }; if (typeof m.default_branch === 'string' && m.default_branch) defaultBranch = m.default_branch; } catch { /* keep 'main' */ }
+    // 2) recursive tree WITH blob shas + sizes
+    let treeRes;
+    try { treeRes = await doFetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`, { headers }); }
+    catch { return { ok: false, reason: 'network' }; }
+    if (!treeRes.ok) return { ok: false, status: treeRes.status, reason: classify(treeRes.status) };
+    let entries: Array<{ path: string; sha: string; size: number }> = [];
+    let truncated = false;
+    try {
+      const body = (await treeRes.json()) as { tree?: Array<{ path?: unknown; type?: unknown; sha?: unknown; size?: unknown }>; truncated?: unknown };
+      truncated = body.truncated === true;
+      entries = (body.tree ?? [])
+        .filter((e) => e && e.type === 'blob' && typeof e.path === 'string' && typeof e.sha === 'string')
+        .map((e) => ({ path: e.path as string, sha: e.sha as string, size: typeof e.size === 'number' ? e.size : 0 }));
+    } catch { return { ok: false, status: treeRes.status, reason: 'network' }; }
+    if (entries.length === 0) return { ok: false, status: treeRes.status, reason: 'empty', truncated };
+    // 3) filter with the SAME rules as the zip path (single source of truth)
+    const keep = entries.filter((e) =>
+      !SKIP_DIR_RE.test(e.path) && !JUNK_FILE_RE.test(e.path) && !SECRET_FILE_RE.test(e.path)
+      && !BINARY_EXT_RE.test(e.path) && e.size <= IMPORT_MAX_FILE_BYTES,
+    ).slice(0, maxFiles);
+    let skipped = entries.length - keep.length;
+    // 4) fetch each kept blob's content (base64) — bounded concurrency, all on api.github.com
+    const files: Record<string, string> = {};
+    await pool(keep, concurrency, async (e) => {
+      try {
+        const r = await doFetch(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${e.sha}`, { headers });
+        if (!r.ok) { skipped++; return; }
+        const b = (await r.json()) as { content?: unknown; encoding?: unknown };
+        if (b.encoding === 'base64' && typeof b.content === 'string') files[e.path] = Buffer.from(b.content, 'base64').toString('utf8');
+        else skipped++;
+      } catch { skipped++; }
+    });
+    if (Object.keys(files).length === 0) return { ok: false, status: treeRes.status, reason: 'empty', truncated };
+    return { ok: true, status: treeRes.status, files, fetched: Object.keys(files).length, skipped, truncated };
+  };
+
+  const first = await attempt(!!opts.token);
+  if (!first.ok && opts.token && (first.reason === 'not-found' || first.reason === 'auth')) {
+    const anon = await attempt(false);
+    if (anon.ok) return anon;
+    return first.reason === 'auth' ? first : anon;
+  }
+  return first;
 }
 
 /** Ordered candidate paths a survey should read first to describe an app accurately — checked against the

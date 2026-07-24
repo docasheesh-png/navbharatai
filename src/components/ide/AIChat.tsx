@@ -774,7 +774,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
               >
                 <span>🚀</span>
-                Haan, Build Karo
+                Yes, Build
               </button>
             </div>
           </div>

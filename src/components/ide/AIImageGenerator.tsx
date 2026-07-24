@@ -268,10 +268,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
   const relativeTime = (ts: number) => {
     const diff = Date.now() - ts;
-    if (diff < 60000) return 'Abhi';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m pehle`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h pehle`;
-    return `${Math.floor(diff / 86400000)}d pehle`;
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
   };
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
@@ -285,7 +285,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">AI Image Generator</h2>
-          <p className="text-xs text-white/40">Prompt likhkar images generate karo — logos, banners, icons</p>
+          <p className="text-xs text-white/40">Write a prompt to generate images — logos, banners, icons</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">Pollinations AI</span>
@@ -302,7 +302,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             <textarea
               className="w-full bg-[#161b22] border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
               rows={4}
-              placeholder="Describe karo kya banana hai... e.g. 'Modern fintech app logo with blue gradient and rupee symbol'"
+              placeholder="Describe what you want to create... e.g. 'Modern fintech app logo with blue gradient and rupee symbol'"
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
             />
@@ -417,21 +417,21 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
               {isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                   <TirangaLoader className="w-12 h-12" />
-                  <p className="text-xs text-white/40">AI image generate ho raha hai...</p>
+                  <p className="text-xs text-white/40">Generating AI image...</p>
                   <p className="text-[10px] text-white/20">Size: {selectedSize.w}×{selectedSize.h}</p>
                 </div>
               )}
               {!isLoading && imageError && (
                 <div className="flex flex-col items-center justify-center h-60 gap-2 px-4 text-center">
                   <ImageIcon className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-red-400">{errorMsg || 'Image generate nahi hui. Retry karo ya prompt change karo.'}</p>
+                  <p className="text-xs text-red-400">{errorMsg || 'Image could not be generated. Retry or change the prompt.'}</p>
                   <button onClick={handleGenerate} className="text-xs text-violet-400 hover:underline">Retry</button>
                 </div>
               )}
               {!isLoading && !imageError && !generatedUrl && (
                 <div className="flex flex-col items-center justify-center h-60 gap-2">
                   <Wand2 className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-white/30">Prompt likhkar Generate dabao</p>
+                  <p className="text-xs text-white/30">Write a prompt and press Generate</p>
                 </div>
               )}
               {!isLoading && !imageError && generatedUrl && (
@@ -505,7 +505,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
               <li>• Specific prompts = better results ("blue gradient tech logo" not just "logo")</li>
               <li>• Style + Color hints add extra quality</li>
               <li>• "Enhance" button adds style-specific keywords automatically</li>
-              <li>• Image URL directly use kar sakte ho img tag mein</li>
+              <li>• You can use the image URL directly in an img tag</li>
             </ul>
           </div>
         </div>

@@ -217,18 +217,18 @@ implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
 \`\`\`
 
 ### 3. Replace AndroidManifest.xml
-Provided \`AndroidManifest.xml\` ko \`app/src/main/AndroidManifest.xml\` mein copy karein.
+Copy the provided \`AndroidManifest.xml\` to \`app/src/main/AndroidManifest.xml\`.
 
 ### 4. Configure your URL
-Apni deployed app URL set karein:
+Set your deployed app URL:
 - URL: ${twaUrl || 'https://your-app.example.com'}
-- Digital Asset Links verify karein: https://digitalassetlinks.googleapis.com/v1/statements
+- Verify Digital Asset Links: https://digitalassetlinks.googleapis.com/v1/statements
 
 ### 5. Build APK
 \`\`\`
 ./gradlew assembleRelease
 \`\`\`
-APK milega: \`app/build/outputs/apk/release/app-release.apk\`
+The APK will be at: \`app/build/outputs/apk/release/app-release.apk\`
 
 ### 6. Sign APK
 \`\`\`
@@ -236,7 +236,7 @@ keytool -genkey -v -keystore my-release-key.jks -keyalg RSA -keysize 2048 -valid
 \`\`\`
 
 ## Notes
-- App require karta hai: Android 5.0+ (API 21)
+- Requires: Android 5.0+ (API 21)
 - Target SDK: Android ${info.targetSdk === '33' ? '13' : '14'} (API ${info.targetSdk})
 - Package: ${info.packageName}
 - Version: ${info.version}
@@ -270,7 +270,7 @@ npx cap add android
 \`\`\`
 
 ### 4. Copy config files
-- \`capacitor.config.json\` root mein rakhe (already done)
+- Place \`capacitor.config.json\` in the root (already done)
 - \`AndroidManifest.xml\` → \`android/app/src/main/AndroidManifest.xml\`
 - \`build.gradle\` → \`android/app/build.gradle\`
 
@@ -281,7 +281,7 @@ npx cap open android
 \`\`\`
 
 ### 6. Build APK
-Android Studio mein: **Build > Build Bundle(s) / APK(s) > Build APK(s)**
+In Android Studio: **Build > Build Bundle(s) / APK(s) > Build APK(s)**
 
 ### 7. Sign for release
 \`\`\`bash
@@ -502,7 +502,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-white">Android APK Builder</h1>
-            <p className="text-sm text-white/50">Web app ko Android package mein convert karein</p>
+            <p className="text-sm text-white/50">Convert your web app into an Android package</p>
           </div>
         </div>
 
@@ -702,7 +702,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                       <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">Recommended</span>
                     </div>
                     <p className="text-sm text-white/60 mt-1">
-                      Web app ko Chrome ke andar native feel ke saath wrap karta hai
+                      Wraps your web app with a native feel inside Chrome
                     </p>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/40">
                       <span>✓ HTTPS URL required</span>
@@ -760,8 +760,8 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     <div className="flex items-start gap-2 text-xs text-yellow-400">
                       <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                       <span>
-                        Capacitor build ke liye apke machine par Node.js 16+ aur Android Studio install hona
-                        chahiye. README mein poori instructions milegi.
+                        A Capacitor build needs Node.js 16+ and Android Studio installed on your machine
+                        . Full instructions are in the README.
                       </span>
                     </div>
                   </div>

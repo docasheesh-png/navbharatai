@@ -421,7 +421,7 @@ export default function App() {
   // Task 1.4 — messagesMap: single source of truth per tab
   const LANGUAGE_PICKER_MSG: Message = {
     id: 'lang-picker',
-    text: `👋 **Welcome to navBharatAI!**\n\nAap kaunsi language mein baat karna chahte ho?\n_(You can always change this later in Settings)_\n\n[🇮🇳 Hindi] [🔀 Hinglish] [🇬🇧 English] [🌐 Auto-detect]`,
+    text: `👋 **Welcome to NavBharatAI!**\n\nWhich language would you like to chat in?\n_(You can always change this later in Settings)_\n\n[🇮🇳 Hindi] [🔀 Hinglish] [🇬🇧 English] [🌐 Auto-detect]`,
     sender: 'ai',
     timestamp: new Date(),
     modelUsed: 'navBharatAI',

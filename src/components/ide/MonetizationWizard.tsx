@@ -368,7 +368,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({ generate
     { id: 'cashfree', icon: <DollarSign size={20} />, label: 'Cashfree', tagline: 'Low fees, instant settlement', detail: 'UPI, Cards, Wallets', fee: '1.75% / txn', color: '#22c55e' },
     { id: 'stripe', icon: <Heart size={20} />, label: 'Stripe', tagline: 'International payments', detail: 'Cards, Apple Pay, Google Pay', fee: '2.9% + $0.30 USD', color: '#a855f7' },
     { id: 'upi', icon: <Smartphone size={20} />, label: 'UPI Deep Link', tagline: 'Direct UPI payment link', detail: 'No gateway needed', fee: 'Zero fees', color: '#f97316' },
-    { id: 'adsense', icon: <Megaphone size={20} />, label: 'Google AdSense', tagline: 'Ads se kamaai', detail: 'Display, in-article ads', fee: 'Revenue share', color: '#eab308' },
+    { id: 'adsense', icon: <Megaphone size={20} />, label: 'Google AdSense', tagline: 'Earn from ads', detail: 'Display, in-article ads', fee: 'Revenue share', color: '#eab308' },
     { id: 'subscription', icon: <RefreshCw size={20} />, label: 'Subscription', tagline: 'Monthly/yearly plans', detail: 'Firebase + Razorpay combo', fee: 'Custom pricing', color: '#3b82f6' },
   ];
 
@@ -514,7 +514,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({ generate
           </div>
         </div>
         <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)', borderRadius: 8, padding: 10, marginBottom: 14, fontSize: 12, color: '#ca8a04' }}>
-          AdSense approval 1-2 weeks lagti hai. Pehle site submit karo at adsense.google.com
+          AdSense approval takes 1-2 weeks. Submit your site first at adsense.google.com
         </div>
         <CodeBlock code={code} label="AdSense Code" copiedKey={copiedKey} setCopied={setCopied} blockKey="adsense-code" />
       </>

@@ -581,7 +581,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             ) : (
               <>
                 <Play size={12} />
-                Analyze Karo
+                Analyze
               </>
             )}
           </button>
@@ -597,7 +597,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             <div className="flex flex-col items-center justify-center h-full gap-4 py-16">
               <Gauge size={56} className="text-[#30363d]" />
               <p className="text-sm text-[#8b949e] text-center max-w-xs leading-relaxed">
-                {realApp ? 'Tap "Analyze Karo" to score your app.' : (appSourceGuidance(appSource.kind) + ' Ya code paste karo.')}
+                {realApp ? 'Tap "Analyze" to score your app.' : (appSourceGuidance(appSource.kind) + ' Or paste code.')}
               </p>
               {!realApp && (
                 <button
@@ -605,7 +605,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 transition-colors"
                 >
                   <Clipboard size={15} />
-                  Code Paste Karo
+                  Paste Code
                 </button>
               )}
             </div>
@@ -702,7 +702,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             style={{ background: '#161b22' }}
           >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-sm text-[#e6edf3]">HTML Code Paste Karo</span>
+              <span className="font-semibold text-sm text-[#e6edf3]">Paste HTML Code</span>
               <button onClick={() => setPasteModal(false)} className="text-[#8b949e] hover:text-white">
                 <X size={18} />
               </button>
@@ -710,7 +710,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             <textarea
               value={pasteValue}
               onChange={(e) => setPasteValue(e.target.value)}
-              placeholder="Apna HTML code yahan paste karo..."
+              placeholder="Paste your HTML code here..."
               className="w-full h-56 rounded-lg border border-[#30363d] bg-[#0d1117] text-xs text-[#e6edf3] p-3 font-mono resize-none focus:outline-none focus:border-indigo-500"
               autoFocus
             />
@@ -726,7 +726,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
                 disabled={!pasteValue.trim()}
                 className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                Analyze Karo
+                Analyze
               </button>
             </div>
           </div>

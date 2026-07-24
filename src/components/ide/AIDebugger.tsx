@@ -231,7 +231,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
             <textarea
               value={errorText}
               onChange={(e) => setErrorText(e.target.value)}
-              placeholder="Error ya stack trace yahan paste karo..."
+              placeholder="Paste your error or stack trace here..."
               className="flex-1 min-h-0 resize-none text-xs font-mono rounded p-3 outline-none"
               style={{
                 background: '#1a0a0a',
@@ -262,7 +262,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
                 <textarea
                   value={codeContext}
                   onChange={(e) => setCodeContext(e.target.value)}
-                  placeholder="Relevant code snippet paste karo..."
+                  placeholder="Paste the relevant code snippet..."
                   rows={3}
                   className="w-full resize-none text-xs font-mono rounded p-2 outline-none"
                   style={{
@@ -341,7 +341,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
             <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
               <Bug className="w-12 h-12" style={{ color: '#8b949e' }} />
               <p className="text-sm" style={{ color: '#8b949e' }}>
-                Error paste karo, AI instant fix dega
+                Paste an error and AI will instantly suggest a fix
               </p>
             </div>
           )}
@@ -532,7 +532,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
                 <div className="flex items-center gap-2 mb-2">
                   <Shield className="w-4 h-4" style={{ color: '#f59e0b' }} />
                   <span className="text-sm font-semibold" style={{ color: '#fcd34d' }}>
-                    Aage se kaise bachein
+                    How to avoid this in future
                   </span>
                 </div>
                 <ul className="flex flex-col gap-1.5">
@@ -581,7 +581,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           >
             {history.length === 0 && (
               <p className="text-xs text-center mt-4" style={{ color: '#8b949e' }}>
-                Abhi koi history nahi
+                No history yet
               </p>
             )}
             {history.map((entry) => (

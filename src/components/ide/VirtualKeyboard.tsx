@@ -160,7 +160,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   const handleRun = () => {
     if (selectedShortcut) {
       onShortcutTrigger(selectedShortcut.keys, selectedShortcut.command);
-      // Optional: keep open or close? User said "jaise hi select kare tab enter dabaye", usually implying it stays for review.
+      // Optional: keep open or close? The user wanted it to stay open after selecting (pressing enter reviews it), usually implying it stays for review.
     }
   };
 

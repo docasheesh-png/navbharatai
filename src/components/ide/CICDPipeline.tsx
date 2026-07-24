@@ -287,7 +287,7 @@ export function CICDPipeline() {
 
               <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
                 <p className="text-[10px] text-amber-300 mb-1.5">⚠️ Security Tip</p>
-                <p className="text-[9px] text-white/40">Sensitive values (API keys, passwords) ko GitHub Secrets / Secret Manager mein rakho. YAML mein directly mat likhna.</p>
+                <p className="text-[9px] text-white/40">Keep sensitive values (API keys, passwords) in GitHub Secrets / Secret Manager. Never write them directly in YAML.</p>
               </div>
             </div>
           ) : (

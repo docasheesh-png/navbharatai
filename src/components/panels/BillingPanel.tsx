@@ -137,7 +137,7 @@ export function BillingPanel(props: BillingPanelProps) {
               <p className="text-xl font-black text-indigo-400 font-mono">{myReferralCode}</p>
               <button
                 onClick={() => {
-                  navigator.clipboard?.writeText(`Join NavBharatAI — भारत का अपना AI App Maker! Use my code ${myReferralCode} for bonus tokens: https://navbharatai.com`);
+                  navigator.clipboard?.writeText(`Join NavBharatAI — India's own AI App Maker! Use my code ${myReferralCode} for bonus tokens: https://navbharatai.com`);
                   onToast('Referral link copied! ✓', 'success');
                 }}
                 className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors"
@@ -526,7 +526,7 @@ export function BillingPanel(props: BillingPanelProps) {
                     {/* Copyable Code Box */}
                     <div className="bg-black/30 border border-amber-500/20 rounded-2xl p-6 relative overflow-hidden group">
                       <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl group-hover:bg-amber-500/10 transition-all"></div>
-                      <h4 className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Apka Unique Referral Code</h4>
+                      <h4 className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Your Unique Referral Code</h4>
                       <div className="flex items-center justify-between gap-4 mt-3 bg-[#0d1117] border border-white/10 rounded-xl px-5 py-3.5">
                         <span className="text-base text-amber-400 font-mono font-black tracking-widest">
                           NAV-{(user?.email || 'USER').split('@')[0].toUpperCase()}-REF
@@ -735,7 +735,7 @@ export function BillingPanel(props: BillingPanelProps) {
                     {/* REMINDER SETTING */}
                     <div className="space-y-3">
                       <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">a. Reminder warning limit</h4>
-                      <p className="text-xs text-[#8b949e]">Is limit se niche credit bache hone par apko popup warning ⚠️ seen hoga. Ap reminder threshold settings change kar sakte hain.</p>
+                      <p className="text-xs text-[#8b949e]">When your credit falls below this limit, you'll see a ⚠️ popup warning. You can change the reminder threshold in settings.</p>
                       <div className="flex items-center gap-3 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 focus-within:border-violet-500 transition-all">
                         <input
                           type="text"
@@ -751,7 +751,7 @@ export function BillingPanel(props: BillingPanelProps) {
                     {/* BUDGET FLOOR SETTING */}
                     <div className="space-y-3 pt-4 border-t border-white/5">
                       <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">b. Last hard budget limit</h4>
-                      <p className="text-xs text-[#8b949e]">Apna budget flow floor value set karen. Is limit par system automatically apko Free version mode activate kar dega.</p>
+                      <p className="text-xs text-[#8b949e]">Set your budget floor value. At this limit the system automatically switches you to Free-version mode.</p>
                       <div className="flex items-center gap-3 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 focus-within:border-violet-500 transition-all">
                         <input
                           type="text"

@@ -180,7 +180,7 @@ export const PWANotifications: React.FC<PWANotificationsProps> = ({ generatedCod
 
   const [permission, setPermission] = useState<NotifPermission>('default');
   const [testTitle, setTestTitle] = useState('Test Notification');
-  const [testBody, setTestBody] = useState('Yeh ek test notification hai!');
+  const [testBody, setTestBody] = useState('This is a test notification!');
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [injected, setInjected] = useState(false);
 
@@ -355,7 +355,7 @@ async function subscribeToPush() {
                 </div>
               </div>
               <p className="text-xs text-yellow-500/80 bg-yellow-500/10 border border-yellow-500/20 rounded px-3 py-2">
-                ⚠️ VAPID keys server pe store karo, client-side expose mat karo
+                ⚠️ Store VAPID keys on the server, never expose them client-side
               </p>
             </div>
           )}
@@ -459,7 +459,7 @@ async function subscribeToPush() {
           </button>
         )}
         {!generatedCode && onCodeUpdate && (
-          <p className="text-xs text-center text-gray-600">Pehle koi app generate karo inject karne ke liye</p>
+          <p className="text-xs text-center text-gray-600">Generate an app first to inject this</p>
         )}
       </div>
     );
@@ -541,7 +541,7 @@ async function subscribeToPush() {
             Send Test
           </button>
           {permission !== 'granted' && (
-            <p className="text-xs text-center text-gray-600">Pehle permission grant karo</p>
+            <p className="text-xs text-center text-gray-600">Grant permission first</p>
           )}
         </div>
 
@@ -577,7 +577,7 @@ async function subscribeToPush() {
         {/* PWA Checklist */}
         <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Smartphone size={15} className="text-green-400" /> PWA Ready hone ke liye:
+            <Smartphone size={15} className="text-green-400" /> To be PWA-ready:
           </h3>
           {PWA_CHECKLIST.map(item => (
             <label key={item} className="flex items-center gap-3 cursor-pointer">
@@ -612,7 +612,7 @@ async function subscribeToPush() {
         <Bell size={18} className="text-indigo-400" />
         <div>
           <h2 className="text-sm font-semibold text-white">PWA Push Notifications</h2>
-          <p className="text-xs text-gray-500">Service worker, manifest aur subscription code generate karo</p>
+          <p className="text-xs text-gray-500">Generate service worker, manifest and subscription code</p>
         </div>
       </div>
 

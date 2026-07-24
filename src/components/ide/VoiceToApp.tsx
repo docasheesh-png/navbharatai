@@ -17,7 +17,7 @@ interface VoiceToAppProps {
    * Hands the spoken/edited prompt to the REAL build engine (NavBharatAI Pro v5.0): the app switches
    * to the Pro chat with the composer prefilled, and pressing Send starts a genuine live build.
    * This replaced a dead POST /api/generate call (the route never existed on the server, so the old
-   * "Apna App Banao" button always errored — a display-only feature, admin autopsy 2026-07-20).
+   * "Build My App" button always errored — a display-only feature, admin autopsy 2026-07-20).
    */
   onBuildViaV5: (prompt: string) => void;
 }
@@ -27,10 +27,10 @@ const QUICK_PROMPTS = ['Todo App', 'Calculator', 'Quiz Game', 'Weather App', 'Re
 const ENHANCERS = ['Make it mobile-first', 'Add animations', 'Dark mode', 'Include Firebase auth'];
 
 const TIPS = [
-  'Clearly bolo: kya banana hai, kis liye, kaise dikhna chahiye',
-  "Example: 'Ek restaurant menu app banao jisme 5 dishes hon'",
+  'Clearly say: what to build, what for, and how it should look',
+  "Example: 'Build a restaurant menu app with 5 dishes'",
   'Details do: color, layout, features',
-  'Language mix karo — Hinglish bilkul theek hai',
+  'Mix languages — Hinglish is perfectly fine',
   'Jitna specific utna better result',
 ];
 
@@ -181,7 +181,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
             Voice to App
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Bol do — NavBharatAI Pro v5.0 banayega aapka apna app
+            Just speak — NavBharatAI Pro v5.0 will build your app
           </p>
         </div>
 
@@ -202,7 +202,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                   className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/10 transition-colors"
                 >
                   <Languages className="w-3.5 h-3.5" />
-                  {lang === 'hi-IN' ? 'Hindi (हि)' : 'English (En)'}
+                  {lang === 'hi-IN' ? 'Hindi' : 'English'}
                 </button>
               </div>
 
@@ -265,7 +265,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
               <textarea
                 value={editablePrompt}
                 onChange={(e) => setEditablePrompt(e.target.value)}
-                placeholder="Apni app describe karo… ya upar mic se bolo"
+                placeholder="Describe your app… or speak using the mic above"
                 rows={5}
                 className="w-full resize-none rounded-lg border border-white/10 bg-[#0d1117] px-3 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-colors"
               />
@@ -320,13 +320,13 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                 className="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors"
               >
                 <Zap className="w-4 h-4" />
-                Apna App Banao
+                Build My App
               </button>
 
               {status === 'success' && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2.5 text-green-400 text-sm">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                  Prompt Pro v5.0 chat me taiyaar hai — Send dabao, real build shuru hogi
+                  Your prompt is ready in Pro v5.0 chat — press Send to start the real build
                 </div>
               )}
 

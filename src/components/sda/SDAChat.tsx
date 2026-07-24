@@ -850,15 +850,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             <div className="flex justify-center">
               <div className="bg-emerald-950/60 border border-emerald-600/40 rounded-2xl px-5 py-3 flex items-center gap-4 max-w-sm">
                 <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
-                <p className="text-[11px] text-emerald-200 flex-1">Case assessment ready. PDF report banana chahiye?</p>
+                <p className="text-[11px] text-emerald-200 flex-1">Case assessment ready. Generate a PDF report?</p>
                 <div className="flex gap-2">
                   <button onClick={generatePDF}
                     className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-[10px] font-black text-white transition-all">
-                    Haan, Banao
+                    Yes, Generate
                   </button>
                   <button onClick={() => setSuggestPDF(false)}
                     className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] font-black text-[#8b949e] transition-all">
-                    Baad mein
+                    Later
                   </button>
                 </div>
               </div>

@@ -8,7 +8,7 @@
 // gives nothing usable; never fakes a result.
 
 import type { Express, Request, Response } from 'express';
-import { AIRouterManager } from '../AI/AIRouterManager';
+import { callProfessionalAI } from '../lib/professionalRouting';
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
 import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y } from '../AppMakerLab/intelligence/A11yLinter';
@@ -17,7 +17,8 @@ const MAX_CODE = 12_000;
 const MAX_BRAND = 600;
 
 export function registerDesignRoutes(app: Express): void {
-  const routeFn: RouteFn = (prompt, system) => AIRouterManager.getRouter('free').route(prompt, system);
+  // Same AI engine as Professional AI (admin 2026-07-24) — adapt the string helper to the RouteFn shape.
+  const routeFn: RouteFn = async (prompt, system) => ({ response: { content: await callProfessionalAI(system ?? '', prompt ?? '', 'free') } });
 
   // Context-aware AI improvement suggestions for the current app.
   app.post('/api/design/suggest', async (req: Request, res: Response) => {

@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { AIRouterManager } from '../AI/AIRouterManager';
+import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring } from '../lib/validate';
 import {
@@ -35,14 +35,13 @@ export function registerDebugRoutes(app: Express): void {
     }
     const { error, code, errorType } = req.body;
     try {
-      const router = AIRouterManager.getRouter('free');
+      // Same AI engine as Professional AI (admin 2026-07-24): professional-free chain, honest failures.
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('debug-analysis timeout')), ROUTE_TIMEOUT_MS));
-      const { response } = await Promise.race([
-        router.route(buildDebugUserPrompt(error, code, errorType), buildDebugSystemPrompt()),
+      const content = await Promise.race([
+        callProfessionalAI(buildDebugSystemPrompt(), buildDebugUserPrompt(error, code, errorType), 'free'),
         timeout,
       ]);
-      const content = response?.content ?? '';
       if (!content.trim()) {
         // No fabricated analysis, ever — an empty model reply is reported as the failure it is.
         res.status(502).json({ error: 'The AI analysis came back empty — please try again.' });

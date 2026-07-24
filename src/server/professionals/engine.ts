@@ -1,4 +1,4 @@
-import { AIRouterManager } from '../AI/AIRouterManager';
+import { callProfessionalAI } from '../lib/professionalRouting';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
@@ -84,20 +84,15 @@ export type ProfessionalTier = 'free' | 'paid';
  * Every config-driven professional shares these isolated universes, never mixing routing state with
  * FREE or PRO. (Doctor AI / SDA has its own route.)
  */
+// The resilient chain now lives in the SHARED professionalRouting module, so the Other-AI tools call
+// the exact same engine (admin 2026-07-24) with zero drift. This thin wrapper keeps the callers here
+// unchanged and preserves the professional-specific error message.
 async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<string> {
-  // Tier-1 leader (BOTH tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
   try {
-    const freeRouter = AIRouterManager.getRouter('professional-free');
-    const { response, telemetry } = await freeRouter.routeRaced(prompt, systemPrompt);
-    if (telemetry.success && response.content?.trim()) return response.content;
-  } catch { /* fall through to the tier's fallback universe */ }
-
-  // Fallback universe depends on the tier: free → Vertex-only; paid → full race → Haiku.
-  const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
-  const router = AIRouterManager.getRouter(fallbackNs);
-  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
-  if (telemetry.success && response.content?.trim()) return response.content;
-  throw new Error('All AI providers failed for this professional.');
+    return await callProfessionalAI(systemPrompt, prompt, tier);
+  } catch {
+    throw new Error('All AI providers failed for this professional.');
+  }
 }
 
 /**

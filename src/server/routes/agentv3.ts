@@ -109,7 +109,7 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -4927,10 +4927,27 @@ export function registerAgentV3Routes(app: Express): void {
               if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });
             } else {
-              emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
+              // HONEST DB-AWARE FAILURE (admin 2026-07-24): a full-stack app that crashed on boot almost
+              // always needs a real DB and/or external secrets — say so with the exact fix, instead of a
+              // generic "did not boot". Falls back to the generic line for an app that needs neither.
+              const dbNote = previewBootFailureAdvisory({
+                needsDb,
+                provider: detectDatabaseProvider(importedFiles),
+                externalVars: externalSecretVars(declaredEnvVars),
+                dbProvisioned: 'DATABASE_URL' in provided,
+              });
+              emitLive({ type: 'narration', agent: 'architect', text: dbNote
+                || '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
             }
           } catch {
-            emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
+            const dbNote = previewBootFailureAdvisory({
+              needsDb,
+              provider: detectDatabaseProvider(importedFiles),
+              externalVars: externalSecretVars(declaredEnvVars),
+              dbProvisioned: false,
+            });
+            emitLive({ type: 'narration', agent: 'architect', text: dbNote
+              || '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
           }
         })();
       }

@@ -21706,3 +21706,26 @@ runs once the user connects a database (Settings → Database) + sets the secret
 DETECT "this import needs a DB/secrets to boot" and show that honest state instead of a raw port error.
 
 Gate: fe tsc 0 · server tsc 0 · devServerHost 73 tests · full suite (running/green) · build ✓.
+
+### 2026-07-24 (cont.) — "dono banao": honest DB-failure state (Phase A, built) + auto dev-database (Phase B, already existed)
+
+Admin asked for both an honest "needs a database" preview state AND an auto dev-database. Audit finding (rule 3 —
+don't fake-build what exists):
+
+- **Phase B (auto dev-database) ALREADY EXISTS and is battle-hardened.** `ImportPreview.ts` + `postgresProvision.ts`
+  + `provisionBackend(['db'])` already: detect the DB need, install+start a sandbox PostgreSQL, return DATABASE_URL,
+  arm an in-sandbox keepalive WATCHDOG (restart on E2B reap), preflight-probe, bound revival (×2), and lock the
+  Prisma provider against a silent SQLite downgrade — forged across autopsies #14–#18 (MediConnect→EstateNest). It
+  also CONJURES the app's own local secrets (SESSION_SECRET/JWT_SECRET → real random values — the exact
+  express-session boot-killer Mitrify hit) and writes a dev `.env`. All wired into the import preview boot
+  (agentv3 ~4898). So the auto dev-database was NOT the Mitrify blocker — the PORT bug (#1864, health-check on 5173)
+  was. Rebuilding it would have been fake work; recorded as already-done instead.
+
+- **Phase A (honest DB-failure state) — the REAL gap, now built.** The preview-BOOT-FAILURE branch showed a generic
+  "did not boot automatically" with no hint that the app needs a DB/secrets. New pure `previewBootFailureAdvisory()`
+  (ImportPreview.ts) names the real cause + exact fix: DB-needed→"connect your database (Settings → App Settings →
+  Database), press Diagnose"; provisioned-but-still-failing→"needs your REAL database"; external secrets→names them
+  + "Settings → Secrets & Keys". Wired into BOTH failure branches (boot-failed + timed-out) in agentv3; falls back
+  to the generic line for an app that needs neither. Never leaks a vendor/model name (tested).
+
+Tests: previewBootFailureAdvisory 5. Gate: fe tsc 0 · server tsc 0 · full suite (running/green) · build ✓.

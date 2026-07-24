@@ -107,6 +107,41 @@ export function persistentDatabaseAdvisory(opts: { provider: string | null; conn
   );
 }
 
+/**
+ * The HONEST advisory shown when a DB-backed imported app's live preview FAILED to boot (admin 2026-07-24:
+ * "honest DB state"). The old failure line was generic ("did not boot automatically — use In-browser /
+ * Diagnose"), so a user whose Express+Postgres app crashed on a missing `DATABASE_URL` had no idea WHY.
+ * This names the real, likely cause and the exact fix. Returns '' for an app that needs no database and
+ * has no external secrets (then the generic line is fine). PURE.
+ */
+export function previewBootFailureAdvisory(opts: {
+  needsDb: boolean;
+  provider: string | null;
+  externalVars: string[];
+  dbProvisioned: boolean;
+}): string {
+  const parts: string[] = [];
+  if (opts.needsDb) {
+    const prov = opts.provider && opts.provider !== 'a database' && opts.provider !== 'a SQL database'
+      ? `**${opts.provider}**` : 'a database';
+    parts.push(
+      opts.dbProvisioned
+        ? `This app uses ${prov}. I provisioned a temporary local one so it could boot — if it still didn't start, it likely needs your REAL database (its own tables/data) to run. Connect it in **Settings → App Settings → Database**, then press **Diagnose** to boot it.`
+        : `This app needs ${prov} to start its server, and I couldn't provision one automatically. Connect your own in **Settings → App Settings → Database**, then press **Diagnose** to boot it.`,
+    );
+  }
+  if (opts.externalVars.length > 0) {
+    const shown = opts.externalVars.slice(0, 8);
+    const more = opts.externalVars.length - shown.length;
+    parts.push(
+      `It also expects real values for ${opts.externalVars.length} external service${opts.externalVars.length === 1 ? '' : 's'} ` +
+      `(${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}) — a server that hard-requires one of these on startup won't boot until you add them in **Settings → Secrets & Keys**.`,
+    );
+  }
+  if (parts.length === 0) return '';
+  return `⚠️ The live preview didn't boot. ${parts.join(' ')} Meanwhile the **In-browser preview** renders your frontend from the imported files.`;
+}
+
 /** The env-var NAMES the app documents in its committed .env template (never the values). PURE. */
 export function envVarNames(files: Record<string, string>): string[] {
   const raw = files['.env.example'] ?? files['.env.sample'] ?? files['.env.template'] ?? '';

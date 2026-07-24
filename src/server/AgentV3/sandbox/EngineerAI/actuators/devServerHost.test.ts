@@ -1,5 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
+
+describe('isNodeServerCommand (Mitrify node-express import fix 2026-07-24)', () => {
+  it('detects a direct Node server launcher (tsx/ts-node/node/nodemon on a server entry)', () => {
+    expect(isNodeServerCommand('tsx server/index.ts')).toBe(true);
+    expect(isNodeServerCommand('NODE_ENV=development tsx server/index.ts')).toBe(true);
+    expect(isNodeServerCommand('node dist/server.js')).toBe(true);
+    expect(isNodeServerCommand('nodemon app.js')).toBe(true);
+    expect(isNodeServerCommand('ts-node src/main.ts')).toBe(true);
+    expect(isNodeServerCommand('node backend/api.js')).toBe(true);
+  });
+  it('does NOT match a bundler/dev-CLI (those are owned by the framework branches)', () => {
+    expect(isNodeServerCommand('vite')).toBe(false);
+    expect(isNodeServerCommand('node node_modules/vite/bin/vite.js')).toBe(false);
+    expect(isNodeServerCommand('next dev')).toBe(false);
+    expect(isNodeServerCommand('astro dev')).toBe(false);
+    expect(isNodeServerCommand('npm run dev')).toBe(false); // pm-run, not a bare node server
+    expect(isNodeServerCommand('')).toBe(false);
+  });
+});
+
+describe('node-server preview: PORT + HOST are injected so the health-check watches the right port (Mitrify)', () => {
+  it('ensureHostBinding prefixes HOST=0.0.0.0 for a bare node server (reachable on the public preview)', () => {
+    expect(ensureHostBinding('tsx server/index.ts')).toBe('HOST=0.0.0.0 tsx server/index.ts');
+    // already binds a host → untouched
+    expect(ensureHostBinding('HOST=0.0.0.0 tsx server/index.ts')).toBe('HOST=0.0.0.0 tsx server/index.ts');
+  });
+  it('pinDevServerPort prefixes PORT=<port> for a bare node server', () => {
+    expect(pinDevServerPort('tsx server/index.ts', 3000)).toBe('PORT=3000 tsx server/index.ts');
+    // composed with ensureHostBinding (the real call site order)
+    expect(pinDevServerPort(ensureHostBinding('tsx server/index.ts'), 3000))
+      .toBe('PORT=3000 HOST=0.0.0.0 tsx server/index.ts');
+    // an explicit PORT= or --port is respected (never double-injected)
+    expect(pinDevServerPort('PORT=5000 tsx server/index.ts', 3000)).toBe('PORT=5000 tsx server/index.ts');
+  });
+});
 
 describe('disableDevServerAutoOpen (v5.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {

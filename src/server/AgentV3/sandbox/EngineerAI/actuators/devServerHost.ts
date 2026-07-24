@@ -67,6 +67,25 @@ export function redirectDevServerOutput(command: string, logPath: string = DEV_S
  */
 export type DevFramework = 'vite' | 'next' | 'astro' | 'nuxt' | 'angular' | 'cra' | undefined;
 
+/**
+ * True when a dev command LAUNCHES A NODE SERVER directly — `tsx`/`ts-node`/`nodemon`/`node` on a server
+ * entry (server/app/index/main/backend/api), e.g. `tsx server/index.ts`. Such a command runs an
+ * Express/Fastify/Koa server on a NODE port (3000), NOT Vite's 5173, and carries no framework keyword the
+ * other detectors recognise — so the port/host helpers must treat it explicitly. Mirrors ProjectImport's
+ * `devScriptRunsNodeServer` (one source of truth for "this is a node server"). A bundler invocation
+ * (`vite`, `next`, …) is NOT matched (those are handled by the framework branches). PURE + unit-testable.
+ *
+ * ROOT CAUSE this enables the fix for (Mitrify import, 2026-07-24): `tsx server/index.ts` fell through
+ * every framework check, so the preview assumed Vite's 5173, pinned nothing, forced no host — and the
+ * health-check waited on 5173 while the Express server bound its own port → "did not come up on port 5173".
+ */
+export function isNodeServerCommand(command: string): boolean {
+  if (!command) return false;
+  // A real bundler/dev-CLI invocation is not a bare node server — let the framework branches own it.
+  if (/\b(?:vite(?:\.js)?|next|astro|nux(?:t|i)|ng|react-scripts)\b/i.test(command)) return false;
+  return /\b(?:tsx|ts-node|nodemon|node)\b[^;|&]*\b(?:server|app|index|main|backend|api)\b/i.test(command);
+}
+
 /** Identify the dev-server framework from a CONCRETE command string (e.g. a resolved package.json
  *  script body like `vite` or `astro dev`). Returns `undefined` for anything unrecognized so the
  *  flag helpers fall back to today's Vite assumption. PURE + unit-testable. */
@@ -112,6 +131,11 @@ export function ensureHostBinding(command: string, framework?: DevFramework): st
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
+  // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
+  // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
+  // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
+  // that ignores HOST is unchanged. (Mitrify node-express import fix, 2026-07-24.)
+  if (isNodeServerCommand(command)) return `HOST=0.0.0.0 ${command}`;
   // Next.js dev server.
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
@@ -351,6 +375,12 @@ export function buildPreKillPortCommand(port: number): string {
 export function pinDevServerPort(command: string, port: number, framework?: DevFramework): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
+  // A direct Node server (`tsx server/index.ts`, …) takes no `--port` flag; nearly every Express/Fastify
+  // app reads its port from `process.env.PORT`. Inject `PORT=<port>` so the server binds the exact port
+  // the health-check watches — the fix for the Mitrify "did not come up on port 5173" import (its
+  // `tsx server/index.ts` had no framework signal, so the preview assumed Vite 5173 and pinned nothing).
+  // If the server ignores PORT and binds its own, detectDevPort re-points the preview to the real port.
+  if (isNodeServerCommand(command) && !/\bPORT=/.test(command)) return `PORT=${port} ${command}`;
   if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run

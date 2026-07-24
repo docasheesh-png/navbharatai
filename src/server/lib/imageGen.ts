@@ -52,6 +52,25 @@ export function imageGenModels(): string[] {
 }
 
 /** Compose the full image prompt from the user's text + style + aspect hint. Pure, bounded. */
+/**
+ * A prompt that asks for a MAP OF INDIA. India-first (admin 2026-07-23): such an image must use the
+ * official map of India (Government of India / Survey of India). Deliberately narrow — only fires when
+ * BOTH "India" and a map/boundary word appear — so an unrelated image is never touched.
+ */
+export function wantsIndiaMap(prompt: string): boolean {
+  const p = (prompt || '').toLowerCase();
+  const india = /\bindia\b|\bbharat\b|भारत|इंडिया/.test(p);
+  const map = /\bmap\b|\bmaps\b|naksha|नक्शा|\bborder\b|\bboundary\b|\bboundaries\b|cartograph/.test(p);
+  return india && map;
+}
+
+/** Appended to a map-of-India image prompt so the render uses India's official boundaries. */
+export const INDIA_MAP_IMAGE_DIRECTIVE =
+  'This is a map of India: use the OFFICIAL map of India as published by the Government of India ' +
+  '(Survey of India) — Jammu & Kashmir and Ladakh (including Aksai Chin and Pakistan-occupied Kashmir/' +
+  'Gilgit-Baltistan) and Arunachal Pradesh are shown as integral parts of India, with the complete ' +
+  'official boundary. Do not use a foreign or “neutral” boundary.';
+
 export function buildImagePrompt(req: ImageGenRequest): string {
   const base = String(req.prompt || '').trim().slice(0, MAX_PROMPT_CHARS);
   const enhancer = IMAGE_STYLE_ENHANCERS[req.style || ''] || '';
@@ -59,6 +78,7 @@ export function buildImagePrompt(req: ImageGenRequest): string {
   const parts = [base];
   if (enhancer) parts.push(`Style: ${enhancer}.`);
   if (ratio) parts.push(`Aspect ratio ${ratio}.`);
+  if (wantsIndiaMap(base)) parts.push(INDIA_MAP_IMAGE_DIRECTIVE);
   return parts.join(' ');
 }
 

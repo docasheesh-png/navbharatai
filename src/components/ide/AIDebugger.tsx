@@ -2,9 +2,10 @@ import React, { useState, useCallback } from 'react';
 import {
   Bug, Wand2, Copy, Check, ChevronDown, ChevronRight,
   Loader2, Clock, X, History, Shield,
-  Lightbulb, Search, Code2, CheckCircle2
+  Lightbulb, Search, Code2, CheckCircle2, FileSearch
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { AppScanPanel } from './AppScanPanel';
 
 interface AIDebuggerProps {
   files?: Record<string, string>;
@@ -88,6 +89,8 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
   const [copiedFix, setCopiedFix] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
+  // Two modes: paste a single error, or scan a whole app (a Pro v5 app / GitHub repo / open project).
+  const [mode, setMode] = useState<'single' | 'app'>('single');
   const detectedType = errorText.trim() ? detectErrorType(errorText) : null;
 
   const loadingStepLabels = [
@@ -189,11 +192,33 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
     return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const modeBtn = (m: 'single' | 'app') => ({
+    background: mode === m ? 'rgba(129,140,248,0.15)' : 'rgba(255,255,255,0.04)',
+    color: mode === m ? '#818cf8' : '#8b949e',
+    border: `1px solid ${mode === m ? 'rgba(129,140,248,0.4)' : 'rgba(255,255,255,0.08)'}`,
+  });
+
   return (
     <div
-      className="flex h-full w-full overflow-hidden"
+      className="flex flex-col h-full w-full overflow-hidden"
       style={{ background: '#0d1117', color: '#e6edf3' }}
     >
+      {/* Mode toggle: paste a single error, or scan a whole app */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+        <button onClick={() => setMode('single')} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={modeBtn('single')}>
+          <Wand2 className="w-3.5 h-3.5" /> Single Error
+        </button>
+        <button onClick={() => setMode('app')} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={modeBtn('app')}>
+          <FileSearch className="w-3.5 h-3.5" /> Full App Scan
+        </button>
+      </div>
+
+      {mode === 'app' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AppScanPanel files={files} />
+        </div>
+      ) : (
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Main column */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* ── TOP SECTION (40%) ── */}
@@ -624,6 +649,8 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           </div>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 };

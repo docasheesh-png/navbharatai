@@ -43,9 +43,17 @@ describe('AI Debugger — real analysis, no fake fallback', () => {
     const entry = kb('ai_debugger');
     expect(entry).toBeTruthy();
     expect(entry!.path).toContain('Other AI → AI Debugger'); // moved from Settings → Home "Other AI" (2026-07-23)
-    expect(entry!.description).toMatch(/REAL AI analysis/i);
-    expect(entry!.description).toMatch(/never shows a canned fake/i);
+    expect(entry!.description).toMatch(/REAL analysis/i);
+    expect(entry!.description).toMatch(/never a fake result/i);
     expect(navFor(entry!)).toEqual({ view: 'debugger' });
+  });
+
+  it('KB entry documents the Full App Scan mode (whole-app debugging from Pro/GitHub sources)', () => {
+    const entry = kb('ai_debugger');
+    expect(entry!.description).toMatch(/Full App Scan/i);
+    expect(entry!.description).toMatch(/file and line/i);
+    expect(entry!.howToUse).toMatch(/Scan for problems/i);
+    expect(entry!.keywords).toEqual(expect.arrayContaining(['full app scan', 'github repo debug']));
   });
 
   it('the canned mock generator is gone from the client (fake analysis can never return)', () => {
@@ -53,6 +61,14 @@ describe('AI Debugger — real analysis, no fake fallback', () => {
     expect(src).not.toMatch(/function generateMockResponse\(/);
     // Failures now surface honestly.
     expect(src).toContain('analyzeError');
+    // Both modes are wired: single-error + the whole-app scan panel.
+    expect(src).toContain('AppScanPanel');
+  });
+
+  it('the Full App Scan panel exists and streams from the real /api/app-debug/run route', () => {
+    const src = readFileSync(join(__dirname, '../src/components/ide/AppScanPanel.tsx'), 'utf8');
+    expect(src).toContain('/api/app-debug/run');
+    expect(src).toContain('/api/app-debug/sources');
   });
 
   it('the /api/debug route is registered on the server (the endpoint the client calls exists)', () => {

@@ -21772,3 +21772,36 @@ Report of the imported Mitrify app (166 files) being edited ("fix network error"
 
 Gate: fe tsc 0 · server tsc 0 · devServerHost 76 tests · full suite green · build ✓. (Rebased onto main after a
 parallel session merged #1866/#1867 — India territorial policy — safeguard #1; only devServerHost files are mine.)
+### 2026-07-24 (cont.) — AI Debugger → Full-App Debugger (whole-codebase scan from Pro v5 / GitHub / open project)
+
+Admin: the AI Debugger (Other AI → AI Tools) should work properly AND gain a system that debugs a WHOLE
+app — connect a GitHub repo or pick a NavBharatAI Pro v5-built app, read every file/line, list every
+problem found, and suggest fixes. (Suggestion adapted per the external-suggestion rule, not copied.)
+
+Audit first (rule 7): the existing AI Debugger is REAL but tiny — one pasted error → /api/debug (free-tier
+LLM, white-label). Kept intact as "Single Error" mode; added a second "Full App Scan" mode rather than
+rebuilding. Reused existing infra: loadWorkspaceFiles (Pro v5 durable files), /api/github/fetch (repo
+files), ProjectImport filters, the free-tier router.
+
+Built (4 commits, all gated):
+- **appStaticScan.ts** (layer 1) — deterministic, zero-hallucination scanner: precise file:line findings
+  for empty catch, eval, leftover debugger/console, TODO/FIXME, possible hardcoded secrets, `as any`,
+  oversized files. Per-rule/per-file caps, minified-line skip, low-false-positive secret rules. 13 tests.
+- **appDebugAnalysis.ts** (layer 2) — prioritized/budget-bounded file selection (source-first; secrets
+  NEVER sent to the model), char-batched line-numbered prompts, a white-label auditor persona → strict
+  JSON findings array, robust parse (fences/prose/[]/empty-drop), merge+rank with static (static wins at
+  a shared spot), honest truncation signal. 16 tests.
+- **WorkspaceFileStore.listUserWorkspaceApps(uid)** — durable list of a user's Pro v5 apps via a
+  documentId prefix range over workspace_files_v3 (metadata-only, newest-first).
+- **routes/appDebug.ts** — GET /api/app-debug/sources (auth) + POST /api/app-debug/run (NDJSON stream:
+  meta/progress/findings/note/done). Loads from a Pro v5 app (ownership-gated) or a client-fetched GitHub
+  repo; runs static over EVERY file + AI over the prioritized subset; honest static-only degrade when the
+  AI pass is briefly unavailable (never a fake result); white-label throughout. Registered in server.ts.
+  9 route tests (incl. the degraded path — CI has no provider keys, so the AI batch fails and the note +
+  static-only path is exercised for real).
+- **AppScanPanel.tsx** + **AIDebugger.tsx** mode toggle — source picker (Pro v5 app / GitHub repo / open
+  project), live streamed progress with real file names, findings ranked by severity with file:line +
+  category + fix suggestion + a "Verified" badge on deterministic findings, honest empty/degraded/error
+  states. Self-contained (authJsonHeaders + connected gh_token). AppKnowledgeBase entry updated.
+
+Gate: fe tsc 0 · server tsc 0 · vite build ✓ · new tests 38 + aiToolsReal 13 green · full suite running.

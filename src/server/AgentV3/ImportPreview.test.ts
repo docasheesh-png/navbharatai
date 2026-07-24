@@ -1,5 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory } from './ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory } from './ImportPreview';
+
+describe('previewBootFailureAdvisory (honest DB state, admin 2026-07-24) — a failed boot names the real cause', () => {
+  it('DB-needed + not provisioned → tells the user to connect their own database', () => {
+    const msg = previewBootFailureAdvisory({ needsDb: true, provider: 'PostgreSQL', externalVars: [], dbProvisioned: false });
+    expect(msg).toMatch(/didn't boot/i);
+    expect(msg).toMatch(/PostgreSQL/);
+    expect(msg).toMatch(/Settings → App Settings → Database/);
+    expect(msg).toMatch(/Diagnose/);
+  });
+  it('DB-needed + provisioned → explains a temp DB was used and the real one may be required', () => {
+    const msg = previewBootFailureAdvisory({ needsDb: true, provider: 'Drizzle', externalVars: [], dbProvisioned: true });
+    expect(msg).toMatch(/provisioned a temporary local one/i);
+    expect(msg).toMatch(/Drizzle/);
+  });
+  it('external secrets → names them and points to Settings → Secrets & Keys', () => {
+    const msg = previewBootFailureAdvisory({ needsDb: false, provider: null, externalVars: ['GOOGLE_CLIENT_ID', 'CASHFREE_APP_ID'], dbProvisioned: false });
+    expect(msg).toMatch(/GOOGLE_CLIENT_ID/);
+    expect(msg).toMatch(/Settings → Secrets & Keys/);
+  });
+  it('needs neither a DB nor external secrets → empty (caller keeps the generic line)', () => {
+    expect(previewBootFailureAdvisory({ needsDb: false, provider: null, externalVars: [], dbProvisioned: false })).toBe('');
+  });
+  it('never leaks an AI vendor/model name', () => {
+    const forbidden = /\b(gemini|claude|anthropic|glm|kimi|grok|openai|gpt|bedrock|vertex)\b/i;
+    const msg = previewBootFailureAdvisory({ needsDb: true, provider: 'MongoDB', externalVars: ['STRIPE_KEY'], dbProvisioned: true });
+    expect(msg).not.toMatch(forbidden);
+  });
+});
 
 describe('detectNeedsDatabase', () => {
   it('detects a SQL/ORM driver in package.json', () => {

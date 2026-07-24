@@ -9,6 +9,8 @@ import { AppScanPanel } from './AppScanPanel';
 
 interface AIDebuggerProps {
   files?: Record<string, string>;
+  /** Auto-fix handoff to the Pro v5 page for the scanned app (admin 2026-07-24). */
+  onAutoFixInV5?: (workspaceId: string, text: string) => void;
 }
 
 type ErrorTab = 'JS/TS Error' | 'CSS Issue' | 'Network Error' | 'Build Error' | 'React Error';
@@ -77,7 +79,7 @@ function saveHistory(entry: HistoryEntry): void {
   }
 }
 
-export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
+export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) => {
   const [activeTab, setActiveTab] = useState<ErrorTab>('JS/TS Error');
   const [errorText, setErrorText] = useState('');
   const [codeContext, setCodeContext] = useState('');
@@ -215,7 +217,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
 
       {mode === 'app' ? (
         <div className="flex-1 min-h-0 overflow-hidden">
-          <AppScanPanel files={files} />
+          <AppScanPanel files={files} onAutoFixInV5={onAutoFixInV5} />
         </div>
       ) : (
       <div className="flex flex-1 min-h-0 overflow-hidden">

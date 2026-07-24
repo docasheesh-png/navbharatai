@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { AIRouterManager } from '../AI/AIRouterManager';
+import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import { loadWorkspaceFiles, listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { scanFilesStatic } from '../lib/appStaticScan';
@@ -158,7 +158,6 @@ export function registerAppDebugRoutes(app: Express): void {
       let aiBatchesFailed = 0;
       const totalBatches = selection.batches.length;
       const system = buildAppDebugSystemPrompt();
-      const router = AIRouterManager.getRouter('free');
 
       for (let i = 0; i < totalBatches; i++) {
         if (closed || Date.now() - startedAt > OVERALL_BUDGET_MS) break;
@@ -170,13 +169,13 @@ export function registerAppDebugRoutes(app: Express): void {
           files: batch.files.map((f) => f.path),
         });
         try {
+          // Same AI engine as Professional AI (admin 2026-07-24).
           const timeout = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('app-debug batch timeout')), BATCH_TIMEOUT_MS));
-          const { response } = await Promise.race([
-            router.route(buildAppDebugBatchPrompt(batch), system),
+          const content = await Promise.race([
+            callProfessionalAI(system, buildAppDebugBatchPrompt(batch), 'free'),
             timeout,
           ]);
-          const content = response?.content ?? '';
           const parsed = parseAiFindings(content, batch.files.map((f) => f.path));
           aiBatchesRun++;
           if (parsed.length) {
@@ -244,14 +243,13 @@ export function registerAppDebugRoutes(app: Express): void {
     try {
       const line = Number(req.body?.line);
       const context = `File: ${file || '(unknown)'}${Number.isInteger(line) && line > 0 ? ` (around line ${line})` : ''}\n\n${code}`;
-      const router = AIRouterManager.getRouter('free');
+      // Same AI engine as Professional AI (admin 2026-07-24).
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('investigate timeout')), 60_000));
-      const { response } = await Promise.race([
-        router.route(buildDebugUserPrompt(problem, context, 'Full-app finding'), buildDebugSystemPrompt()),
+      const content = await Promise.race([
+        callProfessionalAI(buildDebugSystemPrompt(), buildDebugUserPrompt(problem, context, 'Full-app finding'), 'free'),
         timeout,
       ]);
-      const content = response?.content ?? '';
       if (!content.trim()) {
         res.status(502).json({ error: 'The analysis came back empty — please try again.' });
         return;

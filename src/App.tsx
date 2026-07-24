@@ -3341,6 +3341,17 @@ export default function App() {
             onOpenAppDatabase={() => { toggleTab('settings'); setSettingsScreen('database'); }}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
             onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
+            onAutoFixInV5={(workspaceId, text) => {
+              // Open the SCANNED Pro v5 app's session (so v5 fixes THAT app's files) with the fix
+              // prompt prefilled — a fresh fix conversation in the v5 page (admin 2026-07-24).
+              const uid = user?.uid || 'anon';
+              const prefix = `agentv3-${uid}-`;
+              const sid = workspaceId.startsWith(prefix) ? workspaceId.slice(prefix.length) : workspaceId;
+              setV3Resume({ sessionId: sid, messages: [], nonce: Date.now() });
+              v3ResumeInFlightRef.current = true; // retarget that app's session, don't bump a fresh-open
+              setV3PendingFix({ text, nonce: Date.now() });
+              toggleTab('nbi_pro_chat');
+            }}
             problems={problems}
             activeView={activeView}
             generatedCode={generatedCode}

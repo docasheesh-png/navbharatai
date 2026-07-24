@@ -12,7 +12,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Bug, Loader2, Github, Box, RefreshCw, AlertTriangle, ShieldCheck,
-  ChevronDown, ChevronRight, FileSearch, CheckCircle2, Sparkles,
+  ChevronDown, ChevronRight, FileSearch, CheckCircle2, Sparkles, Wrench,
 } from 'lucide-react';
 import { authJsonHeaders } from '../../lib/authHeaders';
 
@@ -49,6 +49,26 @@ interface Repo { full_name: string; name: string; }
 interface AppScanPanelProps {
   /** The project currently open in the editor (an extra, real, always-available source). */
   files?: Record<string, string>;
+  /**
+   * Auto-fix: hand the findings to the NavBharatAI Pro v5 page for the SCANNED app (admin 2026-07-24).
+   * Only wired for a Pro v5 app source — the v5 builder then really fixes that app's files.
+   */
+  onAutoFixInV5?: (workspaceId: string, text: string) => void;
+}
+
+/** Build the fix instruction v5 receives — the real, ranked findings with file:line + suggested fix. */
+function buildFixPrompt(findings: Finding[], health?: ProjectHealth): string {
+  const top = findings.slice(0, 40);
+  const lines = top.map((f, i) => {
+    const loc = `${f.file}${f.line ? `:${f.line}` : ''}`;
+    const fix = f.suggestion ? `\n   Suggested fix: ${f.suggestion}` : '';
+    return `${i + 1}. [${f.severity.toUpperCase()}] ${loc} — ${f.problem}${fix}`;
+  });
+  const more = findings.length > top.length ? `\n\n(+${findings.length - top.length} more lower-priority issues.)` : '';
+  const header = health
+    ? `NavBharatAI's debugger scanned this app (health ${health.score}/100) and found ${findings.length} issue${findings.length === 1 ? '' : 's'}. Please fix them in the actual project files:`
+    : `NavBharatAI's debugger found ${findings.length} issue${findings.length === 1 ? '' : 's'} in this app. Please fix them in the actual project files:`;
+  return `${header}\n\n${lines.join('\n')}${more}\n\nApply real fixes to the code, then make sure the app still builds and runs correctly.`;
 }
 
 type SourceKind = 'pro' | 'github' | 'current';
@@ -60,7 +80,7 @@ const SEV_STYLE: Record<Severity, { bg: string; fg: string; label: string }> = {
   low: { bg: 'rgba(148,163,184,0.12)', fg: '#94a3b8', label: 'LOW' },
 };
 
-export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
+export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5 }) => {
   const [kind, setKind] = useState<SourceKind>('pro');
   const [proApps, setProApps] = useState<ProApp[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -373,6 +393,18 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
               )}
             </div>
           </div>
+        )}
+
+        {/* Auto-fix in NavBharatAI Pro (only for a scanned Pro v5 app — v5 fixes that app's real files) */}
+        {summary && findings.length > 0 && onAutoFixInV5 && activeSource?.kind === 'pro' && activeSource.workspaceId && (
+          <button
+            onClick={() => onAutoFixInV5(activeSource.workspaceId!, buildFixPrompt(findings, summary.health))}
+            className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold w-full justify-center"
+            style={{ background: 'linear-gradient(90deg,#4f46e5,#7c3aed)', color: 'white' }}
+            title="Opens this app in NavBharatAI Pro with the fixes ready to apply"
+          >
+            <Wrench className="w-4 h-4" /> Auto-fix these in NavBharatAI Pro
+          </button>
         )}
 
         {/* Summary bar */}

@@ -134,6 +134,8 @@ export interface ViewPanelsProps {
    *  view, where Send starts a genuine live build. Used by tools like Voice to App whose old
    *  "generate" path called a non-existent endpoint (display-only, admin autopsy 2026-07-20). */
   onBuildViaV5Prompt?: (prompt: string) => void;
+  /** Auto-fix: open the SCANNED Pro v5 app in the v5 page with a fix prompt prefilled (admin 2026-07-24). */
+  onAutoFixInV5?: (workspaceId: string, text: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
 }
@@ -150,7 +152,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -390,7 +392,7 @@ export function ViewPanels({
       {/* Phase 6 — AI Debugger */}
       {activeView === 'debugger' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AIDebugger files={files} />
+          <AIDebugger files={files} onAutoFixInV5={onAutoFixInV5} />
         </div>
       )}
 

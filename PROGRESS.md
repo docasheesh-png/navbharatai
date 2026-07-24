@@ -21830,3 +21830,27 @@ spot; findings ranked most-severe first. The "Verified" badge now covers graph f
 
 Gate: fe tsc 0 · server tsc 0 · vite build ✓ · debugger tests 76 green · full suite running. All folded
 into PR #1869 (branch claude/full-app-debugger) — one PR, one CI cycle.
+
+### 2026-07-24 (cont.) — Debugger auto-fix + "Other AI = Professional AI" routing
+
+Two admin requests, one PR:
+
+**1) Other AI ki API call = Professional AI.** The 70+ professionals answer through one resilient chain
+(`professional-free` GLM-flash → free: Vertex Gemini / paid: race Grok×Gemini×Vertex → Claude-Haiku last
+resort), but the Other-AI tools used the flat `free` router. Extracted that chain into ONE shared helper
+`src/server/lib/professionalRouting.ts` (`callProfessionalAI`) — the professionals engine now delegates to
+it (no drift, rule 2/3), and the Other-AI tools call the same: AI Debugger (`/api/debug`, `/api/app-debug`
+run + investigate) and the Design pass (`/api/design/*`). White-label + honest failures unchanged.
+Regression tests lock the wiring (confirmed live: debugger logs now show the professional `[RACE]` chain,
+not the flat free router). Image Gen (image model) + Screenshot→Code (vision chain) are different
+modalities and stay as-is.
+
+**2) Auto-fix → hand a scanned Pro v5 app to the v5 page.** New "Auto-fix these in NavBharatAI Pro" button
+(only for a Pro v5 app source) composes a ranked fix prompt from the REAL findings (severity + file:line +
+suggested fix) and hands off to the v5 page. Per admin choice ("wahi app khule, fix-chat ready"): it
+retargets the SCANNED app's own v5 session via `v3Resume` (so the v5 builder fixes THAT app's real files)
+and prefills the composer via `v3PendingFix` — a fresh fix conversation in v5, NOT inside the Other AI
+debugger. Threaded App → ViewPanels → AIDebugger → AppScanPanel. sessionId derived from the workspaceId by
+stripping the `agentv3-{uid}-` prefix.
+
+Gate: fe tsc 0 · server tsc 0 · vite build ✓ · routing+debugger+wiring tests green · full suite running.

@@ -7,7 +7,7 @@ import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
-import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 
 /**
@@ -268,6 +268,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     // Every chat tier credits its creators consistently (single source of truth).
     systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;
+    // India-first: answer territorial/map questions per India's official position (single source of truth).
+    systemPrompt = `${systemPrompt}\n\n${INDIA_TERRITORIAL_INTEGRITY}`;
     // Anchor every reply to TODAY so the AI never presents stale training-cutoff facts as current
     // (admin 2026-07-12: "cricket squad ka 2025 data current bata diya"). Honesty directive, all tiers.
     systemPrompt = `${systemPrompt}\n\n${recencyDirective()}`;

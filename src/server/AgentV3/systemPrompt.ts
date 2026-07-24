@@ -7,7 +7,7 @@
 // AgentRegistry so the Architect always delegates by real, current capability.
 
 import { rosterBriefing } from './AgentRegistry';
-import { CREATOR_IDENTITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { isBinaryAsset } from './fileClassification';
 
 /**
@@ -75,7 +75,7 @@ export function planSystemPrompt(): string {
     '- NEVER plan a "comprehensive seed data" / "1000+ records" / bulk-data file step. Generating large',
     '  data by hand times the build out. If the app needs sample data, plan ONE step: "generate seed data"',
     '  (the build will use the generate_seed_data tool) — not a hand-written mega-file.',
-  ].join('\n') + '\n\n' + CREATOR_IDENTITY;
+  ].join('\n') + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + CREATOR_IDENTITY;
 }
 
 /**
@@ -659,5 +659,5 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- When the app is genuinely complete and working, end your turn with a short',
     '  summary of what you built and how to run it. Do not call any tool in that',
     '  final turn.',
-  ].join('\n') + '\n\n' + CREATOR_IDENTITY;
+  ].join('\n') + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + CREATOR_IDENTITY;
 }

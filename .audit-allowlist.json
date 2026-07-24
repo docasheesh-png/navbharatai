@@ -7,6 +7,8 @@
     { "package": "axios", "severity": "high", "reason": "pre-existing transitive; upgrade evaluated separately (used server-side; needs regression check before bumping)." },
     { "package": "cashfree-pg", "severity": "high", "reason": "payments SDK; vendor-pinned — upgrade requires payment-flow re-verification, tracked separately." },
     { "package": "undici", "severity": "high", "reason": "transitive (fetch/runtime); pre-existing, upgrade tracked separately." },
-    { "package": "xlsx", "severity": "high", "reason": "no upstream fix available on npm (prototype-pollution/ReDoS advisories); usage is server-side and input-controlled — tracked separately." }
+    { "package": "xlsx", "severity": "high", "reason": "no upstream fix available on npm (prototype-pollution/ReDoS advisories); usage is server-side and input-controlled — tracked separately." },
+    { "package": "react-router", "severity": "high", "reason": "advisory GHSA (React Router RSC Mode CSRF Bypass) affects vulnerable range 7.12.0-8.2.0; the latest published version (7.18.1) is still in-range and npm's only 'fix' is a BREAKING downgrade to 7.11.0, so no safe forward fix exists yet. The vulnerable code path is RSC/framework mode — NavBharatAI uses react-router-dom purely as a client-side SPA (BrowserRouter/createBrowserRouter; NO @react-router/dev|node|serve framework packages), so RSC actions are never executed. Re-triage + upgrade when a patched version >8.2.0 ships." },
+    { "package": "react-router-dom", "severity": "high", "reason": "flagged via react-router (same RSC-mode CSRF advisory). SPA-only usage; not exploitable without RSC/framework mode, which this app does not use. Bumped to the latest 7.18.1; upgrade tracked with the react-router entry." }
   ]
 }

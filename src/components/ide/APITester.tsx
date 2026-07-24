@@ -92,6 +92,15 @@ function buildUrl(base: string, params: KVRow[]): string {
   return base.includes('?') ? `${base}&${qs}` : `${base}?${qs}`;
 }
 
+// SECURITY: never persist auth/secret-bearing headers to localStorage history (they'd sit in plaintext
+// on disk). The Auth-tab Bearer token is already kept out of history; this also strips a manually-typed
+// Authorization/Cookie/api-key header before saving. The user re-enters the secret when replaying — safer.
+const SENSITIVE_HEADER_RE = /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|api-key|x-auth-token|x-access-token|x-secret)$/i;
+
+function stripSensitiveHeaders(rows: KVRow[]): KVRow[] {
+  return rows.filter((r) => !SENSITIVE_HEADER_RE.test((r.key || '').trim()));
+}
+
 function loadHistory(): RequestConfig[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -189,7 +198,8 @@ const APITester: React.FC<APITesterProps> = () => {
   useEffect(() => { saveHistory(history); }, [history]);
 
   const addToHistory = useCallback((cfg: Omit<RequestConfig, 'id' | 'savedAt'>) => {
-    const entry: RequestConfig = { ...cfg, id: crypto.randomUUID(), savedAt: new Date() };
+    // Never write a secret-bearing header to localStorage (see stripSensitiveHeaders).
+    const entry: RequestConfig = { ...cfg, headers: stripSensitiveHeaders(cfg.headers), id: crypto.randomUUID(), savedAt: new Date() };
     setHistory(prev => [entry, ...prev].slice(0, MAX_HISTORY));
   }, []);
 

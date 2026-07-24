@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, type JsonFetcher,
+  fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, materializeRepoViaApi, type JsonFetcher,
 } from './GithubApiTree';
 
 /** A fake JSON fetch: routes by URL substring to a scripted reply. */
@@ -94,6 +94,58 @@ describe('fetchRepoTextFile — read one key file on demand', () => {
     expect(big).toMatchObject({ ok: false, reason: 'too-large' });
     const bad = await fetchRepoTextFile({ url: 'https://github.com/o/r', path: 'x', fetchImpl: fakeJson(() => ({ body: { encoding: 'none' } })).fetchImpl });
     expect(bad).toMatchObject({ ok: false, reason: 'empty' });
+  });
+});
+
+describe('materializeRepoViaApi — full file map via api.github.com ONLY (no codeload, no sandbox)', () => {
+  const b64 = (s: string) => Buffer.from(s).toString('base64');
+  const TREE_WITH_SHAS = {
+    truncated: false,
+    tree: [
+      { path: 'package.json', type: 'blob', sha: 'sha_pkg', size: 40 },
+      { path: 'src/App.tsx', type: 'blob', sha: 'sha_app', size: 20 },
+      { path: 'node_modules/x/index.js', type: 'blob', sha: 'sha_nm', size: 10 },   // must be skipped
+      { path: 'logo.png', type: 'blob', sha: 'sha_png', size: 5 },                  // binary, skipped
+      { path: '.env', type: 'blob', sha: 'sha_env', size: 5 },                      // secret, skipped
+      { path: 'src', type: 'tree', sha: 'sha_dir' },                                // dir, ignored
+    ],
+  };
+  function repoFetch(): JsonFetcher {
+    return async (url) => {
+      const body =
+        url.endsWith('/repos/o/r') ? { default_branch: 'main' }
+        : url.includes('/git/trees/') ? TREE_WITH_SHAS
+        : url.includes('/git/blobs/sha_pkg') ? { encoding: 'base64', content: b64('{"name":"demo"}') }
+        : url.includes('/git/blobs/sha_app') ? { encoding: 'base64', content: b64('export default 1') }
+        : {};
+      return { ok: true, status: 200, json: async () => body };
+    };
+  }
+
+  it('fetches only the KEPT files (skips node_modules / binaries / secrets) — every call on api.github.com', async () => {
+    const urls: string[] = [];
+    const base = repoFetch();
+    const fetchImpl: JsonFetcher = (url, init) => { urls.push(url); return base(url, init); };
+    const res = await materializeRepoViaApi({ url: 'https://github.com/o/r', token: 't', fetchImpl });
+    expect(res.ok).toBe(true);
+    expect(Object.keys(res.files!).sort()).toEqual(['package.json', 'src/App.tsx']);
+    expect(res.files!['package.json']).toBe('{"name":"demo"}');
+    expect(res.skipped).toBe(3); // node_modules + png + .env
+    // EVERY request went to api.github.com — never codeload.github.com (the whole point)
+    expect(urls.every((u) => u.startsWith('https://api.github.com/'))).toBe(true);
+    expect(urls.some((u) => u.includes('codeload'))).toBe(false);
+  });
+
+  it('classifies a not-found and never throws on a network error', async () => {
+    const nf = await materializeRepoViaApi({ url: 'https://github.com/o/r', fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }) });
+    expect(nf).toMatchObject({ ok: false, reason: 'not-found' });
+    const net = await materializeRepoViaApi({ url: 'https://github.com/o/r', fetchImpl: async () => { throw new Error('down'); } });
+    expect(net).toMatchObject({ ok: false, reason: 'network' });
+  });
+
+  it('rejects a non-github URL up front', async () => {
+    const res = await materializeRepoViaApi({ url: 'https://evil.com/o/r', fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }) });
+    expect(res).toMatchObject({ ok: false, reason: 'bad-url' });
   });
 });
 

@@ -105,7 +105,7 @@ import {
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
 import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFetch';
-import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles } from '../AgentV3/GithubApiTree';
+import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, materializeRepoViaApi } from '../AgentV3/GithubApiTree';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
@@ -5847,9 +5847,38 @@ export function registerAgentV3Routes(app: Express): void {
                 autoResolved: serverSideLanded,
               });
             } catch { /* diagnostics are best-effort */ }
-            // FALLBACK — only if the server-side fetch did NOT land files (a private repo the token truly
-            // cannot see, an over-cap repo, or an API hiccup) — try the legacy in-sandbox clone. Never a
-            // regression vs today; on the common case the clone never runs.
+            // ═══ RELIABILITY FALLBACK — MATERIALIZE VIA api.github.com ONLY (git tree → git blobs) ═══
+            // The zipball redirects to codeload.github.com — a DIFFERENT host than api.github.com. Our
+            // proven GitHub client (UserGitHubClient, which creates the save-repo in prod) only ever
+            // reaches api.github.com, so codeload's reachability is the one thing not proven. If the
+            // zipball didn't land, rebuild the whole file map using ONLY api.github.com (the git tree +
+            // per-file git blobs) — the exact host proven to work in prod — then land it through the same
+            // pipeline. Slower (one call per file) but maximally reliable; runs only when the fast zipball
+            // path failed. (mitrify autopsy 2026-07-24 — remove the last unproven-reachable host.)
+            let apiMaterialized = false;
+            if (!serverSideLanded) {
+              try {
+                const mat = await materializeRepoViaApi({ url: cleanImportUrl, token: githubToken || undefined });
+                if (mat.ok && mat.files && Object.keys(mat.files).length > 0) {
+                  apiMaterialized = await landImportedProject(mat.files, {
+                    source: cleanImportUrl,
+                    writeToSandbox: true,
+                    droppedNote: mat.skipped ? `— skipped ${mat.skipped} file(s) (dependency/build folders, binaries, secrets, or over the size cap)` : '',
+                  });
+                  serverSideLanded = apiMaterialized;
+                }
+                buildDiag.record({
+                  phase: 'build',
+                  severity: apiMaterialized ? 'info' : 'warning',
+                  code: 'IMPORT_DIAGNOSTIC',
+                  message: `GitHub import via api.github.com git-blobs ${apiMaterialized ? `SUCCEEDED (${mat.fetched} files)` : `did not land (${mat.reason ?? 'unknown'})`} for ${cleanImportUrl} — hadToken=${!!githubToken}; elapsed=${Date.now() - importStartedAt}ms${apiMaterialized ? '' : ' → falling back to in-sandbox clone'}`,
+                  autoResolved: apiMaterialized,
+                });
+              } catch { /* best-effort — fall through to the legacy clone */ }
+            }
+            // FALLBACK — only if BOTH server-side fetches did NOT land files (a private repo the token
+            // truly cannot see, an over-cap repo, or an API outage) — try the legacy in-sandbox clone.
+            // Never a regression vs today; on the common case the clone never runs.
             if (!serverSideLanded) {
             // NOTE: do NOT gate the clone on "the sandbox is empty" — ensureWorkspace ALWAYS
             // pre-scaffolds a fresh workspace (a .gitignore + package-lock.json), so an empty check

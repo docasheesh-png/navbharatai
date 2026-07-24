@@ -17,12 +17,14 @@
 
 // Derived/vendor folders across the stacks users actually migrate from (Node, Python, Rust/Java,
 // mobile/Expo, PHP) — all re-created by the stack's own install/build, never worth importing.
-const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea)(\/|$)/;
+// Exported (2026-07-24) so the api.github.com repo materializer (GithubApiTree.materializeRepoViaApi)
+// filters files with the EXACT same rules as the zip path — ONE source of truth, no drift.
+export const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea)(\/|$)/;
 // OS/editor junk files that ride along in almost every user-made zip.
-const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+export const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 // Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep.
-const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
-const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
+export const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
+export const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
 // Small binary ASSETS worth keeping (an imported app's logo/favicon/icons/fonts) so the preview
 // isn't full of broken images. Everything ELSE that matches BINARY_EXT_RE (video/audio/archives/
 // binaries) stays dropped — too large and never needed to boot a preview. ext → MIME for a data URI.

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Send, Clock, Copy, Check, Trash2, Plus, ChevronDown,
-  ArrowRight, Save, RefreshCcw, Globe, X
+  ArrowRight, Save, RefreshCcw, Globe, X, ShieldAlert
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -303,6 +303,10 @@ const APITester: React.FC<APITesterProps> = () => {
     setBody(tryPrettyJson(body));
   };
 
+  // Safety: an absolute http:// target sends the request (and any token) in PLAINTEXT on the wire.
+  // Relative/same-origin URLs inherit the page's HTTPS, so they are not flagged.
+  const insecureTarget = /^http:\/\//i.test(url.trim());
+
   const tabs: { id: ActiveTab; label: string }[] = [
     { id: 'params', label: 'Params' },
     { id: 'headers', label: 'Headers' },
@@ -454,6 +458,14 @@ const APITester: React.FC<APITesterProps> = () => {
             </label>
           </div>
         </div>
+
+        {/* Safety: warn when the target is unencrypted http:// */}
+        {insecureTarget && (
+          <div className="flex items-start gap-2 px-2 sm:px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-400">
+            <ShieldAlert size={13} className="shrink-0 mt-0.5" />
+            <span>This is an <b>http://</b> (unencrypted) URL — the request and any auth token travel in plaintext. Prefer <b>https://</b> where the API supports it.</span>
+          </div>
+        )}
 
         {/* Save request input */}
         {showSaveInput && (

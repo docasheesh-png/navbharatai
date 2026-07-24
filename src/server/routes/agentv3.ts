@@ -105,6 +105,7 @@ import {
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
 import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFetch';
+import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles } from '../AgentV3/GithubApiTree';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
@@ -612,6 +613,32 @@ export function failedImportPromptNote(failed: { url: string; reason: string } |
     'message the platform already showed them. Do NOT clone the repository yourself into a temp',
     'directory and report success — those files would NOT persist into the workspace.',
   ].join('\n');
+}
+
+/**
+ * INSTANT-CONNECT survey note (admin 2026-07-24). When the GitHub API tree + key files were fetched
+ * up-front, give the architect the repo's real structure and key-file contents so it can survey the app
+ * IMMEDIATELY — no waiting on the full download/land. Bounded so a huge repo never floods the prompt.
+ * Returns '' when there is no instant-connect data. Pure.
+ */
+export function importSurveyPromptNote(
+  survey: { url: string; fileCount: number; structure: string; keyFiles: Record<string, string>; truncated: boolean } | null | undefined,
+): string {
+  if (!survey || !survey.url) return '';
+  const lines = [
+    'IMPORTED PROJECT — you are connected to the user\'s GitHub repository and its files are being loaded into the workspace.',
+    `Repository: ${survey.url}`,
+    `It contains ${survey.fileCount} file(s)${survey.truncated ? ' (large repo — the listing below is partial)' : ''}. Top-level structure: ${survey.structure}.`,
+  ];
+  const keys = Object.keys(survey.keyFiles);
+  if (keys.length > 0) {
+    lines.push('', 'Key files (read directly from the repo, for your survey):');
+    for (const k of keys) {
+      lines.push(`\n----- ${k} -----\n${survey.keyFiles[k]}`);
+    }
+  }
+  lines.push('', 'Use this to give an accurate survey of what the app is and how it is structured. Do not claim you cannot see the repository — you are connected to it.');
+  return lines.join('\n');
 }
 
 /** The leading marker of the honesty-backstop prefix — used to avoid prepending it twice. */
@@ -4733,6 +4760,11 @@ export function registerAgentV3Routes(app: Express): void {
     // Fix 41: a failed GitHub-URL import (private/no-access/bad-url) recorded here so the architect
     // prompt can acknowledge it instead of re-asking the user for the URL they already gave.
     let failedImport: { url: string; reason: string } | null = null;
+    // INSTANT CONNECT (admin 2026-07-24, "Claude 0.1s me repo connect ho jata hai"): the repo's file tree
+    // + a couple of key files, fetched via the GitHub API BEFORE any download/land — so the survey can
+    // describe the app immediately (like Claude reading a tree, not bulk-cloning). Injected into the
+    // architect prompt below; the full file materialization (zipball) still runs for edit/build.
+    let importSurvey: { url: string; fileCount: number; structure: string; keyFiles: Record<string, string>; truncated: boolean } | null = null;
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
@@ -5746,6 +5778,30 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${cleanImportUrl}…`, ts: Date.now() });
             const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
             const importStartedAt = Date.now();
+            // ═══ INSTANT CONNECT (admin 2026-07-24 — "Claude 0.1s me repo connect ho jata hai") ═══
+            // Before ANY download, ask GitHub's API for the file TREE (one tiny call — paths only, no blob
+            // content) + a couple of key files. This is how an instant-feeling connect works: no bulk
+            // clone, just the structure. We show it right away and feed it to the survey, so the model can
+            // describe the app immediately while the full materialization (zipball, below) completes.
+            try {
+              const tree = await fetchRepoTree({ url: cleanImportUrl, token: githubToken || undefined });
+              if (tree.ok && tree.paths && tree.paths.length > 0) {
+                const summary = summarizeRepoTree(tree.paths);
+                const extHint = summary.extensions.length > 0 ? ` — mostly ${summary.extensions.slice(0, 3).map((e) => `.${e.ext}`).join(', ')}` : '';
+                events.emit({
+                  type: 'narration', agent: 'architect', ts: Date.now(),
+                  text: `🔗 Connected to ${cleanImportUrl} — ${summary.fileCount} file${summary.fileCount === 1 ? '' : 's'}${extHint}. Top level: ${summary.topLevel.join(', ')}${tree.truncated ? ' …(large repo — structure truncated)' : ''}`,
+                });
+                // Read a few key files on demand (package.json / README / config) so the survey is accurate
+                // from the API alone — no wait for the download.
+                const keyFiles: Record<string, string> = {};
+                for (const p of pickSurveyFiles(tree.paths, 4)) {
+                  const f = await fetchRepoTextFile({ url: cleanImportUrl, path: p, token: githubToken || undefined, ref: tree.defaultBranch });
+                  if (f.ok && f.content) keyFiles[p] = f.content.slice(0, 8000);
+                }
+                importSurvey = { url: cleanImportUrl, fileCount: summary.fileCount, structure: summary.topLevel.join(', '), keyFiles, truncated: !!tree.truncated };
+              }
+            } catch { /* instant-connect is a best-effort accelerator — the zipball land below is the source of truth */ }
             // ═══ PRIMARY IMPORT PATH — SERVER-SIDE ZIPBALL (mitrify autopsy 2026-07-24, the ROOT fix) ═══
             // The old path git-cloned INSIDE the E2B sandbox, which depends on the sandbox having outbound
             // network to github.com AND valid CA certificates — it doesn't (a provably-PUBLIC repo failed
@@ -6282,6 +6338,10 @@ export function registerAgentV3Routes(app: Express): void {
       // never asks the user for the URL they already provided (the amnesiac "I don't see a URL" reply).
       const importFailNote = failedImportPromptNote(failedImport);
       if (importFailNote) architectSystem = `${importFailNote}\n\n---\n\n${architectSystem}`;
+      // INSTANT CONNECT: give the architect the repo's real structure + key files (fetched via the GitHub
+      // API up-front) so it can survey the imported app immediately, Claude-style.
+      const importSurveyNote = importSurveyPromptNote(importSurvey);
+      if (importSurveyNote) architectSystem = `${importSurveyNote}\n\n---\n\n${architectSystem}`;
 
       // P-ARCH+.3 — up-front BLUEPRINT (advisory) for DEEP, agentic, NEW builds. The fast lane already
       // freezes a file-manifest + shared contract; the agentic loop plans free-form (update_todo only),

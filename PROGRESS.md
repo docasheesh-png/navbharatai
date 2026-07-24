@@ -21610,3 +21610,27 @@ AND the clone reason/errTail) will show exactly why.
 Tests: GithubZipFetch 12 (owner/repo parse, zipball URL, status classify, token header, anon-retry, size cap, empty,
 bad-url) + the classifier/honesty tests from the earlier commit. Gate: fe tsc 0 · server tsc 0 · import suite 131/131
 · full suite (running/green) · build ✓.
+
+### 2026-07-24 (cont.) — INSTANT CONNECT: survey a repo via the GitHub API tree in ~0.1s, Claude-style (admin: "Claude 0.1s me repo connect ho jata hai — clone karta hai ya direct main par kaam karta hai?")
+
+Admin's question exposed the real design lesson: an instant-feeling "connect" does NOT bulk-clone. It asks
+GitHub's API for the file TREE in one tiny call (paths only, no blob content), reads the few files it needs
+on demand, and works on a BRANCH (never directly on main). Cloning/sandbox is only for RUNNING the app.
+
+Built that read side + wired it as the instant front of the import:
+- **`GithubApiTree.ts`** (new): `fetchRepoTree` (resolve default branch → `git/trees/{ref}?recursive=1` → all
+  blob paths, token-auth + anonymous retry, truncation flag, never throws); `fetchRepoTextFile` (contents
+  API, base64-decode, size-capped) for key survey files; `summarizeRepoTree` + `pickSurveyFiles` (pure).
+- **Wiring (`routes/agentv3.ts`)**: on a GitHub-URL import, BEFORE any download we fetch the tree and emit an
+  instant `🔗 Connected to <repo> — N files … Top level: …` narration, then read up to 4 key files
+  (package.json/README/config). `importSurveyPromptNote()` injects the structure + key-file contents into the
+  architect system prompt (sibling to `failedImportPromptNote`), so the model surveys the app IMMEDIATELY —
+  no wait on the download. The full file materialization (server-side zipball, previous entry) still runs so
+  edit/build works; the instant connect just front-runs it. Best-effort — if the API tree fetch fails, the
+  zipball land remains the source of truth (never a regression).
+- Answered the admin's literal question in-thread: Claude/agents don't bulk-clone to connect (API tree +
+  lazy reads), and never commit directly to main (branch → PR → merge — this session included).
+
+Tests: GithubApiTree 9 (tree list + default-branch resolve, anon retry, not-found/network/empty/bad-url,
+file base64 decode + caps, summarize + pickSurveyFiles) · agentv3 importSurveyPromptNote 3. Gate: fe tsc 0 ·
+server tsc 0 · agentv3 264 + GithubApiTree 9 green · full suite (running/green) · build ✓.

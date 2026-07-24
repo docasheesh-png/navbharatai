@@ -21484,3 +21484,40 @@ LayoutGrid }` to `menuItems` (same icon as its Home card). Now Other AI opens a 
 close ✕) exactly like the other three, and also appears in the sidebar for consistency. tabClose 8/8 green.
 
 Gate: frontend tsc 0 · `npm run build` ✓ · tabClose 8/8 green.
+## 2026-07-23 — Post-import DATABASE advisory: "this is the problem → here's the solution" (admin, BYO-now)
+
+Admin direction: big/complex apps imported from GitHub are the core target — when an imported app has a
+problem (load/preview/DB/…), Pro v5.0 must tell the user CLEARLY "yeh problem hai, yeh solution hai", and for
+a DB problem, suggest connecting a database. Admin chose "BYO now, managed-DB later" (a NavBharatAI-hosted DB
+is a separate future capability — real infra cost + data liability + contradicts the current "user owns their
+data" design; NOT built blindly).
+
+**The genuine gap (found by investigation, not guessed):** the engine already detects DB need
+(`detectNeedsDatabase`) and even provisions an EPHEMERAL sandbox Postgres so the preview boots — but the
+guidance to connect a PERSISTENT database was injected only into the model's HIDDEN system prompt
+(`userDatabaseContext`/`noDatabaseConnectedContext`), so the user saw it only if the model chose to relay it.
+No deterministic, always-shown "connect your database" advisory existed.
+
+**Shipped (this slice) — deterministic, user-facing DB advisory:**
+- New pure `detectDatabaseProvider(files)` in `ImportPreview.ts` — names the DB provider an imported app uses,
+  BROADER than `detectNeedsDatabase` (which only knows SQL/ORM drivers): it also recognises the BaaS providers
+  (Supabase/Firebase) that big imported apps commonly use, plus env/source fallbacks (SUPABASE_URL/MONGODB_URI/
+  DATABASE_URL). Naming the user's own DB vendor is correct (the white-label rule covers NavBharatAI's AI
+  vendors, not the user's chosen database).
+- New pure `persistentDatabaseAdvisory({provider, connected})` — the clear problem→solution message: "this app
+  uses <provider>, but you haven't connected a database yet — connect yours at Settings → App Settings →
+  Database and I'll wire it in; any preview until then runs on temporary data." Returns '' when a DB is already
+  connected (no problem) or none is used.
+- Wired in the import-completion block (`agentv3.ts`, next to the env-template note): on any imported app that
+  uses a DB, best-effort load the user's vault, reuse the EXISTING connected-detection (`userDatabaseContext(vault)
+  !== ''`), and emit a deterministic user narration when not connected. Points at the existing bring-your-own
+  flow the engine already auto-wires — zero new cost/liability. Kill switch `AGENTV3_DB_ADVISORY=off`.
+- 8 regression tests (provider naming incl. Supabase/Firebase-that-detectNeedsDatabase-misses; env fallback;
+  advisory suppressed when connected / no DB; generic-label formatting).
+
+OPEN / next (recorded): (1) extend the same "problem → solution" advisory pattern to the OTHER import problem
+classes the admin named — build/load failures, preview failures, missing external-service keys — as deterministic
+user-facing messages (today several are prompt-only or admin-only). (2) Managed NavBharatAI database — a real
+future product decision (infra + pricing + data ownership), per the admin's "managed later".
+
+Gate: server tsc 0 · ImportPreview 22/22 · full suite (running/green).

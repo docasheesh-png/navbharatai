@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets } from './ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory } from './ImportPreview';
 
 describe('detectNeedsDatabase', () => {
   it('detects a SQL/ORM driver in package.json', () => {
@@ -88,5 +88,50 @@ describe('conjurableSecrets (real values for self-issued secrets, never third-pa
   it('externalSecretVars no longer lists the conjured secrets as "still needed" (honesty)', () => {
     const ext = externalSecretVars(['SESSION_SECRET', 'NEXTAUTH_SECRET', 'CASHFREE_SECRET_KEY']);
     expect(ext).toEqual(['CASHFREE_SECRET_KEY']);
+  });
+});
+
+describe('detectDatabaseProvider — name the DB an imported app uses (incl. BaaS that detectNeedsDatabase misses)', () => {
+  const pkg = (deps: Record<string, string>) => ({ 'package.json': JSON.stringify({ dependencies: deps }) });
+  it('names Supabase / Firebase (BaaS — not SQL drivers)', () => {
+    expect(detectDatabaseProvider(pkg({ '@supabase/supabase-js': '^2' }))).toBe('Supabase');
+    expect(detectDatabaseProvider(pkg({ firebase: '^10' }))).toBe('Firebase');
+    // the reason a broader detector is needed: detectNeedsDatabase misses BaaS
+    expect(detectNeedsDatabase(pkg({ '@supabase/supabase-js': '^2' }))).toBe(false);
+  });
+  it('names SQL/ORM providers, most-specific first', () => {
+    expect(detectDatabaseProvider(pkg({ '@prisma/client': '^5' }))).toBe('Prisma');
+    expect(detectDatabaseProvider(pkg({ mongoose: '^8' }))).toBe('MongoDB');
+    expect(detectDatabaseProvider(pkg({ '@neondatabase/serverless': '^0.9' }))).toBe('Neon');
+    expect(detectDatabaseProvider(pkg({ pg: '^8' }))).toBe('PostgreSQL');
+    expect(detectDatabaseProvider(pkg({ mysql2: '^3' }))).toBe('MySQL');
+    expect(detectDatabaseProvider(pkg({ knex: '^3' }))).toBe('a SQL database');
+  });
+  it('falls back to env/source signals when there is no driver dep', () => {
+    expect(detectDatabaseProvider({ '.env.example': 'SUPABASE_URL=\nSUPABASE_ANON_KEY=' })).toBe('Supabase');
+    expect(detectDatabaseProvider({ 'src/db.ts': 'const url = process.env.DATABASE_URL;' })).toBe('a database');
+  });
+  it('returns null for an app with no database', () => {
+    expect(detectDatabaseProvider(pkg({ react: '^18', vite: '^5' }))).toBeNull();
+    expect(detectDatabaseProvider({})).toBeNull();
+  });
+});
+
+describe('persistentDatabaseAdvisory — clear problem → solution, suppressed when already connected', () => {
+  it('names the provider and points to Settings → Database when NOT connected', () => {
+    const msg = persistentDatabaseAdvisory({ provider: 'Supabase', connected: false });
+    expect(msg).toContain('Supabase');
+    expect(msg).toContain('Settings → App Settings → Database');
+    expect(msg).toMatch(/won't persist|temporary data/i);
+  });
+  it('is EMPTY when a database is already connected (no problem)', () => {
+    expect(persistentDatabaseAdvisory({ provider: 'Supabase', connected: true })).toBe('');
+  });
+  it('is EMPTY when the app uses no database', () => {
+    expect(persistentDatabaseAdvisory({ provider: null, connected: false })).toBe('');
+  });
+  it('does not bold the generic labels', () => {
+    expect(persistentDatabaseAdvisory({ provider: 'a database', connected: false })).toContain('uses a database,');
+    expect(persistentDatabaseAdvisory({ provider: 'Neon', connected: false })).toContain('**Neon**');
   });
 });

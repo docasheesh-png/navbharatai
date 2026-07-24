@@ -7,6 +7,8 @@
     { "package": "axios", "severity": "high", "reason": "pre-existing transitive; upgrade evaluated separately (used server-side; needs regression check before bumping)." },
     { "package": "cashfree-pg", "severity": "high", "reason": "payments SDK; vendor-pinned — upgrade requires payment-flow re-verification, tracked separately." },
     { "package": "undici", "severity": "high", "reason": "transitive (fetch/runtime); pre-existing, upgrade tracked separately." },
-    { "package": "xlsx", "severity": "high", "reason": "no upstream fix available on npm (prototype-pollution/ReDoS advisories); usage is server-side and input-controlled — tracked separately." }
+    { "package": "xlsx", "severity": "high", "reason": "no upstream fix available on npm (prototype-pollution/ReDoS advisories); usage is server-side and input-controlled — tracked separately." },
+    { "package": "react-router", "severity": "high", "reason": "GHSA (RSC-mode CSRF bypass, range >=7.12.0 <8.3.0) applies ONLY to React Router's RSC/server-action mode; NavBharatAI is a Vite SPA using client-side routing (no RSC), so it is not exploitable. The only npm 'fix' is a breaking v8 major (>=8.3.0) or a downgrade to <7.12.0 which REINTRODUCES the 7.18.0-patched DoS (GHSA-chx6-hx7r-mcp5). Pinned at 7.18.1 (DoS-patched); v8 migration tracked separately." },
+    { "package": "react-router-dom", "severity": "high", "reason": "Same advisory as react-router (via react-router). RSC-mode-only CSRF, not applicable to our SPA. Pinned at 7.18.1 (DoS-patched); v8 upgrade is a breaking major, tracked separately." }
   ]
 }

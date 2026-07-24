@@ -90,6 +90,7 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
     "firebase-tools": "^15.18.0",
+    "postcss": "^8.5.23",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

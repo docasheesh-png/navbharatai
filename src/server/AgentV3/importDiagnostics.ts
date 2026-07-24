@@ -59,8 +59,28 @@ export function importFailureNarration({ reason, hadToken, url }: ImportFailureC
     return `I couldn't find ${url} with your connected GitHub account. If the repo is private, it belongs to a DIFFERENT GitHub account than the one connected here — connect the account that actually owns it (⚙ → GitHub).${ownerClause} If it's public, double-check the URL. ${TAIL}`;
   }
 
-  // no-git / unknown / bad-url → the original honest fallback.
-  return `I couldn't clone ${url}. If it's private, connect the GitHub account that owns it (⚙ → GitHub) so I have access; otherwise check the URL. ${TAIL}`;
+  // A TLS / certificate failure reaching GitHub — an environment/network condition, NOT the user's repo
+  // access. Say so honestly and invite a retry (never imply the repo is private). (mitrify autopsy.)
+  if (reason === 'tls') {
+    return `I reached GitHub but couldn't establish a secure connection to clone ${url} (a TLS/certificate issue on the build network). This isn't a problem with your repo — please try the import again in a moment. ${TAIL}`;
+  }
+
+  // A protocol / partial-transfer failure (the clone connected but the transfer broke — a known class
+  // behind some egress proxies). Environmental, retryable, and NOT a private-repo problem.
+  if (reason === 'protocol') {
+    return `I started cloning ${url} but the transfer was interrupted before it finished (a network/protocol hiccup, not a problem with your repo). Please try the import again — it usually succeeds on a retry. ${TAIL}`;
+  }
+
+  // The build sandbox ran out of disk while cloning — an infrastructure condition, nothing to do with
+  // the repo's visibility. Be honest so the user doesn't waste time "fixing" GitHub access.
+  if (reason === 'disk') {
+    return `I couldn't finish cloning ${url} because the build environment ran low on space partway through — this is on our side, not your repo. Please try the import again in a fresh session. ${TAIL}`;
+  }
+
+  // no-git / unknown / bad-url → an honest, NON-ACCUSATORY fallback. Do NOT assert the repo is private:
+  // the mitrify autopsy proved a provably-PUBLIC repo can land here (an unclassified environmental clone
+  // failure), so claiming "most likely private" sent the user chasing a non-existent access problem.
+  return `I couldn't complete the clone of ${url} — it didn't finish for an unexpected reason. Please try the import again; if it keeps failing, double-check the URL, and if the repo is private make sure the GitHub account that owns it is connected (⚙ → GitHub).${ownerClause} ${TAIL}`;
 }
 
 /** The short internal reason threaded into the architect prompt so the model never re-asks for the URL. */
@@ -69,5 +89,8 @@ export function importFailureModelReason({ reason, hadToken }: Omit<ImportFailur
   if (!hadToken) return 'no GitHub account is connected, so a private repo could not be accessed';
   if (reason === 'auth') return 'the connected GitHub account could not authenticate (the connection is likely expired)';
   if (reason === 'not-found') return 'the connected GitHub account cannot see this repo — it is private and owned by a different account, or the URL is wrong';
-  return 'the clone failed — most likely a private repo the connected GitHub account cannot access, or the URL is wrong';
+  if (reason === 'tls') return 'the clone could not establish a secure (TLS) connection to GitHub from the build environment — an environmental issue, not the repo';
+  if (reason === 'protocol') return 'the clone connected but the transfer was interrupted before it finished (a network/protocol hiccup), not a repo-access problem';
+  if (reason === 'disk') return 'the build environment ran low on disk space partway through the clone — an infrastructure issue, not the repo';
+  return 'the clone did not finish for an unexpected reason (not necessarily a private-repo or access problem — a provably public repo can hit this via an environmental clone failure)';
 }

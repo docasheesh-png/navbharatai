@@ -5756,10 +5756,15 @@ export function registerAgentV3Routes(app: Express): void {
             // we printed a false "couldn't clone" AND skipped the landing pipeline — even though the
             // files were actually on disk. So we measure the workspace BEFORE and AFTER: if the clone
             // added real files, the import SUCCEEDED regardless of what the echo said, and we land them.
+            const importStartedAt = Date.now();
             const beforePaths = new Set(Object.keys((await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files));
             let h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
             let after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
             let addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            // Capture the FIRST (token-authed) attempt's outcome before any anonymous retry overwrites it,
+            // so the structured IMPORT_DIAGNOSTIC below can show BOTH attempts. (mitrify autopsy 2026-07-24.)
+            const authAttempt = { added: addedReal.length, hydrated: h.hydrated, reason: h.reason, errTail: h.errTail };
+            let anonRetried = false;
             // ANONYMOUS-CLONE FALLBACK (deep-test App #5, 2026-07-13): a token-authenticated clone can FAIL
             // on a PUBLIC repo the token's scope doesn't cover (a GitHub App installation token, or a token
             // for a different account) — while an anonymous clone of that same public repo succeeds. The
@@ -5767,12 +5772,30 @@ export function registerAgentV3Routes(app: Express): void {
             // `git clone` of the identical URL exited 0. Retry once WITHOUT the token before giving up (a
             // private repo still needs it, so the authed attempt runs first).
             if (shouldRetryImportAnonymously({ hydrated: h.hydrated, addedFileCount: addedReal.length, hadToken: !!githubToken, urlsDiffer: cloneUrl !== cleanImportUrl })) {
+              anonRetried = true;
               events.emit({ type: 'narration', agent: 'architect', text: 'Retrying the import without credentials (it looks like a public repo)…', ts: Date.now() });
               h = await importSync.hydrateFromRepo(cleanImportUrl, { overlayAnyContent: true });
               after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
               addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
             }
-            if (h.hydrated || addedReal.length > 0) {
+            // STRUCTURED IMPORT DIAGNOSTIC (mitrify autopsy 2026-07-24, rule 5 — the missing subsystem).
+            // The import path used to record ONLY human narration strings, so a failed clone was a black
+            // box: no reason code, no per-attempt file counts, no stderr — a session had to re-probe the
+            // repo externally just to learn it was public. Record the decisive evidence ONCE here (ADMIN
+            // diagnostics only; the errTail is already URL/token-redacted inside the sandbox) so the next
+            // report definitively shows whether the clone failed (and why) or the overlay dropped files.
+            const importLanded = h.hydrated || addedReal.length > 0;
+            try {
+              buildDiag.record({
+                phase: 'build',
+                severity: importLanded ? 'info' : 'warning',
+                code: 'IMPORT_DIAGNOSTIC',
+                message: `GitHub import ${importLanded ? 'SUCCEEDED' : 'did not land files'} for ${cleanImportUrl} — hadToken=${!!githubToken}; authAttempt(added=${authAttempt.added}, reason=${authAttempt.reason ?? (authAttempt.hydrated ? 'ok' : 'none')}); ${anonRetried ? `anonRetry(added=${addedReal.length}, reason=${h.reason ?? (h.hydrated ? 'ok' : 'none')})` : 'no-anon-retry'}; elapsed=${Date.now() - importStartedAt}ms`,
+                autoResolved: importLanded,
+                detail: (h.errTail || authAttempt.errTail) ? `git stderr (redacted): ${(h.errTail || authAttempt.errTail || '').slice(0, 300)}` : undefined,
+              });
+            } catch { /* diagnostics are best-effort — never let a record break the import */ }
+            if (importLanded) {
               // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX only.
               // Land them properly — durable store (Files/IDE/reopen), files_restored event,
               // framework lock, edit mode, memory index, background preview boot.

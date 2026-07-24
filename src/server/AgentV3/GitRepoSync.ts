@@ -66,7 +66,7 @@ export function sanitizeRepoUrl(raw: string): string | null {
  * caller tell the user the ACTUAL reason (expired/no credentials vs wrong account vs network) instead of
  * a single generic guess.
  */
-export type HydrateFailReason = 'auth' | 'not-found' | 'network' | 'no-git' | 'bad-url' | 'unknown';
+export type HydrateFailReason = 'auth' | 'not-found' | 'network' | 'no-git' | 'bad-url' | 'disk' | 'tls' | 'protocol' | 'unknown';
 
 export interface HydrateResult {
   /** True when repo content was cloned into an empty sandbox this run. */
@@ -77,6 +77,27 @@ export interface HydrateResult {
   skipped: boolean;
   /** Set on a failed clone (`skipped:true` from a real attempt) — the classified cause. */
   reason?: HydrateFailReason;
+  /**
+   * A SHORT, REDACTED tail of git's real stderr on a failed clone — the token-embedded remote URL and
+   * any http(s) URL are stripped, so no secret leaks, but the true cause is still legible in the
+   * ADMIN-ONLY build diagnostics. Empty on success / when no error was captured. This is the evidence
+   * the mitrify autopsy (2026-07-24) proved was missing: an 'unknown' clone failure was un-diagnosable
+   * because the raw reason was thrown away, forcing every session to re-probe the repo externally.
+   */
+  errTail?: string;
+}
+
+/**
+ * Redact a raw git stderr blob down to a short, secret-safe tail: drop any `https://…`/`http://…` URL
+ * (which can carry the auth token in its userinfo) and collapse whitespace. Admin-diagnostics only —
+ * never shown to an end user. Pure.
+ */
+export function redactCloneStderr(raw: string): string {
+  return String(raw || '')
+    .replace(/https?:\/\/[^\s'"]*/gi, '<repo-url>')   // strips token@github.com/… and the plain URL
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
 }
 
 export interface PushResult {
@@ -135,6 +156,14 @@ export class GitRepoSync {
     if (opts?.branch) attempts.push(`${gitPrefix} git clone --depth 1 -b "${sanitizeBranch(opts.branch)}" "${safeUrl}" /tmp/nbhydrate`);
     if (opts?.fallbackBranch && opts.fallbackBranch !== opts.branch) attempts.push(`${gitPrefix} git clone --depth 1 -b "${sanitizeBranch(opts.fallbackBranch)}" "${safeUrl}" /tmp/nbhydrate`);
     attempts.push(`${gitPrefix} git clone --depth 1 "${safeUrl}" /tmp/nbhydrate`);
+    // FULL-CLONE FALLBACK (mitrify import autopsy 2026-07-24): a proven-public, cloneable repo still
+    // reported an UNCLASSIFIED clone failure inside the E2B sandbox (reproduced as NB_HYDRATED in a
+    // plain git+network env, so the overlay logic is sound — the failure is environmental). A known
+    // real class is an egress proxy that breaks the `--depth 1` shallow-clone protocol negotiation
+    // while a FULL clone of the same URL succeeds. So after every shallow attempt fails, try one
+    // non-shallow clone before giving up. Cheap insurance — only runs when the fast shallow path
+    // already failed, and can only ever ADD a recovery path (never breaks a working shallow clone).
+    attempts.push(`${gitPrefix} git clone "${safeUrl}" /tmp/nbhydrate`);
     // Each attempt appends its stderr to errFile so the LAST (default-branch) failure's real reason is
     // classified below. stderr stays INSIDE the sandbox — only a NB_CLONE_* code is ever echoed out.
     const cloneChain = attempts.map((c) => `{ rm -rf /tmp/nbhydrate 2>/dev/null; ${c} >/dev/null 2>>${errFile}; }`).join(' || ');
@@ -157,14 +186,23 @@ export class GitRepoSync {
         'if [ "$need" -gt 0 ] && [ "$got" -eq "$need" ]; then echo NB_HYDRATED; else echo NB_HYDRATE_FAIL; fi; ' +
         'else echo NB_EMPTY_REPO; fi; ' +
         'else ' +
-        // Classify the failure from git's stderr WITHOUT leaking it (only the code is echoed). Order
-        // matters: auth + network are checked before the broad "not found" so `git: command not found`
-        // (no-git) and a real "Repository not found" (wrong account/private) don't collide.
-        `if grep -qiE 'could not read Username|terminal prompts disabled|Authentication failed|invalid username or password|Bad credentials|403 Forbidden|Permission( to| denied)|Support for password authentication' ${errFile} 2>/dev/null; then echo NB_CLONE_AUTH; ` +
-        `elif grep -qiE 'Could not resolve host|unable to access|Failed to connect|Connection timed out|Could not read from remote|network is unreachable|Operation timed out' ${errFile} 2>/dev/null; then echo NB_CLONE_NETWORK; ` +
+        // Classify the failure from git's stderr WITHOUT leaking it (only the code + a URL-stripped tail
+        // are echoed). Order matters — specific causes before generic ones: disk/no-git first, then auth
+        // (incl. `returned error: 403`), then not-found (incl. `returned error: 404`) BEFORE the broad
+        // "unable to access" network catch, then tls/protocol before the generic network bucket. The
+        // mitrify autopsy (2026-07-24) added disk/tls/protocol because a public, cloneable repo failed in
+        // E2B with a stderr none of the old four patterns matched → a misleading `unknown` → "private repo".
+        `if grep -qiE 'No space left on device|disk quota exceeded|cannot allocate memory|Out of memory' ${errFile} 2>/dev/null; then echo NB_CLONE_DISK; ` +
         `elif grep -qiE 'command not found|No such file or directory.*git|git: not found' ${errFile} 2>/dev/null; then echo NB_NO_GIT; ` +
-        `elif grep -qiE 'Repository not found|remote: Not Found|repository .* not found|does not exist' ${errFile} 2>/dev/null; then echo NB_CLONE_NOTFOUND; ` +
+        `elif grep -qiE 'could not read Username|terminal prompts disabled|Authentication failed|invalid username or password|Bad credentials|403 Forbidden|returned error: 403|returned error: 401|Permission( to| denied)|Support for password authentication' ${errFile} 2>/dev/null; then echo NB_CLONE_AUTH; ` +
+        `elif grep -qiE 'Repository not found|remote: Not Found|repository .* not found|does not exist|returned error: 404' ${errFile} 2>/dev/null; then echo NB_CLONE_NOTFOUND; ` +
+        `elif grep -qiE 'SSL certificate problem|unable to get local issuer|server certificate verification failed|gnutls_handshake|SSL_ERROR|schannel' ${errFile} 2>/dev/null; then echo NB_CLONE_TLS; ` +
+        `elif grep -qiE 'RPC failed|early EOF|index-pack|protocol error|dumb http|remote end hung up|fetch-pack|unexpected disconnect|pack-objects|fatal: protocol|expected .* pack' ${errFile} 2>/dev/null; then echo NB_CLONE_PROTOCOL; ` +
+        `elif grep -qiE 'Could not resolve host|unable to access|Failed to connect|Connection timed out|Could not read from remote|network is unreachable|Operation timed out|Connection reset|timed out' ${errFile} 2>/dev/null; then echo NB_CLONE_NETWORK; ` +
         `else echo NB_CLONE_FAIL; fi; ` +
+        // The REDACTED stderr tail (URLs — incl. the token-embedded remote — stripped in-sandbox before
+        // it ever crosses the boundary). Admin diagnostics only; the TS side re-redacts as belt-and-braces.
+        `printf 'NB_ERRTAIL:'; tr '\\n' ' ' < ${errFile} 2>/dev/null | sed -E 's#https?://[^ ]*#<repo-url>#g' | cut -c1-300; echo; ` +
         'fi; ' +
         `rm -rf /tmp/nbhydrate ${errFile} 2>/dev/null`;
       const r = await this.run(cmd);
@@ -174,12 +212,18 @@ export class GitRepoSync {
       if (out.includes('NB_EMPTY_REPO')) return { hydrated: false, hadFiles: false, skipped: false };
       // Clone failed — classify the real cause so the caller can tell the user exactly what to fix.
       const reason: HydrateFailReason =
-        out.includes('NB_CLONE_AUTH') ? 'auth'
-        : out.includes('NB_CLONE_NETWORK') ? 'network'
+        out.includes('NB_CLONE_DISK') ? 'disk'
         : out.includes('NB_NO_GIT') ? 'no-git'
+        : out.includes('NB_CLONE_AUTH') ? 'auth'
         : out.includes('NB_CLONE_NOTFOUND') ? 'not-found'
+        : out.includes('NB_CLONE_TLS') ? 'tls'
+        : out.includes('NB_CLONE_PROTOCOL') ? 'protocol'
+        : out.includes('NB_CLONE_NETWORK') ? 'network'
         : 'unknown';
-      return { hydrated: false, hadFiles: false, skipped: true, reason };
+      // Extract the redacted stderr tail the sandbox emitted (never leaves the admin diagnostics).
+      const tailMatch = /NB_ERRTAIL:(.*)$/s.exec(out);
+      const errTail = tailMatch ? redactCloneStderr(tailMatch[1]) : '';
+      return { hydrated: false, hadFiles: false, skipped: true, reason, errTail };
     } catch {
       return { hydrated: false, hadFiles: false, skipped: true, reason: 'unknown' };
     }

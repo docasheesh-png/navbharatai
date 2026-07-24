@@ -21521,3 +21521,62 @@ user-facing messages (today several are prompt-only or admin-only). (2) Managed 
 future product decision (infra + pricing + data ownership), per the admin's "managed later".
 
 Gate: server tsc 0 · ImportPreview 22/22 · full suite (running/green).
+
+---
+
+## 2026-07-24 — 5th-rule autopsy: mitrify GitHub import STILL failed after the cp -a fix — import path was a black box + lied "private repo" (root-caused)
+
+**Trigger:** admin build report (buildId `2bd9145d`, weak/GLM `glm-4.7-flash`, ok:true) — prompt "Import this
+app from my GitHub repository…". The import of `https://github.com/aashishcpmt093-ui/mitrify` failed: authed
+clone added 0 files → anonymous retry ("looks like a public repo") → also 0 files → "I couldn't clone… if it's
+private…". Same repo as the 2026-07-23 `cp -a` autopsy (PR #1853), which was supposed to have fixed it.
+
+**Forensic ledger (5 buckets):**
+- ❌ **Still broken (1):** the import genuinely landed 0 files for a repo that is **provably public**.
+- ⏭️ **Skipped/mis-attributed (1):** the failure was reported to the user as "most likely a private repo the
+  connected GitHub account cannot access" — a FALSE cause (the repo is public), sending the user to fix a
+  non-existent access problem.
+- 🥵 **Struggle (1):** two full clone attempts (~6s each) then an honest-but-wrong dead-end.
+- ✅/🔀 none.
+
+**Investigation (rule 1 — evidence, not guesses):**
+1. Confirmed PR #1853 (`cp -a` → `cp -R --preserve=mode,timestamps`, filesystem-verified overlay) merged
+   2026-07-23 13:00 UTC — **~12h BEFORE** this build (01:25 UTC) and Cloud-Run-deployed. So the cp fix was
+   live and did NOT fix this repo. The earlier "cp -a was THE root cause" conclusion was incomplete.
+2. `git ls-remote https://github.com/aashishcpmt093-ui/mitrify` → **exit 0, HEAD `ba9a93e`** → the repo is
+   **public and cloneable anonymously**. The "private repo" verdict is wrong.
+3. Reproduced the EXACT overlay shell against the real mitrify repo in a git+network env → **`NB_HYDRATED`,
+   need=21 got=21, cp stderr empty**, all 21 top-level entries (client/ server/ shared/ drizzle/ migrations/…)
+   landed. So the overlay logic is SOUND; the E2B failure is **environmental** (an UNCLASSIFIED clone error).
+4. The E2B failure surfaced as `reason:'unknown'` — matching NONE of the old four stderr patterns
+   (auth/not-found/network/no-git) → the misleading "private repo" fallback fired.
+
+**Missing subsystem (rule 5 Step 2):** the import path recorded **only human narration strings** into the
+build report — no reason code, no per-attempt file counts, no git stderr, no timing. A failed clone was a
+**black box**: this session had to `git ls-remote` the repo EXTERNALLY just to learn it was public. An
+under-instrumented critical path guarantees un-convergeable repeat autopsies.
+
+**DNA-level fixes (PR pending):**
+1. **Instrument the import path** — `hydrateFromRepo` now returns a short **URL/token-redacted `errTail`**
+   (stripped IN the sandbox before crossing the boundary), and `routes/agentv3.ts` records ONE structured
+   **`IMPORT_DIAGNOSTIC`** into buildDiag: hadToken, per-attempt added-file counts + hydrated + reason,
+   elapsed ms, final outcome, redacted stderr. The next mitrify report will DEFINITIVELY show whether the
+   clone failed (and why) or the overlay dropped files — no external probing needed. (admin-only diagnostics.)
+2. **Widen the classifier** — new reasons `disk` (No space left / OOM), `tls` (SSL cert / handshake),
+   `protocol` (RPC failed / early EOF / index-pack / shallow-transfer break), plus `returned error: 403/404`
+   http forms. `'unknown'` becomes rare and actionable.
+3. **Full-clone fallback** — after every `--depth 1` shallow attempt fails, try one **non-shallow** clone
+   (a known real class: an egress proxy breaks shallow-clone protocol negotiation while a full clone of the
+   same URL succeeds). Only runs when the fast path already failed → can only ADD a recovery path.
+4. **Stop the false "private" verdict (rule-5 honesty)** — the `'unknown'` message no longer asserts the repo
+   is "most likely private"; it says the clone didn't finish for an unexpected reason and offers a retry.
+   New honest, non-accusatory messages for disk/tls/protocol (environmental, retryable — never repo-blame).
+
+**Honest open root cause (rule 6):** the EXACT E2B clone-failure cause is not yet observable from here (needs
+either the new IMPORT_DIAGNOSTIC from a real run, or E2B console access). The full-clone fallback covers the
+most likely class (proxy-breaks-shallow); if the next instrumented report shows a different `reason`
+(disk/tls/network), that becomes the next targeted fix. No cosmetic patch shipped as "the fix".
+
+Regression tests: GitRepoSync 32 (disk/tls/protocol classification, full-clone fallback ordering, errTail
+redaction in-shell + in-TS, `redactCloneStderr` unit) · importDiagnostics 10 (no-"private" honesty regression,
+tls/protocol/disk messages). Gate: frontend tsc 0 · server tsc 0 · full suite **9023/9023** · build ✓.

@@ -9,6 +9,7 @@ import type { ThemeMode } from '../../lib/theme';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
+import { hasConflictMarkers } from '../../lib/merge3';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 // ── Lazy-loaded view components ─────────────────────────────────────────────
@@ -247,6 +248,31 @@ export function ViewPanels({
       )}
 
       {activeView === 'files' && (
+        <div className="flex flex-col h-full overflow-hidden">
+          {(() => {
+            // The standalone Diff Viewer tile was removed (redundant with v5's inline diffs + Diff tab),
+            // but its merge-CONFLICT resolver is kept: whenever a workspace file carries conflict markers
+            // (e.g. a GitHub import of a repo with unresolved conflicts), surface a Resolve entry that opens
+            // the conflict resolver. Fires only when real markers exist — never dead UI. (admin 2026-07-24)
+            const conflicted = Object.entries(files as Record<string, string>)
+              .filter(([, c]) => typeof c === 'string' && hasConflictMarkers(c))
+              .map(([p]) => p);
+            if (conflicted.length === 0) return null;
+            return (
+              <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b text-xs"
+                style={{ background: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.3)', color: '#fcd34d' }}>
+                <span className="flex-1 min-w-0">
+                  ⚠ {conflicted.length} file{conflicted.length > 1 ? 's have' : ' has'} unresolved merge conflicts
+                  {' '}(<span className="font-mono">{conflicted.slice(0, 2).join(', ')}{conflicted.length > 2 ? `, +${conflicted.length - 2}` : ''}</span>).
+                </span>
+                <button onClick={() => toggleTab('diff')}
+                  className="shrink-0 px-2.5 py-1 rounded font-semibold"
+                  style={{ background: 'rgba(245,158,11,0.25)', color: '#fde68a' }}>
+                  Resolve
+                </button>
+              </div>
+            );
+          })()}
         <FilesPanel
           files={files}
           hasGeneratedCode={hasGeneratedCode}
@@ -290,6 +316,7 @@ export function ViewPanels({
             toggleTab('studio');
           }}
         />
+        </div>
       )}
 
       {/* Phase 3 — Testing System */}

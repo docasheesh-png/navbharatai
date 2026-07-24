@@ -21750,3 +21750,25 @@ per-surface drift — same discipline as CREATOR_IDENTITY / recencyDirective):
 
 Tests: `indiaTerritorial.test.ts` (6) — names every region, stays respectful, wired into Professionals, wantsIndiaMap
 precision, buildImagePrompt injection. Gate: fe tsc 0 · server tsc 0 · full suite 9076 passed · build ✓. CI green → merged.
+
+### 2026-07-24 (cont.) — Autopsy 7773b4b0 (Mitrify continue "fix network error"): piped dev command mangled by flag injection
+
+Report of the imported Mitrify app (166 files) being edited ("fix network error"). Findings:
+- ❌ **Piped dev command mangled (the fixable bug):** the model ran `npm run dev 2>&1 | head -50` to inspect the
+  server log. The E2B dev-launch flag helpers (ensureHostBinding/pinDevServerPort) appended
+  `-- --host 0.0.0.0 --port 3000 --strictPort` to the END of the pipeline → the flags landed on `head`, which
+  errored `head: cannot open '--host' for reading` → the dev server "did not come up on port 3000". PRE-EXISTING
+  (the #1864 port fix only changed the appended port 5173→3000; the mangling already existed for any piped/chained
+  dev command). FIX: new pure `pipesOrChainsToAnotherCommand()` — ensureHostBinding + pinDevServerPort now SKIP
+  flag injection when the command pipes/chains (`|`/`&&`/`;`) into another program (the managed preview always
+  launches a clean, unpiped dev command, so only a model's ad-hoc piped invocation is skipped). `2>&1` alone is
+  correctly NOT treated as a chain. Regression test locks it.
+- 🥵 **GLM 429 storm again (15 failures + one 71s call):** same infra throttle → 10+ min build. Lever: more GLM
+  keys in the Cloud Run comma-pool (admin action). Fallback chain kept it working (never broke).
+- ✅ **Sandbox recycle self-healed:** sandbox came back with 11/166 files; the File Guardian restored all 166 from
+  the durable store + GitHub history (worked as designed).
+- (The user-reported "network error" — frontend calling `/api/auth/user`, which IS registered via
+  `registerAuthRoutes` — model was still mid-investigation at snapshot time; not a v3.0 defect.)
+
+Gate: fe tsc 0 · server tsc 0 · devServerHost 76 tests · full suite green · build ✓. (Rebased onto main after a
+parallel session merged #1866/#1867 — India territorial policy — safeguard #1; only devServerHost files are mine.)

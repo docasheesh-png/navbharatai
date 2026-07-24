@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, pipesOrChainsToAnotherCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
 
 describe('isNodeServerCommand (Mitrify node-express import fix 2026-07-24)', () => {
   it('detects a direct Node server launcher (tsx/ts-node/node/nodemon on a server entry)', () => {
@@ -17,6 +17,26 @@ describe('isNodeServerCommand (Mitrify node-express import fix 2026-07-24)', () 
     expect(isNodeServerCommand('astro dev')).toBe(false);
     expect(isNodeServerCommand('npm run dev')).toBe(false); // pm-run, not a bare node server
     expect(isNodeServerCommand('')).toBe(false);
+  });
+});
+
+describe('piped/chained dev commands never get flags appended (report 7773b4b0 — "head: cannot open \'--host\'")', () => {
+  it('a `npm run dev | head` inspection command is left UNTOUCHED by both helpers', () => {
+    const cmd = 'npm run dev 2>&1 | head -50';
+    expect(ensureHostBinding(cmd)).toBe(cmd);
+    expect(pinDevServerPort(ensureHostBinding(cmd), 3000)).toBe(cmd);
+  });
+  it('chained commands (&&, ;, ||) are also left untouched', () => {
+    expect(ensureHostBinding('npm run dev && echo done')).toBe('npm run dev && echo done');
+    expect(pinDevServerPort('npm run dev ; ls', 3000)).toBe('npm run dev ; ls');
+    expect(pinDevServerPort('npm run dev || echo fail', 3000)).toBe('npm run dev || echo fail');
+  });
+  it('a CLEAN dev command (with only a 2>&1 redirect, no pipe/chain) is still flagged normally', () => {
+    // 2>&1 is not a chain — the managed preview must still get --host/--port.
+    expect(ensureHostBinding('vite')).toBe('vite --host 0.0.0.0');
+    expect(pinDevServerPort('vite', 5173)).toBe('vite --port 5173 --strictPort');
+    expect(pipesOrChainsToAnotherCommand('npm run dev 2>&1')).toBe(false);
+    expect(pipesOrChainsToAnotherCommand('npm run dev 2>&1 | head')).toBe(true);
   });
 });
 

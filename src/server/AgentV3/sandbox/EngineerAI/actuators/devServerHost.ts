@@ -79,6 +79,21 @@ export type DevFramework = 'vite' | 'next' | 'astro' | 'nuxt' | 'angular' | 'cra
  * every framework check, so the preview assumed Vite's 5173, pinned nothing, forced no host — and the
  * health-check waited on 5173 while the Express server bound its own port → "did not come up on port 5173".
  */
+/**
+ * True when a command pipes or chains into ANOTHER command (`|`, `||`, `&&`, `;`). Appending a
+ * `--host`/`--port` flag to such a command lands it on the WRONG program — the real bug from report
+ * 7773b4b0: a model ran `npm run dev 2>&1 | head -50`, and the flag helpers appended
+ * `-- --host 0.0.0.0 --port 3000 --strictPort` onto the END, so `head` received them and errored
+ * ("head: cannot open '--host' for reading"), and the dev server never came up. The flag helpers skip
+ * injection when this is true (the managed preview always launches a CLEAN, unpiped dev command, so only
+ * a model's ad-hoc piped/chained invocation is skipped — correct, since that isn't the managed preview).
+ * PURE + unit-testable. (`2>&1` alone is NOT a chain — it contains no `|`/`&&`/`;`.)
+ */
+export function pipesOrChainsToAnotherCommand(command: string): boolean {
+  if (!command) return false;
+  return /\||&&|;/.test(command);
+}
+
 export function isNodeServerCommand(command: string): boolean {
   if (!command) return false;
   // A real bundler/dev-CLI invocation is not a bare node server — let the framework branches own it.
@@ -131,6 +146,9 @@ export function ensureHostBinding(command: string, framework?: DevFramework): st
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
+  // Piped/chained (`| head`, `&& …`) — appending a flag would land it on the WRONG program (report
+  // 7773b4b0: `npm run dev | head` got `--host` appended onto `head`). Leave such a command untouched.
+  if (pipesOrChainsToAnotherCommand(command)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
@@ -375,6 +393,9 @@ export function buildPreKillPortCommand(port: number): string {
 export function pinDevServerPort(command: string, port: number, framework?: DevFramework): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
+  // Piped/chained (`| head`, `&& …`) — appending a `--port` would land it on the WRONG program (report
+  // 7773b4b0: `npm run dev | head` got `--port 3000 --strictPort` appended onto `head`). Skip injection.
+  if (pipesOrChainsToAnotherCommand(command)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no `--port` flag; nearly every Express/Fastify
   // app reads its port from `process.env.PORT`. Inject `PORT=<port>` so the server binds the exact port
   // the health-check watches — the fix for the Mitrify "did not come up on port 5173" import (its

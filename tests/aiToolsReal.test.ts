@@ -82,6 +82,19 @@ describe('AI Debugger — real analysis, no fake fallback', () => {
     expect(kbEntry!.description).toMatch(/Investigate & fix/);
   });
 
+  it('auto-fix hands the findings to the Pro v5 page for the scanned app (wired end-to-end)', () => {
+    const panel = readFileSync(join(__dirname, '../src/components/ide/AppScanPanel.tsx'), 'utf8');
+    expect(panel).toContain('onAutoFixInV5');           // panel invokes the handoff
+    expect(panel).toContain('buildFixPrompt');          // composes the real fix prompt from findings
+    const viewPanels = readFileSync(join(__dirname, '../src/components/panels/ViewPanels.tsx'), 'utf8');
+    expect(viewPanels).toContain('onAutoFixInV5');      // threaded through to AIDebugger
+    const app = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
+    expect(app).toContain('onAutoFixInV5');             // App implements it via v3Resume + v3PendingFix
+    expect(app).toMatch(/setV3Resume\(\{ sessionId: sid/); // retargets the SCANNED app's session
+    const kbEntry = kb('ai_debugger');
+    expect(kbEntry!.description).toMatch(/Auto-fix these in NavBharatAI Pro/);
+  });
+
   it('the /api/debug route is registered on the server (the endpoint the client calls exists)', () => {
     const route = readFileSync(join(__dirname, '../src/server/routes/debug.ts'), 'utf8');
     expect(route).toContain("app.post('/api/debug'");

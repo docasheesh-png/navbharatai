@@ -104,6 +104,7 @@ import {
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
+import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFetch';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
@@ -5743,13 +5744,63 @@ export function registerAgentV3Routes(app: Express): void {
               events.emit({ type: 'narration', agent: 'architect', text: `That import URL isn't a supported GitHub repository URL (expected https://github.com/owner/repo). Starting with an empty workspace instead.`, ts: Date.now() });
             } else {
             events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${cleanImportUrl}…`, ts: Date.now() });
+            const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+            const importStartedAt = Date.now();
+            // ═══ PRIMARY IMPORT PATH — SERVER-SIDE ZIPBALL (mitrify autopsy 2026-07-24, the ROOT fix) ═══
+            // The old path git-cloned INSIDE the E2B sandbox, which depends on the sandbox having outbound
+            // network to github.com AND valid CA certificates — it doesn't (a provably-PUBLIC repo failed
+            // to clone in the sandbox with an unclassified error, while an identical clone succeeded
+            // everywhere else). Every prior fix touched the overlay/classifier/reporting — all DOWNSTREAM
+            // of a clone that never succeeds — so none could work. Fix: fetch the repo SERVER-SIDE (proven-
+            // good network — the same server already reaches GitHub's API to create the save-repo) as a
+            // zipball, then land it through the EXACT extractZipProject → landImportedProject pipeline the
+            // (working) zip-upload import uses. Removes the sandbox network/git/cert dependency entirely.
+            let serverSideLanded = false;
+            let serverFetchReason: ZipFetchReason | 'validate' | undefined;
+            try {
+              const zres = await fetchGithubRepoZip({ url: cleanImportUrl, token: githubToken || undefined });
+              if (zres.ok && zres.buf) {
+                const extracted = await extractZipProject(zres.buf);
+                if (Object.keys(extracted.files).length > 0) {
+                  const lockKept = Object.keys(extracted.sandboxOnly);
+                  serverSideLanded = await landImportedProject(extracted.files, {
+                    source: cleanImportUrl,
+                    writeToSandbox: true,
+                    droppedNote: [
+                      extracted.appRoot ? `— landed the app from its "${extracted.appRoot}/" folder` : '',
+                      lockKept.length > 0 ? `— kept ${lockKept.join(', ')} for exact dependency versions (sandbox only, over the durable-store size cap)` : '',
+                      droppedDetailNote(extracted),
+                    ].filter(Boolean).join(' '),
+                    sandboxOnly: extracted.sandboxOnly,
+                    assets: extracted.assets,
+                  });
+                  if (!serverSideLanded) serverFetchReason = 'validate'; // fetched+extracted but not a runnable project
+                } else {
+                  serverFetchReason = 'empty'; // repo fetched but nothing importable after filtering
+                }
+              } else {
+                serverFetchReason = zres.reason;
+              }
+            } catch { serverFetchReason = 'network'; }
+            try {
+              buildDiag.record({
+                phase: 'build',
+                severity: serverSideLanded ? 'info' : 'warning',
+                code: 'IMPORT_DIAGNOSTIC',
+                message: `GitHub import via SERVER-SIDE zipball ${serverSideLanded ? 'SUCCEEDED' : `did not land (${serverFetchReason ?? 'unknown'})`} for ${cleanImportUrl} — hadToken=${!!githubToken}; elapsed=${Date.now() - importStartedAt}ms${serverSideLanded ? '' : ' → falling back to in-sandbox clone'}`,
+                autoResolved: serverSideLanded,
+              });
+            } catch { /* diagnostics are best-effort */ }
+            // FALLBACK — only if the server-side fetch did NOT land files (a private repo the token truly
+            // cannot see, an over-cap repo, or an API hiccup) — try the legacy in-sandbox clone. Never a
+            // regression vs today; on the common case the clone never runs.
+            if (!serverSideLanded) {
             // NOTE: do NOT gate the clone on "the sandbox is empty" — ensureWorkspace ALWAYS
             // pre-scaffolds a fresh workspace (a .gitignore + package-lock.json), so an empty check
             // never fires and the import silently did nothing (the reported "GitHub connect hua par
             // 0 files aayi" bug). hydrateFromRepo clones into a TEMP dir and overlays, so it handles
             // a scaffolded workspace by design — just run it whenever the user asked to import.
             const importSync = new GitRepoSync(actuator, workspaceId);
-            const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
             const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
             // TRUST THE FILESYSTEM, not the shell echo. On a LARGE repo (real evidence: a 316-file
             // import) hydrateFromRepo's success marker was not captured, so it reported "skipped" and
@@ -5760,6 +5811,10 @@ export function registerAgentV3Routes(app: Express): void {
             let h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
             let after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
             let addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            // Capture the FIRST (token-authed) attempt's outcome before any anonymous retry overwrites it,
+            // so the structured IMPORT_DIAGNOSTIC below can show BOTH attempts. (mitrify autopsy 2026-07-24.)
+            const authAttempt = { added: addedReal.length, hydrated: h.hydrated, reason: h.reason, errTail: h.errTail };
+            let anonRetried = false;
             // ANONYMOUS-CLONE FALLBACK (deep-test App #5, 2026-07-13): a token-authenticated clone can FAIL
             // on a PUBLIC repo the token's scope doesn't cover (a GitHub App installation token, or a token
             // for a different account) — while an anonymous clone of that same public repo succeeds. The
@@ -5767,12 +5822,30 @@ export function registerAgentV3Routes(app: Express): void {
             // `git clone` of the identical URL exited 0. Retry once WITHOUT the token before giving up (a
             // private repo still needs it, so the authed attempt runs first).
             if (shouldRetryImportAnonymously({ hydrated: h.hydrated, addedFileCount: addedReal.length, hadToken: !!githubToken, urlsDiffer: cloneUrl !== cleanImportUrl })) {
+              anonRetried = true;
               events.emit({ type: 'narration', agent: 'architect', text: 'Retrying the import without credentials (it looks like a public repo)…', ts: Date.now() });
               h = await importSync.hydrateFromRepo(cleanImportUrl, { overlayAnyContent: true });
               after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
               addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
             }
-            if (h.hydrated || addedReal.length > 0) {
+            // STRUCTURED IMPORT DIAGNOSTIC (mitrify autopsy 2026-07-24, rule 5 — the missing subsystem).
+            // The import path used to record ONLY human narration strings, so a failed clone was a black
+            // box: no reason code, no per-attempt file counts, no stderr — a session had to re-probe the
+            // repo externally just to learn it was public. Record the decisive evidence ONCE here (ADMIN
+            // diagnostics only; the errTail is already URL/token-redacted inside the sandbox) so the next
+            // report definitively shows whether the clone failed (and why) or the overlay dropped files.
+            const importLanded = h.hydrated || addedReal.length > 0;
+            try {
+              buildDiag.record({
+                phase: 'build',
+                severity: importLanded ? 'info' : 'warning',
+                code: 'IMPORT_DIAGNOSTIC',
+                message: `GitHub import ${importLanded ? 'SUCCEEDED' : 'did not land files'} for ${cleanImportUrl} — hadToken=${!!githubToken}; authAttempt(added=${authAttempt.added}, reason=${authAttempt.reason ?? (authAttempt.hydrated ? 'ok' : 'none')}); ${anonRetried ? `anonRetry(added=${addedReal.length}, reason=${h.reason ?? (h.hydrated ? 'ok' : 'none')})` : 'no-anon-retry'}; elapsed=${Date.now() - importStartedAt}ms`,
+                autoResolved: importLanded,
+                detail: (h.errTail || authAttempt.errTail) ? `git stderr (redacted): ${(h.errTail || authAttempt.errTail || '').slice(0, 300)}` : undefined,
+              });
+            } catch { /* diagnostics are best-effort — never let a record break the import */ }
+            if (importLanded) {
               // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX only.
               // Land them properly — durable store (Files/IDE/reopen), files_restored event,
               // framework lock, edit mode, memory index, background preview boot.
@@ -5792,6 +5865,7 @@ export function registerAgentV3Routes(app: Express): void {
               // Cloned successfully but the repo had no content beyond .git (a brand-new empty repo).
               events.emit({ type: 'narration', agent: 'architect', text: `${cleanImportUrl} looks like an empty repository — there was nothing to import. Tell me what you'd like to build in it.`, ts: Date.now() });
             }
+            } // end fallback in-sandbox clone (if !serverSideLanded)
             }
           } catch (importErr) {
             const m = importErr instanceof Error ? importErr.message : String(importErr);

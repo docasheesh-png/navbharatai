@@ -41,9 +41,39 @@ describe('importFailureNarration — accurate, actionable clone-failure messages
   it('unknown / no-git / bad-url → the honest generic fallback', () => {
     for (const reason of ['unknown', 'no-git', 'bad-url', undefined] as const) {
       const msg = importFailureNarration({ reason, hadToken: true, url: URL });
-      expect(msg).toMatch(/I couldn't clone/i);
+      expect(msg).toMatch(/couldn't complete the clone|didn't finish/i);
       expect(msg).toContain(URL);
     }
+  });
+
+  // REGRESSION (mitrify autopsy 2026-07-24): an UNCLASSIFIED clone failure of a provably-PUBLIC repo used
+  // to be reported as "most likely a private repo the connected GitHub account cannot access", sending the
+  // user to chase a non-existent access problem. The honest fallback must NOT assert the repo is private.
+  it('unknown → NEVER asserts the repo is (most likely) private', () => {
+    const msg = importFailureNarration({ reason: 'unknown', hadToken: true, url: URL });
+    expect(msg).not.toMatch(/most likely a private repo/i);
+    expect(msg).toMatch(/unexpected reason/i);
+    // A conditional "if the repo is private…" hint is fine; asserting it IS private is not.
+    expect(importFailureModelReason({ reason: 'unknown', hadToken: true })).not.toMatch(/most likely a private repo/i);
+  });
+
+  it('tls / protocol / disk → honest environmental messages, never a repo-access blame', () => {
+    const tls = importFailureNarration({ reason: 'tls', hadToken: true, url: URL });
+    expect(tls).toMatch(/secure connection|TLS/i);
+    expect(tls).toMatch(/isn't a problem with your repo/i);
+
+    const proto = importFailureNarration({ reason: 'protocol', hadToken: true, url: URL });
+    expect(proto).toMatch(/interrupted|hiccup/i);
+    expect(proto).toMatch(/try the import again/i);
+
+    const disk = importFailureNarration({ reason: 'disk', hadToken: true, url: URL });
+    expect(disk).toMatch(/space/i);
+    expect(disk).toMatch(/on our side|not your repo/i);
+
+    // model-facing reasons are specific + honest too
+    expect(importFailureModelReason({ reason: 'tls', hadToken: true })).toMatch(/TLS|secure/i);
+    expect(importFailureModelReason({ reason: 'protocol', hadToken: true })).toMatch(/interrupted|protocol/i);
+    expect(importFailureModelReason({ reason: 'disk', hadToken: true })).toMatch(/disk|space/i);
   });
 
   it('every message ends with the honest "empty workspace" tail and NEVER names an AI vendor/model', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GitRepoSync, sanitizeRepoUrl } from './GitRepoSync';
+import { GitRepoSync, sanitizeRepoUrl, redactCloneStderr } from './GitRepoSync';
 import type { CommandRunner } from './GitManager';
 
 /** A fake CommandRunner that records every command and replies from a scripted matcher. */
@@ -139,6 +139,52 @@ describe('GitRepoSync.hydrateFromRepo', () => {
     }
   });
 
+  // mitrify autopsy 2026-07-24: a provably-PUBLIC repo failed to clone in E2B with a stderr that matched
+  // NONE of the original four patterns → a misleading `unknown` → the user was told "private repo". These
+  // new buckets classify the real environmental causes so the message is honest and the report diagnosable.
+  it('classifies disk / tls / protocol failures (the previously-unclassified E2B causes)', async () => {
+    const cases: Array<[string, string]> = [
+      ['NB_CLONE_DISK', 'disk'],
+      ['NB_CLONE_TLS', 'tls'],
+      ['NB_CLONE_PROTOCOL', 'protocol'],
+    ];
+    for (const [marker, reason] of cases) {
+      const { runner } = fakeRunner(() => ({ stdout: marker }));
+      const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+      expect(res).toMatchObject({ hydrated: false, skipped: true, reason });
+    }
+  });
+
+  it('tries a FULL (non-shallow) clone after every shallow attempt fails — the proxy-breaks-shallow class', async () => {
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
+    await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+    const cmd = commands[0];
+    // a shallow attempt AND a non-shallow fallback are both present, shallow first.
+    const iShallow = cmd.indexOf('git clone --depth 1 "');
+    const iFull = cmd.indexOf(`git clone "${URL}"`); // the no --depth fallback
+    expect(iShallow).toBeGreaterThan(-1);
+    expect(iFull).toBeGreaterThan(iShallow);
+  });
+
+  it('returns a REDACTED git-stderr tail on failure (admin diagnostics) — the token/URL never leaks', async () => {
+    const { runner } = fakeRunner(() => ({
+      stdout: 'NB_CLONE_TLS\nNB_ERRTAIL:fatal: unable to access <repo-url> SSL certificate problem: self signed certificate',
+    }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+    expect(res.reason).toBe('tls');
+    expect(res.errTail).toMatch(/SSL certificate problem/i);
+    expect(res.errTail).not.toContain('ghs_tok');       // the token never appears
+    expect(res.errTail).not.toMatch(/https?:\/\//i);     // no raw URL either
+  });
+
+  it('the clone command emits a URL-stripped errtail (redaction happens IN the sandbox, before the boundary)', async () => {
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_CLONE_FAIL' }));
+    await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+    const cmd = commands[0];
+    expect(cmd).toContain('NB_ERRTAIL:');
+    expect(cmd).toContain("sed -E 's#https?://[^ ]*#<repo-url>#g'"); // strips the token-embedded remote in-shell
+  });
+
   it('sets GIT_TERMINAL_PROMPT=0 so a private clone fails fast instead of hanging on a prompt', async () => {
     const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_CLONE_AUTH' }));
     await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
@@ -206,6 +252,22 @@ describe('GitRepoSync.hydrateFromRepo', () => {
     const throwing: CommandRunner = { async runCommand() { throw new Error('no shell'); } };
     const res = await new GitRepoSync(throwing, 'ws1').hydrateFromRepo(URL);
     expect(res.skipped).toBe(true);
+  });
+});
+
+describe('redactCloneStderr — secret-safe admin diagnostic tail', () => {
+  it('strips any http(s) URL (incl. a token-embedded remote) and truncates', () => {
+    const raw = "fatal: unable to access 'https://x-access-token:ghs_SECRET@github.com/o/r.git/': SSL certificate problem";
+    const out = redactCloneStderr(raw);
+    expect(out).not.toContain('ghs_SECRET');
+    expect(out).not.toMatch(/https?:\/\//);
+    expect(out).toContain('<repo-url>');
+    expect(out).toMatch(/SSL certificate problem/);
+  });
+  it('collapses whitespace, caps length, and is safe on empty input', () => {
+    expect(redactCloneStderr('')).toBe('');
+    expect(redactCloneStderr('a\n\n  b   c')).toBe('a b c');
+    expect(redactCloneStderr('x'.repeat(1000)).length).toBe(300);
   });
 });
 

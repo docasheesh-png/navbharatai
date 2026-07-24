@@ -2432,7 +2432,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     <>
       {tapDebug && (
         <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-amber-300 break-all select-text">
-          {lastTap || 'tap tracer ON — ab kisi chat par tap kijiye'}
+          {lastTap || 'tap tracer ON — now tap any chat'}
         </div>
       )}
       <button
@@ -3448,7 +3448,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 type="button"
                 onClick={toggleVoice}
                 disabled={running}
-                title={listening ? 'Listening… tap to stop' : 'Voice to App — bolkar type karo'}
+                title={listening ? 'Listening… tap to stop' : 'Voice to App — speak to type'}
                 aria-pressed={listening}
                 className={`h-7 w-9 flex items-center justify-center rounded border disabled:opacity-40 ${listening ? 'border-red-500 text-red-400 bg-red-500/10 animate-pulse' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
               >

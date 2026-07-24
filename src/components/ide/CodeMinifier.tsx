@@ -392,7 +392,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
           className="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <Zap size={14} />
-          Minify Karo
+          Minify
         </button>
         <button
           onClick={handleBeautify}
@@ -491,7 +491,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
           <textarea
             value={inputCode}
             onChange={(e) => setInputCode(e.target.value)}
-            placeholder="Yahan apna HTML / CSS / JS paste karo..."
+            placeholder="Paste your HTML / CSS / JS here..."
             spellCheck={false}
             className="flex-1 resize-none p-3 text-xs font-mono leading-relaxed outline-none text-gray-200 placeholder-gray-600"
             style={{ background: '#0d1117' }}
@@ -548,8 +548,8 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-4" style={{ background: '#0d1117' }}>
               <Zap size={32} className="text-gray-700" />
               <p className="text-sm text-gray-500">
-                Left side me code paste karo, phir{' '}
-                <span className="text-indigo-400 font-medium">Minify Karo</span> button dabao
+                Paste code on the left, then click{' '}
+                <span className="text-indigo-400 font-medium">Minify</span> button
               </p>
             </div>
           )}

@@ -448,7 +448,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Component search karo..."
+              placeholder="Search components..."
               className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
               style={{ background: '#161b22', border: '1px solid #30363d', color: '#e6edf3' }}
             />

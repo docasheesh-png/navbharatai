@@ -222,7 +222,7 @@ export function LocalizationManager() {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Localization Manager</h2>
-          <p className="text-xs text-white/40">App ko multiple languages mein translate karo — 18 languages supported</p>
+          <p className="text-xs text-white/40">Translate your app into multiple languages — 18 languages supported</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowImport(!showImport)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">

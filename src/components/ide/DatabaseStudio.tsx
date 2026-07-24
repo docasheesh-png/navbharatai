@@ -112,7 +112,7 @@ export function DatabaseStudio() {
   };
 
   const deleteRow = async (row: DBRow) => {
-    if (!window.confirm(`"${row.id || row.name}" delete karna hai?`)) return;
+    if (!window.confirm(`Delete "${row.id || row.name}"?`)) return;
     if (source === 'firestore') {
       try { await deleteDoc(doc(db, selectedCol, row.id)); } catch {}
     }

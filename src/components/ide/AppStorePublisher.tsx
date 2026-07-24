@@ -159,7 +159,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
 
   const generateDescription = () => {
     if (!data.appName) return;
-    const desc = `${data.appName} — ${data.shortDesc || 'ek powerful app'}\n\n${data.appName} aapke liye design kiya gaya hai jo ${data.category.toLowerCase()} ko simple aur effective banata hai.\n\n✅ Key Features:\n• Fast aur smooth performance\n• User-friendly interface\n• Secure aur reliable\n• Regular updates\n\n${data.appName} se aap apna kaam aur bhi aasaan bana sakte ho. Millions of users pehle se use kar rahe hain — aap bhi try karo!\n\nKoi sawal ho to: ${data.devEmail || 'support@yourapp.com'}`;
+    const desc = `${data.appName} — ${data.shortDesc || 'a powerful app'}\n\n${data.appName} is designed to make ${data.category.toLowerCase()} simple and effective.\n\n✅ Key Features:\n• Fast and smooth performance\n• User-friendly interface\n• Secure and reliable\n• Regular updates\n\n${data.appName} makes your work even easier. Millions of users already rely on it — give it a try too!\n\nQuestions? Contact: ${data.devEmail || 'support@yourapp.com'}`;
     update({ fullDesc: desc });
   };
 
@@ -170,7 +170,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
       'Key feature #2 — in action',
       'User profile / settings page',
       'Success/completion screen — emotional moment',
-      'Onboarding — "Shuru karo" ka first screen',
+      'Onboarding — the "Get Started" first screen',
     ];
   };
 
@@ -225,7 +225,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">App Store Publisher</h2>
-          <p className="text-xs text-white/40">Google Play & App Store ke liye metadata aur ASO optimize karo</p>
+          <p className="text-xs text-white/40">Optimize metadata and ASO for Google Play & the App Store</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <div className="text-right">
@@ -445,10 +445,10 @@ export function AppStorePublisher({ generatedCode }: Props) {
             <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
               <p className="text-xs text-amber-300 flex items-center gap-1.5 mb-1.5"><Info className="w-3 h-3" /> Screenshot Tips</p>
               <ul className="text-[10px] text-white/40 space-y-1">
-                <li>• First screenshot sabse important hai — main value show karo</li>
-                <li>• Text overlay add karo feature explain karne ke liye</li>
-                <li>• Real UI use karo — mockup theek hai, but real better hai</li>
-                <li>• Bright, high contrast screenshots download rate badhate hain</li>
+                <li>• The first screenshot matters most — show the main value</li>
+                <li>• Add a text overlay to explain the feature</li>
+                <li>• Use real UI — a mockup is fine, but real is better</li>
+                <li>• Bright, high-contrast screenshots increase the download rate</li>
               </ul>
             </div>
           </div>
@@ -478,7 +478,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
               <textarea
                 className="w-full bg-[#161b22] border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 resize-none focus:outline-none focus:border-rose-500/50"
                 rows={8}
-                placeholder="Apni app ke baare mein likho — features, benefits, use cases..."
+                placeholder="Describe your app — features, benefits, use cases..."
                 value={data.fullDesc}
                 onChange={e => update({ fullDesc: e.target.value })}
                 maxLength={4000}
@@ -494,7 +494,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
               <textarea
                 className="w-full bg-[#161b22] border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 resize-none focus:outline-none focus:border-rose-500/50"
                 rows={3}
-                placeholder="Is version mein kya naya hai..."
+                placeholder="What's new in this version..."
                 value={data.whatsNew}
                 onChange={e => update({ whatsNew: e.target.value })}
                 maxLength={500}
@@ -561,7 +561,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
                   <span className={`text-[10px] ${data.selectedKeywords.length >= 12 ? 'text-amber-400' : 'text-white/30'}`}>{data.selectedKeywords.length}/12</span>
                 </div>
                 {data.selectedKeywords.length === 0 ? (
-                  <p className="text-xs text-white/20 py-2">ऊपर se keywords select karo</p>
+                  <p className="text-xs text-white/20 py-2">Select keywords from above</p>
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {data.selectedKeywords.map(kw => (
@@ -629,7 +629,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
               {readiness >= 80 ? <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" /> : <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />}
               <div>
                 <p className={`text-sm font-semibold ${readiness >= 80 ? 'text-emerald-300' : readiness >= 50 ? 'text-amber-300' : 'text-red-300'}`}>
-                  {readiness >= 80 ? '🎉 Ready to Publish!' : readiness >= 50 ? '⚡ Almost Ready' : '🔧 Kuch kaam baaki hai'}
+                  {readiness >= 80 ? '🎉 Ready to Publish!' : readiness >= 50 ? '⚡ Almost Ready' : '🔧 Some work remaining'}
                 </p>
                 <p className="text-xs text-white/40">{readiness}% checklist complete — {CHECKLIST_GROUPS.flatMap(g => g.items).filter(i => data.checklist[i.key]).length} / {CHECKLIST_GROUPS.flatMap(g => g.items).length} items done</p>
               </div>

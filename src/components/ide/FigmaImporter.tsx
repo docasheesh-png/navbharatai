@@ -237,7 +237,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
   const validateUrl = (url: string) => {
     if (!url) { setUrlError(''); return; }
     if (!url.includes('figma.com')) {
-      setUrlError('Valid Figma URL paste karo');
+      setUrlError('Paste a valid Figma URL');
     } else {
       setUrlError('');
     }
@@ -246,7 +246,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
   const handleConnect = useCallback(async () => {
     if (!figmaUrl || !token) return;
     const fileKey = extractFileKey(figmaUrl);
-    if (!fileKey) { setUrlError('Valid Figma URL paste karo'); return; }
+    if (!fileKey) { setUrlError('Paste a valid Figma URL'); return; }
 
     setConnectionStatus('connecting');
     setConnectionError('');
@@ -264,8 +264,8 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
       });
       const payload = await res.json().catch(() => null);
       const figmaStatus = payload?.status ?? res.status;
-      if (figmaStatus === 403) throw new Error('Token invalid hai — Figma settings mein check karo');
-      if (figmaStatus === 404) throw new Error('File nahi mili — URL dobara check karo');
+      if (figmaStatus === 403) throw new Error('Token is invalid — check it in your Figma settings');
+      if (figmaStatus === 404) throw new Error('File not found — check the URL again');
       if (!res.ok || !payload?.data) throw new Error((payload && payload.error) || `Figma API error: ${figmaStatus}`);
 
       const data = payload.data as any;
@@ -286,7 +286,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
       saveHistory(fileKey);
       setHistory(loadHistory());
     } catch (err: any) {
-      setConnectionError(err?.message || 'Connection fail ho gayi — thodi der baad try karo.');
+      setConnectionError(err?.message || 'Connection failed — please try again in a moment.');
       setConnectionStatus('error');
     }
   }, [figmaUrl, token]);
@@ -378,7 +378,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
               <div className="w-7 h-7 rounded-md bg-[#1e1333] flex items-center justify-center">
                 <span className="text-[#a259ff] font-black text-sm leading-none">F</span>
               </div>
-              <h2 className="text-sm font-semibold text-gray-100">Figma se Design Import Karo</h2>
+              <h2 className="text-sm font-semibold text-gray-100">Import Design from Figma</h2>
             </div>
             {statusBadge()}
           </div>
@@ -392,7 +392,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
                 <div className="relative group">
                   <Info size={12} className="text-gray-500 cursor-pointer" />
                   <div className="absolute left-0 top-5 z-20 hidden group-hover:block w-56 bg-[#1c2128] border border-white/10 rounded-lg p-2 text-xs text-gray-300 shadow-xl">
-                    Figma me file kholo → Share → Copy link
+                    Open the file in Figma → Share → Copy link
                   </div>
                 </div>
               </div>
@@ -423,7 +423,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
                   onClick={() => setShowTokenHelp((v) => !v)}
                   className="text-xs text-indigo-400 hover:text-indigo-300 ml-1 underline"
                 >
-                  Token kahan milega?
+                  Where do I find the token?
                 </button>
               </div>
               <div className="relative">
@@ -448,13 +448,13 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
           {/* Token help card */}
           {showTokenHelp && (
             <div className="mb-3 bg-[#1c2128] border border-indigo-500/30 rounded-lg p-3 text-xs text-gray-300">
-              <p className="font-medium text-indigo-300 mb-1">Token kaise banayein:</p>
+              <p className="font-medium text-indigo-300 mb-1">How to create a token:</p>
               <ol className="list-decimal list-inside space-y-0.5">
-                <li>Figma kholo → top-left avatar click karo</li>
-                <li>"Account Settings" chuno</li>
-                <li>"Personal access tokens" section mein jao</li>
-                <li>"Generate new token" click karo</li>
-                <li>Token copy karo aur yahan paste karo</li>
+                <li>Open Figma → click the top-left avatar</li>
+                <li>Choose "Account Settings"</li>
+                <li>Go to the "Personal access tokens" section</li>
+                <li>Click "Generate new token"</li>
+                <li>Copy the token and paste it here</li>
               </ol>
             </div>
           )}
@@ -605,10 +605,10 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-300">
-                  {fileInfo ? 'Frame select karo import karne ke liye' : 'Figma file connect karo shuruaat karne ke liye'}
+                  {fileInfo ? 'Select a frame to import' : 'Connect a Figma file to get started'}
                 </p>
                 <p className="text-xs text-gray-600 mt-1">
-                  {fileInfo ? 'Left panel se page expand karo aur frame chunein' : 'URL aur token enter karke Connect & Fetch dabao'}
+                  {fileInfo ? 'Expand a page in the left panel and choose a frame' : 'Enter the URL and token, then press Connect & Fetch'}
                 </p>
               </div>
             </div>

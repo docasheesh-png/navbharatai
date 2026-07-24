@@ -269,7 +269,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         >
           <ImageIcon className="w-10 h-10 text-gray-500 mb-3" />
           <p className="text-gray-400 text-sm text-center leading-relaxed">
-            Screenshot yahan drop karo ya click karke select karo
+            Drop a screenshot here, or click to select
           </p>
           {imageFile && (
             <p className="mt-2 text-xs text-indigo-400 truncate max-w-full px-4">
@@ -406,7 +406,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <Upload className="w-8 h-8 text-gray-600" />
                 <p className="text-sm text-gray-500">
-                  Kisi bhi website ka screenshot upload karo — AI same-to-same app bana dega
+                  Upload any website screenshot — AI will build a same-to-same app
                 </p>
               </div>
             )}
@@ -415,7 +415,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <ImageIcon className="w-8 h-8 text-indigo-500" />
                 <p className="text-sm text-gray-400">
-                  Image ready hai — "Build from Screenshot" dabao
+                  Image ready — press "Build from Screenshot"
                 </p>
               </div>
             )}
@@ -423,7 +423,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
             {status === 'generating' && (
               <div className="h-full flex flex-col items-center justify-center gap-3">
                 <TirangaLoader className="w-8 h-8" />
-                <p className="text-sm text-gray-400">AI analyze kar raha hai...</p>
+                <p className="text-sm text-gray-400">AI is analyzing...</p>
               </div>
             )}
 

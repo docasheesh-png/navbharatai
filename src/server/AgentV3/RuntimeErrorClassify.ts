@@ -151,6 +151,22 @@ export function groupRuntimeErrors(texts: string[]): RuntimeErrorGroup[] {
   );
 }
 
+/** Category ids that mean "an API/endpoint call is failing" — the trigger to point the user at the API Tester. */
+export const API_PROBLEM_CATEGORY_IDS = new Set(['cors', 'http-status', 'network-fetch']);
+
+/**
+ * A user-facing, white-label hint pointing to the API Tester — returned ONLY when the captured runtime
+ * errors include an API/network/CORS/HTTP-status failure. Lets v5 proactively tell the user "an API call
+ * is failing — test that endpoint in the API Tester" (admin 2026-07-24). Pure; '' when no API-class error
+ * is present, so the nudge fires only when it is genuinely relevant. Names no underlying provider.
+ */
+export function apiTesterHintFor(texts: string[]): string {
+  const apiGroups = groupRuntimeErrors(texts).filter((g) => API_PROBLEM_CATEGORY_IDS.has(g.category.id));
+  if (apiGroups.length === 0) return '';
+  const labels = apiGroups.map((g) => g.category.label).join(', ');
+  return `🔌 It looks like an API call in your app is failing (${labels}). You can test that exact endpoint yourself in the API Tester — open Home → Other AI → Developer Tools → API Tester, paste the URL (keep "Route via NavBharatAI" on to bypass CORS), and Send to see the real status and response.`;
+}
+
 /**
  * Render categorized, prioritised repair guidance for the repair prompt: each group as a labelled block
  * with its hint and the (capped) errors under it. Pure. '' when there is nothing to render.

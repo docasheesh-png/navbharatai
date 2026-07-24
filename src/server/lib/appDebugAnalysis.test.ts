@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isAnalyzableFile, filePriority, selectFilesForAI,
   buildAppDebugSystemPrompt, buildAppDebugBatchPrompt,
-  parseAiFindings, mergeFindings, summarizeScan,
+  parseAiFindings, mergeFindings, summarizeScan, computeHealth,
   type AppFinding,
 } from './appDebugAnalysis';
 import type { StaticFinding } from './appStaticScan';
@@ -157,5 +157,35 @@ describe('mergeFindings + summarizeScan — dedupe, rank, honest counts', () => 
     expect(s.counts.critical).toBe(1);
     expect(s.counts.medium).toBe(1);
     expect(s.filesAiSkippedForBudget).toBe(2);
+    expect(s.health).toBeTruthy();
+    expect(s.health.score).toBeGreaterThanOrEqual(0);
+    expect(s.health.score).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('computeHealth — honest project health score', () => {
+  it('a clean app scores 100 with a clean verdict', () => {
+    const h = computeHealth([], 20);
+    expect(h.score).toBe(100);
+    expect(h.verdict).toMatch(/clean/i);
+    expect(h.topCategories).toEqual([]);
+  });
+
+  it('a critical-heavy app scores low and lists top categories', () => {
+    const many: AppFinding[] = Array.from({ length: 6 }, (_, i) => ({
+      severity: 'critical', file: `f${i}.ts`, line: 1, category: 'security', problem: 'x', suggestion: 'y', source: 'ai',
+    }));
+    const h = computeHealth(many, 10);
+    expect(h.score).toBeLessThan(50);
+    expect(h.topCategories[0]).toEqual({ category: 'security', count: 6 });
+  });
+
+  it('scales by size — the same findings hurt a tiny app more than a large one', () => {
+    const finds: AppFinding[] = Array.from({ length: 4 }, (_, i) => ({
+      severity: 'high', file: `f${i}.ts`, line: 1, category: 'logic', problem: 'x', suggestion: 'y', source: 'ai',
+    }));
+    const small = computeHealth(finds, 8);
+    const large = computeHealth(finds, 200);
+    expect(large.score).toBeGreaterThan(small.score);
   });
 });

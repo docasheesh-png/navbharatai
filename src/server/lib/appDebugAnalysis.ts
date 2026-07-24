@@ -25,8 +25,8 @@ export interface AppFinding {
   category: string;
   problem: string;
   suggestion: string;
-  /** 'static' = deterministic (always real); 'ai' = semantic model pass. */
-  source: 'static' | 'ai';
+  /** 'static'/'graph' = deterministic (always real); 'ai' = semantic model pass. */
+  source: 'static' | 'graph' | 'ai';
 }
 
 export interface DebugScanMeta {
@@ -38,9 +38,47 @@ export interface DebugScanMeta {
   bytesAiScanned: number;
 }
 
+export interface ProjectHealth {
+  /** 0–100, where 100 is a clean app. Heuristic, computed from weighted severity vs. size. */
+  score: number;
+  verdict: string;
+  topCategories: Array<{ category: string; count: number }>;
+}
+
 export interface DebugScanSummary extends DebugScanMeta {
   counts: Record<FindingSeverity, number>;
   total: number;
+  health: ProjectHealth;
+}
+
+const HEALTH_WEIGHT: Record<FindingSeverity, number> = { critical: 12, high: 6, medium: 2, low: 0.5 };
+
+/**
+ * A project HEALTH score (0–100) + a plain-language verdict + the top problem categories. Honest
+ * heuristic: it weights findings by severity against the app's size (so a big app isn't unfairly
+ * punished, and a tiny app isn't over-penalized per file). Pure + tested.
+ */
+export function computeHealth(findings: AppFinding[], filesScanned: number): ProjectHealth {
+  let penalty = 0;
+  const byCat = new Map<string, number>();
+  for (const f of findings) {
+    penalty += HEALTH_WEIGHT[f.severity] ?? 1;
+    byCat.set(f.category, (byCat.get(f.category) || 0) + 1);
+  }
+  const denom = Math.max(8, filesScanned); // small apps: don't over-weight per-file
+  const score = Math.max(0, Math.min(100, Math.round(100 - (penalty / denom) * 20)));
+  const verdict =
+    findings.length === 0 ? 'Clean — no problems found' :
+    score >= 90 ? 'Excellent — very few issues' :
+    score >= 75 ? 'Good — minor issues to tidy up' :
+    score >= 50 ? 'Needs attention — several real issues' :
+    score >= 25 ? 'Poor — many issues; fix the criticals first' :
+    'Critical — serious problems to address';
+  const topCategories = [...byCat.entries()]
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+  return { score, verdict, topCategories };
 }
 
 /** How many files the AI pass reads at most, and its char budgets. Tunable via env without a deploy. */
@@ -283,9 +321,9 @@ export function mergeFindings(staticFindings: StaticFinding[], aiFindings: AppFi
   return merged;
 }
 
-/** Roll findings + scan metadata into the summary the client renders (honest counts). */
+/** Roll findings + scan metadata into the summary the client renders (honest counts + health). */
 export function summarizeScan(findings: AppFinding[], meta: DebugScanMeta): DebugScanSummary {
   const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
   for (const f of findings) counts[f.severity]++;
-  return { ...meta, counts, total: findings.length };
+  return { ...meta, counts, total: findings.length, health: computeHealth(findings, meta.filesStaticScanned) };
 }

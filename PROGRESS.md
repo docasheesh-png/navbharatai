@@ -21805,3 +21805,28 @@ Built (4 commits, all gated):
   states. Self-contained (authJsonHeaders + connected gh_token). AppKnowledgeBase entry updated.
 
 Gate: fe tsc 0 · server tsc 0 · vite build ✓ · new tests 38 + aiToolsReal 13 green · full suite running.
+
+### 2026-07-24 (cont.) — Full-App Debugger → "mythos-level": system-level intelligence (folded into PR #1869)
+
+Admin: "sirf feature nahi — top-class, real, mythos-level debugger banao." Added three intelligence
+layers on top of the base scan (all deterministic-real + honest):
+
+- **Cross-file module-GRAPH analyzer** (`appGraphScan.ts`) — the debugger now understands the app as a
+  SYSTEM, not isolated files. Deterministic, verified findings: MISSING_DEPENDENCY (imported but not in
+  package.json → real "Cannot find module" crash), BROKEN_IMPORT (relative path resolves to no file),
+  DEAD_FILE (nothing imports it). Honest by construction — whole-graph checks (broken/dead) run ONLY on a
+  COMPLETE fileset (a Pro v5 app's durable store) and only with positive evidence the target area was
+  fetched, so a truncated GitHub fetch can never yield a false "missing file". Excludes builtins/aliases/
+  entries/routes/tests/configs. 17 tests incl. every FP guard.
+- **Project HEALTH score** (`computeHealth`) — weighted-severity score 0–100 + plain verdict + top
+  categories, scaled by app size. Streamed in the scan summary; rendered as a score-ring header.
+- **Interactive "Investigate & fix"** — new POST /api/app-debug/investigate: root cause + full fix for ONE
+  finding using its real file (workspace: owner-gated durable load; github/open: client-sent content),
+  free-tier + white-label, honest 5xx (never a fake). Client renders root cause / fix / steps / prevention
+  inline under the finding.
+
+Merge: graph findings stream as their own phase; deterministic (static+graph) win over AI at a shared
+spot; findings ranked most-severe first. The "Verified" badge now covers graph findings too.
+
+Gate: fe tsc 0 · server tsc 0 · vite build ✓ · debugger tests 76 green · full suite running. All folded
+into PR #1869 (branch claude/full-app-debugger) — one PR, one CI cycle.

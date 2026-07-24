@@ -3,11 +3,15 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { workspaceRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import { loadWorkspaceFiles, listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { scanFilesStatic } from '../lib/appStaticScan';
+import { scanAppGraph } from '../lib/appGraphScan';
 import {
   selectFilesForAI, buildAppDebugSystemPrompt, buildAppDebugBatchPrompt,
   parseAiFindings, mergeFindings, summarizeScan,
   type AppFinding,
 } from '../lib/appDebugAnalysis';
+import {
+  buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse,
+} from '../lib/debugAnalysis';
 
 /**
  * Full-App Debugger — the REAL whole-codebase scan route (admin request 2026-07-24).
@@ -128,7 +132,13 @@ export function registerAppDebugRoutes(app: Express): void {
       // Layer 1 — deterministic static scan over EVERY file (fast, precise, always real).
       const staticFindings = scanFilesStatic(files);
 
-      // Layer 2 — plan the AI semantic pass (prioritised, budget-bounded).
+      // Layer 2 — cross-file module-GRAPH scan (missing deps, broken imports, dead code). The
+      // whole-graph checks only fire on a COMPLETE fileset (a Pro v5 app's durable store); a GitHub
+      // fetch is capped at ~200 files, so its map may be partial → only the dependency check runs.
+      const completeFileset = source === 'workspace';
+      const graphFindings = scanAppGraph(files, completeFileset);
+
+      // Layer 3 — plan the AI semantic pass (prioritised, budget-bounded).
       const selection = selectFilesForAI(files);
       const filesTotal = Object.keys(files).length;
       send({
@@ -141,6 +151,7 @@ export function registerAppDebugRoutes(app: Express): void {
       });
       // Surface the deterministic findings immediately so the user sees real results while the AI runs.
       if (staticFindings.length) send({ type: 'findings', phase: 'static', findings: staticFindings });
+      if (graphFindings.length) send({ type: 'findings', phase: 'graph', findings: graphFindings });
 
       const aiFindings: AppFinding[] = [];
       let aiBatchesRun = 0;
@@ -179,8 +190,8 @@ export function registerAppDebugRoutes(app: Express): void {
         }
       }
 
-      // Merge + rank, then finish with the authoritative summary.
-      const merged = mergeFindings(staticFindings, aiFindings);
+      // Merge + rank (deterministic static + graph win at a shared spot), then the authoritative summary.
+      const merged = mergeFindings([...staticFindings, ...graphFindings], aiFindings);
       const aiUnavailable = totalBatches > 0 && aiBatchesRun === 0;
       const summary = summarizeScan(merged, {
         filesTotal,
@@ -205,6 +216,49 @@ export function registerAppDebugRoutes(app: Express): void {
       // Stream already started → emit an honest error event and close (no fake result).
       send({ type: 'error', message: 'NavBharatAI hit a brief hiccup while scanning. Please try again in a minute.' });
       try { res.end(); } catch { /* already closed */ }
+    }
+  });
+
+  // ── Deep-dive: investigate ONE finding → root cause + full fix (interactive) ────────────────────
+  app.post('/api/app-debug/investigate', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const problem = typeof req.body?.problem === 'string' ? req.body.problem.trim() : '';
+    const file = typeof req.body?.file === 'string' ? req.body.file : '';
+    if (!problem) {
+      res.status(400).json({ error: 'A problem to investigate is required.' });
+      return;
+    }
+
+    // Resolve the file's real content: from the durable workspace (owner-gated) or the client payload.
+    let code = typeof req.body?.code === 'string' ? req.body.code.slice(0, 60_000) : '';
+    if (req.body?.source === 'workspace') {
+      const uid = await verifyFirebaseToken(req);
+      const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+      if (!ownsWorkspace(uid, workspaceId)) {
+        res.status(403).json({ error: 'You can only investigate your own NavBharatAI Pro apps.' });
+        return;
+      }
+      const files = await loadWorkspaceFiles(workspaceId);
+      if (file && typeof files[file] === 'string') code = files[file].slice(0, 60_000);
+    }
+
+    try {
+      const line = Number(req.body?.line);
+      const context = `File: ${file || '(unknown)'}${Number.isInteger(line) && line > 0 ? ` (around line ${line})` : ''}\n\n${code}`;
+      const router = AIRouterManager.getRouter('free');
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('investigate timeout')), 60_000));
+      const { response } = await Promise.race([
+        router.route(buildDebugUserPrompt(problem, context, 'Full-app finding'), buildDebugSystemPrompt()),
+        timeout,
+      ]);
+      const content = response?.content ?? '';
+      if (!content.trim()) {
+        res.status(502).json({ error: 'The analysis came back empty — please try again.' });
+        return;
+      }
+      res.json(parseDebugResponse(content));
+    } catch {
+      res.status(503).json({ error: 'NavBharatAI\'s engine is briefly busy — please try again in a minute.' });
     }
   });
 }

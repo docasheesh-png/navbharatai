@@ -12,7 +12,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Bug, Loader2, Github, Box, RefreshCw, AlertTriangle, ShieldCheck,
-  ChevronDown, ChevronRight, FileSearch, CheckCircle2,
+  ChevronDown, ChevronRight, FileSearch, CheckCircle2, Sparkles,
 } from 'lucide-react';
 import { authJsonHeaders } from '../../lib/authHeaders';
 
@@ -27,6 +27,11 @@ interface Finding {
   suggestion: string;
   source: 'static' | 'ai';
 }
+interface ProjectHealth {
+  score: number;
+  verdict: string;
+  topCategories: Array<{ category: string; count: number }>;
+}
 interface ScanSummary {
   filesTotal: number;
   filesStaticScanned: number;
@@ -34,7 +39,10 @@ interface ScanSummary {
   filesAiSkippedForBudget: number;
   counts: Record<Severity, number>;
   total: number;
+  health: ProjectHealth;
 }
+interface DeepDive { rootCause: string; fix: string; explanation: string[]; prevention: string[]; }
+interface DeepDiveState { loading?: boolean; error?: string; result?: DeepDive; }
 interface ProApp { workspaceId: string; label: string; fileCount: number; savedAt: number; }
 interface Repo { full_name: string; name: string; }
 
@@ -70,6 +78,10 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
   const [notes, setNotes] = useState<string[]>([]);
   const [runError, setRunError] = useState('');
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  // For the deep-dive investigation: the scanned file map (github/open project) + the active source.
+  const [scannedFiles, setScannedFiles] = useState<Record<string, string> | null>(null);
+  const [activeSource, setActiveSource] = useState<{ kind: SourceKind; workspaceId?: string } | null>(null);
+  const [deepDive, setDeepDive] = useState<Record<number, DeepDiveState>>({});
 
   // Load the two source lists: the user's Pro v5 apps (auth) + connected GitHub repos (gh_token).
   const loadSources = useCallback(async () => {
@@ -108,7 +120,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
   const hasCurrent = !!files && Object.keys(files).length > 0;
 
   const resetResults = () => {
-    setFindings([]); setSummary(null); setNotes([]); setRunError(''); setProgress(null); setExpanded({});
+    setFindings([]); setSummary(null); setNotes([]); setRunError(''); setProgress(null); setExpanded({}); setDeepDive({});
   };
 
   const handleEvent = useCallback((evt: any) => {
@@ -173,9 +185,13 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
     try {
       if (kind === 'pro') {
         if (!selectedPro) throw new Error('Choose one of your NavBharatAI Pro apps to scan.');
+        setScannedFiles(null); // the server holds the files; investigate loads them by workspaceId
+        setActiveSource({ kind: 'pro', workspaceId: selectedPro });
         await streamRun({ source: 'workspace', workspaceId: selectedPro }, await authJsonHeaders());
       } else if (kind === 'current') {
         if (!hasCurrent) throw new Error('There is no open project in the editor to scan.');
+        setScannedFiles(files || null);
+        setActiveSource({ kind: 'current' });
         await streamRun({ source: 'github', files }, await authJsonHeaders());
       } else {
         if (!selectedRepo) throw new Error('Choose a GitHub repository to scan.');
@@ -191,6 +207,8 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
         if (!fetchRes.ok || !fetchData?.files || Object.keys(fetchData.files).length === 0) {
           throw new Error((fetchData && typeof fetchData.error === 'string' && fetchData.error) || 'Could not read the repository files.');
         }
+        setScannedFiles(fetchData.files);
+        setActiveSource({ kind: 'github' });
         await streamRun({ source: 'github', files: fetchData.files }, await authJsonHeaders());
       }
     } catch (e) {
@@ -201,6 +219,31 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
       setProgress(null);
     }
   }, [kind, selectedPro, selectedRepo, ghToken, hasCurrent, files, streamRun]);
+
+  // Deep-dive: ask NavBharatAI for the root cause + full fix of ONE finding, using its real file.
+  const investigate = useCallback(async (index: number, f: Finding) => {
+    setDeepDive((d) => ({ ...d, [index]: { loading: true } }));
+    try {
+      const body: any = { problem: `${f.problem}${f.suggestion ? ` (suggested: ${f.suggestion})` : ''}`, file: f.file, line: f.line };
+      if (activeSource?.kind === 'pro') {
+        body.source = 'workspace';
+        body.workspaceId = activeSource.workspaceId;
+      } else if (scannedFiles && typeof scannedFiles[f.file] === 'string') {
+        body.code = scannedFiles[f.file];
+      }
+      const res = await fetch('/api/app-debug/investigate', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify(body) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error((data && typeof data.error === 'string' && data.error) || 'The investigation could not be completed — please try again.');
+      setDeepDive((d) => ({ ...d, [index]: { result: {
+        rootCause: typeof data.rootCause === 'string' ? data.rootCause : '',
+        fix: typeof data.fix === 'string' ? data.fix : '',
+        explanation: Array.isArray(data.explanation) ? data.explanation.filter((x: unknown) => typeof x === 'string') : [],
+        prevention: Array.isArray(data.prevention) ? data.prevention.filter((x: unknown) => typeof x === 'string') : [],
+      } } }));
+    } catch (e) {
+      setDeepDive((d) => ({ ...d, [index]: { error: e instanceof Error ? e.message : 'Investigation failed.' } }));
+    }
+  }, [activeSource, scannedFiles]);
 
   const canScan = !running && (
     (kind === 'pro' && !!selectedPro) ||
@@ -304,6 +347,34 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
           </div>
         )}
 
+        {/* Health header */}
+        {summary && (
+          <div className="mb-3 flex items-center gap-3 rounded-lg p-3" style={{ background: '#161b22', border: '1px solid rgba(255,255,255,0.07)' }}>
+            {(() => {
+              const s = summary.health.score;
+              const col = s >= 75 ? '#22c55e' : s >= 50 ? '#fcd34d' : s >= 25 ? '#fb923c' : '#f87171';
+              return (
+                <div className="shrink-0 flex items-center justify-center rounded-full" style={{ width: 52, height: 52, border: `3px solid ${col}` }}>
+                  <span className="text-lg font-bold" style={{ color: col }}>{s}</span>
+                </div>
+              );
+            })()}
+            <div className="min-w-0">
+              <div className="text-sm font-semibold" style={{ color: '#e6edf3' }}>App health {summary.health.score}/100</div>
+              <div className="text-xs" style={{ color: '#8b949e' }}>{summary.health.verdict}</div>
+              {summary.health.topCategories.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {summary.health.topCategories.map((c) => (
+                    <span key={c.category} className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e', fontSize: 10 }}>
+                      {c.category} · {c.count}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Summary bar */}
         {summary && (
           <div className="mb-4">
@@ -348,7 +419,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
                   <span className="flex items-center gap-2 mt-0.5 text-xs" style={{ color: '#6e7681' }}>
                     <span className="font-mono truncate">{f.file}{f.line ? `:${f.line}` : ''}</span>
                     <span className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.05)' }}>{f.category}</span>
-                    {f.source === 'static' && (
+                    {f.source !== 'ai' && (
                       <span className="flex items-center gap-0.5" style={{ color: '#22c55e' }} title="Deterministic — verified, not AI-guessed">
                         <ShieldCheck className="w-3 h-3" /> Verified
                       </span>
@@ -356,11 +427,52 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files }) => {
                   </span>
                 </span>
               </button>
-              {open && f.suggestion && (
-                <div className="px-3 pb-3 pl-8">
-                  <div className="rounded p-2 text-xs" style={{ background: '#0d1117', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    <span style={{ color: '#86efac', fontWeight: 600 }}>Suggested fix: </span>{f.suggestion}
-                  </div>
+              {open && (
+                <div className="px-3 pb-3 pl-8 flex flex-col gap-2">
+                  {f.suggestion && (
+                    <div className="rounded p-2 text-xs" style={{ background: '#0d1117', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      <span style={{ color: '#86efac', fontWeight: 600 }}>Suggested fix: </span>{f.suggestion}
+                    </div>
+                  )}
+                  {/* Deep-dive investigation */}
+                  {(() => {
+                    const dd = deepDive[i];
+                    if (dd?.result) {
+                      const r = dd.result;
+                      return (
+                        <div className="rounded p-2.5 text-xs flex flex-col gap-2" style={{ background: '#0d1117', border: '1px solid rgba(59,130,246,0.25)' }}>
+                          {r.rootCause && <div><span style={{ color: '#93c5fd', fontWeight: 600 }}>Root cause: </span><span style={{ color: '#c9d1d9' }}>{r.rootCause}</span></div>}
+                          {r.fix && (
+                            <pre className="rounded p-2 overflow-x-auto" style={{ background: '#161b22', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.fix}</pre>
+                          )}
+                          {r.explanation.length > 0 && (
+                            <ol className="flex flex-col gap-1 list-none">
+                              {r.explanation.map((s, k) => (
+                                <li key={k} className="flex items-start gap-1.5"><span style={{ color: '#60a5fa' }}>{k + 1}.</span><span style={{ color: '#c9d1d9' }}>{s}</span></li>
+                              ))}
+                            </ol>
+                          )}
+                          {r.prevention.length > 0 && (
+                            <div style={{ color: '#8b949e' }}>
+                              <span style={{ color: '#fcd34d', fontWeight: 600 }}>Prevent it: </span>{r.prevention.join(' ')}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    if (dd?.error) return <div className="text-xs" style={{ color: '#f87171' }}>{dd.error}</div>;
+                    return (
+                      <button
+                        onClick={() => investigate(i, f)}
+                        disabled={dd?.loading}
+                        className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium"
+                        style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.3)', opacity: dd?.loading ? 0.6 : 1 }}
+                      >
+                        {dd?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                        {dd?.loading ? 'Investigating…' : 'Investigate & fix'}
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </div>

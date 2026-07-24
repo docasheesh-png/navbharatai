@@ -299,10 +299,10 @@ function findingKey(f: AppFinding): string {
  * category) spot, near-duplicate AI findings are dropped, and the result is ranked most-severe first,
  * then by file, then by line. Pure + stable.
  */
-export function mergeFindings(staticFindings: StaticFinding[], aiFindings: AppFinding[]): AppFinding[] {
+export function mergeFindings(deterministicFindings: Array<StaticFinding | AppFinding>, aiFindings: AppFinding[]): AppFinding[] {
   const seen = new Set<string>();
   const merged: AppFinding[] = [];
-  for (const f of staticFindings as AppFinding[]) {
+  for (const f of deterministicFindings as AppFinding[]) {
     const k = findingKey(f);
     if (seen.has(k)) continue;
     seen.add(k);

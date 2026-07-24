@@ -71,6 +71,17 @@ describe('AI Debugger — real analysis, no fake fallback', () => {
     expect(src).toContain('/api/app-debug/sources');
   });
 
+  it('the debugger has system-level intelligence: graph analyzer, health score, and investigate', () => {
+    const panel = readFileSync(join(__dirname, '../src/components/ide/AppScanPanel.tsx'), 'utf8');
+    expect(panel).toContain('/api/app-debug/investigate'); // deep-dive per finding
+    expect(panel).toMatch(/health/i);                       // project health header
+    const route = readFileSync(join(__dirname, '../src/server/routes/appDebug.ts'), 'utf8');
+    expect(route).toContain('scanAppGraph');                // cross-file graph scan wired in
+    const kbEntry = kb('ai_debugger');
+    expect(kbEntry!.description).toMatch(/HEALTH score/);
+    expect(kbEntry!.description).toMatch(/Investigate & fix/);
+  });
+
   it('the /api/debug route is registered on the server (the endpoint the client calls exists)', () => {
     const route = readFileSync(join(__dirname, '../src/server/routes/debug.ts'), 'utf8');
     expect(route).toContain("app.post('/api/debug'");

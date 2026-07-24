@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
@@ -238,6 +238,10 @@ function extractDevPort(command: string): number {
   if (/\bexpress\b/.test(command)) return 3000;             // Express
   if (/\bfastify\b/.test(command)) return 3000;             // Fastify
   if (/\bserve\b/.test(command) && !/npm/.test(command)) return 3000; // http-server/serve
+  // A direct Node server launcher (`tsx server/index.ts`, `node dist/server.js`, `nodemon app.js`) carries
+  // no framework keyword, so it used to fall through to Vite's 5173 while the Express/Fastify server bound
+  // a Node port — the exact Mitrify "did not come up on port 5173" import failure. Treat it as a Node port.
+  if (isNodeServerCommand(command)) return 3000;
   return 5173; // Vite default
 }
 

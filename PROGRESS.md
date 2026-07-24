@@ -21679,3 +21679,30 @@ Two real defects the report exposed (why the admin said "nahi hua"):
   land (the admin values files showing in the Files tab, which the land provides).
 
 Gate: fe tsc 0 · server tsc 0 · shouldRunIntegrityHeal 3 tests · full suite (running/green) · build ✓.
+
+### 2026-07-24 (cont.) — Preview fix: node-express imports were watched on Vite's 5173 (Mitrify "did not come up on port 5173")
+
+The admin's screenshot showed the real preview error: **"The dev server did not come up on port 5173 … dev
+server did not start and the log had no recognisable error."** Root-caused with certainty: Mitrify's dev script
+is `tsx server/index.ts` (a node-express full-stack app, correctly detected as `node-express` upstream). But the
+E2B preview machinery re-derives the port/host from the COMMAND string, and `tsx server/index.ts` carries NO
+framework keyword — so `extractDevPort` fell through to `return 5173` (Vite default), `pinDevServerPort` pinned
+nothing, and `ensureHostBinding` forced no host. The health-check then polled 5173 while the Express server bound
+its own Node port → "did not come up on port 5173". This hits EVERY node-express import, not just Mitrify.
+
+Fix (one shared detector, three wirings): new exported `isNodeServerCommand()` (mirrors ProjectImport's
+`devScriptRunsNodeServer` — one source of truth for "this is a bare node server", excludes vite/next/astro/…):
+- `extractDevPort` → returns **3000** (node port) for a node-server command instead of 5173.
+- `pinDevServerPort` → prefixes **`PORT=<port>`** so a server reading `process.env.PORT` binds the watched port
+  (detectDevPort still re-points to the real port if the server ignores PORT).
+- `ensureHostBinding` → prefixes **`HOST=0.0.0.0`** so a config-driven server is reachable on the PUBLIC E2B
+  preview instead of localhost-only (blank preview).
+Composed call site now yields `PORT=3000 HOST=0.0.0.0 tsx server/index.ts`. Tests: isNodeServerCommand 2 groups +
+PORT/HOST injection (incl. the composed order + no-double-inject). Vite/Next/etc. commands byte-for-byte unchanged.
+
+HONEST OPEN ITEM (rule 6): Mitrify ALSO needs a PostgreSQL `DATABASE_URL` + ~6 secrets to boot (its server runs
+`ensureSchema()` DB migrations on startup — see its SETUP_README). Even with the port fix, its preview only fully
+runs once the user connects a database (Settings → Database) + sets the secrets. A follow-up should make the engine
+DETECT "this import needs a DB/secrets to boot" and show that honest state instead of a raw port error.
+
+Gate: fe tsc 0 · server tsc 0 · devServerHost 73 tests · full suite (running/green) · build ✓.

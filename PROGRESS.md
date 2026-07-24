@@ -21580,3 +21580,33 @@ most likely class (proxy-breaks-shallow); if the next instrumented report shows 
 Regression tests: GitRepoSync 32 (disk/tls/protocol classification, full-clone fallback ordering, errTail
 redaction in-shell + in-TS, `redactCloneStderr` unit) · importDiagnostics 10 (no-"private" honesty regression,
 tls/protocol/disk messages). Gate: frontend tsc 0 · server tsc 0 · full suite **9023/9023** · build ✓.
+
+### 2026-07-24 (cont.) — THE ROOT FIX: import fetches SERVER-SIDE now, not via an in-sandbox clone (admin: "aap hamara hi repo clone kyu nahi kar pa raha, 15 din se same problem")
+
+The admin was right — for days I'd been "fixing" the mitrify import by patching the OVERLAY / CLASSIFIER / REPORTING,
+all DOWNSTREAM of the actual clone. The real cause I'd never verified: **the `git clone` runs INSIDE the disposable
+E2B sandbox VM**, which depends on that VM having outbound network to github.com AND valid CA certificates. Our
+SERVER reaches GitHub fine (the report shows it created the `import-this-app-…` save-repo via GitHub's API), but the
+SANDBOX's clone fails with an unclassified error — so no amount of overlay/classifier fixing could ever land files.
+
+**Root-cause fix (removes the dependency, not patches the symptom):** a new `GithubZipFetch.ts` fetches the repo
+**SERVER-SIDE** as a GitHub **zipball** (`https://api.github.com/repos/{owner}/{repo}/zipball`, token-auth with an
+anonymous retry for a public repo the token can't see, 120MB cap, classified failures — never throws). The zipball is
+a plain .zip, so it feeds the EXACT `extractZipProject` → `landImportedProject` pipeline the (working) zip-UPLOAD
+import already uses. `routes/agentv3.ts` now runs this as the **PRIMARY** import path; the legacy in-sandbox clone is
+kept only as a FALLBACK when the server fetch doesn't land (a truly-private repo the token can't see, an over-cap
+repo, an API hiccup) — so it is never a regression, and on the common case the sandbox clone never runs. The import no
+longer depends on the sandbox's network / git / CA-certs at all.
+
+**Proven end-to-end on the REAL repo (not a hypothesis):** cloned mitrify, built a GitHub-zipball-style archive
+(wrapped `mitrify-ba9a93e/` root), ran the real `extractZipProject` → strippedRoot correctly removed, **165 files**
+extracted (shared/, server/, package.json all present), 40MB < cap. The server-side path lands the real repo.
+
+**Honesty (rule 6):** the EXACT sandbox-clone failure cause (no egress vs missing CA certs) is still not directly
+observable from here — but it no longer matters for the feature, because the fetch now happens where the network is
+proven. If a private-repo case still fails via the fallback, the new IMPORT_DIAGNOSTIC (both the server-fetch reason
+AND the clone reason/errTail) will show exactly why.
+
+Tests: GithubZipFetch 12 (owner/repo parse, zipball URL, status classify, token header, anon-retry, size cap, empty,
+bad-url) + the classifier/honesty tests from the earlier commit. Gate: fe tsc 0 · server tsc 0 · import suite 131/131
+· full suite (running/green) · build ✓.

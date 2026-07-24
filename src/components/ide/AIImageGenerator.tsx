@@ -8,6 +8,7 @@ interface GeneratedImage {
   id: string;
   url: string;
   prompt: string;
+  type: string;
   style: string;
   size: string;
   timestamp: number;
@@ -33,7 +34,9 @@ const SIZES = [
   { id: 'icon', label: 'App Icon', w: 192, h: 192, desc: '192×192' },
 ];
 
-const QUICK_PROMPTS = [
+// Image types — a compulsory selector (exactly one is always active). The chosen type is
+// combined into the real generation request, so it genuinely shapes the output.
+const IMAGE_TYPES = [
   'Modern app logo',
   'Website banner',
   'App icon',
@@ -64,6 +67,7 @@ const STYLE_ENHANCERS: Record<string, string> = {
 
 export function AIImageGenerator({ onImageGenerated }: Props) {
   const [prompt, setPrompt] = useState('');
+  const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
   const [style, setStyle] = useState('minimal');
   const [size, setSize] = useState('square');
   const [isLoading, setIsLoading] = useState(false);
@@ -79,8 +83,14 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   // free image site from the browser (no server side at all; unreliable and outside our control).
   // History is session-only: generated images are multi-MB data URLs that would overflow
   // localStorage, so nothing is persisted — the current session keeps up to 6 recents in memory.
+  // The compulsory image type is always folded into what actually gets generated, so a selected
+  // type shapes the output even when the free-text prompt is empty (type alone is a valid request).
+  const buildEffectivePrompt = () =>
+    `${imageType}${prompt.trim() ? ` — ${prompt.trim()}` : ''}`;
+
   const handleGenerate = async () => {
-    if (!prompt.trim() || isLoading) return;
+    const effectivePrompt = buildEffectivePrompt();
+    if (!effectivePrompt.trim() || isLoading) return;
     setGeneratedUrl('');
     setImageError(false);
     setErrorMsg('');
@@ -89,7 +99,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       const res = await fetch('/api/image/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.trim(), style, size }),
+        body: JSON.stringify({ prompt: effectivePrompt, style, size }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || typeof data.image !== 'string') {
@@ -101,12 +111,13 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         id: Date.now().toString(),
         url: data.image,
         prompt: prompt.trim(),
+        type: imageType,
         style,
         size,
         timestamp: Date.now(),
       };
       setHistory((h) => [newItem, ...h].slice(0, 6));
-      if (onImageGenerated) onImageGenerated(data.image, prompt.trim());
+      if (onImageGenerated) onImageGenerated(data.image, effectivePrompt);
     } catch (e) {
       // Honest failure — the real reason from the server, never a placeholder image.
       setImageError(true);
@@ -296,28 +307,38 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel */}
         <div className="w-[60%] flex flex-col gap-4 p-5 overflow-y-auto border-r border-white/5">
+          {/* Image Type — compulsory: exactly one is always selected (comes first, above the prompt) */}
+          <div>
+            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Image Type</label>
+            <div className="flex flex-wrap gap-1.5">
+              {IMAGE_TYPES.map(t => (
+                <button
+                  key={t}
+                  onClick={() => setImageType(t)}
+                  aria-pressed={imageType === t}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                    imageType === t
+                      ? 'border-violet-500/60 bg-violet-500/20 text-violet-200 font-medium'
+                      : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10 hover:text-white/70'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Prompt */}
           <div>
             <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Prompt</label>
             <textarea
               className="w-full bg-[#161b22] border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
               rows={4}
-              placeholder="Describe what you want to create... e.g. 'Modern fintech app logo with blue gradient and rupee symbol'"
+              placeholder="Add details for your Modern app logo, banner, icon... e.g. 'with blue gradient and rupee symbol'"
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
             />
-            <div className="flex items-center justify-between mt-2">
-              <div className="flex flex-wrap gap-1.5">
-                {QUICK_PROMPTS.map(q => (
-                  <button
-                    key={q}
-                    onClick={() => setPrompt(q)}
-                    className="text-[10px] px-2 py-0.5 bg-white/5 hover:bg-violet-500/20 rounded-full text-white/50 hover:text-violet-300 transition-colors border border-white/5"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
+            <div className="flex items-center justify-end mt-2">
               <button
                 onClick={handleEnhance}
                 className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 shrink-0"
@@ -394,10 +415,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             </div>
           </div>
 
-          {/* Generate Button */}
+          {/* Generate Button — pinned at the very bottom of the left column */}
           <button
             onClick={handleGenerate}
-            disabled={!prompt.trim() || isLoading}
+            disabled={isLoading}
             className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors mt-2"
           >
             {isLoading ? (
@@ -431,7 +452,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
               {!isLoading && !imageError && !generatedUrl && (
                 <div className="flex flex-col items-center justify-center h-60 gap-2">
                   <Wand2 className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-white/30">Write a prompt and press Generate</p>
+                  <p className="text-xs text-white/30">Pick a type, add details, then press Generate</p>
                 </div>
               )}
               {!isLoading && !imageError && generatedUrl && (
@@ -482,7 +503,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 {history.map(item => (
                   <button
                     key={item.id}
-                    onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setStyle(item.style); setSize(item.size); }}
+                    onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setImageType(item.type || IMAGE_TYPES[0]); setStyle(item.style); setSize(item.size); }}
                     className="group relative rounded-lg overflow-hidden border border-white/5 hover:border-violet-500/40 transition-all aspect-square bg-[#161b22]"
                   >
                     <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" loading="lazy" />

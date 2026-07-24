@@ -534,6 +534,7 @@ export function ViewPanels({
           <CodeVersioning
             generatedCode={generatedCode}
             files={files as Record<string, string>}
+            sessionId={currentProSessionId}
             onRestore={(c: string) => setGeneratedCode(c)}
             onRestoreFiles={(f: any) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
           />

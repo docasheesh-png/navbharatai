@@ -858,6 +858,43 @@ export function registerBuildRoutes(app: Express): void {
     }
   });
 
+  // Code Versioning — save a MANUAL named restore-point (checkpoint) to the SAME durable, cross-device
+  // build-history store (admin 2026-07-24). This makes the Versioning tool genuinely strong: alongside
+  // the automatic per-build checkpoints, a user can snapshot "this is good" before a risky change and
+  // Restore to it later from any device. Bounded + best-effort; the sessionId is the unguessable
+  // capability, mirroring the GET routes above.
+  app.post('/api/build-history/:sessionId/checkpoint', async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const body = req.body as { name?: unknown; files?: unknown };
+      if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      if (!body?.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
+        return res.status(400).json({ error: 'files map required' });
+      }
+      const files: Record<string, string> = {};
+      let bytes = 0;
+      for (const [k, v] of Object.entries(body.files as Record<string, unknown>)) {
+        if (typeof k !== 'string' || typeof v !== 'string') continue;
+        bytes += k.length + v.length;
+        if (bytes > 5 * 1024 * 1024) break; // hard cap; the store caps again to the Firestore 1MB doc limit
+        files[k] = v;
+      }
+      if (Object.keys(files).length === 0) return res.status(400).json({ error: 'no readable files to checkpoint' });
+      const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 120) : 'Manual checkpoint';
+      await buildHistoryStore.save(sessionId, {
+        commitMessage: name,
+        fileCount: Object.keys(files).length,
+        files,
+        isEdit: true,
+        tier: 'manual',
+        ok: true,
+      });
+      return res.json({ ok: true });
+    } catch {
+      return res.status(500).json({ error: 'failed to save checkpoint' });
+    }
+  });
+
   // Phase 4.2 — Per-user monthly AI cost summary for the Billing panel.
   // SECURITY (audit IDOR): scope to the verified token uid — this exposes a user's build count and AI
   // spend; without the check any uid could be read. Client sends the Bearer token via authedHeaders();

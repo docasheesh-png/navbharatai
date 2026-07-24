@@ -36,6 +36,7 @@ import { registerTeamLibraryRoutes } from './src/server/routes/teamLibrary';
 import { registerTraceabilityRoutes } from './src/server/routes/traceability';
 import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
 import { registerDebugRoutes } from './src/server/routes/debug';
+import { registerAppDebugRoutes } from './src/server/routes/appDebug';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
@@ -594,6 +595,7 @@ setInterval(() => {
   registerTraceabilityRoutes(app); // P-PME.12 — requirement→file→test traceability matrix (POST/GET /api/workspace/traceability)
   registerExplainCodeRoutes(app); // P-DEV.10 — deterministic code explanation (POST /api/workspace/explain)
   registerDebugRoutes(app); // AI Debugger — real free-tier AI error analysis (POST /api/debug)
+  registerAppDebugRoutes(app); // Full-App Debugger — whole-codebase scan (GET /api/app-debug/sources, POST /api/app-debug/run)
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
   registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)

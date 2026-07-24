@@ -316,6 +316,51 @@ export async function listWorkspaceFilePaths(workspaceId: string): Promise<strin
   }
 }
 
+/** One durably-stored Pro v5 app owned by a user (metadata only — no file content read). */
+export interface UserWorkspaceApp {
+  workspaceId: string;
+  fileCount: number;
+  savedAt: number;
+}
+
+/**
+ * List a user's Pro v5-built apps that have durable files — the source list for the Full-App Debugger
+ * (admin request 2026-07-24). Every v5 workspace id is `agentv3-{uid}-{sessionId}`, so a documentId
+ * PREFIX range query over the metadata docs returns exactly this user's apps (each metadata doc is a
+ * root doc; the per-file `files` subcollection docs live one level down and are NOT returned). Reads
+ * only the small metadata docs (count + savedAt), never file content. Newest-first. Returns [] when
+ * absent / no Firestore. Never throws — a listing failure must never break the tool.
+ */
+export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<UserWorkspaceApp[]> {
+  const db = getDb();
+  if (!db || !uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return [];
+  try {
+    const prefix = `agentv3-${uid}-`;
+    // U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range.
+    const prefixEnd = `${prefix}${String.fromCharCode(0xf8ff)}`;
+    const byId = admin.firestore.FieldPath.documentId();
+    const snap = await db.collection(COLLECTION)
+      .orderBy(byId)
+      .startAt(prefix)
+      .endAt(prefixEnd)
+      .limit(Math.max(1, Math.min(limit, 200)))
+      .get();
+    const apps: UserWorkspaceApp[] = [];
+    for (const d of snap.docs) {
+      const data = d.data() || {};
+      const fileCount = typeof data.count === 'number'
+        ? data.count
+        : (Array.isArray(data.paths) ? data.paths.length : 0);
+      if (fileCount <= 0) continue; // an empty workspace is not a debuggable app
+      apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
+    }
+    apps.sort((a, b) => b.savedAt - a.savedAt);
+    return apps;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Pure: the UNION of a project's file paths as seen by the (ephemeral) sandbox and the (durable)
  * WorkspaceFileStore. RC-1 root fix (admin 2026-07-06): the sandbox listing can be near-empty on a

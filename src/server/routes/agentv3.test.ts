@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1592,6 +1592,33 @@ describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never 
     const note = failedImportPromptNote({ url: 'https://github.com/o/r', reason: 'the clone failed' });
     expect(note).toContain('Do NOT clone the repository yourself into a temp');
     expect(note).toContain('would NOT persist');
+  });
+});
+
+describe('importSurveyPromptNote (instant connect 2026-07-24) — the survey uses the API tree + key files', () => {
+  const survey = {
+    url: 'https://github.com/aashishcpmt093-ui/mitrify',
+    fileCount: 165,
+    structure: 'client/, server/, shared/, package.json',
+    keyFiles: { 'package.json': '{"name":"mitrify","scripts":{"dev":"vite"}}' },
+    truncated: false,
+  };
+  it('names the repo, file count, structure, and embeds the key files for an immediate survey', () => {
+    const note = importSurveyPromptNote(survey);
+    expect(note).toContain('https://github.com/aashishcpmt093-ui/mitrify');
+    expect(note).toContain('165 file');
+    expect(note).toContain('client/, server/, shared/, package.json');
+    expect(note).toContain('----- package.json -----');
+    expect(note).toContain('"name":"mitrify"');
+    expect(note).toMatch(/Do not claim you cannot see the repository/i); // never re-ask / deny connection
+  });
+  it('flags a truncated (large) repo listing honestly', () => {
+    expect(importSurveyPromptNote({ ...survey, truncated: true })).toMatch(/partial/i);
+  });
+  it('is empty when there is no instant-connect data (normal turns unchanged)', () => {
+    expect(importSurveyPromptNote(null)).toBe('');
+    expect(importSurveyPromptNote(undefined)).toBe('');
+    expect(importSurveyPromptNote({ ...survey, url: '' })).toBe('');
   });
 });
 

@@ -699,6 +699,26 @@ export function zeroBillForUnrenderedPreview(expectsArtifacts: boolean, previewV
 }
 
 /**
+ * Should the post-build INTEGRITY heal (a file-MUTATING LLM pass) run?
+ *
+ * ROOT CAUSE (mitrify import autopsy 2026-07-24, report fdc35433): the user's prompt was "Import this app …
+ * and give me a short survey … **Do not change any files yet**." The engine imported + surveyed correctly,
+ * but the integrity heal STILL ran and edited 3 files (an autoFocus focus-conflict fix) — a direct
+ * instruction violation. It was the un-gated SIBLING of the C9 reviewer-autofix, which is already skipped on
+ * import/survey turns for exactly this reason (`!isImportTurn`, 2026-07-07). Gate the heal on
+ * `expectsArtifacts` (= a real new_build/edit turn, never an import/survey turn) so a "do not change" turn
+ * only RECORDS the integrity warnings (advisory) and never mutates files. Pure + tested.
+ */
+export function shouldRunIntegrityHeal(opts: {
+  gateEnabled: boolean;
+  resultOk: boolean;
+  expectsArtifacts: boolean;
+  aborted: boolean;
+}): boolean {
+  return opts.gateEnabled && opts.resultOk && opts.expectsArtifacts && !opts.aborted;
+}
+
+/**
  * EMPTY-BUILD HONESTY (deep-test App #7, 2026-07-13). A build that EXPECTED artifacts (a new build / edit)
  * but produced ZERO files is a FAILURE — never "✓ Done". The App #7 report showed `ok: true` / "Done · 9
  * steps" over an EMPTY preview because the sandbox could not be set up (SANDBOX_UNAVAILABLE), so no file
@@ -7933,8 +7953,11 @@ export function registerAgentV3Routes(app: Express): void {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_MODULE', message: `"${d.module}" exists in ${d.copies.length} places across different convention roots: ${d.copies.join(', ')}. Their interfaces drift and break the build (TaskForge autopsy). Keep the copy the app's entry imports; make each other copy a re-export stub from it (never delete the directory — governance refuses that).`, autoResolved: false });
           }
           // Bounded LLM self-heal (flag-gated, default OFF). Never blocks or fails the build — a heal
-          // that can't fix leaves the honest warnings above and the app still ships.
-          if (process.env.AGENTV3_INTEGRITY_GATE === 'on' && result.ok && !abort.signal.aborted) {
+          // that can't fix leaves the honest warnings above and the app still ships. NEVER on an
+          // import/survey turn (mitrify autopsy 2026-07-24): the user said "do not change any files yet",
+          // so the heal must not edit the imported project — the warnings above stay advisory (matches the
+          // C9 reviewer-autofix `!isImportTurn` gate). `expectsArtifacts` is false on every import turn.
+          if (shouldRunIntegrityHeal({ gateEnabled: process.env.AGENTV3_INTEGRITY_GATE === 'on', resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
             events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues (focus ownership / duplicate stylesheet)…', ts: Date.now() });
             try {
               const integrityRunner = new AgentRunner({

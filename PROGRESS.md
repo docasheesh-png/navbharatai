@@ -21729,3 +21729,24 @@ don't fake-build what exists):
   to the generic line for an app that needs neither. Never leaks a vendor/model name (tested).
 
 Tests: previewBootFailureAdvisory 5. Gate: fe tsc 0 · server tsc 0 · full suite (running/green) · build ✓.
+
+### 2026-07-24 (cont.) — India-first territorial-integrity & map policy across EVERY AI (PR #1866, merged)
+
+Admin: "navbharatai pura app indian-1st hai — koi user Indian territory/map ke bare me kuch puche to India ki
+hisab se answer ho, India ka map India ke anusar hi." Built as a SINGLE source of truth, injected everywhere (no
+per-surface drift — same discipline as CREATOR_IDENTITY / recencyDirective):
+
+- **`INDIA_TERRITORIAL_INTEGRITY`** (new, `src/server/lib/prompts.ts`) — one directive: answer territorial/boundary
+  questions per the official Government of India (Survey of India) position — Jammu & Kashmir and Ladakh (incl. Aksai
+  Chin and Pakistan-occupied Kashmir / Gilgit-Baltistan) and Arunachal Pradesh are integral parts of India; never use
+  a foreign or "neutral" boundary. Stays factual, respectful, non-inflammatory (may acknowledge other claims exist,
+  then states India's position). Injected into: Free Chat (`routes/chat.ts`), Pro v5 chat (`routes/agentv3.ts`) + both
+  builder prompts (`AgentV3/systemPrompt.ts` ×2), all 70+ Professionals (`professionals/engine.ts`), Doctor AI/SDA
+  (`routes/sda.ts`), Engineer AI (`EngineerAI/EngineerAgentLoop.ts`).
+- **Map-image guard** (`src/server/lib/imageGen.ts`) — `wantsIndiaMap()` (fires ONLY when both an India-word AND a
+  map/boundary-word are present, EN + Hindi/Hinglish) → `buildImagePrompt` appends `INDIA_MAP_IMAGE_DIRECTIVE` so a
+  "map of India" render uses India's official boundary. Unrelated images are byte-identical to before.
+- HONESTY / white-label: directive is respectful and never leaks a vendor/model name.
+
+Tests: `indiaTerritorial.test.ts` (6) — names every region, stays respectful, wired into Professionals, wantsIndiaMap
+precision, buildImagePrompt injection. Gate: fe tsc 0 · server tsc 0 · full suite 9076 passed · build ✓. CI green → merged.

@@ -21655,3 +21655,27 @@ Net: for a public repo (the admin's case) the import now lands via api.github.co
 unreachable — the same host that provably works in prod. Tests: materializeRepoViaApi 3 (kept-file filtering +
 api-only assertion, not-found/network, bad-url). Gate: fe tsc 0 · server tsc 0 · import suites green · full suite
 (running/green) · build ✓.
+
+### 2026-07-24 (cont.) — Autopsy of report fdc35433: import SUCCEEDED, but it changed files on a "do not change" turn + was slow
+
+The admin's real import (buildId fdc35433) — admin confirmed **files + survey both appeared**, so the 15-day core
+problem (import fails) is SOLVED: 🔗 instant-connect showed "316 files", IMPORT_DIAGNOSTIC "SERVER-SIDE zipball
+SUCCEEDED", 165 files landed, accurate Mitrify survey produced. Also notable: the model's OWN `git clone` of the
+repo inside the sandbox exited 0 in 2.5s — so the sandbox CAN reach github; the original 2bd9145d 'unknown'
+failure was environmental/transient, and the server-side fetch made it moot.
+
+Two real defects the report exposed (why the admin said "nahi hua"):
+- ❌ **Instruction violation:** the prompt said "Do not change any files yet", but the integrity heal STILL ran
+  and edited 3 files (an autoFocus focus-conflict fix). ROOT: the integrity heal (agentv3.ts ~7937) was the
+  UN-GATED SIBLING of the C9 reviewer-autofix, which is already skipped on import turns (`!isImportTurn`,
+  2026-07-07) for this exact reason. FIX: extracted pure `shouldRunIntegrityHeal()` gated on `expectsArtifacts`
+  (false on every import/survey turn); the heal now only RECORDS advisory integrity warnings on such turns, never
+  mutates files. Regression test locks it (runs on a real build; NEVER on an import turn). Sibling-swept: the
+  other file-mutating post-build gates (preview-compile, vaccine, red-team, runtime-autofix, reviewer-autofix)
+  were already gated on `expectsArtifacts`/`!isImportTurn` — integrity was the only gap.
+- 🥵 **Slow (~10 min for a survey):** zipball land ~78s + a redundant model re-clone to /tmp + a second full
+  reviewer survey + GLM 429 storms. The integrity-heal skip removes one LLM pass from survey turns; deeper
+  survey-turn speedups (defer/parallelise the heavy pipeline) are recorded as an OPEN follow-up — NOT the full
+  land (the admin values files showing in the Files tab, which the land provides).
+
+Gate: fe tsc 0 · server tsc 0 · shouldRunIntegrityHeal 3 tests · full suite (running/green) · build ✓.

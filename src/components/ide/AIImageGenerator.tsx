@@ -1,18 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
+import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 
-interface GeneratedImage {
-  id: string;
-  url: string;
-  prompt: string;
-  type: string;
-  style: string;
-  size: string;
-  timestamp: number;
-}
+type GeneratedImage = ImageHistoryItem;
 
 interface Props {
   onImageGenerated?: (imageUrl: string, prompt: string) => void;
@@ -81,10 +74,19 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   // REAL generation (admin autopsy 2026-07-20): images come from NavBharatAI's own server route
   // (/api/image/generate) on our configured image engine — the old code hot-linked a third-party
   // free image site from the browser (no server side at all; unreliable and outside our control).
-  // History is session-only: generated images are multi-MB data URLs that would overflow
-  // localStorage, so nothing is persisted — the current session keeps up to 6 recents in memory.
+  // History is PERSISTED in IndexedDB (admin 2026-07-24: "history save honi chahiye") — a generated
+  // image is a multi-MB data URL that overflows localStorage, so IndexedDB holds up to 50 recents that
+  // survive reload / tab close / app restart (per-device). Loaded on mount below.
   // The compulsory image type is always folded into what actually gets generated, so a selected
   // type shapes the output even when the free-text prompt is empty (type alone is a valid request).
+
+  // Load the saved history once, on mount, so the user's past images are there after a reload.
+  useEffect(() => {
+    let alive = true;
+    imageHistoryStore.getAll().then((items) => { if (alive) setHistory(items); }).catch(() => { /* store unavailable → empty */ });
+    return () => { alive = false; };
+  }, []);
+
   const buildEffectivePrompt = () =>
     `${imageType}${prompt.trim() ? ` — ${prompt.trim()}` : ''}`;
 
@@ -108,7 +110,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       }
       setGeneratedUrl(data.image);
       const newItem: GeneratedImage = {
-        id: Date.now().toString(),
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: data.image,
         prompt: prompt.trim(),
         type: imageType,
@@ -116,7 +118,9 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         size,
         timestamp: Date.now(),
       };
-      setHistory((h) => [newItem, ...h].slice(0, 6));
+      // Persist to IndexedDB so it survives reloads, then reflect it in the UI (newest-first, bounded).
+      setHistory((h) => pruneHistory([newItem, ...h]));
+      void imageHistoryStore.save(newItem).catch(() => { /* persistence is best-effort — never blocks generation */ });
       if (onImageGenerated) onImageGenerated(data.image, effectivePrompt);
     } catch (e) {
       // Honest failure — the real reason from the server, never a placeholder image.
@@ -275,6 +279,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const handleClearHistory = () => {
     setHistory([]);
     setGeneratedUrl('');
+    void imageHistoryStore.clear().catch(() => { /* best-effort — the UI is already cleared */ });
   };
 
   const relativeTime = (ts: number) => {

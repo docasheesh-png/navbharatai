@@ -84,6 +84,44 @@ describe('pagespeed route (mocked fetch)', () => {
     expect(res.statusCode).toBe(429);
     expect(res.body).toEqual({ error: 'Rate limited' });
   });
+
+  it('defaults to mobile strategy and echoes the extra vitals + finalUrl', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        lighthouseResult: {
+          finalUrl: 'https://example.com/',
+          categories: { performance: { score: 0.5 } },
+          audits: {
+            'speed-index': { displayValue: '3.1 s' },
+            'interactive': { displayValue: '4.0 s' },
+          },
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const routes = captureRoutes(registerTelemetryRoutes);
+    const res = mockRes();
+    await routes.get('GET /api/analyze/pagespeed')!(mockReq({ query: { url: 'https://example.com' } }), res);
+    expect(fetchMock.mock.calls[0][0]).toContain('strategy=mobile');
+    expect(res.body.strategy).toBe('mobile');
+    expect(res.body.si).toBe('3.1 s');
+    expect(res.body.tti).toBe('4.0 s');
+    expect(res.body.finalUrl).toBe('https://example.com/');
+  });
+
+  it('passes strategy=desktop through to the PageSpeed API when requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ lighthouseResult: { categories: {}, audits: {} } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const routes = captureRoutes(registerTelemetryRoutes);
+    const res = mockRes();
+    await routes.get('GET /api/analyze/pagespeed')!(mockReq({ query: { url: 'https://example.com', strategy: 'desktop' } }), res);
+    expect(fetchMock.mock.calls[0][0]).toContain('strategy=desktop');
+    expect(res.body.strategy).toBe('desktop');
+  });
 });
 
 describe('pwa routes', () => {

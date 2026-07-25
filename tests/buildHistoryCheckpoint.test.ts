@@ -8,6 +8,7 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 const routes = captureRoutes(registerBuildRoutes);
 const checkpoint = routes.get('POST /api/build-history/:sessionId/checkpoint')!;
+const appsList = routes.get('GET /api/versioning/apps')!;
 
 describe('POST /api/build-history/:sessionId/checkpoint', () => {
   it('is registered', () => {
@@ -40,11 +41,23 @@ describe('POST /api/build-history/:sessionId/checkpoint', () => {
   });
 });
 
+describe('GET /api/versioning/apps — Time Machine app picker', () => {
+  it('is registered', () => {
+    expect(typeof appsList).toBe('function');
+  });
+  it('returns an empty list for an unauthenticated caller (no cross-device apps without a verified user)', async () => {
+    const res = mockRes();
+    await appsList(mockReq({}), res);
+    expect(res.body).toEqual({ apps: [] });
+  });
+});
+
 describe('server registration', () => {
-  it('the checkpoint route is present in build.ts', async () => {
+  it('the checkpoint + apps routes are present in build.ts', async () => {
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
     const src = readFileSync(join(__dirname, '../src/server/routes/build.ts'), 'utf8');
     expect(src).toContain("app.post('/api/build-history/:sessionId/checkpoint'");
+    expect(src).toContain("app.get('/api/versioning/apps'");
   });
 });

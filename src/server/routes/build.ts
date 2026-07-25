@@ -51,6 +51,7 @@ import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { workspaceLock } from '../project/WorkspaceLock';
 import { userCostStore } from '../lib/UserCostStore';
 import { userBuildHistoryStore, type BuildStatus } from '../lib/UserBuildHistoryStore';
@@ -892,6 +893,30 @@ export function registerBuildRoutes(app: Express): void {
       return res.json({ ok: true });
     } catch {
       return res.status(500).json({ error: 'failed to save checkpoint' });
+    }
+  });
+
+  // Code Versioning "Time Machine" — list the signed-in user's apps so they can pick WHICH app's
+  // version history to view (admin 2026-07-24). Each Pro v5 app is `agentv3-{uid}-{sessionId}`; we
+  // return the raw sessionId (the build-history key) + a friendly label. Anonymous → empty list.
+  app.get('/api/versioning/apps', async (req: Request, res: Response) => {
+    try {
+      const uid = await verifyFirebaseToken(req);
+      if (!uid) return res.json({ apps: [] });
+      const prefix = `agentv3-${uid}-`;
+      const apps = (await listUserWorkspaceApps(uid)).map((a) => {
+        const sessionId = a.workspaceId.startsWith(prefix) ? a.workspaceId.slice(prefix.length) : a.workspaceId;
+        const when = a.savedAt > 0 ? new Date(a.savedAt).toISOString().slice(0, 10) : '';
+        return {
+          sessionId,
+          label: `App · ${a.fileCount} file${a.fileCount === 1 ? '' : 's'}${when ? ` · ${when}` : ''}`,
+          fileCount: a.fileCount,
+          savedAt: a.savedAt,
+        };
+      });
+      return res.json({ apps });
+    } catch {
+      return res.json({ apps: [] });
     }
   });
 

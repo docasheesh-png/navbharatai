@@ -137,6 +137,8 @@ export interface ViewPanelsProps {
   onBuildViaV5Prompt?: (prompt: string) => void;
   /** Auto-fix: open the SCANNED Pro v5 app in the v5 page with a fix prompt prefilled (admin 2026-07-24). */
   onAutoFixInV5?: (workspaceId: string, text: string) => void;
+  /** Time Machine: switch the workspace to another of the user's apps by its v5 sessionId. */
+  onSwitchApp?: (sessionId: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
 }
@@ -153,7 +155,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -537,6 +539,7 @@ export function ViewPanels({
             sessionId={currentProSessionId}
             onRestore={(c: string) => setGeneratedCode(c)}
             onRestoreFiles={(f: any) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
+            onSwitchApp={onSwitchApp}
           />
         </div>
       )}

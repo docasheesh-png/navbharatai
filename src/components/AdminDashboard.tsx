@@ -409,7 +409,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </div>
         {/* Logout — always top-right, never wraps off screen */}
         <button
-          onClick={() => { sessionStorage.removeItem('admin_token'); onLogout(); }}
+          onClick={() => { localStorage.removeItem('admin_token'); onLogout(); }}
           className="absolute top-0 right-0 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 active:bg-red-600 border border-red-500/30 text-red-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap"
         >
           Logout

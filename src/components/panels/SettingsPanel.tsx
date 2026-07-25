@@ -1315,7 +1315,7 @@ export function SettingsPanel({
                 onViewportEnter={() => {
                   if (!adminLiveMetrics && !loadingAdminMetrics) {
                     setLoadingAdminMetrics(true);
-                    const token = sessionStorage.getItem('admin_token') || '';
+                    const token = localStorage.getItem('admin_token') || '';
                     fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
                       .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
                   }
@@ -1387,7 +1387,7 @@ export function SettingsPanel({
                     <button
                       onClick={() => {
                         setLoadingAdminMetrics(true);
-                        const token = sessionStorage.getItem('admin_token') || '';
+                        const token = localStorage.getItem('admin_token') || '';
                         fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
                           .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
                       }}

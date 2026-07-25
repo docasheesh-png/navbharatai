@@ -1010,7 +1010,14 @@ export default function App() {
       let data: any = {};
       try { data = JSON.parse(raw); } catch { /* non-JSON response (rate-limit text, HTML error, etc.) */ }
       if (res.ok && data.ok) {
-        sessionStorage.setItem('admin_token', data.token);
+        // ROOT-CAUSE FIX (admin 2026-07-25: "mobile app open karo to login karna pad raha hai" — the
+        // admin dashboard's fetches were silently 401ing after every cold app restart with "Admin
+        // session expired — please log out and log in again"). sessionStorage is tied to the WebView's
+        // current top-level navigation and is GUARANTEED empty after a fresh launch (a full app kill +
+        // reopen is a brand-new navigation, on both iOS and Android, every single time) — unlike
+        // localStorage, which is disk-backed and survives a cold restart. The `isAdmin` flag was
+        // already correctly in localStorage; the token that flag's dashboard actually needs was not.
+        localStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
         setAdminMfaRequired(false);
         setAdminTotp('');
@@ -3154,7 +3161,7 @@ export default function App() {
               onPasswordChange={setAdminPassword}
               onSubmit={handleAdminLogin}
               onLogout={() => setIsAdmin(false)}
-              adminToken={sessionStorage.getItem('admin_token') || ''}
+              adminToken={localStorage.getItem('admin_token') || ''}
               adminTotp={adminTotp}
               onTotpChange={setAdminTotp}
               mfaRequired={adminMfaRequired}

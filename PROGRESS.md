@@ -21877,3 +21877,5 @@ Noticed but OUT OF SCOPE (flagged to admin, not changed here): the generator hea
 
 Tests: pruneHistory 4 + MemoryImageHistoryStore contract 4 (save/reload newest-first, bound-to-max, remove/
 clear, re-save replaces). Gate: fe tsc 0 · server tsc 0 · aiToolsReal green · full suite (running/green) · build ✓.
+
+<!-- ci re-trigger: webhook did not fire on the audit-fix force-push (2026-07-24) -->

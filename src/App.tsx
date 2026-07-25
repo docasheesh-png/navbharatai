@@ -3352,6 +3352,15 @@ export default function App() {
               setV3PendingFix({ text, nonce: Date.now() });
               toggleTab('nbi_pro_chat');
             }}
+            onSwitchApp={(sid: string) => {
+              // Time Machine: switch the workspace to another of the user's apps so its versions become
+              // restorable (reuses the proven session-resume path). The Versioning view stays open and
+              // reloads that app's history via the updated currentProSessionId.
+              if (!sid || sid === currentProSessionId) return;
+              setCurrentProSessionId(sid);
+              setV3Resume({ sessionId: sid, messages: [], nonce: Date.now() });
+              v3ResumeInFlightRef.current = true;
+            }}
             problems={problems}
             activeView={activeView}
             generatedCode={generatedCode}

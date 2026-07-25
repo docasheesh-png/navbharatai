@@ -399,7 +399,7 @@ export function ViewPanels({
       {/* Phase 6 — Performance Analyzer */}
       {activeView === 'performance' && (
         <div className="flex-1 h-full overflow-hidden">
-          <PerformanceAnalyzer generatedCode={generatedCode} files={files as Record<string, string>} />
+          <PerformanceAnalyzer generatedCode={generatedCode} files={files as Record<string, string>} liveUrl={v3Preview?.previewUrl} />
         </div>
       )}
 

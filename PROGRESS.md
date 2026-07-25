@@ -21879,3 +21879,32 @@ Tests: pruneHistory 4 + MemoryImageHistoryStore contract 4 (save/reload newest-f
 clear, re-save replaces). Gate: fe tsc 0 · server tsc 0 · aiToolsReal green · full suite (running/green) · build ✓.
 
 <!-- ci re-trigger: webhook did not fire on the audit-fix force-push (2026-07-24) -->
+
+### 2026-07-25 — Performance Analyzer made REAL (admin: "is ka real me kya kaam hota hai? ... ok babao, real!")
+
+Admin asked what the Other AI → Developer Tools → Performance Analyzer actually measures. Honest answer:
+it was a 100% offline, static-HTML regex heuristic linter (checks for `defer`/`async`, `alt` text, a
+`<title>` tag, etc. — never ran a real browser, never measured a real page). For a React/Vite SPA the
+static `index.html` it scored is an empty `<div id="root">` shell, so the tool was scoring almost nothing
+meaningful for apps this platform builds. Its "Run PageSpeed Test" button was also dead: it opened
+`https://pagespeed.web.dev/analysis?url=` with an always-empty `url` param.
+
+Root cause + fix: wired the component to REAL Google PageSpeed Insights (genuine Lighthouse engine) via
+the server's existing (previously unwired, zero frontend callers) `GET /api/analyze/pagespeed` proxy in
+`telemetry.ts`. Redundant-work catch mid-build (safeguard #6): a duplicate `/api/perf/pagespeed` route was
+built first, then deleted on discovering the existing tested route in `telemetry.ts` — consolidated onto
+the ONE real route instead (enhanced additively: `strategy` mobile/desktop toggle, extra Core Web Vitals —
+Speed Index, TTI — a `finalUrl` echo, `GOOGLE_PAGESPEED_KEY` env alias; every original flat field kept
+so nothing existing breaks).
+
+`PerformanceAnalyzer.tsx`: new "Live performance — real Lighthouse metrics" section — URL input (defaults
+to the live E2B preview URL via the new `liveUrl` prop, threaded from `ViewPanels.tsx`), mobile/desktop
+toggle, "Measure live" button hitting the real endpoint, score rings + a Core Web Vitals grid from genuine
+measured values, honest loading/error states. Fixed the broken "Full report ↗" button to use the actual
+entered URL (disabled with no URL, was silently broken before). The old static-HTML checks are kept but
+now clearly labeled "Static code checks (offline)" underneath — an honest offline lint, not the real
+measurement, so the two are never confused again.
+
+Tests: 2 new telemetry route tests (mobile-default + strategy=desktop passthrough, vitals/finalUrl
+echoed) — 19/19 telemetry tests green, all pre-existing back-compat. Gate: fe tsc 0 · server tsc 0 ·
+full suite 9160/9160 green · build ✓.

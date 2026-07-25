@@ -10,7 +10,7 @@
 
 import type { ComponentType } from 'react';
 import {
-  Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitMerge, GitBranch, Gauge, Minimize2,
+  Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2,
   Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, CloudUpload, Search,
   Package, IndianRupee, Users2, TrendingUp, Database,
 } from 'lucide-react';
@@ -52,7 +52,6 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     items: [
       { id: 'testing', label: 'Test Runner', icon: TestTube },
       { id: 'api', label: 'API Tester', icon: Globe },
-      { id: 'diff', label: 'Diff Viewer', icon: GitMerge },
       { id: 'versioning', label: 'Versioning', icon: GitBranch },
       { id: 'performance', label: 'Performance', icon: Gauge },
       { id: 'minifier', label: 'Minifier', icon: Minimize2 },

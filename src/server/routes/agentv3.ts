@@ -198,6 +198,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -8323,6 +8324,10 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           if (remaining.length) {
             events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
+            // If an API/network/CORS/HTTP-status error survived, proactively point the user at the API
+            // Tester so they can test the exact endpoint themselves (admin 2026-07-24). Advisory only.
+            const apiHint = apiTesterHintFor(remaining.map((e) => e.text));
+            if (apiHint) events.emit({ type: 'narration', agent: 'architect', text: apiHint, ts: Date.now() });
             buildDiag.record(runtimeErrorsRemainRecord(remaining));
           } else if (!captureAvailable) {
             buildDiag.record(runtimeUncheckedRecord());

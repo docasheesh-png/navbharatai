@@ -18,8 +18,22 @@ interface Props {
    *  Versioning used to snapshot only `generatedCode`, which is the retired placeholder in v5.0, so
    *  Save stayed disabled and restore pushed an empty string. Now a version carries the file set. */
   files?: Record<string, string>;
+  /** The v5 session id — when present, Versioning uses the DURABLE, cross-device server build-history
+   *  (every build is auto-saved as a restore point) instead of only per-browser localStorage. This is
+   *  what makes "undo a bad change" genuinely reliable — there is always a real point to go back to. */
+  sessionId?: string;
   onRestore: (code: string) => void;
   onRestoreFiles?: (files: Record<string, string>) => void;
+}
+
+/** One durable restore-point from the server build-history (metadata only; files fetched on restore). */
+interface CloudVersion {
+  id: string;
+  commitMessage: string;
+  createdAt: string;
+  fileCount: number;
+  tier?: string;
+  isEdit?: boolean;
 }
 
 const MAX_VERSIONS = 50;
@@ -47,7 +61,7 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86400000)}d ago`;
 }
 
-export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles }: Props) {
+export function CodeVersioning({ generatedCode, files, sessionId, onRestore, onRestoreFiles }: Props) {
   // A snapshot is worth saving when there's a REAL app: either a bundled preview (non-placeholder
   // generatedCode) or real workspace files. `snapFiles` is what a version stores/restores.
   const snapFiles = filesHaveRealContent(files) ? files : undefined;
@@ -63,6 +77,67 @@ export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles
   const [confirmClear, setConfirmClear] = useState(false);
   const [diffMode, setDiffMode] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Durable, cross-device restore points from the server build-history (every build is auto-saved here).
+  const [cloudVersions, setCloudVersions] = useState<CloudVersion[]>([]);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudNote, setCloudNote] = useState('');
+
+  const loadCloud = React.useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}`);
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data && Array.isArray(data.versions)) setCloudVersions(data.versions as CloudVersion[]);
+    } catch { /* offline — the local snapshots below still work */ }
+  }, [sessionId]);
+
+  useEffect(() => { void loadCloud(); }, [loadCloud]);
+
+  // Save a durable, named restore-point to the server (in addition to the local snapshot).
+  const saveCloudCheckpoint = async (name: string) => {
+    if (!sessionId || !snapFiles) return;
+    setCloudBusy(true);
+    setCloudNote('');
+    try {
+      const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/checkpoint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, files: snapFiles }),
+      });
+      if (!res.ok) { setCloudNote('Could not save to the cloud — a local copy was kept.'); return; }
+      await loadCloud();
+    } catch {
+      setCloudNote('Offline — a local copy was kept.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  // Restore a durable version: fetch its real files from the server and put them back into the workspace.
+  const restoreCloud = async (v: CloudVersion) => {
+    if (!sessionId || !onRestoreFiles) return;
+    setCloudBusy(true);
+    try {
+      const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(v.id)}`);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.files && typeof data.files === 'object') {
+        onRestoreFiles(data.files as Record<string, string>);
+        setCloudNote(`Restored "${v.commitMessage}" ✓`);
+      } else {
+        setCloudNote('Could not load that version — please try again.');
+      }
+    } catch {
+      setCloudNote('Could not reach the server — please try again.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const cloudRelTime = (iso: string): string => {
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? relativeTime(t) : '';
+  };
 
   useEffect(() => {
     try {
@@ -114,6 +189,8 @@ export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles
     };
     const updated = [v, ...versions].slice(0, MAX_VERSIONS);
     persist(updated);
+    // Also persist a DURABLE, cross-device restore-point to the server when we have a session.
+    void saveCloudCheckpoint(name);
     setNewName('');
     setShowNameInput(false);
   };
@@ -161,7 +238,9 @@ export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Code Versioning</h2>
-          <p className="text-xs text-white/40">Every change saved — restore anytime</p>
+          <p className="text-xs text-white/40">
+            {sessionId ? 'Every build auto-saved — go back to any version anytime' : 'Save snapshots and restore them anytime'}
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -212,11 +291,47 @@ export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles
           )}
 
           <div className="flex-1 overflow-y-auto">
+            {/* Durable, cross-device restore points (auto-saved on every build) — the reliable "undo". */}
+            {sessionId && (
+              <div className="border-b border-white/5 p-2">
+                <div className="flex items-center justify-between px-1 mb-1">
+                  <span className="text-[10px] uppercase tracking-wide text-emerald-400/80 flex items-center gap-1">
+                    <GitBranch className="w-3 h-3" /> Restore points ({cloudVersions.length})
+                  </span>
+                  <button onClick={() => void loadCloud()} className="text-[9px] text-white/30 hover:text-white/60">Refresh</button>
+                </div>
+                <p className="text-[9px] text-white/20 px-1 mb-1.5">Auto-saved every build · synced across your devices</p>
+                {cloudNote && <p className="text-[9px] text-emerald-300 px-1 mb-1">{cloudNote}</p>}
+                {cloudVersions.length === 0 ? (
+                  <p className="text-[9px] text-white/20 px-1 py-1">No builds saved yet — each build you make appears here to restore.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {cloudVersions.map((v) => (
+                      <div key={v.id} className="flex items-center gap-1.5 p-1.5 rounded-lg border border-white/5 bg-[#161b22]">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] text-white truncate flex items-center gap-1">
+                            <span className="truncate">{v.commitMessage}</span>
+                            {v.tier === 'manual' && <span className="shrink-0 text-[7px] text-emerald-300 bg-emerald-500/10 px-1 rounded">saved</span>}
+                          </div>
+                          <div className="text-[9px] text-white/30">{cloudRelTime(v.createdAt)} · {v.fileCount} file{v.fileCount === 1 ? '' : 's'}</div>
+                        </div>
+                        <button onClick={() => void restoreCloud(v)} disabled={cloudBusy}
+                          className="shrink-0 flex items-center gap-0.5 text-[9px] px-1.5 py-1 bg-emerald-500/20 text-emerald-300 rounded-md hover:bg-emerald-500/30 disabled:opacity-40"
+                          title="Put these files back into your app (undo to this point)">
+                          <RotateCcw className="w-2.5 h-2.5" /> Restore
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[9px] uppercase tracking-wide text-white/20 px-1 mt-3 mb-0.5">Local quick-saves (this browser)</p>
+              </div>
+            )}
             {versions.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 gap-2 p-4 text-center">
                 <GitCommit className="w-8 h-8 text-white/10" />
-                <p className="text-xs text-white/30">No versions yet</p>
-                <p className="text-[10px] text-white/20">Save your first snapshot!</p>
+                <p className="text-xs text-white/30">{sessionId ? 'No local quick-saves' : 'No versions yet'}</p>
+                <p className="text-[10px] text-white/20">Tap Save to snapshot the current app.</p>
               </div>
             ) : (
               <div className="relative p-2 space-y-1">
@@ -408,12 +523,12 @@ export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles
 
           {/* Tips */}
           <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3">
-            <p className="text-[10px] text-emerald-400 font-medium mb-1.5">Tips</p>
+            <p className="text-[10px] text-emerald-400 font-medium mb-1.5">Undo a bad change</p>
             <ul className="text-[9px] text-white/30 space-y-1">
-              <li>• Save a snapshot before adding features</li>
-              <li>• Auto-save creates incremental versions in the background</li>
-              <li>• Max 50 versions stored</li>
-              <li>• Click a version to view its diff</li>
+              <li>• Every build is auto-saved as a Restore point</li>
+              <li>• Made a change you don't like? Restore an earlier point to go back</li>
+              <li>• Tap Save to name a checkpoint before a risky change</li>
+              <li>• Restore points sync across your devices (last 50 kept)</li>
             </ul>
           </div>
         </div>

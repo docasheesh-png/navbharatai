@@ -46,6 +46,7 @@ import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
+import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
 // import { registerAppmakerRoutes } from './src/server/routes/appmaker';
@@ -521,6 +522,11 @@ setInterval(() => {
 
   // GitHub data-API routes — extracted to src/server/routes/github.ts (Phase 1).
   registerGithubRoutes(app);
+
+  // Ship-to-stores: generate a real GitHub Actions build pipeline for a user's app (signed .aab +
+  // .ipa → TestFlight) and dispatch it. See src/server/lib/mobileShipKit.ts for why the binary is
+  // built on GitHub's runners rather than here.
+  registerMobileShipRoutes(app);
 
   // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
   registerAuditRoutes(app);

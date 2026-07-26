@@ -11,6 +11,7 @@ import {
   Cpu,
   FileText,
   AlertCircle,
+  Rocket,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -478,6 +479,48 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
     setBuildState('done');
   }, [info, perms, buildConfig, validate]);
 
+  // SHIP KIT (admin 2026-07-26) — the config files above describe the app but cannot become an
+  // installable one on their own. This fetches the REAL build pipeline (GitHub Actions workflows that
+  // produce a signed .aab and an .ipa uploaded to TestFlight, plus the fastlane lane and a setup guide)
+  // and downloads every file. The binaries are built by GitHub's own Linux + macOS runners, because a
+  // browser cannot compile or sign one — and iOS legally requires macOS.
+  const [shipBusy, setShipBusy] = useState(false);
+  const [shipErr, setShipErr] = useState('');
+  const [shipDone, setShipDone] = useState(false);
+
+  const downloadShipKit = useCallback(async () => {
+    setShipBusy(true);
+    setShipErr('');
+    setShipDone(false);
+    try {
+      const r = await fetch('/api/mobile-ship/kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appName: info.appName, appId: info.packageName }),
+      });
+      if (!r.ok) throw new Error(`Server returned ${r.status}`);
+      const kit = await r.json();
+      const files = (kit?.files || {}) as Record<string, string>;
+      if (!Object.keys(files).length) throw new Error('The server returned an empty kit');
+      // One download per file, keeping the real paths in the filename so they are easy to place.
+      for (const [path, content] of Object.entries(files)) {
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = path.replace(/\//g, '__');
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      setShipDone(true);
+    } catch (e) {
+      // Honest failure — never pretend a kit was produced.
+      setShipErr((e as { message?: string })?.message || 'Could not build the ship kit. Please try again.');
+    } finally {
+      setShipBusy(false);
+    }
+  }, [info.appName, info.packageName]);
+
   const downloadAll = useCallback(() => {
     // Honest filename: this is a plain-text bundle of the config files, not a real .zip / .apk.
     const combined = generatedFiles.map((f) => `\n\n===== ${f.name} =====\n\n${f.content}`).join('');
@@ -858,10 +901,39 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                       files; it does NOT compile or sign an APK/AAB (a browser can't). The real signed
                       .aab comes from CI. */}
                   <div className="rounded-xl p-3 border border-indigo-500/20 bg-indigo-500/5 text-[11px] text-white/60 leading-relaxed">
-                    <span className="text-indigo-300 font-semibold">To get a real installable app: </span>
-                    the signed <code className="text-white/80">.aab</code> is built by the repo&apos;s CI —
-                    Actions → &ldquo;Build Android App Bundle (.aab, signed)&rdquo; → Run workflow. It needs a
-                    one-time signing keystore set by an admin; the admin then uploads the .aab to Play Console.
+                    <span className="text-indigo-300 font-semibold">These are config files, not an installable app. </span>
+                    A browser cannot compile or sign an <code className="text-white/80">.apk</code>/<code className="text-white/80">.aab</code>,
+                    and iOS builds legally require macOS. Get the build kit below — it runs on GitHub&apos;s own
+                    Linux and macOS runners and produces the genuine signed app.
+                  </div>
+
+                  {/* REAL ship pipeline (admin 2026-07-26). Generates the GitHub Actions workflows that
+                      build a signed .aab and an .ipa uploaded to TestFlight, plus the fastlane lane and
+                      an honest setup guide naming the secrets only the user can provide. */}
+                  <div className="rounded-xl p-3 border border-green-500/25 bg-green-500/5 space-y-2">
+                    <p className="text-[11px] text-white/70 leading-relaxed">
+                      <span className="text-green-300 font-semibold">Store-ready build kit: </span>
+                      GitHub Actions workflows that produce a signed <code className="text-white/80">.aab</code> for
+                      Play Store and an <code className="text-white/80">.ipa</code> uploaded straight to
+                      <span className="text-white/80"> TestFlight</span> — no Mac needed. Add the files to a GitHub
+                      repo, set your signing secrets (listed in the included SHIPPING.md), then run it from the
+                      Actions tab.
+                    </p>
+                    <button
+                      onClick={downloadShipKit}
+                      disabled={shipBusy}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-white font-semibold"
+                    >
+                      <Rocket size={18} />
+                      {shipBusy ? 'Preparing the build kit…' : 'Get store-ready build kit'}
+                    </button>
+                    {shipDone && (
+                      <p className="text-[11px] text-green-400">
+                        Downloaded. Each file is named with its real path (<code className="text-white/70">__</code> stands
+                        for a folder separator) — recreate those folders in your repo, then open SHIPPING.md.
+                      </p>
+                    )}
+                    {shipErr && <p className="text-[11px] text-red-400">{shipErr}</p>}
                   </div>
 
                   {generatedFiles.map((f) => (
@@ -873,7 +945,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-700 hover:bg-green-600 transition-colors text-white font-semibold"
                   >
                     <Download size={18} />
-                    Download All as ZIP
+                    Download config files (.txt)
                   </button>
                 </div>
               )}

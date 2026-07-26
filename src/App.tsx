@@ -76,6 +76,7 @@ import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 import { authGateDecision, isAuthGatedView } from './lib/authGate';
+import { initPushNotifications, teardownPushNotifications } from './lib/pushNotifications';
 
 /**
  * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync
@@ -1096,6 +1097,9 @@ export default function App() {
       setLoadingUser(false);
       if (currentUser) {
         setShowAuth(false);
+        // Native push notifications (admin 2026-07-26): register this device's FCM token now that a
+        // real, verified session exists. No-op on web; best-effort — never blocks sign-in.
+        void initPushNotifications(currentUser.uid);
         // COLD-RESTART LOGOUT FIX (admin 2026-07-25) — verify the signed-in session was written to a
         // DURABLE store and self-heal it if it was not (the native auth instance can silently be running
         // in-memory, which is what made every app relaunch come back logged out). Fire-and-forget: it is
@@ -3233,8 +3237,10 @@ export default function App() {
                   signOut: () => signOutEverywhere(), // clears the NATIVE plugin session too (app), not just the web SDK
                   clearStorage: defaultClearAuthStorage,
                   // The GitHub connection must NOT outlive the session — else the next user on this
-                  // browser would inherit it (and see/push to this user's GitHub account).
-                  extraCleanup: clearGithubConnection,
+                  // browser would inherit it (and see/push to this user's GitHub account). Also
+                  // unregister this device's push token so a signed-out device stops receiving pushes
+                  // meant for this account (best-effort, async — never blocks logout).
+                  extraCleanup: () => { clearGithubConnection(); void teardownPushNotifications(); },
                   deleteAuthDb: () => deleteFirebaseAuthDb(),
                   reload: () => window.location.reload(),
                 });

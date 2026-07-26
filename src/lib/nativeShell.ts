@@ -25,6 +25,8 @@ export interface NativeShellContext {
     /** Leaving the app at the root of the back stack — the standard Android expectation. */
     exitApp?: () => void;
   };
+  /** Keyboard behaviour (see installKeyboardBehaviour) — the loudest WebView giveaway in the app. */
+  Keyboard?: KeyboardPlugin;
 }
 
 /**
@@ -55,6 +57,7 @@ export async function loadNativeShellContext(): Promise<NativeShellContext> {
     load(async () => { ctx.StatusBar = (await import('@capacitor/status-bar')).StatusBar as unknown as NativeShellContext['StatusBar']; }),
     load(async () => { ctx.Haptics = (await import('@capacitor/haptics')).Haptics as unknown as NativeShellContext['Haptics']; }),
     load(async () => { ctx.App = (await import('@capacitor/app')).App as unknown as NativeShellContext['App']; }),
+    load(async () => { ctx.Keyboard = (await import('@capacitor/keyboard')).Keyboard as unknown as KeyboardPlugin; }),
   ]);
   return ctx;
 }
@@ -151,14 +154,151 @@ export function installBackButtonHandler(ctx: NativeShellContext, onBack: (info?
 export async function installNativeShellPolish(ctx: NativeShellContext, onBack: (info?: { canGoBack?: boolean }) => void): Promise<boolean> {
   if (!isNativeShell(ctx)) return false;
 
+  // Status bar FIRST, then hide the splash. Doing it the other way round shows one frame of the old
+  // bar colour over the new UI — a small flash, but exactly the kind a native app never has.
+  await syncStatusBarToTheme(ctx, typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null);
+
   // Hide the native splash screen — the React app is now on screen.
   await hideSplashScreen(ctx);
-
-  // Apply the app theme to the status bar and safe-area background.
-  await applyStatusBarTheme(ctx, 'light');
 
   // Install back button handler (Android) — forward to React Router.
   installBackButtonHandler(ctx, onBack);
 
+  // Keyboard + touch feedback: the two behaviours users read as "app" vs "web page" without ever
+  // being able to name why. Both no-op when their plugin is unavailable.
+  if (typeof document !== 'undefined') {
+    installKeyboardBehaviour(ctx, (name, value) => document.documentElement.style.setProperty(name, value));
+    installTapHaptics(ctx, document);
+  }
+
   return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// NATIVE FEEL, PASS 2 (admin 2026-07-26: "koi na pehchan paye ki yeh Capacitor hai").
+//
+// Pass 1 made the existing module actually run. These are the remaining behaviours where a WebView
+// still betrays itself to anyone who has used a real Android/iOS app for five minutes. Each one is a
+// SPECIFIC observable difference, not a vague "make it feel native":
+//
+//   • The keyboard. On the web the page SCROLLS to reveal a focused field and an iOS input shows a
+//     grey "Done / ‹ ›" accessory bar. Native apps do neither — the layout resizes and there is no
+//     bar. This is the loudest giveaway in the whole app because every chat message goes through it.
+//   • Touch. Native controls answer a finger with a tick of haptic feedback. A web page never does.
+//   • The status bar. Ours was pinned to light regardless of the app's theme, so in dark mode the
+//     bar stayed bright — something no real app does.
+//
+// All native-only and individually guarded: on web every function returns immediately, and a missing
+// plugin degrades that one behaviour instead of the whole pass.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Keyboard surface we depend on (DI for tests). */
+export interface KeyboardPlugin {
+  setAccessoryBarVisible?: (o: { isVisible: boolean }) => Promise<void>;
+  setScroll?: (o: { isDisabled: boolean }) => Promise<void>;
+  addListener?: (event: string, cb: (info?: { keyboardHeight?: number }) => void) => { remove: () => void };
+}
+
+/** CSS variable the layout reads so it can move with the keyboard instead of being scrolled by it. */
+export const KEYBOARD_HEIGHT_VAR = '--nb-keyboard-height';
+
+/**
+ * Make the keyboard behave the way it does in a native app.
+ *
+ * Three separate fixes:
+ *  1. `setScroll({ isDisabled: true })` stops the WebView scrolling the entire document to reveal the
+ *     focused input — the single most web-like moment in the app, because the header slides away and
+ *     the page visibly jumps.
+ *  2. `setAccessoryBarVisible(false)` removes iOS's grey "Done / ‹ ›" bar above the keyboard, which
+ *     only ever appears over web inputs and instantly identifies a WebView.
+ *  3. The show/hide listeners publish the real keyboard height as a CSS variable, so the composer can
+ *     sit exactly on top of the keyboard and animate with it, the way a native chat app does.
+ *
+ * Returns a teardown. Best-effort throughout: never throws, never blocks input.
+ */
+export function installKeyboardBehaviour(
+  ctx: { Capacitor?: NativeShellContext['Capacitor']; Keyboard?: KeyboardPlugin },
+  setVar: (name: string, value: string) => void,
+): () => void {
+  if (!isNativeShell(ctx) || !ctx.Keyboard) return () => {};
+  const kb = ctx.Keyboard;
+  const subs: Array<{ remove: () => void }> = [];
+
+  try { void kb.setScroll?.({ isDisabled: true })?.catch?.(() => {}); } catch { /* best effort */ }
+  try { void kb.setAccessoryBarVisible?.({ isVisible: false })?.catch?.(() => {}); } catch { /* iOS-only; Android throws */ }
+
+  try {
+    // `willShow`/`willHide` (not didShow/didHide) so our layout moves WITH the keyboard animation
+    // rather than snapping a frame late — late is exactly what reads as "web".
+    const show = kb.addListener?.('keyboardWillShow', (info) => {
+      setVar(KEYBOARD_HEIGHT_VAR, `${Math.max(0, Number(info?.keyboardHeight) || 0)}px`);
+    });
+    if (show) subs.push(show);
+    const hide = kb.addListener?.('keyboardWillHide', () => setVar(KEYBOARD_HEIGHT_VAR, '0px'));
+    if (hide) subs.push(hide);
+  } catch { /* best effort */ }
+
+  return () => { for (const s of subs) { try { s.remove(); } catch { /* ignore */ } } };
+}
+
+/**
+ * Which status-bar style suits a theme.
+ *
+ * Capacitor's naming is a genuine trap worth stating: `Style.Light` means LIGHT TEXT, which you need
+ * on a DARK background. Getting this backwards yields dark-on-dark — invisible icons. Pure, so the
+ * mapping is locked by a test rather than by whoever last touched it.
+ */
+export function statusBarStyleForTheme(theme: string | null | undefined): 'light' | 'dark' {
+  return theme === 'dark' ? 'light' : 'dark';
+}
+
+/** Status-bar background matching the app's own surface, so the bar never looks bolted on. */
+export function statusBarColorForTheme(theme: string | null | undefined): string {
+  return theme === 'dark' ? '#0d1117' : '#ffffff';
+}
+
+/**
+ * Keep the status bar in step with the app's theme.
+ *
+ * Previously pinned to 'light' at startup, so switching to dark mode left a bright status bar above a
+ * dark app — a mismatch no real app has. Re-applied on every theme change.
+ */
+export async function syncStatusBarToTheme(ctx: NativeShellContext, theme: string | null | undefined): Promise<void> {
+  if (!isNativeShell(ctx) || !ctx.StatusBar) return;
+  try {
+    await ctx.StatusBar.setStyle(statusBarStyleForTheme(theme));
+    await ctx.StatusBar.setBackgroundColor?.(statusBarColorForTheme(theme));
+  } catch { /* best effort — a themed bar is polish, never a blocker */ }
+}
+
+/** Elements that should answer a touch the way a native control does. */
+const HAPTIC_TARGET = 'button, [role="button"], a[href], input[type="submit"]';
+/** Two taps inside this window are one interaction; without it a fast tapper gets a buzz storm. */
+export const HAPTIC_MIN_GAP_MS = 60;
+
+/**
+ * App-wide haptic feedback on tap.
+ *
+ * Deliberately ONE delegated listener rather than a prop threaded through ~200 components: a single
+ * implementation cannot drift, and adding a button later gets the behaviour for free instead of
+ * needing to remember. `pointerdown` (not click) so the tick lands on touch-down like a native
+ * control, and 'light' because anything stronger becomes irritating at chat-typing frequency.
+ */
+export function installTapHaptics(
+  ctx: NativeShellContext,
+  root: { addEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void; removeEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void },
+  now: () => number = () => Date.now(),
+): () => void {
+  if (!isNativeShell(ctx) || !ctx.Haptics) return () => {};
+  let last = 0;
+  const onDown = (e: Event): void => {
+    const target = e.target as { closest?: (s: string) => unknown } | null;
+    if (!target?.closest?.(HAPTIC_TARGET)) return;
+    const t = now();
+    if (t - last < HAPTIC_MIN_GAP_MS) return;
+    last = t;
+    try { void ctx.Haptics?.impact({ style: 'light' }); } catch { /* best effort */ }
+  };
+  root.addEventListener('pointerdown', onDown, { passive: true });
+  return () => root.removeEventListener('pointerdown', onDown, { passive: true } as unknown);
 }

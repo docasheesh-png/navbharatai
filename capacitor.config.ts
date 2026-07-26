@@ -49,14 +49,46 @@ const config: CapacitorConfig = {
       providers: ['google.com', 'apple.com', 'github.com'],
     },
     // Splash screen: show app icon while loading, auto-hide once React mounts.
+    //
+    // WHITE-FLASH FIX (admin 2026-07-26). `launchAutoHide: false` means the splash stays until the app
+    // hides it — but the hide call lived in a module that never ran (see src/lib/nativeShell.ts), so
+    // this config had no working counterpart. With the hide now wired, two things matter:
+    //   • backgroundColor must match the app's own dark surface. Left unset it defaults to WHITE, so
+    //     users saw a white sheet flash between the splash and the dark UI — the single most obvious
+    //     "this is a web page loading" moment in the whole launch.
+    //   • launchAutoHide stays false so the splash covers the WebView until React has actually painted,
+    //     instead of revealing a blank shell mid-boot. `launchFadeOutDuration` makes the hand-off a
+    //     fade rather than a hard cut, which is what a native launch looks like.
     SplashScreen: {
       launchShowDuration: 3000,
-      launchAutoHide: false, // manually hidden after app ready
+      launchAutoHide: false, // manually hidden after app ready (nativeShell.hideSplashScreen)
+      backgroundColor: '#0d1117',
+      launchFadeOutDuration: 200,
+      androidScaleType: 'CENTER_CROP',
+      showSpinner: false,
     },
     // Status bar: match app theme (dark text on light background, or vice versa).
+    // NOTE: this is only the LAUNCH value. The live bar follows the user's theme at runtime via
+    // syncStatusBarToTheme (src/lib/nativeShell.ts) — pinning it here alone left a bright bar above a
+    // dark app whenever the user chose dark mode.
     StatusBar: {
       style: 'dark',
       backgroundColor: '#ffffff',
+    },
+    // KEYBOARD (admin 2026-07-26) — the loudest WebView giveaway in a chat app.
+    //
+    // `resize: 'native'` makes the WEBVIEW ITSELF shrink when the keyboard opens, exactly like a
+    // native view: the composer ends up sitting on the keyboard and the header stays put. The web
+    // default instead SCROLLS the document to reveal the focused input, which visibly jerks the whole
+    // page and slides the header away — the moment everyone recognises as "this is a web page".
+    //
+    // Deliberately NOT combined with extra bottom padding on the composer: with native resize the
+    // viewport is already shorter, so adding the keyboard height again would double-count it and open
+    // a dead gap above the keyboard. The keyboard height is still published as a CSS variable
+    // (--nb-keyboard-height) for the few components that genuinely need to measure it.
+    Keyboard: {
+      resize: 'native',
+      resizeOnFullScreen: true,
     },
   },
 };

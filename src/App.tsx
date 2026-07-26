@@ -367,7 +367,18 @@ export default function App() {
   // source of truth. index.css defines the semantic palette per theme and theme-compat.css remaps the
   // app's hardcoded palette to it — so this one attribute recolours the WHOLE app, on desktop AND mobile
   // (fixes "themes only work on mobile / only header changes"). Portalled modals at <body> inherit it too.
-  useEffect(() => { try { document.documentElement.setAttribute('data-theme', theme); } catch { /* no document */ } }, [theme]);
+  useEffect(() => {
+    try { document.documentElement.setAttribute('data-theme', theme); } catch { /* no document */ }
+    // NATIVE FEEL (admin 2026-07-26): follow the theme on the NATIVE status bar too. It used to be
+    // pinned to light at startup, so switching to dark mode left a bright status bar sitting above a
+    // dark app — a mismatch no real app has. No-op on web; best-effort, never blocks the theme switch.
+    void (async () => {
+      try {
+        const { loadNativeShellContext, syncStatusBarToTheme } = await import('./lib/nativeShell');
+        await syncStatusBarToTheme(await loadNativeShellContext(), theme);
+      } catch { /* polish only */ }
+    })();
+  }, [theme]);
 
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());

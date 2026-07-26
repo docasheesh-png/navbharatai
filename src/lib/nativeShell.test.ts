@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { isNativeShell, hideSplashScreen, applyStatusBarTheme, triggerHaptic, installBackButtonHandler, installNativeShellPolish, type NativeShellContext } from './nativeShell';
+import {
+  isNativeShell, hideSplashScreen, applyStatusBarTheme, triggerHaptic, installBackButtonHandler,
+  installNativeShellPolish, type NativeShellContext,
+  KEYBOARD_HEIGHT_VAR, HAPTIC_MIN_GAP_MS, installKeyboardBehaviour, installTapHaptics,
+  statusBarStyleForTheme, statusBarColorForTheme, syncStatusBarToTheme,
+} from './nativeShell';
 
 const fakeContext = (over: Partial<NativeShellContext> = {}): NativeShellContext => ({
   Capacitor: over.Capacitor,
@@ -210,7 +215,12 @@ describe('installNativeShellPolish — all features coordinated', () => {
     const result = await installNativeShellPolish(ctx, onBack);
     expect(result).toBe(true);
     expect(hide).toHaveBeenCalledOnce();
-    expect(setStyle).toHaveBeenCalledWith('light');
+    // CORRECTED (admin 2026-07-26): this used to assert setStyle('light') for the light theme, which
+    // encoded a real bug. In Capacitor, Style.Light means LIGHT TEXT — what you need on a DARK bar.
+    // Asking for it on a white bar painted white-on-white icons. The startup pass now goes through
+    // syncStatusBarToTheme, which maps a light theme to DARK text. The old expectation was locking in
+    // the defect, so it is replaced rather than preserved.
+    expect(setStyle).toHaveBeenCalledWith('dark');
     expect(setBackgroundColor).toHaveBeenCalledWith('#ffffff');
     expect(addListener).toHaveBeenCalledWith('backButton', expect.any(Function));
   });
@@ -332,5 +342,184 @@ describe('hardware back button — Android must not exit from a screen you can g
     expect(has()).toBe(true);
     remove();
     expect(has()).toBe(false);
+  });
+});
+
+describe('status bar follows the app theme', () => {
+  it('dark theme needs LIGHT text — Capacitor\'s naming is inverted and getting it wrong hides the icons', () => {
+    expect(statusBarStyleForTheme('dark')).toBe('light');
+    expect(statusBarColorForTheme('dark')).toBe('#0d1117');
+  });
+
+  it('light theme needs DARK text on a light bar', () => {
+    expect(statusBarStyleForTheme('light')).toBe('dark');
+    expect(statusBarColorForTheme('light')).toBe('#ffffff');
+  });
+
+  it('an unknown or missing theme falls back to the light treatment, never to nothing', () => {
+    for (const t of [null, undefined, '', 'sepia']) {
+      expect(statusBarStyleForTheme(t)).toBe('dark');
+      expect(statusBarColorForTheme(t)).toBe('#ffffff');
+    }
+  });
+
+  it('applies both style and colour on native', async () => {
+    const setStyle = vi.fn(() => Promise.resolve());
+    const setBackgroundColor = vi.fn(() => Promise.resolve());
+    await syncStatusBarToTheme({ Capacitor: { isNativePlatform: () => true }, StatusBar: { setStyle, setBackgroundColor } } as never, 'dark');
+    expect(setStyle).toHaveBeenCalledWith('light');
+    expect(setBackgroundColor).toHaveBeenCalledWith('#0d1117');
+  });
+
+  it('is a no-op on web — the browser owns its own chrome', async () => {
+    const setStyle = vi.fn(() => Promise.resolve());
+    await syncStatusBarToTheme({ Capacitor: { isNativePlatform: () => false }, StatusBar: { setStyle } } as never, 'dark');
+    expect(setStyle).not.toHaveBeenCalled();
+  });
+
+  it('a throwing plugin never breaks the theme switch', async () => {
+    const setStyle = vi.fn(() => Promise.reject(new Error('no bar')));
+    await expect(syncStatusBarToTheme({ Capacitor: { isNativePlatform: () => true }, StatusBar: { setStyle } } as never, 'dark')).resolves.toBeUndefined();
+  });
+});
+
+describe('keyboard behaviour — the loudest WebView giveaway', () => {
+  function kbCtx() {
+    const listeners: Record<string, (i?: unknown) => void> = {};
+    const calls: string[] = [];
+    return {
+      calls,
+      listeners,
+      ctx: {
+        Capacitor: { isNativePlatform: () => true },
+        Keyboard: {
+          setScroll: (o: { isDisabled: boolean }) => { calls.push(`scroll:${o.isDisabled}`); return Promise.resolve(); },
+          setAccessoryBarVisible: (o: { isVisible: boolean }) => { calls.push(`bar:${o.isVisible}`); return Promise.resolve(); },
+          addListener: (ev: string, cb: (i?: unknown) => void) => {
+            listeners[ev] = cb;
+            return { remove: () => { delete listeners[ev]; } };
+          },
+        },
+      } as never,
+    };
+  }
+
+  it('stops the document scrolling to reveal the input, and removes the iOS accessory bar', () => {
+    const { ctx, calls } = kbCtx();
+    installKeyboardBehaviour(ctx, vi.fn());
+    expect(calls).toContain('scroll:true');
+    expect(calls).toContain('bar:false');
+  });
+
+  it('publishes the real keyboard height so a layout can move WITH the animation', () => {
+    const setVar = vi.fn();
+    const { ctx, listeners } = kbCtx();
+    installKeyboardBehaviour(ctx, setVar);
+    listeners.keyboardWillShow({ keyboardHeight: 336 });
+    expect(setVar).toHaveBeenCalledWith(KEYBOARD_HEIGHT_VAR, '336px');
+    listeners.keyboardWillHide();
+    expect(setVar).toHaveBeenCalledWith(KEYBOARD_HEIGHT_VAR, '0px');
+  });
+
+  it('uses willShow/willHide, not the frame-late didShow/didHide', () => {
+    const { ctx, listeners } = kbCtx();
+    installKeyboardBehaviour(ctx, vi.fn());
+    expect(Object.keys(listeners).sort()).toEqual(['keyboardWillHide', 'keyboardWillShow']);
+  });
+
+  it('a garbage height never writes a broken CSS value', () => {
+    const setVar = vi.fn();
+    const { ctx, listeners } = kbCtx();
+    installKeyboardBehaviour(ctx, setVar);
+    listeners.keyboardWillShow({ keyboardHeight: -5 });
+    expect(setVar).toHaveBeenCalledWith(KEYBOARD_HEIGHT_VAR, '0px');
+    listeners.keyboardWillShow({});
+    expect(setVar).toHaveBeenCalledWith(KEYBOARD_HEIGHT_VAR, '0px');
+  });
+
+  it('teardown removes every listener', () => {
+    const { ctx, listeners } = kbCtx();
+    installKeyboardBehaviour(ctx, vi.fn())();
+    expect(Object.keys(listeners)).toHaveLength(0);
+  });
+
+  it('is a no-op on web', () => {
+    const setVar = vi.fn();
+    installKeyboardBehaviour({ Capacitor: { isNativePlatform: () => false }, Keyboard: {} } as never, setVar);
+    expect(setVar).not.toHaveBeenCalled();
+  });
+});
+
+describe('tap haptics — one delegated listener, never 200 call sites', () => {
+  function hapticCtx() {
+    const impacts: string[] = [];
+    let handler: ((e: Event) => void) | null = null;
+    const root = {
+      addEventListener: (_t: string, cb: (e: Event) => void) => { handler = cb; },
+      removeEventListener: () => { handler = null; },
+    };
+    return {
+      impacts,
+      root,
+      fire: (matches: boolean) => handler?.({ target: { closest: () => (matches ? {} : null) } } as unknown as Event),
+      attached: () => handler !== null,
+      ctx: { Capacitor: { isNativePlatform: () => true }, Haptics: { impact: (o: { style: string }) => { impacts.push(o.style); return Promise.resolve(); } } } as never,
+    };
+  }
+
+  it('ticks on a real control, and stays silent on plain content', () => {
+    const h = hapticCtx();
+    installTapHaptics(h.ctx, h.root, () => 1000);
+    h.fire(true);
+    expect(h.impacts).toEqual(['light']);
+    h.fire(false);
+    expect(h.impacts).toEqual(['light']); // untouched — body text must not buzz
+  });
+
+  it('throttles a fast tapper into one tick instead of a buzz storm', () => {
+    const h = hapticCtx();
+    let t = 1000;
+    installTapHaptics(h.ctx, h.root, () => t);
+    h.fire(true);
+    t += HAPTIC_MIN_GAP_MS - 1;
+    h.fire(true);
+    expect(h.impacts).toHaveLength(1);
+    t += HAPTIC_MIN_GAP_MS;
+    h.fire(true);
+    expect(h.impacts).toHaveLength(2);
+  });
+
+  it('teardown detaches the listener', () => {
+    const h = hapticCtx();
+    const off = installTapHaptics(h.ctx, h.root, () => 1);
+    expect(h.attached()).toBe(true);
+    off();
+    expect(h.attached()).toBe(false);
+  });
+
+  it('is a no-op on web — a browser has no haptics to give', () => {
+    const h = hapticCtx();
+    const impact = vi.fn(() => Promise.resolve());
+    installTapHaptics({ Capacitor: { isNativePlatform: () => false }, Haptics: { impact } } as never, h.root, () => 1);
+    expect(h.attached()).toBe(false);
+    expect(impact).not.toHaveBeenCalled();
+  });
+});
+
+describe('splash screen — no white flash on launch', () => {
+  it('capacitor.config pins the splash background to the app surface, not the default white', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const cfg = readFileSync(join(__dirname, '../../capacitor.config.ts'), 'utf8');
+    expect(cfg).toMatch(/backgroundColor:\s*'#0d1117'/);
+    // The splash must not vanish before React paints, or the user sees the blank shell underneath.
+    expect(cfg).toMatch(/launchAutoHide:\s*false/);
+  });
+
+  it('the keyboard resizes the webview natively instead of scrolling the document', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const cfg = readFileSync(join(__dirname, '../../capacitor.config.ts'), 'utf8');
+    expect(cfg).toMatch(/resize:\s*'native'/);
   });
 });

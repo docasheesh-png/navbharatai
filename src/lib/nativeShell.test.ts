@@ -550,3 +550,74 @@ describe('app shell overscroll — a swipe down must not reload the app', () => 
     expect(css).toMatch(/font-size:\s*16px\s*!important/);
   });
 });
+
+// THE INCIDENT (admin, TestFlight, 2026-07-26): the app launched and never got past the splash.
+// `launchAutoHide: false` had been inert for months because @capacitor/splash-screen was not installed.
+// Installing the plugin brought it to life — the splash now genuinely waited for a JS hide() that sat
+// behind an AWAITED status-bar call, and a plugin call that hangs in a WKWebView never settles. One
+// hang = a permanently frozen app with no fallback. These tests make that shape impossible to reship.
+describe('launch must never be able to freeze on the splash', () => {
+  /** Config with comment lines stripped — the incident write-up quotes the old value, so a raw
+   *  text search would match the explanation rather than the setting actually in force. */
+  const cfg = async (): Promise<string> => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    return readFileSync(join(__dirname, '../../capacitor.config.ts'), 'utf8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//'))
+      .join('\n');
+  };
+
+  it('the native side auto-hides the splash on its own timer — JS is never the only way out', async () => {
+    const c = await cfg();
+    expect(c).toMatch(/launchAutoHide:\s*true/);
+    expect(c).not.toMatch(/launchAutoHide:\s*false/);
+  });
+
+  it('nothing is awaited before the splash hide — it must be the first thing that runs', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const src = readFileSync(join(__dirname, 'nativeShell.ts'), 'utf8');
+    const body = src.slice(src.indexOf('export async function installNativeShellPolish'));
+    const hideAt = body.indexOf('hideSplashScreen(ctx)');
+    const statusAt = body.indexOf('syncStatusBarToTheme(ctx');
+    expect(hideAt).toBeGreaterThan(-1);
+    // The status bar (or anything else) placed BEFORE the hide is exactly the bug.
+    expect(hideAt).toBeLessThan(statusAt);
+    // And it must not be awaited — an awaited hang would hold the splash hostage again.
+    expect(body).toMatch(/void hideSplashScreen\(ctx\)/);
+    expect(body).not.toMatch(/await hideSplashScreen\(ctx\)/);
+  });
+
+  it('a hung status-bar plugin no longer blocks the launch', async () => {
+    const hide = vi.fn(async () => {});
+    const ctx = fakeContext({
+      Capacitor: { isNativePlatform: () => true },
+      SplashScreen: { hide },
+      // Never settles — the WKWebView hang that caused the incident.
+      StatusBar: { setStyle: () => new Promise<void>(() => {}) },
+      App: { addListener: () => ({ remove: vi.fn() }) },
+    });
+    await expect(installNativeShellPolish(ctx, vi.fn())).resolves.toBe(true);
+    expect(hide).toHaveBeenCalledOnce();
+  });
+
+  it('a hung splash plugin does not stop the rest of the launch either', async () => {
+    const addListener = vi.fn(() => ({ remove: vi.fn() }));
+    const ctx = fakeContext({
+      Capacitor: { isNativePlatform: () => true },
+      SplashScreen: { hide: () => new Promise<void>(() => {}) },
+      App: { addListener },
+    });
+    await expect(installNativeShellPolish(ctx, vi.fn())).resolves.toBe(true);
+    expect(addListener).toHaveBeenCalled(); // back button still wired
+  });
+
+  it('the plugin loader is bounded, so a hanging import cannot stall the caller', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const src = readFileSync(join(__dirname, 'nativeShell.ts'), 'utf8');
+    const loader = src.slice(src.indexOf('export async function loadNativeShellContext'));
+    expect(loader).toContain('withinDeadline');
+  });
+});

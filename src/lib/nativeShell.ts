@@ -20,7 +20,43 @@ export interface NativeShellContext {
   SplashScreen?: { hide: () => Promise<void> };
   StatusBar?: { setStyle: (style: 'light' | 'dark') => Promise<void>; setBackgroundColor?: (color: string) => Promise<void> };
   Haptics?: { impact: (options: { style: 'light' | 'medium' | 'heavy' }) => Promise<void> };
-  App?: { addListener: (event: string, listener: (data: any) => void) => { remove: () => void } };
+  App?: {
+    addListener: (event: string, listener: (data: any) => void) => { remove: () => void };
+    /** Leaving the app at the root of the back stack — the standard Android expectation. */
+    exitApp?: () => void;
+  };
+}
+
+/**
+ * ROOT-CAUSE FIX (admin audit 2026-07-26) — this whole module was DEAD CODE.
+ *
+ * Every function below is correctly written and unit-tested, but it reads its plugins off the object
+ * it is handed, and the only caller passed `window`. Capacitor 4+ does NOT expose plugins as window
+ * globals (they are ES module imports), and the four plugin packages were not even installed — so
+ * `ctx.SplashScreen`, `ctx.StatusBar`, `ctx.Haptics` and `ctx.App` were ALWAYS undefined and every
+ * feature silently no-opped. The app therefore shipped with: no splash control (white flash on
+ * launch), an unthemed status bar, no haptics, and — the most visible one on Android — NO hardware
+ * back-button handling at all, so Back closed the app from any screen instead of navigating back.
+ *
+ * This loader builds a REAL context from actual dynamic imports. The imports are inside the native
+ * branch, so a web build never pulls the plugin code into its bundle, and every import is individually
+ * guarded: one missing plugin degrades that single feature instead of killing the whole polish pass.
+ */
+export async function loadNativeShellContext(): Promise<NativeShellContext> {
+  const { Capacitor } = await import('@capacitor/core');
+  if (!Capacitor.isNativePlatform()) return { Capacitor };
+
+  const ctx: NativeShellContext = { Capacitor };
+  const load = async (fn: () => Promise<void>): Promise<void> => {
+    try { await fn(); } catch { /* one unavailable plugin must not disable the others */ }
+  };
+  await Promise.all([
+    load(async () => { ctx.SplashScreen = (await import('@capacitor/splash-screen')).SplashScreen as NativeShellContext['SplashScreen']; }),
+    load(async () => { ctx.StatusBar = (await import('@capacitor/status-bar')).StatusBar as unknown as NativeShellContext['StatusBar']; }),
+    load(async () => { ctx.Haptics = (await import('@capacitor/haptics')).Haptics as unknown as NativeShellContext['Haptics']; }),
+    load(async () => { ctx.App = (await import('@capacitor/app')).App as unknown as NativeShellContext['App']; }),
+  ]);
+  return ctx;
 }
 
 /** True when running inside a native shell (Android/iOS app), never on plain web. */
@@ -85,13 +121,19 @@ export async function triggerHaptic(ctx: NativeShellContext, style: 'light' | 'm
  * On iOS: swipe-back is handled natively, no action needed.
  * NO-OP if App plugin is absent or on web.
  */
-export function installBackButtonHandler(ctx: NativeShellContext, onBack: () => void): () => void {
+export function installBackButtonHandler(ctx: NativeShellContext, onBack: (info?: { canGoBack?: boolean }) => void): () => void {
   if (!isNativeShell(ctx) || !ctx.App) return () => {};
 
   try {
-    const listener = ctx.App.addListener('backButton', () => {
-      // Prevent the default (exit app). Let React Router handle navigation.
-      onBack();
+    const listener = ctx.App.addListener('backButton', (data?: { canGoBack?: boolean }) => {
+      // Android's expectation, in order: go back if there is anywhere to go, otherwise leave the app.
+      // Passing canGoBack through lets the caller decide with its own navigation state; only when the
+      // stack is genuinely empty do we exit — silently swallowing Back would trap the user instead.
+      if (data?.canGoBack === false && ctx.App?.exitApp) {
+        ctx.App.exitApp();
+        return;
+      }
+      onBack(data);
     });
     return () => listener.remove();
   } catch (e) {
@@ -106,7 +148,7 @@ export function installBackButtonHandler(ctx: NativeShellContext, onBack: () => 
  * Safe to call on web (becomes a pure pass-through with no side effects).
  * Call once at app startup, after React mounts (so the back button handler can navigate).
  */
-export async function installNativeShellPolish(ctx: NativeShellContext, onBack: () => void): Promise<boolean> {
+export async function installNativeShellPolish(ctx: NativeShellContext, onBack: (info?: { canGoBack?: boolean }) => void): Promise<boolean> {
   if (!isNativeShell(ctx)) return false;
 
   // Hide the native splash screen — the React app is now on screen.

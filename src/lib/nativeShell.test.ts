@@ -252,3 +252,85 @@ describe('installNativeShellPolish — all features coordinated', () => {
     expect(addListener).toHaveBeenCalledOnce();
   });
 });
+
+// THE bug (admin audit 2026-07-26): this whole module was DEAD CODE. Every function was correct and
+// tested, but the only caller passed `window` — and Capacitor 4+ does not expose plugins as window
+// globals, nor were the plugin packages installed. So ctx.SplashScreen/StatusBar/Haptics/App were
+// ALWAYS undefined and every feature silently no-opped: white flash on launch, unthemed status bar,
+// no haptics, and no hardware Back handling at all (Back closed the app from any screen). Unit tests
+// could never catch it because they inject a perfect ctx — so these lock the WIRING instead.
+describe('native shell wiring — the plugins must actually reach the module', () => {
+  it('the caller passes a real loaded context, never the window object', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const src = readFileSync(join(__dirname, '../main.tsx'), 'utf8');
+    expect(src).toContain('loadNativeShellContext()');
+    // `installNativeShellPolish(window as any, …)` is precisely the dead-code bug.
+    expect(src).not.toMatch(/installNativeShellPolish\(\s*window/);
+  });
+
+  it('every plugin the module reads is a real installed dependency', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
+    for (const p of ['@capacitor/app', '@capacitor/splash-screen', '@capacitor/status-bar', '@capacitor/haptics']) {
+      expect(pkg.dependencies[p], `${p} must be installed or the feature silently no-ops`).toBeTruthy();
+    }
+  });
+});
+
+describe('hardware back button — Android must not exit from a screen you can go back from', () => {
+  function ctxWith(exitApp?: () => void) {
+    const listeners: Record<string, (d?: unknown) => void> = {};
+    return {
+      ctx: {
+        Capacitor: { isNativePlatform: () => true },
+        App: {
+          addListener: (ev: string, cb: (d?: unknown) => void) => {
+            listeners[ev] = cb;
+            return { remove: () => { delete listeners[ev]; } };
+          },
+          exitApp,
+        },
+      } as never,
+      fire: (data?: unknown) => listeners.backButton?.(data),
+      has: () => Boolean(listeners.backButton),
+    };
+  }
+
+  it('navigates back when there IS somewhere to go', () => {
+    const onBack = vi.fn();
+    const exitApp = vi.fn();
+    const { ctx, fire } = ctxWith(exitApp);
+    installBackButtonHandler(ctx, onBack);
+    fire({ canGoBack: true });
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(exitApp).not.toHaveBeenCalled();
+  });
+
+  it('exits the app at the root instead of trapping the user on the screen', () => {
+    const onBack = vi.fn();
+    const exitApp = vi.fn();
+    const { ctx, fire } = ctxWith(exitApp);
+    installBackButtonHandler(ctx, onBack);
+    fire({ canGoBack: false });
+    expect(exitApp).toHaveBeenCalledOnce();
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it('falls back to navigating when the platform reports nothing', () => {
+    const onBack = vi.fn();
+    const { ctx, fire } = ctxWith(vi.fn());
+    installBackButtonHandler(ctx, onBack);
+    fire(undefined);
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it('removing the handler detaches the listener', () => {
+    const { ctx, has } = ctxWith(vi.fn());
+    const remove = installBackButtonHandler(ctx, vi.fn());
+    expect(has()).toBe(true);
+    remove();
+    expect(has()).toBe(false);
+  });
+});

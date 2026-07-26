@@ -11,6 +11,7 @@ import {
   Cpu,
   FileText,
   AlertCircle,
+  Rocket,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -478,6 +479,80 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
     setBuildState('done');
   }, [info, perms, buildConfig, validate]);
 
+  // SHIP KIT (admin 2026-07-26) — the config files above describe the app but cannot become an
+  // installable one on their own. This fetches the REAL build pipeline (GitHub Actions workflows that
+  // produce a signed .aab and an .ipa uploaded to TestFlight, plus the fastlane lane and a setup guide)
+  // and downloads every file. The binaries are built by GitHub's own Linux + macOS runners, because a
+  // browser cannot compile or sign one — and iOS legally requires macOS.
+  const [shipBusy, setShipBusy] = useState(false);
+  const [shipErr, setShipErr] = useState('');
+  const [shipDone, setShipDone] = useState(false);
+
+  // Step-by-step publishing walkthrough, fetched from the ONE structured source that also feeds the
+  // AIs and the generated SHIPPING.md — so the three can never drift.
+  const [guide, setGuide] = useState<null | Array<{ platform: string; title: string; upfront: string; steps: Array<{ id: string; title: string; detail: string; youShouldSee?: string; cost?: string; takes?: string; youMustDoThis?: boolean; navbharatDoesThis?: boolean; link?: string }> }>>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guidePlatform, setGuidePlatform] = useState<'android' | 'ios'>('android');
+  const [guideErr, setGuideErr] = useState('');
+  const [doneSteps, setDoneSteps] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('navbharat_publish_steps') || '{}'); } catch { return {}; }
+  });
+
+  const toggleStep = useCallback((id: string) => {
+    setDoneSteps((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem('navbharat_publish_steps', JSON.stringify(next)); } catch { /* progress is a nicety, never blocks */ }
+      return next;
+    });
+  }, []);
+
+  const openGuide = useCallback(async () => {
+    setGuideOpen(true);
+    if (guide) return;
+    setGuideErr('');
+    try {
+      const r = await fetch('/api/mobile-ship/guide');
+      if (!r.ok) throw new Error(`Server returned ${r.status}`);
+      const d = await r.json();
+      setGuide(d.guides || null);
+    } catch (e) {
+      setGuideErr((e as { message?: string })?.message || 'Could not load the guide.');
+    }
+  }, [guide]);
+
+  const downloadShipKit = useCallback(async () => {
+    setShipBusy(true);
+    setShipErr('');
+    setShipDone(false);
+    try {
+      const r = await fetch('/api/mobile-ship/kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appName: info.appName, appId: info.packageName }),
+      });
+      if (!r.ok) throw new Error(`Server returned ${r.status}`);
+      const kit = await r.json();
+      const files = (kit?.files || {}) as Record<string, string>;
+      if (!Object.keys(files).length) throw new Error('The server returned an empty kit');
+      // One download per file, keeping the real paths in the filename so they are easy to place.
+      for (const [path, content] of Object.entries(files)) {
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = path.replace(/\//g, '__');
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      setShipDone(true);
+    } catch (e) {
+      // Honest failure — never pretend a kit was produced.
+      setShipErr((e as { message?: string })?.message || 'Could not build the ship kit. Please try again.');
+    } finally {
+      setShipBusy(false);
+    }
+  }, [info.appName, info.packageName]);
+
   const downloadAll = useCallback(() => {
     // Honest filename: this is a plain-text bundle of the config files, not a real .zip / .apk.
     const combined = generatedFiles.map((f) => `\n\n===== ${f.name} =====\n\n${f.content}`).join('');
@@ -858,11 +933,111 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                       files; it does NOT compile or sign an APK/AAB (a browser can't). The real signed
                       .aab comes from CI. */}
                   <div className="rounded-xl p-3 border border-indigo-500/20 bg-indigo-500/5 text-[11px] text-white/60 leading-relaxed">
-                    <span className="text-indigo-300 font-semibold">To get a real installable app: </span>
-                    the signed <code className="text-white/80">.aab</code> is built by the repo&apos;s CI —
-                    Actions → &ldquo;Build Android App Bundle (.aab, signed)&rdquo; → Run workflow. It needs a
-                    one-time signing keystore set by an admin; the admin then uploads the .aab to Play Console.
+                    <span className="text-indigo-300 font-semibold">These are config files, not an installable app. </span>
+                    A browser cannot compile or sign an <code className="text-white/80">.apk</code>/<code className="text-white/80">.aab</code>,
+                    and iOS builds legally require macOS. Get the build kit below — it runs on GitHub&apos;s own
+                    Linux and macOS runners and produces the genuine signed app.
                   </div>
+
+                  {/* REAL ship pipeline (admin 2026-07-26). Generates the GitHub Actions workflows that
+                      build a signed .aab and an .ipa uploaded to TestFlight, plus the fastlane lane and
+                      an honest setup guide naming the secrets only the user can provide. */}
+                  <div className="rounded-xl p-3 border border-green-500/25 bg-green-500/5 space-y-2">
+                    <p className="text-[11px] text-white/70 leading-relaxed">
+                      <span className="text-green-300 font-semibold">Store-ready build kit: </span>
+                      GitHub Actions workflows that produce a signed <code className="text-white/80">.aab</code> for
+                      Play Store and an <code className="text-white/80">.ipa</code> uploaded straight to
+                      <span className="text-white/80"> TestFlight</span> — no Mac needed. Add the files to a GitHub
+                      repo, set your signing secrets (listed in the included SHIPPING.md), then run it from the
+                      Actions tab.
+                    </p>
+                    <button
+                      onClick={downloadShipKit}
+                      disabled={shipBusy}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-white font-semibold"
+                    >
+                      <Rocket size={18} />
+                      {shipBusy ? 'Preparing the build kit…' : 'Get store-ready build kit'}
+                    </button>
+                    {shipDone && (
+                      <p className="text-[11px] text-green-400">
+                        Downloaded. Each file is named with its real path (<code className="text-white/70">__</code> stands
+                        for a folder separator) — recreate those folders in your repo, then open SHIPPING.md.
+                        The Android build gives you a <code className="text-white/70">.aab</code> for Play Store
+                        and a <code className="text-white/70">.apk</code> you can install straight onto your phone.
+                      </p>
+                    )}
+                    {shipErr && <p className="text-[11px] text-red-400">{shipErr}</p>}
+
+                    <button
+                      onClick={openGuide}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-white/80 text-xs font-semibold"
+                    >
+                      <FileText size={15} />
+                      Show me how to publish, step by step
+                    </button>
+                  </div>
+
+                  {/* Step-by-step walkthrough for a first-time, non-technical publisher. */}
+                  {guideOpen && (
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-3">
+                      <div className="flex gap-2">
+                        {(['android', 'ios'] as const).map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setGuidePlatform(p)}
+                            className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                              guidePlatform === p ? 'bg-indigo-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'
+                            }`}
+                          >
+                            {p === 'android' ? 'Play Store' : 'App Store'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {guideErr && <p className="text-[11px] text-red-400">{guideErr}</p>}
+                      {!guide && !guideErr && <p className="text-[11px] text-white/50">Loading the guide…</p>}
+
+                      {guide?.filter((g) => g.platform === guidePlatform).map((g) => (
+                        <div key={g.platform} className="space-y-3">
+                          <p className="text-[11px] text-amber-300/90 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                            <span className="font-bold">Before you start: </span>{g.upfront}
+                          </p>
+                          {g.steps.map((s, i) => (
+                            <div key={s.id} className="flex gap-2.5">
+                              <button
+                                onClick={() => toggleStep(s.id)}
+                                aria-label={doneSteps[s.id] ? `Mark step ${i + 1} as not done` : `Mark step ${i + 1} as done`}
+                                className={`mt-0.5 shrink-0 w-5 h-5 rounded-md border text-[10px] font-bold transition-colors ${
+                                  doneSteps[s.id] ? 'bg-green-600 border-green-500 text-white' : 'border-white/25 text-transparent hover:border-white/50'
+                                }`}
+                              >
+                                ✓
+                              </button>
+                              <div className={`flex-1 min-w-0 ${doneSteps[s.id] ? 'opacity-50' : ''}`}>
+                                <p className="text-[12px] font-semibold text-white/90">{i + 1}. {s.title}</p>
+                                <p className="text-[11px] text-white/60 leading-relaxed mt-0.5">{s.detail}</p>
+                                {s.youShouldSee && (
+                                  <p className="text-[11px] text-green-400/80 mt-1">You should see: {s.youShouldSee}</p>
+                                )}
+                                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                  {s.cost && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{s.cost}</span>}
+                                  {s.takes && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">{s.takes}</span>}
+                                  {s.navbharatDoesThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">NavBharatAI does this</span>}
+                                  {s.youMustDoThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">Only you can do this</span>}
+                                </div>
+                                {s.link && (
+                                  <a href={s.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block">
+                                    Open the page →
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {generatedFiles.map((f) => (
                     <FileCard key={f.name} file={f} />
@@ -873,7 +1048,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-700 hover:bg-green-600 transition-colors text-white font-semibold"
                   >
                     <Download size={18} />
-                    Download All as ZIP
+                    Download config files (.txt)
                   </button>
                 </div>
               )}

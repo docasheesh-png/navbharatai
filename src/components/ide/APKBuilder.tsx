@@ -488,6 +488,38 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
   const [shipErr, setShipErr] = useState('');
   const [shipDone, setShipDone] = useState(false);
 
+  // Step-by-step publishing walkthrough, fetched from the ONE structured source that also feeds the
+  // AIs and the generated SHIPPING.md — so the three can never drift.
+  const [guide, setGuide] = useState<null | Array<{ platform: string; title: string; upfront: string; steps: Array<{ id: string; title: string; detail: string; youShouldSee?: string; cost?: string; takes?: string; youMustDoThis?: boolean; navbharatDoesThis?: boolean; link?: string }> }>>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guidePlatform, setGuidePlatform] = useState<'android' | 'ios'>('android');
+  const [guideErr, setGuideErr] = useState('');
+  const [doneSteps, setDoneSteps] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('navbharat_publish_steps') || '{}'); } catch { return {}; }
+  });
+
+  const toggleStep = useCallback((id: string) => {
+    setDoneSteps((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem('navbharat_publish_steps', JSON.stringify(next)); } catch { /* progress is a nicety, never blocks */ }
+      return next;
+    });
+  }, []);
+
+  const openGuide = useCallback(async () => {
+    setGuideOpen(true);
+    if (guide) return;
+    setGuideErr('');
+    try {
+      const r = await fetch('/api/mobile-ship/guide');
+      if (!r.ok) throw new Error(`Server returned ${r.status}`);
+      const d = await r.json();
+      setGuide(d.guides || null);
+    } catch (e) {
+      setGuideErr((e as { message?: string })?.message || 'Could not load the guide.');
+    }
+  }, [guide]);
+
   const downloadShipKit = useCallback(async () => {
     setShipBusy(true);
     setShipErr('');
@@ -931,10 +963,81 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                       <p className="text-[11px] text-green-400">
                         Downloaded. Each file is named with its real path (<code className="text-white/70">__</code> stands
                         for a folder separator) — recreate those folders in your repo, then open SHIPPING.md.
+                        The Android build gives you a <code className="text-white/70">.aab</code> for Play Store
+                        and a <code className="text-white/70">.apk</code> you can install straight onto your phone.
                       </p>
                     )}
                     {shipErr && <p className="text-[11px] text-red-400">{shipErr}</p>}
+
+                    <button
+                      onClick={openGuide}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-white/80 text-xs font-semibold"
+                    >
+                      <FileText size={15} />
+                      Show me how to publish, step by step
+                    </button>
                   </div>
+
+                  {/* Step-by-step walkthrough for a first-time, non-technical publisher. */}
+                  {guideOpen && (
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-3">
+                      <div className="flex gap-2">
+                        {(['android', 'ios'] as const).map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setGuidePlatform(p)}
+                            className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                              guidePlatform === p ? 'bg-indigo-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'
+                            }`}
+                          >
+                            {p === 'android' ? 'Play Store' : 'App Store'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {guideErr && <p className="text-[11px] text-red-400">{guideErr}</p>}
+                      {!guide && !guideErr && <p className="text-[11px] text-white/50">Loading the guide…</p>}
+
+                      {guide?.filter((g) => g.platform === guidePlatform).map((g) => (
+                        <div key={g.platform} className="space-y-3">
+                          <p className="text-[11px] text-amber-300/90 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                            <span className="font-bold">Before you start: </span>{g.upfront}
+                          </p>
+                          {g.steps.map((s, i) => (
+                            <div key={s.id} className="flex gap-2.5">
+                              <button
+                                onClick={() => toggleStep(s.id)}
+                                aria-label={doneSteps[s.id] ? `Mark step ${i + 1} as not done` : `Mark step ${i + 1} as done`}
+                                className={`mt-0.5 shrink-0 w-5 h-5 rounded-md border text-[10px] font-bold transition-colors ${
+                                  doneSteps[s.id] ? 'bg-green-600 border-green-500 text-white' : 'border-white/25 text-transparent hover:border-white/50'
+                                }`}
+                              >
+                                ✓
+                              </button>
+                              <div className={`flex-1 min-w-0 ${doneSteps[s.id] ? 'opacity-50' : ''}`}>
+                                <p className="text-[12px] font-semibold text-white/90">{i + 1}. {s.title}</p>
+                                <p className="text-[11px] text-white/60 leading-relaxed mt-0.5">{s.detail}</p>
+                                {s.youShouldSee && (
+                                  <p className="text-[11px] text-green-400/80 mt-1">You should see: {s.youShouldSee}</p>
+                                )}
+                                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                  {s.cost && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{s.cost}</span>}
+                                  {s.takes && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">{s.takes}</span>}
+                                  {s.navbharatDoesThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">NavBharatAI does this</span>}
+                                  {s.youMustDoThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">Only you can do this</span>}
+                                </div>
+                                {s.link && (
+                                  <a href={s.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block">
+                                    Open the page →
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {generatedFiles.map((f) => (
                     <FileCard key={f.name} file={f} />

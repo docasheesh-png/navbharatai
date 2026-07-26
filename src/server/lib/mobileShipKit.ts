@@ -28,6 +28,9 @@
 // re-implemented here — it comes from MobileExportGenerator so the two can never drift (rule 4).
 
 import { generateMobileExport, type MobileExportResult } from './MobileExportGenerator';
+// The publishing walkthrough is embedded from the ONE structured source that also drives the in-app
+// checklist and the AI's answers, so the three can never drift (rule 4).
+import { renderPublishGuideText } from './storePublishGuide';
 
 /** A repository secret the USER must set — we can never set these for them (they are their identity). */
 export interface RequiredSecret {
@@ -186,18 +189,29 @@ jobs:
           }
           GRADLE
 
-      - name: Build the signed bundle
+      # BOTH outputs, because they answer different needs and a non-technical user needs both:
+      #   .aab → the ONLY format Google Play accepts for a release.
+      #   .apk → cannot be uploaded to Play, but CAN be installed directly on a phone, so the user can
+      #          actually hold their app and test it before ever touching Play Console.
+      - name: Build the signed bundle (.aab) and installable app (.apk)
         env:
           STORE_PASS: \${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: \${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: \${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: cd android && chmod +x ./gradlew && ./gradlew bundleRelease
+        run: cd android && chmod +x ./gradlew && ./gradlew bundleRelease assembleRelease
 
-      - name: Upload the .aab
+      - name: Upload the .aab (for Google Play)
         uses: actions/upload-artifact@v4
         with:
           name: release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 14
+
+      - name: Upload the .apk (install straight onto a phone)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
       # The keystore is a secret — never let it linger on the runner.
@@ -491,7 +505,20 @@ ${ios ? `- **Build iOS App (.ipa, signed)** → tick **upload** to send it strai
 
 Just run the workflow again. The version/build number is stamped automatically from the run number, so
 you will never hit "this version already exists" from either store.
-`;
+
+---
+
+# Step-by-step: getting it onto the stores
+
+Never published an app before? These are the complete walkthroughs, including what each store costs and
+how long each step really takes.
+
+## Google Play
+
+\`\`\`
+${renderPublishGuideText('android')}
+\`\`\`
+${ios ? `\n## Apple App Store\n\n\`\`\`\n${renderPublishGuideText('ios')}\n\`\`\`\n` : ''}`;
 };
 
 /**

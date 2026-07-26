@@ -67,6 +67,14 @@ describe('generateShipKit — the store-rejection traps this repo learned the ha
     expect(android).toContain('app-release.aab');
   });
 
+  it('Android ALSO builds an .apk so the user can install the app on a real phone before Play Console', () => {
+    // Play only accepts .aab, but an .aab cannot be installed on a phone — a non-technical user needs
+    // to be able to hold their app and try it, so both artifacts are produced.
+    expect(android).toContain('assembleRelease');
+    expect(android).toContain('app-release.apk');
+    expect(android).toContain('name: release-apk');
+  });
+
   it('Android fails EARLY when signing secrets are absent — never yields an unsigned bundle', () => {
     expect(android).toContain('Pre-flight — require signing secrets');
     expect(android).toMatch(/::error::Missing signing secret/);

@@ -10,7 +10,16 @@
    sidebar) is handled in JS. */
 html, body {
   overscroll-behavior-x: none;
-  overscroll-behavior-y: auto;
+  /* NATIVE-FEEL FIX (admin audit 2026-07-26). This was `auto`, which leaves the BROWSER's
+     pull-to-refresh armed: dragging down at the top of a chat reloads the whole app. That is wrong
+     twice over — no native app reloads itself from a downward swipe, and doing it mid-build throws
+     away the screen the user was watching. It also leaves the iOS rubber-band bounce on the app
+     shell, which native screens do not have.
+
+     `none` removes both. Nothing depends on it: the app has no pull-to-refresh of its own (grepped),
+     and inner scrollable regions are unaffected — this only governs what happens when the DOCUMENT
+     is dragged past its own boundary. */
+  overscroll-behavior-y: none;
 }
 
 /* The html/body rule alone only stops the back/forward gesture when the page

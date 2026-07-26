@@ -523,3 +523,30 @@ describe('splash screen — no white flash on launch', () => {
     expect(cfg).toMatch(/resize:\s*'native'/);
   });
 });
+
+describe('app shell overscroll — a swipe down must not reload the app', () => {
+  it('the document does not arm the browser pull-to-refresh or rubber-band', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const css = readFileSync(join(__dirname, '../index.css'), 'utf8');
+    // `overscroll-behavior-y: auto` on html/body is what let a downward drag at the top of a chat
+    // reload the entire app — losing whatever build the user was watching.
+    expect(css).not.toMatch(/overscroll-behavior-y:\s*auto/);
+    expect(css).toMatch(/overscroll-behavior-y:\s*none/);
+  });
+
+  it('the mobile tap-highlight rectangle stays suppressed', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const css = readFileSync(join(__dirname, '../index.css'), 'utf8');
+    expect(css).toMatch(/-webkit-tap-highlight-color:\s*transparent/);
+  });
+
+  it('touch devices still get 16px inputs, so focusing one never zooms the viewport', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const css = readFileSync(join(__dirname, '../index.css'), 'utf8');
+    // Pre-existing and correct — locked so a later refactor cannot quietly drop it.
+    expect(css).toMatch(/font-size:\s*16px\s*!important/);
+  });
+});

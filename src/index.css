@@ -25,6 +25,30 @@ html, body {
   overscroll-behavior-x: none;
 }
 
+/* NATIVE-FEEL FIX (admin audit 2026-07-26). The default mobile tap-highlight paints a translucent
+   grey/blue rectangle over whatever you touch — the single most recognisable "this is a web page in
+   an app" tell, because no native Android or iOS control behaves that way. Removing it costs nothing:
+   the app already renders its own pressed/active states, so touch feedback stays intact while the
+   browser's rectangle disappears. Scoped to the whole document because the giveaway appears on every
+   tappable element, not just buttons.
+
+   `text-size-adjust` is here for the same reason — a WebView silently inflating font sizes on rotate
+   breaks the typographic rhythm in a way that reads as "web page", never as a native screen. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Long-pressing UI chrome in a native app must not raise the browser's text-selection handles or the
+   iOS callout menu. Selection stays ENABLED for the places users genuinely need it — chat replies,
+   generated code, inputs — so nothing becomes uncopyable. */
+button, [role='button'], nav, header, footer {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 @layer base {
   /* ── DNA-level theme palette (admin 2026-07-14) ──────────────────────────────────────────────
      ONE semantic palette per theme, keyed on `html[data-theme]`. The compat layer (theme-compat.css)

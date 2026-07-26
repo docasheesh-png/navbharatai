@@ -11,10 +11,11 @@
 // App.tsx re-exports from here so every existing `import { auth } from './App'` keeps working.
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, setPersistence, browserLocalPersistence, signOut as fbSignOut } from 'firebase/auth';
+import { getAuth, initializeAuth, setPersistence, browserLocalPersistence, indexedDBLocalPersistence, signOut as fbSignOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from '../config/firebase';
+import { ensureSessionPersisted, hasPersistedSession, type SessionPersistenceOutcome } from './authPersistence';
 
 export const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
 
@@ -44,8 +45,23 @@ export const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: fireb
 // localStorage is synchronous and immune to that suspension, so the save completes and onAuthStateChanged
 // fires normally. (Tradeoff, stated honestly: sessions stored under the old IDB key are not read anymore —
 // one extra login after this update, on a path that was broken anyway.)
+// PART 3 of the root fix — THE COLD-RESTART LOGOUT (admin 2026-07-25: "app band karo, background se
+// clear karo, wapas open karo — logout hi mila tha", on BOTH platforms and EVERY provider).
+//
+// `initializeAuth` resolves persistence exactly ONCE, at this line, by asking each candidate
+// `_isAvailable()`. Passing a SINGLE store meant that if localStorage was unavailable for even that
+// instant inside the WebView, the SDK SILENTLY fell back to IN-MEMORY persistence for the whole app
+// session — sign-in worked, the app behaved normally, and the session evaporated on the next launch.
+// That also explains why every OTHER localStorage value (settings, chats, workspaces) survived a cold
+// restart while only the login did: our own writes happen later, once storage is warm.
+//
+// Passing an ordered HIERARCHY of DURABLE stores removes the silent-downgrade path: a transient
+// localStorage miss now falls through to IndexedDB (also durable) instead of collapsing to in-memory.
+// localStorage stays FIRST because it is synchronous and immune to the WebKit IndexedDB suspension that
+// wedged the native sign-in write (PART 2 above) — IndexedDB is only ever the fallback, never the
+// default. The healing half lives in `ensureNativeSessionPersisted()` below.
 export const auth = Capacitor.isNativePlatform()
-  ? initializeAuth(app, { persistence: browserLocalPersistence })
+  ? initializeAuth(app, { persistence: [browserLocalPersistence, indexedDBLocalPersistence] })
   : getAuth(app);
 // WEB ONLY: persist sessions in localStorage (explicit, though the default is already durable).
 // Fire-and-forget by design — both the default (indexedDB) and this are durable, so a pending switch
@@ -55,6 +71,32 @@ if (!Capacitor.isNativePlatform()) {
   setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('[firebase] setPersistence failed (keeping default persistence):', e?.message || e));
 }
 export const db = getFirestore(app, firebaseConfig.firestoreDbId);
+
+/**
+ * THE HEALING HALF of the cold-restart-logout fix (see the `auth` initialization above).
+ *
+ * Layer 1 (the persistence hierarchy) stops the silent in-memory downgrade from happening. This is
+ * layer 2, the last line of defence: once a user is actually signed in, VERIFY that a durable session
+ * record really exists. If it does not, the instance is running in-memory and the session would be lost
+ * on the next launch — so re-apply a durable persistence, which makes the Firebase SDK MIGRATE the
+ * current user into it, then re-verify.
+ *
+ * Best-effort and non-blocking by construction: it never throws and never gates sign-in, so a failure
+ * here can only ever leave today's behavior, never break a working login. Returns an HONEST outcome
+ * (`repair-failed` is reported as such, never dressed up as success) so a future diagnostic can state
+ * plainly whether the session will survive a restart. NO-OP on web, whose persistence is already sound.
+ */
+export async function ensureNativeSessionPersisted(): Promise<SessionPersistenceOutcome | 'skipped-web'> {
+  if (!Capacitor.isNativePlatform()) return 'skipped-web';
+  return ensureSessionPersisted({
+    hasDurableSession: () => {
+      try { return hasPersistedSession(typeof localStorage !== 'undefined' ? localStorage : null); } catch { return false; }
+    },
+    // Re-applying a durable persistence is what migrates the live user into storage.
+    applyDurablePersistence: () => setPersistence(auth, browserLocalPersistence),
+    log: (m) => console.warn(m),
+  });
+}
 
 /**
  * FULL client sign-out — clears the session on EVERY layer, so "logout" truly logs out.

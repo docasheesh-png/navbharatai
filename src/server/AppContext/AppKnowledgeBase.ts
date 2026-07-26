@@ -2543,6 +2543,16 @@ BIDIRECTIONAL SELECTION: (1) pick a framework in the picker (⚙ → Framework o
     aiSurface: 'nbi_chat',
     keywords: ['rate', 'rating', 'review', 'rate app', 'give rating', 'stars', 'rate us', 'feedback', 'play store rating', 'rating do', 'app ko rate karo', 'review likho', 'rating popup', '5 star', 'rate the app'],
   },
+  {
+    id: 'mobile_push_notifications',
+    name: 'Push Notifications (mobile)',
+    path: 'Automatic — the app asks for notification permission once, right after you sign in on the installed Android/iOS app.',
+    description: `In the NavBharatAI mobile app (installed from the Play Store or App Store), NavBharatAI sends real push notifications for two events: (1) a build finishing — success or a real problem — so you don't have to keep the app open and watch it, and (2) your wallet balance hitting ₹0, so a build never fails silently for a reason you didn't know about. The app asks for notification permission once, right after you sign in; if you decline, you simply won't receive these — nothing else in the app is affected. There is no separate in-app notification settings screen yet — to change your choice later, use your phone's own system Settings → Apps → NavBharatAI → Notifications. Not available on the website (browser notifications are a different, unrelated thing).`,
+    howToUse: '1. Sign in on the installed NavBharatAI app. 2. Allow notifications when asked (once). 3. You\'ll get a push when a build finishes or your wallet reaches ₹0 — tap it to open the app. To turn notifications off/on later, use your phone\'s system Settings for the NavBharatAI app.',
+    relatedFeatures: ['mobile_app_update', 'wallet_billing'],
+    aiSurface: 'nbi_chat',
+    keywords: ['push notification', 'notifications', 'notification', 'build finished notification', 'balance alert', 'wallet notification', 'notify', 'alert', 'notification on', 'notification off', 'notification band karo', 'suchna', 'build complete alert', 'app notification'],
+  },
 ];
 
 /** Quick lookup by id. */

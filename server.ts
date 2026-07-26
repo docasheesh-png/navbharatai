@@ -16,6 +16,7 @@ import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
+import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerNavigateRoutes } from './src/server/routes/navigate';
@@ -574,6 +575,7 @@ setInterval(() => {
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).
   registerDeployArtifactsRoutes(app);
   registerSecretsRoutes(app);
+  registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);
   registerBuildAnalyticsRoutes(app);
   registerNavigateRoutes(app);

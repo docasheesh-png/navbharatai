@@ -94,10 +94,14 @@ platform :ios do
     # App Store provisioning profile for the bundle id (sigh defaults to an App Store distribution profile).
     # force:true so it REGENERATES the profile — a stale cached profile from before Sign in with Apple was
     # enabled would otherwise be reused and omit the new entitlement.
+    # Same reasoning applies to push notifications (opt-in via ENABLE_PUSH=true, admin 2026-07-26): a
+    # stale cached profile from before the Push Notifications capability was enabled on the App ID would
+    # otherwise be reused and omit the aps-environment entitlement, so a push-enabled build also forces
+    # regeneration.
     sigh(
       api_key: api_key,
       app_identifier: APP_IDENTIFIER,
-      force: ENV["APPLE_SIGNIN"] == "true",
+      force: ENV["APPLE_SIGNIN"] == "true" || ENV["ENABLE_PUSH"] == "true",
     )
 
     # The Capacitor project ships with automatic signing; switch it to manual so the archive uses the

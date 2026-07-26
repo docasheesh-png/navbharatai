@@ -72,7 +72,7 @@ import { firebaseConfig } from './config/firebase';
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
-import { auth, db, signOutEverywhere } from './lib/firebase';
+import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 import { authGateDecision, isAuthGatedView } from './lib/authGate';
@@ -1100,6 +1100,11 @@ export default function App() {
         // Native push notifications (admin 2026-07-26): register this device's FCM token now that a
         // real, verified session exists. No-op on web; best-effort — never blocks sign-in.
         void initPushNotifications(currentUser.uid);
+        // COLD-RESTART LOGOUT FIX (admin 2026-07-25) — verify the signed-in session was written to a
+        // DURABLE store and self-heal it if it was not (the native auth instance can silently be running
+        // in-memory, which is what made every app relaunch come back logged out). Fire-and-forget: it is
+        // best-effort, never throws, and must never delay the UI reacting to a successful sign-in.
+        void ensureNativeSessionPersisted();
         // GITHUB CONNECTION IS PER-USER: pick up this user's OWN GitHub token, but NEVER inherit a
         // token authorized by a different NavBharatAI user on this browser (the "every user sees my
         // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.

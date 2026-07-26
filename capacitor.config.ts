@@ -59,9 +59,22 @@ const config: CapacitorConfig = {
     //   • launchAutoHide stays false so the splash covers the WebView until React has actually painted,
     //     instead of revealing a blank shell mid-boot. `launchFadeOutDuration` makes the hand-off a
     //     fade rather than a hard cut, which is what a native launch looks like.
+    // ⚠️ launchAutoHide MUST stay true. This bricked the app once — do not "optimise" it back.
+    //
+    // WHAT HAPPENED (admin, TestFlight, 2026-07-26): the app launched and never got past the splash.
+    // `launchAutoHide: false` had sat here harmlessly for months ONLY because @capacitor/splash-screen
+    // was not installed, so the whole config was inert. Installing the plugin brought this line to life:
+    // the splash now genuinely waited forever for a JS hide() call, and that call sat behind an awaited
+    // status-bar call which can hang in a WKWebView. One hang anywhere in that chain = a permanently
+    // frozen app, with no fallback.
+    //
+    // `true` makes the NATIVE side hide the splash on its own timer no matter what JavaScript does. The
+    // explicit hide() in nativeShell still runs and still fires earlier than this on a healthy launch —
+    // it just is no longer the ONLY thing standing between the user and their app. A visible splash for
+    // a moment too long is a blemish; a splash that never leaves is a dead app.
     SplashScreen: {
-      launchShowDuration: 3000,
-      launchAutoHide: false, // manually hidden after app ready (nativeShell.hideSplashScreen)
+      launchShowDuration: 2000,
+      launchAutoHide: true,
       backgroundColor: '#0d1117',
       launchFadeOutDuration: 200,
       androidScaleType: 'CENTER_CROP',

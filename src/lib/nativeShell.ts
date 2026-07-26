@@ -49,16 +49,22 @@ export async function loadNativeShellContext(): Promise<NativeShellContext> {
   if (!Capacitor.isNativePlatform()) return { Capacitor };
 
   const ctx: NativeShellContext = { Capacitor };
+  // BOUNDED (2026-07-26, after the frozen-splash incident): a plugin import that never settles must not
+  // be able to stop this function returning, because the caller's splash-hide runs only once it does.
+  // Whatever has loaded by the deadline is used; a straggler simply leaves its feature inactive.
   const load = async (fn: () => Promise<void>): Promise<void> => {
     try { await fn(); } catch { /* one unavailable plugin must not disable the others */ }
   };
-  await Promise.all([
+  const withinDeadline = <T,>(p: Promise<T>, ms = 4000): Promise<T | void> =>
+    Promise.race([p, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
+
+  await withinDeadline(Promise.all([
     load(async () => { ctx.SplashScreen = (await import('@capacitor/splash-screen')).SplashScreen as NativeShellContext['SplashScreen']; }),
     load(async () => { ctx.StatusBar = (await import('@capacitor/status-bar')).StatusBar as unknown as NativeShellContext['StatusBar']; }),
     load(async () => { ctx.Haptics = (await import('@capacitor/haptics')).Haptics as unknown as NativeShellContext['Haptics']; }),
     load(async () => { ctx.App = (await import('@capacitor/app')).App as unknown as NativeShellContext['App']; }),
     load(async () => { ctx.Keyboard = (await import('@capacitor/keyboard')).Keyboard as unknown as KeyboardPlugin; }),
-  ]);
+  ]));
   return ctx;
 }
 
@@ -154,12 +160,22 @@ export function installBackButtonHandler(ctx: NativeShellContext, onBack: (info?
 export async function installNativeShellPolish(ctx: NativeShellContext, onBack: (info?: { canGoBack?: boolean }) => void): Promise<boolean> {
   if (!isNativeShell(ctx)) return false;
 
-  // Status bar FIRST, then hide the splash. Doing it the other way round shows one frame of the old
-  // bar colour over the new UI — a small flash, but exactly the kind a native app never has.
-  await syncStatusBarToTheme(ctx, typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null);
+  // ⚠️ ORDERING IS LOAD-BEARING — hiding the splash comes FIRST and is never awaited behind anything.
+  //
+  // This previously ran the status-bar call first and awaited it, then hid the splash. That looked
+  // harmless (one less frame of colour mismatch) and it bricked the app on TestFlight: a plugin call
+  // that hangs in a WKWebView never settles, so the awaited chain never reached hide() and the splash
+  // stayed up forever. Anything placed before the hide becomes a single point of failure for the entire
+  // app starting, which is never a trade worth making for a cosmetic frame.
+  //
+  // Fire-and-forget, not awaited: the splash comes down as soon as the plugin responds, and a hang in
+  // any LATER step can no longer hold it hostage. (capacitor.config also auto-hides on a native timer,
+  // so there are now two independent ways out instead of zero.)
+  void hideSplashScreen(ctx);
 
-  // Hide the native splash screen — the React app is now on screen.
-  await hideSplashScreen(ctx);
+  // Everything below is polish. Each is launched independently and never awaited by the others, so one
+  // unresponsive plugin degrades exactly one feature instead of stalling the rest.
+  void syncStatusBarToTheme(ctx, typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null);
 
   // Install back button handler (Android) — forward to React Router.
   installBackButtonHandler(ctx, onBack);

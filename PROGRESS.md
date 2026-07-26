@@ -21908,3 +21908,95 @@ measurement, so the two are never confused again.
 Tests: 2 new telemetry route tests (mobile-default + strategy=desktop passthrough, vitals/finalUrl
 echoed) — 19/19 telemetry tests green, all pre-existing back-compat. Gate: fe tsc 0 · server tsc 0 ·
 full suite 9160/9160 green · build ✓.
+
+### 2026-07-26 — Push notifications built (admin: "push notification kaam nahi kar raha, sab theek kar ke
+store par post karne me help karo")
+
+Admin asked for a scan of what's broken before Play Store / App Store submission. Root cause: push
+notifications were never built at all — `@capacitor/push-notifications` was never a dependency, and
+`mobileNative.ts`'s own header comment says it wires only "the TWO mobile engagement features" (app-update
+check + in-app review). MOBILE_PUBLISHING.md §7 already flagged this honestly as the one missing native
+capability. Everything else checked (Android/iOS signing pipelines, in-app review, app-update check,
+Firebase auth native wiring, image-gen media plugin) was genuinely working — no other broken feature found.
+
+**Built, real, end-to-end:**
+- Client: `@capacitor-firebase/messaging` (same plugin family as the already-shipped
+  `@capacitor-firebase/authentication` — bridges APNs↔FCM internally on iOS, so the server only ever
+  handles FCM tokens on both platforms; the raw `@capacitor/push-notifications` plugin would have handed
+  back an unusable bare APNs token on iOS). `src/lib/pushNotifications.ts` requests permission, registers
+  the FCM token, and re-registers on token refresh — wired into the real sign-in listener in `App.tsx` (not
+  a fake demo hook) and torn down on sign-out via `signOutFlow.ts`'s existing `extraCleanup` hook.
+- Server: `src/server/lib/DeviceTokenStore.ts` (mirrors `MentionNotificationStore.ts` exactly —
+  `users/{uid}/deviceTokens/{token}`, VITEST-skip, never throws) + `src/server/lib/PushNotificationService.ts`
+  (`admin.messaging().sendEachForMulticast`, prunes tokens FCM reports dead) + `src/server/routes/push.ts`
+  (`requireUserMatch`, mirrors `/api/secrets/:userId` exactly — a device token can only ever be registered
+  under the account that owns the signed-in session). No new infra — same Firebase project
+  (`gen-lang-client-0866594388`) the app already authenticates against.
+- Two REAL triggers wired (not simulated): a build finishing (success or failure, all 3 real completion
+  sites in `agentv3.ts` — main path, watchdog/time-capped path, crash path; the invisible mid-flow
+  "resumable" pause is deliberately excluded) and the wallet hitting ₹0 (the affordability-gate block
+  branch). Deliberately did NOT notify on the "economy" low-but-nonzero branch — that fires on every build
+  while balance stays low, which would spam a push per build; only the hard-stop ₹0 moment notifies.
+- Android: zero manual gradle changes — `google-services.json` already committed, `npx cap sync android`
+  auto-registers the plugin via manifest merge (verified: `Found 6 Capacitor plugins for android`,
+  including `@capacitor-firebase/messaging`). Committed the regenerated `capacitor.build.gradle` /
+  `capacitor.settings.gradle` (were stale — listed zero plugins even though 6 were already installed
+  before this change; CI always regenerates them fresh via `cap sync` so this was cosmetic, not a real
+  build risk, but now the committed state matches reality).
+- iOS: added an OPT-IN `enable_push_notifications` toggle to `ios-ipa.yml` (default OFF — unlike
+  `apple_signin`'s default-true, because push's prerequisite, the Apple Developer "Push Notifications"
+  capability + a Firebase Console APNs key, has NOT been done yet; defaulting on would break the first
+  build). Injects the `aps-environment` entitlement + forces `sigh` to regenerate the profile, mirroring
+  the exact Sign-in-with-Apple entitlement pattern already proven in this workflow. The two remaining
+  one-time steps ONLY the admin can do (documented in `MOBILE_PUBLISHING.md` §7.5): (1) enable "Push
+  Notifications" on the `com.navbharat.ai` App ID, (2) upload an APNs key to Firebase Console → Cloud
+  Messaging.
+- Also fixed, while in these files: both `android-aab.yml` and `ios-ipa.yml`'s summary text (and
+  `MOBILE_PUBLISHING.md`'s intro + §5) still said "hosted mode" — the app switched to BUNDLED mode
+  2026-07-10 (`capacitor.config.ts`); corrected to describe what's actually shipped.
+
+Tests: 32 new tests — `DeviceTokenStore` (6, VITEST-degrade contract), `PushNotificationService`
+(5, pure `deadTokensFrom` dead-token-detection logic, extracted from the I/O so it's independently
+testable), `push.ts` routes (7, validation/status codes/store-mock, matches `routesSecretsIdor.test.ts`'s
+mocking style), `pushApi.ts` client (5, auth-header attachment, matches `secretsApi.test.ts`), and
+`pushNotifications.ts` native bootstrap (9 — no-op on web, honest stop on denied permission, idempotent
+per-session, re-registers on account switch, re-registers on token refresh, teardown on sign-out, never
+throws on a native error).
+
+KB: new `mobile_push_notifications` entry (any AI can now honestly answer "does the app notify me").
+
+Gate: fe tsc 0 · server tsc 0 · full suite green (32 new + all pre-existing) · build ✓ · YAML-validated
+both workflow files · `npx cap sync android` verified plugin registration live.
+
+### 2026-07-26 (cont.) — OPEN ROOT CAUSE found + fixed at our end: audit gate was silently false-clean
+(npm's legacy audit endpoint is being retired)
+
+While running the pre-push verification gate for the above, `npm run audit:gate` reported "✅ No new
+high/critical vulnerabilities" with `allowlisted: 0, totals: {}` — suspiciously empty. Root cause:
+`npm audit --json` itself failed (`POST .../v1/security/audits/quick → 400 Bad Request: Invalid package
+tree`, with the notice "This endpoint is being retired. Use the bulk advisory endpoint instead") but
+STILL exited 0 and printed that error object to stdout. `scripts/auditGate.mjs`'s `evaluateAudit()` read
+`audit.vulnerabilities` off that error object, got `undefined` → `{}`, and reported a false-clean gate —
+exactly the "wrong verdict" the fifth absolute rule requires fixing at the reporting level, not just
+patching around.
+
+**Confirmed NOT caused by this session's changes**: `git stash` + re-running against the ORIGINAL,
+already-on-`main` `package-lock.json` reproduces the identical 400. This is an ambient npm-registry-side
+issue (the endpoint is being deprecated server-side) that would affect ANY PR right now — also confirmed
+`registry.npmjs.org` is in this sandbox's proxy `noProxy` list (direct connection, not a local proxy
+artifact), so the same failure is expected on GitHub's runners too (also direct to the real registry).
+
+**Fixed at our end (the part we control):** `isAuditErrorResponse()` — pure, tested (6 new cases in
+`tests/auditGate.test.ts`) — detects the registry-error shape (`statusCode` + `error`, but critically NO
+`vulnerabilities` key, which a real report — even an empty one — always has) and makes the CLI entrypoint
+FAIL LOUDLY with an honest message instead of silently passing. `evaluateAudit()`'s own tested contract
+(pure, called directly) is untouched — the check runs only in the CLI wrapper, exactly where the
+dishonesty was happening.
+
+**OPEN ROOT CAUSE (infra-blocked, per rule 6 — not something this repo can fix alone):** the actual npm
+registry endpoint retirement. Until npm's CLI ships a client that calls the new "bulk advisory endpoint"
+(or the legacy one recovers), `npm audit --json` may keep returning this error — which now means
+`audit:gate` in CI will correctly BLOCK every PR (an honest block, not a bug) rather than silently
+rubber-stamping. Watch the next CI run on this PR to see whether GitHub's runners hit the same failure;
+if so, this needs an admin decision (wait it out / temporarily relax the CI gate with a tracked TODO /
+find a working audit mechanism) — flagging here rather than silently working around it.

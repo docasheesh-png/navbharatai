@@ -72,6 +72,15 @@ on:
         description: 'TestFlight "What to Test" note for this build (optional — defaults to the build number)'
         type: string
         default: ''
+      enable_push_notifications:
+        # OPT-IN, default OFF (admin 2026-07-26 — push notifications just built, see MOBILE_PUBLISHING.md
+        # §7.5). Unlike apple_signin above this does NOT default to true, because its prerequisite (the
+        # Push Notifications capability on the com.navbharat.ai App ID + an APNs key uploaded to Firebase
+        # Console) has not been done yet — defaulting ON here would break the FIRST build for anyone who
+        # hasn't done that one-time setup. Flip the default to true (like apple_signin) once it's proven.
+        description: 'Include the push-notifications entitlement (needs the one-time Apple Developer + Firebase Console setup in MOBILE_PUBLISHING.md §7.5 first — leave OFF until that''s done)'
+        type: boolean
+        default: false
 
 jobs:
   build-ios:
@@ -250,6 +259,40 @@ jobs:
           RUBY
           echo "Sign in with Apple entitlement in place."
 
+      # Push notifications (OPT-IN — off by default, see the workflow_dispatch input above). Declares the
+      # aps-environment entitlement Apple requires for ANY push capability. PREREQUISITES (one-time, done
+      # by hand — see MOBILE_PUBLISHING.md §7.5, same pattern as the Sign in with Apple prerequisites
+      # above): (1) Apple Developer → Identifiers → com.navbharat.ai → "Push Notifications" ✅ (so the
+      # profile `sigh` creates includes the entitlement), (2) Firebase Console → Project Settings → Cloud
+      # Messaging → Apple app configuration → upload an APNs Authentication Key (so Firebase can actually
+      # deliver to APNs on our behalf — @capacitor-firebase/messaging's iOS side routes through Firebase,
+      # so this step is required even though we're not calling raw APNs ourselves).
+      - name: Enable push-notifications entitlement (opt-in)
+        if: ${{ inputs.enable_push_notifications }}
+        run: |
+          set -e
+          ENT="ios/App/App/App.entitlements"
+          if [ ! -f "$ENT" ]; then
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict></dict></plist>' > "$ENT"
+          fi
+          /usr/libexec/PlistBuddy -c "Add :aps-environment string production" "$ENT" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENT"
+          gem install xcodeproj --no-document --quiet
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('ios/App/App.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'App' } or abort('App target not found')
+          target.build_configurations.each do |c|
+            c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements'
+          end
+          proj.save
+          puts 'OK: App.entitlements wired to the App target (push notifications).'
+          RUBY
+          echo "Push-notifications entitlement in place."
+
       # App Store REQUIRES a purpose string for every device permission the app can request, or review
       # REJECTS the binary (and iOS crashes on the first getUserMedia call without it). The app uses the
       # MICROPHONE (Sonic voice) + CAMERA + photo library (image attach) — same permissions as the
@@ -372,6 +415,9 @@ jobs:
           # Opt-in native Apple sign-in: when true, the Fastfile enables the App-ID capability via produce
           # before sigh so the profile includes com.apple.developer.applesignin.
           APPLE_SIGNIN: ${{ inputs.apple_signin }}
+          # Opt-in push notifications: when true, forces sigh to regenerate the provisioning profile so
+          # it picks up the aps-environment entitlement injected above.
+          ENABLE_PUSH: ${{ inputs.enable_push_notifications }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
@@ -405,4 +451,4 @@ jobs:
             echo "Download the **navbharatai-release-ipa** artifact above. To publish, re-run with **upload** checked (sends it to TestFlight/App Store Connect)." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Bundle id \`com.navbharat.ai\` · hosted mode loads https://navbharatai.com — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"
+          echo "Bundle id \`com.navbharat.ai\` · bundled mode runs from this build (API calls still hit navbharatai.com) — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

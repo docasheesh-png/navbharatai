@@ -118,6 +118,7 @@ import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { notifyBuildComplete, notifyLowBalance } from '../lib/PushNotificationService';
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice } from '../AgentV3/weakTierNotice';
@@ -4286,6 +4287,7 @@ export function registerAgentV3Routes(app: Express): void {
       if (gate.action === 'block') {
         activeBuilds.delete(buildKey); // release the lock acquired above; the build never starts.
         audit('AGENTV3_BUILD_BLOCKED_NO_CREDITS', { userId, balanceInr, estimateInr: estimate.inr }, 'warn');
+        void notifyLowBalance(userId, true);
         res.status(402).json({
           error: gate.notice || 'Your credits are used up. Add credits to start a new build.',
           code: 'INSUFFICIENT_CREDITS',
@@ -5240,6 +5242,7 @@ export function registerAgentV3Routes(app: Express): void {
           ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate())
           : null;
         emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
+        void notifyBuildComplete(userId, true);
       } else {
         // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
         // lage", 2026-07-20): a wall-clock pause that will be AUTO-CONTINUED must be INVISIBLE — no
@@ -9222,6 +9225,10 @@ export function registerAgentV3Routes(app: Express): void {
         ? null
         : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate());
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
+      // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
+      // response the client already has. A resumable module turn is an intermediate step, not a
+      // finished build, so it's excluded (the user is mid-flow inside the app already).
+      if (!projectContinue.resumable) void notifyBuildComplete(userId, result.ok);
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash
@@ -9282,6 +9289,7 @@ export function registerAgentV3Routes(app: Express): void {
       // durable-saved above; attaching it here (same shape the success path emits) makes the failure
       // card / "Build report" render immediately instead of a bare error with no detail.
       emit({ type: 'error', message: errMsg, ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
+      void notifyBuildComplete(userId, false);
     } finally {
       // Flush the LAST background checkpoint so the finished app is captured in History/restore.
       // Bounded (6s) + best-effort: checkpoints are off the hot path during the build, so this is

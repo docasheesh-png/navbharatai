@@ -20,6 +20,16 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # npm's legacy `/v1/security/audits/quick` endpoint (used by `npm audit`) is being retired and now
+      # returns a 400 "Invalid package tree" error on EVERY request — confirmed 2026-07-26 against main's
+      # own committed lockfile, not caused by any specific PR. The bundled npm on Node 20 runners (10.8.x)
+      # still calls that legacy endpoint; a newer npm CLI is more likely to use the "bulk advisory"
+      # endpoint the retirement notice points to instead. Pinned (not @latest) for reproducibility — bump
+      # deliberately, same reasoning as the GLM/Kimi model-id policy in CLAUDE.md. Remove this step (or
+      # note if it turned out not to help) once confirmed either way.
+      - name: Upgrade npm (root-cause attempt for the audit-gate false-block, see PROGRESS.md 2026-07-26)
+        run: npm install -g npm@12.0.1
+
       - name: Install dependencies
         run: npm ci
 

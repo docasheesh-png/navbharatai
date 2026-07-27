@@ -103,18 +103,18 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar bg-[#0d1117] text-white">
-      <div className="max-w-2xl mx-auto px-5 py-6 space-y-6">
+      <div className="max-w-2xl mx-auto px-3 sm:px-5 py-5 sm:py-6 space-y-5 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-start sm:items-center gap-3">
           {onBack && (
-            <button onClick={onBack} className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-[#8b949e] hover:text-white transition-colors">
+            <button onClick={onBack} className="w-9 h-9 shrink-0 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-[#8b949e] hover:text-white transition-colors">
               <ChevronLeft className="w-4 h-4" />
             </button>
           )}
-          <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+          <div className="w-9 h-9 shrink-0 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
             <Globe className="w-5 h-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="text-base font-bold">Connect my website</h2>
             <p className="text-[11px] text-[#8b949e]">Point your own domain to your NavBharatAI site, with automatic HTTPS.</p>
           </div>
@@ -122,8 +122,8 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
 
         {/* Step 1 — domain */}
         <div className="space-y-2">
-          <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Step 1 — Your domain</label>
-          <div className="flex gap-2">
+          <label className="text-[11px] font-black text-[#8b949e] uppercase tracking-widest">Step 1 — Your domain</label>
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               value={domain}
               onChange={e => setDomain(e.target.value)}
@@ -134,14 +134,14 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
             <button
               onClick={connect}
               disabled={!domainValid || busy}
-              className="px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-medium flex items-center gap-1.5 shrink-0"
+              className="px-4 py-3 sm:py-0 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-medium flex items-center justify-center gap-1.5 shrink-0"
             >
               {busy ? <TirangaLoader className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
               {busy ? 'Starting…' : 'Connect'}
             </button>
           </div>
           {domain && !domainValid && (
-            <p className="text-[10px] text-red-400">Enter a valid domain like myshop.com (no https://, no slashes).</p>
+            <p className="text-[11px] text-red-400">Enter a valid domain like myshop.com (no https://, no slashes).</p>
           )}
         </div>
 
@@ -155,7 +155,7 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
         {/* Step 2 — registrar (helper to open DNS page) */}
         {result && (
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Step 2 — Where is your domain's DNS?</label>
+            <label className="text-[11px] font-black text-[#8b949e] uppercase tracking-widest">Step 2 — Where is your domain's DNS?</label>
             <select
               value={registrar}
               onChange={e => setRegistrar(e.target.value)}
@@ -178,13 +178,13 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
         {/* Step 3 — the real DNS records to add */}
         {result && (
           <div className="space-y-3">
-            <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Step 3 — Add these DNS records</label>
+            <label className="text-[11px] font-black text-[#8b949e] uppercase tracking-widest">Step 3 — Add these DNS records</label>
             <div className="space-y-2">
               {result.records.map((rec, i) => (
                 <div key={i} className="px-4 py-3 rounded-xl bg-[#161b22] border border-white/10 space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">{rec.type}</span>
-                    {rec.note && <span className="text-[10px] text-[#586069]">{rec.note}</span>}
+                    <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">{rec.type}</span>
+                    {rec.note && <span className="text-[11px] text-[#586069]">{rec.note}</span>}
                   </div>
                   <Field label="Name" value={rec.name} k={`n${i}`} copied={copied} onCopy={copy} />
                   <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
@@ -193,12 +193,12 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
             </div>
 
             {/* Status + check */}
-            <div className={`flex items-center justify-between gap-2 px-4 py-3 rounded-xl border ${result.active ? 'bg-green-500/10 border-green-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
+            <div className={`flex flex-wrap items-center justify-between gap-2 px-4 py-3 rounded-xl border ${result.active ? 'bg-green-500/10 border-green-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
               <div className="flex items-center gap-2 min-w-0">
                 {result.active
                   ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
                   : <TirangaLoader className="w-4 h-4 text-amber-400 shrink-0" />}
-                <span className={`text-[11px] truncate ${result.active ? 'text-green-200' : 'text-amber-200/90'}`}>
+                <span className={`text-[11px] ${result.active ? 'text-green-200' : 'text-amber-200/90'}`}>
                   {result.active
                     ? `Live! ${result.hostname} is connected with HTTPS.`
                     : `Pending — add the records above, then check. (verification: ${result.status}, SSL: ${result.sslStatus})`}
@@ -214,7 +214,7 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
                 </button>
               )}
             </div>
-            <p className="text-[10px] text-[#586069] leading-relaxed">
+            <p className="text-[11px] text-[#586069] leading-relaxed">
               DNS changes can take a few minutes to a few hours to take effect. Once verified, Cloudflare issues a free SSL certificate automatically.
             </p>
           </div>
@@ -225,12 +225,23 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
 };
 
 function Field({ label, value, k, copied, onCopy }: { label: string; value: string; k: string; copied: string | null; onCopy: (v: string, k: string) => void; }) {
+  // The value is shown IN FULL, wrapped, never truncated. This is the one thing on the screen the
+  // user has to read and re-type into their domain provider — a value cut off as "abc123…" is
+  // useless, and on a phone the old `truncate` cut almost all of it. It wraps on its character
+  // boundaries so a long TXT record stays readable instead of forcing the page sideways.
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[9px] text-[#586069] w-10 shrink-0 uppercase">{label}</span>
-      <code className="flex-1 min-w-0 truncate text-[11px] font-mono text-[#c9d1d9] bg-black/30 rounded px-2 py-1">{value}</code>
-      <button onClick={() => onCopy(value, k)} className="shrink-0 text-[#8b949e] hover:text-white" title="Copy">
-        {copied === k ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+    <div className="flex items-start gap-2">
+      <span className="text-[11px] text-[#586069] w-11 shrink-0 uppercase pt-1.5">{label}</span>
+      <code className="flex-1 min-w-0 text-[12px] font-mono text-[#c9d1d9] bg-black/30 rounded px-2 py-1.5 break-all leading-relaxed select-all">
+        {value}
+      </code>
+      <button
+        onClick={() => onCopy(value, k)}
+        className="shrink-0 flex items-center justify-center w-8 h-8 -mr-1 rounded-lg text-[#8b949e] hover:text-white hover:bg-white/5"
+        title="Copy"
+        aria-label={`Copy ${label}`}
+      >
+        {copied === k ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
       </button>
     </div>
   );

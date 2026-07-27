@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Smartphone,
   Check,
@@ -12,13 +12,27 @@ import {
   FileText,
   AlertCircle,
   Rocket,
+  Upload,
+  Clipboard,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
+import { AppTargetPicker, useUserApps, useAppFiles } from './AppTargetPicker';
+import { StoreBuildPanel } from './StoreBuildPanel';
+import { readIconFile, readIconFromClipboard } from '../../lib/appIcon';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface APKBuilderProps {
   generatedCode?: string;
   appName?: string;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
+  /** The connected GitHub token — the build runs on the user's own account. */
+  githubToken?: string;
+  onConnectGitHub?: () => void;
+  /** Send the user to AI Image Gen to create an icon. */
+  onMakeIcon?: () => void;
 }
 
 interface AppInfo {
@@ -390,7 +404,7 @@ function FileCard({ file }: { file: GeneratedFile }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
+export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, onConnectGitHub, onMakeIcon }) => {
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
 
@@ -405,6 +419,46 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
     orientation: 'portrait',
     targetSdk: '34',
   });
+
+  // WHICH app is being packaged (admin 2026-07-27). The builder used to have no idea — it packaged
+  // whatever preview happened to be open, under a hardcoded "NavBharatAI App" name.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading } = useAppFiles(targetSession);
+
+  // A REAL icon, not an emoji. Play needs a 512x512 PNG; an emoji rendered by whatever font the build
+  // machine happens to have is not one.
+  const [iconDataUrl, setIconDataUrl] = useState('');
+  const [iconNote, setIconNote] = useState('');
+  const [iconFailed, setIconFailed] = useState(false);
+  const [iconBusy, setIconBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const acceptIcon = useCallback(async (run: () => Promise<{ ok: boolean; dataUrl?: string; error?: string; warning?: string }>) => {
+    setIconBusy(true);
+    setIconNote('');
+    setIconFailed(false);
+    try {
+      const r = await run();
+      if (!r.ok || !r.dataUrl) {
+        setIconFailed(true);
+        setIconNote(r.error || 'That image could not be used.');
+        return;
+      }
+      setIconDataUrl(r.dataUrl);
+      setIconNote(r.warning || 'Icon set.');
+      setIconFailed(!!r.warning);
+    } finally {
+      setIconBusy(false);
+    }
+  }, []);
+
+  // Keep the app name in step with the app the user picked, unless they have typed their own.
+  const nameTouched = useRef(false);
+  useEffect(() => {
+    if (nameTouched.current || !targetSession) return;
+    const picked = apps.find((a) => a.sessionId === targetSession);
+    if (picked) setInfo((prev) => ({ ...prev, packageName: prev.packageName }));
+  }, [targetSession, apps]);
 
   // Step 2
   const [perms, setPerms] = useState<PermissionState>({
@@ -581,6 +635,19 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
           </div>
         </div>
 
+        {/* WHICH app is being packaged. Without this the builder had no idea — it used whatever
+            preview was open, under a hardcoded name. */}
+        <div className="rounded-xl border border-white/10 mb-6" style={{ background: '#161b22' }}>
+          <AppTargetPicker
+            apps={apps}
+            appsLoading={appsLoading}
+            files={appFiles}
+            filesLoading={filesLoading}
+            sessionId={targetSession}
+            onSessionChange={setTargetSession}
+          />
+        </div>
+
         <StepIndicator current={step} total={4} />
 
         {/* Card */}
@@ -654,25 +721,87 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
               {/* Icon picker */}
               <div>
                 <label className="block text-xs text-white/50 mb-2">App Icon</label>
-                <div className="flex items-center gap-3">
+
+                {/* A REAL icon (admin 2026-07-27). The emoji row below is still handy as a quick
+                    placeholder, but Play needs a 512x512 image — an emoji drawn with whatever font
+                    the build machine has is not an app icon. */}
+                <div className="flex items-center gap-3 mb-3">
                   <div
-                    className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl border border-white/10 flex-shrink-0"
+                    className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl border border-white/10 flex-shrink-0 overflow-hidden"
                     style={{ background: info.primaryColor + '33' }}
                   >
-                    {info.icon}
+                    {iconDataUrl
+                      ? <img src={iconDataUrl} alt="App icon" className="w-full h-full object-cover" />
+                      : info.icon}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {EMOJI_OPTIONS.map((e) => (
+                  <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (f) void acceptIcon(() => readIconFile(f));
+                      }}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={iconBusy}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-white/15 hover:bg-white/5 disabled:opacity-40 transition-colors"
+                    >
+                      <Upload size={13} /> Upload
+                    </button>
+                    <button
+                      onClick={() => void acceptIcon(() => readIconFromClipboard())}
+                      disabled={iconBusy}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-white/15 hover:bg-white/5 disabled:opacity-40 transition-colors"
+                    >
+                      {iconBusy ? <Loader2 size={13} className="animate-spin" /> : <Clipboard size={13} />} Paste
+                    </button>
+                    {onMakeIcon && (
                       <button
-                        key={e}
-                        onClick={() => updateInfo({ icon: e })}
-                        className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center border transition-all
-                          ${info.icon === e ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 hover:border-white/30'}`}
+                        onClick={onMakeIcon}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
                       >
-                        {e}
+                        <Sparkles size={13} /> Make icon
                       </button>
-                    ))}
+                    )}
+                    {iconDataUrl && (
+                      <button
+                        onClick={() => { setIconDataUrl(''); setIconNote(''); setIconFailed(false); }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/15 hover:bg-white/5 text-white/60 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
+                </div>
+
+                <p className="text-[11px] text-white/40 leading-relaxed mb-2">
+                  Use a square picture, at least 512×512. "Make icon" opens AI Image Gen — copy the
+                  image it creates, then come back and press Paste.
+                </p>
+
+                {iconNote && (
+                  <p className={`text-xs leading-relaxed mb-3 px-3 py-2 rounded-lg ${iconFailed ? 'text-amber-300' : 'text-green-300'}`}
+                     style={{ background: iconFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)' }}>
+                    {iconNote}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {EMOJI_OPTIONS.map((e) => (
+                    <button
+                      key={e}
+                      onClick={() => updateInfo({ icon: e })}
+                      className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center border transition-all
+                        ${info.icon === e && !iconDataUrl ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 hover:border-white/30'}`}
+                    >
+                      {e}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -1086,6 +1215,20 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
               )}
             </div>
           )}
+        </div>
+
+        {/* THE BUTTON THIS SCREEN IS FOR — a real Android app, built on real machines, downloaded
+            here. Kept at the very bottom so it reads as the last step after decorating the app. */}
+        <div className="mt-6 mb-2">
+          <StoreBuildPanel
+            sessionId={targetSession}
+            appName={info.appName}
+            appId={info.packageName}
+            iconDataUrl={iconDataUrl || undefined}
+            githubToken={githubToken}
+            onConnectGitHub={onConnectGitHub}
+            onOpenGuide={() => void openGuide()}
+          />
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { HostingChooser, type HostingProvider } from './HostingChooser';
+import { HostingChooser, type HostingProvider, type OwnRepoInfo } from './HostingChooser';
 
 const P = (id: string, name: string, configured: boolean): HostingProvider => ({ id, name, configured, requirement: '' });
 
@@ -66,5 +66,32 @@ describe('HostingChooser — the two-path Publish surface', () => {
       <HostingChooser providers={[P('vercel', 'Vercel', true)]} onDeploy={() => {}} onClose={() => {}} busy={false}
         workspaceId="agentv3-u1-s1" customDomainsEnabled />,
     )).not.toContain('Connect your own domain');
+  });
+});
+
+// "I host it myself" — NavBharatAI never touches deployment; only writes code into the user's own
+// GitHub repo (admin request 2026-07-27: "user apni khud ki hosting connect kare... NavBharatAI
+// edit kare, CI green par merge kare, waki uska hosting jaane").
+describe('HostingChooser — "I host it myself" (BYO hosting via own-repo git storage)', () => {
+  const OWN_REPO: OwnRepoInfo = { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' };
+
+  it('always offers the third "I host it myself" path, independent of configured deploy providers', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('I host it myself');
+    expect(html).toContain('We never touch your hosting');
+    expect(html).toContain('We only write code and open a pull request into your own GitHub repo');
+  });
+
+  it('shows "Set up" when no own-repo is connected yet for this workspace', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Set up');
+  });
+
+  it('shows the connected repo name on the button once own-repo storage is active', () => {
+    const html = renderToStaticMarkup(
+      <HostingChooser providers={[P('firebase', 'Firebase Hosting', true)]} onDeploy={() => {}} onClose={() => {}} busy={false}
+        ownRepo={OWN_REPO} />,
+    );
+    expect(html).toContain('Connected: aashish/mitrify');
   });
 });

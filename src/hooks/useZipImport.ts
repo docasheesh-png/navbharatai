@@ -127,7 +127,9 @@ export function useZipImport(deps: ZipImportDeps) {
       // Final state — ensure everything is synced.
       setFiles(loadedFiles as any);
       saveAllFiles(loadedFiles).catch(() => {}); // persist to IndexedDB/Cache API
-      syncFilesToV3(loadedFiles).catch(() => {}); // mirror uploaded files into the v5.0 workspace
+      // source: 'import' marks this a bulk import (not a routine IDE-edit autosave) — required for
+      // the large-import GitHub durability backstop in syncFilesToV3/import-files to ever consider it.
+      syncFilesToV3(loadedFiles, { source: 'import' }).catch(() => {}); // mirror uploaded files into the v5.0 workspace
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 

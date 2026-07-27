@@ -33,9 +33,9 @@ const ComponentLibrary  = _lz(() => import('../ide/ComponentLibrary'),   'Compon
 const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOptimizer');
 const APKBuilder        = _lz(() => import('../ide/APKBuilder'),         'APKBuilder');
 const FigmaImporter     = _lz(() => import('../ide/FigmaImporter'),      'FigmaImporter');
-// Custom Domain now uses the REAL Cloudflare-backed panel (admin autopsy 2026-07-21) — the old
-// ide/CustomDomain wizard faked a "domain is live" state without any SSL/ownership verification.
-const ConnectDomainPanel = _lz(() => import('./ConnectDomainPanel'),     'ConnectDomainPanel');
+// Custom Domain now uses the REAL, workspace-scoped Firebase-native connect flow (root-cause fix
+// 2026-07-27) — both this entry and Sidebar → "Connect my website" share ONE real implementation.
+const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
 const TeamCollaboration = _lz(() => import('../ide/TeamCollaboration'),  'TeamCollaboration');
 const PWANotifications  = _lz(() => import('../ide/PWANotifications'),   'PWANotifications');
 const CodeMinifier      = _lz(() => import('../ide/CodeMinifier'),       'CodeMinifier');
@@ -490,11 +490,11 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Custom Domain — the REAL Cloudflare-backed connect flow (honest pending/active/not-configured
-          states via /api/domains/*), replacing the old wizard that faked "your domain is live". */}
+      {/* Custom Domain — the REAL, workspace-scoped Firebase-native connect flow (honest
+          pending/active/not-configured states), same implementation as Sidebar → "Connect my website". */}
       {activeView === 'domain' && (
         <div className="flex-1 h-full overflow-y-auto">
-          <ConnectDomainPanel onBack={() => toggleTab('studio')} />
+          <ConnectMyWebsitePanel onBack={() => toggleTab('studio')} uid={user?.uid} />
         </div>
       )}
 

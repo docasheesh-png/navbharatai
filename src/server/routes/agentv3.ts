@@ -3829,6 +3829,10 @@ export function registerAgentV3Routes(app: Express): void {
   // `/api/github/fetch` route, or any source) into the v5.0 sandbox so the agent can
   // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
   // never imports node_modules / .git / live .env secrets.
+  //
+  // Only an import over this size triggers the GitHub durability backstop (or the "connect
+  // GitHub" prompt when no token is available) — routine small imports/edits never need it.
+  const LARGE_IMPORT_GITHUB_BACKSTOP_BYTES = 5 * 1024 * 1024;
   app.post('/api/agentv3/import-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -3869,7 +3873,52 @@ export function registerAgentV3Routes(app: Express): void {
       if (req.body?.source === 'ide-edit') {
         try { await recordManualEdits(workspaceId, written.length ? written : Object.keys(files as Record<string, string>), Date.now()); } catch { /* edit tracking is best-effort */ }
       }
-      res.json({ imported: written.length, skipped: skipped.length });
+      // GITHUB BACKSTOP FOR LARGE IMPORTS (report 2026-07-27 — "1gb zip firbase me nahi to github
+      // login karwao"). Firestore's WorkspaceFileStore caps a single file doc at ~900KB, so a
+      // genuinely large imported project has no practical ceiling only in git. The client sends
+      // `finalize: true` on the LAST chunk of a multi-chunk import (chunkFilesForSync on the
+      // client) together with the import's total byte size; pushAll commits the sandbox's FULL
+      // current state (every chunk already written to it this batch), not just this one request's
+      // files. Only fires for bulk imports over a real size threshold — never for routine IDE-edit
+      // autosaves — and is a pure best-effort backstop: the Firestore/sandbox copy above is already
+      // the durable source of truth, this just adds a second, unbounded-size one when it matters.
+      let github: { url: string; fullName: string } | null = null;
+      let needsGithub = false;
+      const totalBytes = typeof req.body?.totalBytes === 'number' ? req.body.totalBytes : 0;
+      if (req.body?.source === 'import' && req.body?.finalize === true && totalBytes > LARGE_IMPORT_GITHUB_BACKSTOP_BYTES && githubStorageActive()) {
+        const userToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+        if (userToken) {
+          try {
+            const userClient = new UserGitHubClient(userToken);
+            const login = await userClient.getLogin();
+            // Converge on the SAME readable repo name a v5.0 build turn for this workspace would
+            // use (repoNameForProject with the conversation's own title/createdAt) whenever that
+            // record already exists, so an import that happens alongside/after a chat build lands
+            // in the one repo the user already sees — not a second, disconnected one. Falls back to
+            // a stable (still deterministic, still real) name when no conversation exists yet.
+            let repoName = repoNameForProject(userId, workspaceId);
+            try {
+              const idRec = await getConversationStore().get(workspaceId).catch(() => null);
+              if (idRec?.title) {
+                repoName = repoNameForProject(userId, workspaceId, {
+                  appName: idRec.title,
+                  createdAtMs: typeof idRec.createdAt === 'number' && idRec.createdAt > 0 ? idRec.createdAt : Date.now(),
+                });
+              }
+            } catch { /* readable-name lookup is best-effort — the stable fallback name still works */ }
+            const repo = await userClient.ensureRepo(repoName);
+            const authedUrl = userClient.authedCloneUrl(repoName, login);
+            const repoSync = new GitRepoSync(actuator, workspaceId);
+            const pushed = await repoSync.pushAll(authedUrl, repo.defaultBranch || 'main', 'Import large project from ZIP');
+            if (pushed.pushed || pushed.noChange) {
+              github = { url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}` };
+            }
+          } catch { /* GitHub backup is a best-effort backstop — never blocks the import */ }
+        } else {
+          needsGithub = true; // large import, no GitHub connected — let the client offer to connect
+        }
+      }
+      res.json({ imported: written.length, skipped: skipped.length, ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to import the files.' });
     }

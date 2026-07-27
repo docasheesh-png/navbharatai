@@ -1901,3 +1901,59 @@ describe('isReportAdmin (Fix 68) — only the admin sees raw provider names in t
     expect(isReportAdmin('aashishcpmt09@gmail.com')).toBe(false); // override replaces the default list
   });
 });
+
+// Large-zip-import GitHub durability backstop (report 2026-07-27 — "1gb zip firbase me nahi to
+// github login karwao"). /api/agentv3/import-files gained a best-effort push-to-GitHub step for
+// the FINAL chunk of a large bulk import when no Firestore-sized transport ceiling would ever be
+// enough. Static-source checks (matching this file's existing style for this huge route file):
+// gating must be narrow (bulk import + finalize + real size threshold + git storage active), and
+// the whole block must never be able to fail the request.
+describe('import-files GitHub backstop — gating + never-blocks (large-zip-import fix)', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+  const handler = (() => {
+    const i = SRC.indexOf("app.post('/api/agentv3/import-files'");
+    const j = SRC.indexOf("app.post('/api/agentv3/delete-files'");
+    expect(i).toBeGreaterThan(-1);
+    expect(j).toBeGreaterThan(i);
+    return SRC.slice(i, j);
+  })();
+
+  it('only attempts the GitHub push for a bulk import, on the final chunk, over a real size threshold, with git storage active', () => {
+    expect(handler).toContain("req.body?.source === 'import'");
+    expect(handler).toContain('req.body?.finalize === true');
+    expect(handler).toContain('totalBytes > LARGE_IMPORT_GITHUB_BACKSTOP_BYTES');
+    expect(handler).toContain('githubStorageActive()');
+  });
+
+  it('the push itself is wrapped so a GitHub failure can never fail the import response', () => {
+    const pushIdx = handler.indexOf('repoSync.pushAll(');
+    expect(pushIdx).toBeGreaterThan(-1);
+    const tryIdx = handler.lastIndexOf('try {', pushIdx);
+    const catchIdx = handler.indexOf('} catch {', pushIdx);
+    expect(tryIdx).toBeGreaterThan(-1);
+    expect(catchIdx).toBeGreaterThan(pushIdx);
+    // the route's own outer catch must still return a 500 only for real (non-GitHub) failures —
+    // confirm the response is built (res.json) AFTER the best-effort GitHub block, not skipped by it.
+    const resJsonIdx = handler.indexOf('res.json({ imported: written.length');
+    expect(resJsonIdx).toBeGreaterThan(catchIdx);
+  });
+
+  it('reports needsGithub only when the import is large and no token is available (never nags on small edits)', () => {
+    const needsIdx = handler.indexOf('needsGithub = true');
+    expect(needsIdx).toBeGreaterThan(-1);
+    // needsGithub is set in the `else` branch of the userToken check, itself inside the size/gating `if`
+    const elseIdx = handler.lastIndexOf('} else {', needsIdx);
+    expect(elseIdx).toBeGreaterThan(-1);
+    const gatingIfIdx = handler.lastIndexOf('if (req.body?.source === \'import\'', elseIdx);
+    expect(gatingIfIdx).toBeGreaterThan(-1);
+    expect(elseIdx).toBeGreaterThan(gatingIfIdx);
+  });
+
+  it('the LARGE_IMPORT_GITHUB_BACKSTOP_BYTES threshold is defined and reasonably sized (not trivially small)', () => {
+    const m = SRC.match(/const LARGE_IMPORT_GITHUB_BACKSTOP_BYTES = ([\d_]+) \* 1024 \* 1024/);
+    expect(m).not.toBeNull();
+    const mb = Number((m as RegExpMatchArray)[1].replace(/_/g, ''));
+    expect(mb).toBeGreaterThanOrEqual(1);
+    expect(mb).toBeLessThanOrEqual(50);
+  });
+});

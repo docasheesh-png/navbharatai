@@ -22047,3 +22047,88 @@ the path that actually works, rather than silently failing.
 Gate: fe tsc 0 · full suite 9251/9251 green (reused already-tested `checkAttachmentSizes` logic — no new
 pure function needed, no regression risk to lock beyond the existing `attachmentLimits.test.ts` coverage)
 · build ✓.
+
+### 2026-07-27 — large ZIP import STILL silently vanishing at 100MB AND 1GB (root cause #2 found +
+fixed) + GitHub durability backstop; domain-connect consolidated to ONE real flow; new "I host it
+myself" BYO-hosting path (admin: two big asks in one message, handled carefully)
+
+**Bug 1 — the 2026-07-26 fix above did not cover Code Studio's own ZIP importer.** The admin re-tested
+with a fresh 100 MB zip AND a 1 GB zip via Code Studio's importer (`useZipImport.ts` → `/api/extract-zip`)
+— both still silently failed to appear in the Pro v5.0 workspace, even though Code Studio itself reported
+success. Traced end-to-end: Code Studio's local unzip genuinely works fine at any size (raw octet-stream
+upload, no JSON body limit) — the failure was one step LATER, in `syncFilesToV3` → `POST
+/api/agentv3/import-files`, which sent the ENTIRE extracted file-content map as ONE `JSON.stringify` body.
+That hits the exact same `express.json({limit:'30mb'})` / Cloud Run ~32 MB ceiling the 2026-07-07/07-26
+fixes were built to respect — but this call site had NO size guard at all, and the failure was swallowed
+by a trailing `.catch(() => {})` with zero user feedback. Reproduces identically at 100 MB and 1 GB
+because the real threshold is the EXTRACTED CONTENT size (which crosses 30 MB for almost any real app),
+not the original zip's size.
+
+Root-cause fix (never a single unbounded JSON POST again, the same discipline as the 07-26 fix):
+- New pure helper `chunkFilesForSync` (`src/lib/chunkFilesForSync.ts`, unit-tested) splits a file map into
+  chunks that stay under a safe byte budget (8 MB, well under the 30 MB server cap). `syncFilesToV3`
+  (`App.tsx`) now sends each chunk sequentially and reports an HONEST aggregate result — "Synced N files
+  ✓" only when every chunk truly succeeded, an explicit "⚠️ N synced, M batch(es) failed" otherwise —
+  instead of the old silent best-effort swallow. Total project size no longer determines success.
+- GITHUB DURABILITY BACKSTOP (per the admin's explicit ask — "firebase me nahi to github login karwao,
+  waha rakho"): Firestore's `WorkspaceFileStore` still caps a single file doc at ~900 KB regardless of
+  transport, so for a genuinely LARGE import (>5 MB total, `LARGE_IMPORT_GITHUB_BACKSTOP_BYTES` in
+  `agentv3.ts`), the final chunk of a bulk import (`source:'import', finalize:true`) also triggers a
+  best-effort push of the sandbox's full current state to the user's OWN GitHub repo, reusing the
+  already-built, already-tested `UserGitHubClient` + `GitRepoSync.pushAll` (the exact machinery the
+  AgentV3 build turn already uses for git-native storage — no new git-push code written). Converges on
+  the SAME readable repo name a build turn for this workspace would use (via the conversation record's
+  title), when one already exists. If the user has no GitHub connected, the response carries
+  `needsGithub:true` and the client shows an honest "connect GitHub so every file stays backed up" nudge
+  — never a silent failure, never a fake "all safe".
+- `useZipImport.ts` now marks its sync call `source:'import'` (it silently omitted this before, which
+  would have kept the new backstop from ever firing for zip imports specifically).
+
+**Bug 2 / feature — "Connect my website" existed as effectively THREE different, non-identical screens.**
+Investigated per the admin's ask to make both known entry points (Sidebar → "Connect my website" and Home
+→ Other AI → Publish & Deploy → "Custom Domain") do the same real thing. Found: (a) `ide/CustomDomain.tsx`
+was already fully dead code (a prior 2026-07-21 autopsy had orphaned it — zero importers, confirmed via
+repo-wide grep); (b) both live entry points already pointed at the same `ConnectDomainPanel.tsx`
+(Cloudflare-for-SaaS) — but that flow, per its own code comment in `firebaseCustomDomain.ts`, never
+actually routes a domain to any specific app ("the serving layer... is missing") — it provisions a
+hostname and nothing more; (c) a THIRD, newer, genuinely-complete flow already existed —
+`NbaiDomainConnect.tsx` + `/api/domains/nbai/*` — Firebase-native, per-workspace custom domains with real
+honest pending/active/SSL status — but it only had a workspaceId-aware entry point (inside the AgentV3
+build panel's Hosting chooser), not a global one, and is gated by `AGENTV3_FIREBASE_CUSTOM_DOMAINS` (not
+confirmed live in prod — flagging per rule 6, needs an admin check).
+
+Fix: built `ConnectMyWebsitePanel.tsx` — the ONE real entry point both Sidebar and Home→Other AI now
+render. It lists the user's NavBharatAI Pro v5.0 apps (reusing the existing, tested `/api/app-debug/sources`
+endpoint), auto-picks when there's exactly one, otherwise lets the user choose which app the domain should
+point to, then hands off to the real `NbaiDomainConnect`. An app-less account gets an honest "build an app
+first" state instead of a domain form that could never connect anything. Deleted both now-fully-orphaned
+files (`ide/CustomDomain.tsx`, `panels/ConnectDomainPanel.tsx`) — confirmed zero remaining importers before
+removal.
+
+**Feature — "I host it myself" (new third Publish path, admin: "log agar hamse hosting nahi karwana
+chahte, to jahan se bhi hosting kare woh connect kar do... ham edit karke github par PR banaye, CI green
+hone par merge kare, waki uska hosting jaane").** Added a third box to `HostingChooser.tsx` alongside "Host
+on NavBharatAI" and "Host somewhere else (we deploy for you)": NavBharatAI writes code onto the
+`navbharatai/work` branch of the user's OWN GitHub repo and opens a PR, merging into their base branch only
+when CI is green (this git-native storage + PR/merge machinery — `GitStorageTarget`, `UserGitHubClient`,
+`GitHubPrFlow` — already existed and is used by the normal build flow; this box just surfaces it as an
+explicit hosting choice). NavBharatAI never touches deploy credentials or the hosting step itself — the
+user connects that SAME repo on their own Vercel/Netlify/Render/Cloudflare Pages dashboard once, and every
+future merge auto-deploys through their own account. Shows the connected repo + a real GitHub link when
+own-repo storage is active for the workspace, a "Connect GitHub" CTA when it isn't connected at all, and an
+honest "import your repo to activate this" note when GitHub is connected but this workspace isn't linked to
+an owned repo yet (own-repo mode activates on import today — a fully retroactive mid-build switch would
+touch the core build-turn logic and was deliberately left out of this change to avoid unnecessary risk to
+the highest-blast-radius file in the repo).
+
+AppKnowledgeBase updated in the same change (connect_domain entry rewritten to describe the one real flow;
+Publish/Hosting entry extended to describe the third path).
+
+Gate: fe tsc 0 · server tsc 0 · full suite 9554/9554 green (938 files) — includes 8 new
+`chunkFilesForSync` tests, 4 new static-source tests for the import-files GitHub-backstop gating, 3 new
+`HostingChooser` tests for the self-host path · build ✓ (client + server bundles).
+
+**Open item for the admin (not this repo's to flip):** confirm `AGENTV3_FIREBASE_CUSTOM_DOMAINS` is
+actually set to a live value in Cloud Run — the consolidated "Connect my website" flow is only as real as
+that flag; if it's off, users see the honest "not enabled yet" message (never a fake success) but the
+feature won't actually work end-to-end until it's on.

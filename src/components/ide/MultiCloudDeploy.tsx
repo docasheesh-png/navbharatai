@@ -249,9 +249,9 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
             <div style={{ color: '#64748b', fontSize: 11 }}>Instant NavBharat Hosting · CLI guides for Vercel, Netlify &amp; more</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%' }}>
           {(['deploy', 'history', 'config'] as const).map(t => (
-            <button key={t} onClick={() => setActiveTab(t)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, background: activeTab === t ? '#3b82f6' : '#334155', color: activeTab === t ? '#fff' : '#94a3b8' }}>
+            <button key={t} onClick={() => setActiveTab(t)} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0, background: activeTab === t ? '#3b82f6' : '#334155', color: activeTab === t ? '#fff' : '#94a3b8' }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
@@ -262,7 +262,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
 
         {/* Deploy Tab */}
         {activeTab === 'deploy' && (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Platform Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
               {(Object.entries(PLATFORMS) as [Platform, PlatformConfig][]).map(([id, p]) => (
@@ -270,9 +270,9 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ fontSize: 16 }}>{p.icon}</span>
                     <span style={{ fontWeight: 600, fontSize: 13, color: selectedPlatform === id ? p.color : '#e2e8f0' }}>{p.name}</span>
-                    {p.free && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: '#052e16', color: '#4ade80' }}>FREE</span>}
+                    {p.free && <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#052e16', color: '#4ade80' }}>FREE</span>}
                   </div>
-                  <div style={{ fontSize: 10, color: '#64748b', lineHeight: 1.4 }}>{p.description}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>{p.description}</div>
                 </button>
               ))}
             </div>
@@ -286,38 +286,38 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 10 }}>
                 <div>
                   <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Build Command</div>
-                  <div style={{ background: '#0f172a', borderRadius: 4, padding: '6px 8px', fontSize: 11, color: '#a5f3fc', fontFamily: 'monospace' }}>{cfg.buildCmd}</div>
+                  <div style={{ background: '#0f172a', borderRadius: 4, padding: '7px 9px', fontSize: 12, color: '#a5f3fc', fontFamily: 'monospace', wordBreak: 'break-all' }}>{cfg.buildCmd}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Output Directory</div>
-                  <div style={{ background: '#0f172a', borderRadius: 4, padding: '6px 8px', fontSize: 11, color: '#a5f3fc', fontFamily: 'monospace' }}>{cfg.outputDir}</div>
+                  <div style={{ background: '#0f172a', borderRadius: 4, padding: '7px 9px', fontSize: 12, color: '#a5f3fc', fontFamily: 'monospace', wordBreak: 'break-all' }}>{cfg.outputDir}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {cfg.features.map(f => (
-                  <span key={f} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 10, background: '#1e3a5f', color: '#60a5fa' }}>{f}</span>
+                  <span key={f} style={{ fontSize: 11, padding: '4px 9px', borderRadius: 10, background: '#1e3a5f', color: '#60a5fa' }}>{f}</span>
                 ))}
               </div>
             </div>
 
             {/* Deploy Button & Logs */}
-            <button onClick={runDeploy} style={{ padding: '12px', borderRadius: 8, border: 'none', cursor: 'pointer', background: deployStatus === 'success' ? '#10b981' : '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <button onClick={runDeploy} style={{ padding: '14px 12px', borderRadius: 10, width: '100%', border: 'none', cursor: 'pointer', background: deployStatus === 'success' ? '#10b981' : '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               {deployStatus === 'success' && selectedPlatform === 'navbharat' ? <><CloudCheck size={16} /> Deployed! Deploy Again</> : selectedPlatform === 'navbharat' ? <><Rocket size={16} /> Deploy to NavBharat Hosting</> : <><Terminal size={16} /> Show Deploy Steps</>}
             </button>
 
             {/* Live URL */}
             {liveUrl && (
               <div style={{ ...cardStyle, border: '1px solid #10b981', background: '#052e16' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ minWidth: 0, flex: '1 1 200px' }}>
                     <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 600, marginBottom: 2 }}>🎉 Live URL</div>
-                    <div style={{ fontSize: 12, color: '#86efac', fontFamily: 'monospace' }}>{liveUrl}</div>
+                    <div style={{ fontSize: 12, color: '#86efac', fontFamily: 'monospace', wordBreak: 'break-all', lineHeight: 1.5 }}>{liveUrl}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={copyUrl} style={{ padding: '6px 10px', borderRadius: 5, border: 'none', cursor: 'pointer', background: '#065f46', color: '#4ade80', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button onClick={copyUrl} style={{ padding: '9px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#065f46', color: '#4ade80', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
                       {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied!' : 'Copy'}
                     </button>
-                    <a href={liveUrl} target="_blank" rel="noopener noreferrer" style={{ padding: '6px 10px', borderRadius: 5, border: 'none', cursor: 'pointer', background: '#065f46', color: '#4ade80', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                    <a href={liveUrl} target="_blank" rel="noopener noreferrer" style={{ padding: '9px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#065f46', color: '#4ade80', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, textDecoration: 'none' }}>
                       <ExternalLink size={12} /> Open
                     </a>
                   </div>
@@ -346,7 +346,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
 
         {/* History Tab */}
         {activeTab === 'history' && (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {deployments.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
                 <CloudUpload size={32} style={{ margin: '0 auto 12px' }} />
@@ -364,7 +364,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 11, color: dep.status === 'live' ? '#4ade80' : '#f87171' }}>{dep.status === 'live' ? '● Live' : '● Failed'}</div>
-                    <div style={{ fontSize: 10, color: '#64748b' }}>{dep.duration}s · {new Date(dep.timestamp).toLocaleDateString()}</div>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>{dep.duration}s · {new Date(dep.timestamp).toLocaleDateString()}</div>
                   </div>
                   <a href={dep.url} target="_blank" rel="noopener noreferrer" style={{ color: '#94a3b8', textDecoration: 'none' }}><ExternalLink size={14} /></a>
                 </div>
@@ -375,7 +375,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
 
         {/* Config Tab */}
         {activeTab === 'config' && (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ ...cardStyle }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Shield size={14} color="#f59e0b" /> Environment Variables

@@ -143,33 +143,33 @@ export function CICDPipeline() {
         <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center">
           <Rocket className="w-5 h-5 text-violet-400" />
         </div>
-        <div>
+        <div className="min-w-0">
           <h2 className="font-semibold text-white text-base">CI/CD Pipeline</h2>
-          <p className="text-xs text-white/40">Visual pipeline builder — GitHub Actions, Cloud Build, GitLab CI</p>
+          <p className="text-xs text-white/40 leading-snug">Visual pipeline builder — GitHub Actions, Cloud Build, GitLab CI</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           {/* This is a pipeline BUILDER — the real deliverable is the CI YAML, which your provider
               runs (admin autopsy 2026-07-21). The old "Run Pipeline" button faked pass/fail + console
               logs in the browser; nothing was ever executed. Download the real YAML instead. */}
-          <button onClick={downloadYaml} className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-all">
+          <button onClick={downloadYaml} className="flex items-center gap-1.5 px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-all whitespace-nowrap">
             <Download className="w-4 h-4" /> Download YAML
           </button>
         </div>
       </div>
 
       {/* Sub-header: config */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-white/5 bg-[#161b22] flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-white/40">App:</span>
-          <input className="bg-transparent border-b border-white/20 text-xs text-white px-1 py-0.5 focus:outline-none focus:border-violet-500/50 w-28" value={appName} onChange={e => setAppName(e.target.value)} />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-2.5 border-b border-white/5 bg-[#161b22] sm:flex-wrap">
+        <div className="flex items-center gap-2 flex-1 sm:flex-none min-w-0">
+          <span className="text-[11px] text-white/40 shrink-0">App:</span>
+          <input className="flex-1 sm:flex-none bg-transparent border-b border-white/20 text-sm sm:text-xs text-white px-1 py-1 focus:outline-none focus:border-violet-500/50 sm:w-28 min-w-0" value={appName} onChange={e => setAppName(e.target.value)} />
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-white/40">Env:</span>
-          <input className="bg-transparent border-b border-white/20 text-xs text-white px-1 py-0.5 focus:outline-none focus:border-violet-500/50 w-24" value={envName} onChange={e => setEnvName(e.target.value)} />
+        <div className="flex items-center gap-2 flex-1 sm:flex-none min-w-0">
+          <span className="text-[11px] text-white/40 shrink-0">Env:</span>
+          <input className="flex-1 sm:flex-none bg-transparent border-b border-white/20 text-sm sm:text-xs text-white px-1 py-1 focus:outline-none focus:border-violet-500/50 sm:w-24 min-w-0" value={envName} onChange={e => setEnvName(e.target.value)} />
         </div>
-        <div className="flex gap-1 sm:ml-auto flex-wrap">
+        <div className="flex gap-1.5 sm:ml-auto overflow-x-auto -mx-1 px-1 pb-0.5">
           {(['github', 'cloudbuild', 'gitlab'] as Platform[]).map(p => (
-            <button key={p} onClick={() => setPlatform(p)} className={`text-[10px] px-2.5 py-1 rounded-lg border capitalize transition-all ${platform === p ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-white/10 text-white/30 hover:border-white/20'}`}>
+            <button key={p} onClick={() => setPlatform(p)} className={`shrink-0 text-[11px] px-3 py-1.5 rounded-lg border capitalize whitespace-nowrap transition-all ${platform === p ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-white/10 text-white/30 hover:border-white/20'}`}>
               {p === 'github' ? 'GitHub Actions' : p === 'cloudbuild' ? 'Cloud Build' : 'GitLab CI'}
             </button>
           ))}
@@ -180,8 +180,8 @@ export function CICDPipeline() {
         {/* Pipeline Steps */}
         <div className="w-full md:w-72 flex-shrink-0 max-h-[40vh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-white/5 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
-            <span className="text-[10px] text-white/30 uppercase tracking-wider">Steps ({steps.filter(s => s.enabled).length} active)</span>
-            <button onClick={() => setShowAddStep(!showAddStep)} className="text-[10px] text-violet-400 hover:text-violet-300 flex items-center gap-1">
+            <span className="text-[11px] text-white/30 uppercase tracking-wider">Steps ({steps.filter(s => s.enabled).length} active)</span>
+            <button onClick={() => setShowAddStep(!showAddStep)} className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 py-1">
               <Plus className="w-3 h-3" /> Add
             </button>
           </div>
@@ -192,8 +192,8 @@ export function CICDPipeline() {
                 {STEP_TYPE_OPTIONS.map(o => <option key={o.type} value={o.type}>{o.label}</option>)}
               </select>
               <div className="flex gap-1.5">
-                <button onClick={addStep} className="flex-1 py-1 bg-violet-600 rounded-lg text-[10px]"><Check className="w-3 h-3 inline mr-1" />Add</button>
-                <button onClick={() => setShowAddStep(false)} className="px-2 py-1 bg-white/5 rounded-lg text-[10px] text-white/40"><X className="w-3 h-3" /></button>
+                <button onClick={addStep} className="flex-1 py-2 bg-violet-600 rounded-lg text-[11px]"><Check className="w-3 h-3 inline mr-1" />Add</button>
+                <button onClick={() => setShowAddStep(false)} className="px-3 py-2 bg-white/5 rounded-lg text-[11px] text-white/40"><X className="w-3 h-3" /></button>
               </div>
             </div>
           )}
@@ -223,10 +223,10 @@ export function CICDPipeline() {
                     <Icon className={`w-3.5 h-3.5 shrink-0 ${STEP_COLORS[step.type]}`} />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-white truncate">{step.name}</p>
-                      <p className="text-[9px] text-white/30 truncate font-mono">{step.command}</p>
+                      <p className="text-[10px] text-white/30 truncate font-mono">{step.command}</p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {step.duration && <span className="text-[8px] text-white/20">{(step.duration / 1000).toFixed(1)}s</span>}
+                      {step.duration && <span className="text-[10px] text-white/20">{(step.duration / 1000).toFixed(1)}s</span>}
                       <button onClick={e => { e.stopPropagation(); toggleStep(step.id); }} className={`w-5 h-3 rounded-full transition-all ${step.enabled ? 'bg-violet-500' : 'bg-white/10'}`}>
                         <div className={`w-2.5 h-2.5 bg-white rounded-full shadow transition-transform ${step.enabled ? 'translate-x-2' : 'translate-x-0.5'}`} />
                       </button>
@@ -235,7 +235,7 @@ export function CICDPipeline() {
 
                   {selectedStep === step.id && step.log && (
                     <div className="mt-1 mx-0.5 bg-[#0d1117] rounded-lg p-2 border border-white/5">
-                      <pre className="text-[8px] font-mono text-emerald-300 whitespace-pre-wrap">{step.log}</pre>
+                      <pre className="text-[10px] font-mono text-emerald-300 whitespace-pre-wrap">{step.log}</pre>
                     </div>
                   )}
                 </div>
@@ -258,19 +258,19 @@ export function CICDPipeline() {
               </div>
 
               <div>
-                <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5 block">Step Name</label>
+                <label className="text-[11px] text-white/40 uppercase tracking-wider mb-1.5 block">Step Name</label>
                 <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500/50" value={selectedStepData.name} onChange={e => updateSelected({ name: e.target.value })} />
               </div>
 
               <div>
-                <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5 block">Command</label>
+                <label className="text-[11px] text-white/40 uppercase tracking-wider mb-1.5 block">Command</label>
                 <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-violet-500/50" value={selectedStepData.command} onChange={e => updateSelected({ command: e.target.value })} />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-[10px] text-white/40 uppercase tracking-wider">Environment Variables</label>
-                  <button onClick={addEnvVar} className="text-[10px] text-violet-400 flex items-center gap-0.5"><Plus className="w-3 h-3" /> Add</button>
+                  <label className="text-[11px] text-white/40 uppercase tracking-wider">Environment Variables</label>
+                  <button onClick={addEnvVar} className="text-[11px] text-violet-400 flex items-center gap-0.5"><Plus className="w-3 h-3" /> Add</button>
                 </div>
                 <div className="space-y-1.5">
                   {selectedStepData.envVars.map((env, i) => (
@@ -281,13 +281,13 @@ export function CICDPipeline() {
                       <button onClick={() => removeEnvVar(i)} className="p-1 text-white/20 hover:text-red-400"><X className="w-3 h-3" /></button>
                     </div>
                   ))}
-                  {selectedStepData.envVars.length === 0 && <p className="text-[10px] text-white/20">No env vars. Add with button above.</p>}
+                  {selectedStepData.envVars.length === 0 && <p className="text-[11px] text-white/20">No env vars. Add with button above.</p>}
                 </div>
               </div>
 
               <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
-                <p className="text-[10px] text-amber-300 mb-1.5">⚠️ Security Tip</p>
-                <p className="text-[9px] text-white/40">Keep sensitive values (API keys, passwords) in GitHub Secrets / Secret Manager. Never write them directly in YAML.</p>
+                <p className="text-[11px] text-amber-300 mb-1.5">⚠️ Security Tip</p>
+                <p className="text-[11px] text-white/40 leading-relaxed">Keep sensitive values (API keys, passwords) in GitHub Secrets / Secret Manager. Never write them directly in YAML.</p>
               </div>
             </div>
           ) : (
@@ -298,16 +298,16 @@ export function CICDPipeline() {
                   {platform === 'github' ? '.github/workflows/cicd.yml' : platform === 'cloudbuild' ? 'cloudbuild.yaml' : '.gitlab-ci.yml'}
                 </span>
                 <div className="flex gap-2">
-                  <button onClick={copyYaml} className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-all ${yamlCopied ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-white/10 text-white/40 bg-white/5'}`}>
+                  <button onClick={copyYaml} className={`flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border transition-all ${yamlCopied ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-white/10 text-white/40 bg-white/5'}`}>
                     {yamlCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
                   </button>
-                  <button onClick={downloadYaml} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-white/10 text-white/40 bg-white/5 hover:text-white transition-all">
+                  <button onClick={downloadYaml} className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-white/10 text-white/40 bg-white/5 hover:text-white transition-all">
                     <Download className="w-3 h-3" /> Download
                   </button>
                 </div>
               </div>
               <div className="flex-1 overflow-auto p-4">
-                <pre className="text-[10px] font-mono text-emerald-300 whitespace-pre">{yaml}</pre>
+                <pre className="text-[11px] leading-relaxed font-mono text-emerald-300 whitespace-pre inline-block min-w-full">{yaml}</pre>
               </div>
             </div>
           )}

@@ -173,7 +173,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
   const charCount = editablePrompt.length;
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-gray-300 p-4 md:p-6">
+    <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-gray-300 p-4 md:p-6">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">

@@ -468,7 +468,14 @@ export function ViewPanels({
       {/* Phase 7 — APK Builder */}
       {activeView === 'apk' && (
         <div className="flex-1 h-full overflow-hidden">
-          <APKBuilder generatedCode={generatedCode} appName="NavBharatAI App" />
+          <APKBuilder
+            generatedCode={generatedCode}
+            appName="NavBharatAI App"
+            sessionId={currentProSessionId}
+            githubToken={githubToken}
+            onConnectGitHub={connectGitHub}
+            onMakeIcon={() => toggleTab('imagegen')}
+          />
         </div>
       )}
 

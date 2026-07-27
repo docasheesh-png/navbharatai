@@ -249,7 +249,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
 
   return (
     <div
-      className="flex flex-col lg:flex-row gap-4 p-4 min-h-screen"
+      className="flex flex-col lg:flex-row gap-4 p-4 h-full overflow-y-auto overscroll-contain"
       style={{ backgroundColor: '#0d1117', color: 'rgb(209 213 219)' }}
     >
       {/* LEFT COLUMN */}

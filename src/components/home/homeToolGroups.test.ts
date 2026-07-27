@@ -16,7 +16,14 @@ describe('HOME_TOOL_GROUPS — the builder tools moved from Settings to the Home
     const ids = HOME_TOOL_GROUPS.flatMap((g) => g.items.map((i) => i.id));
     expect(new Set(ids).size).toBe(ids.length);
     // A few of the exact ids the old Settings tiles used — must not drift.
-    expect(ids).toEqual(expect.arrayContaining(['botbuilder', 'imagegen', 'debugger', 'testing', 'figma', 'apk', 'monetize', 'analytics', 'database']));
+    expect(ids).toEqual(expect.arrayContaining(['botbuilder', 'imagegen', 'debugger', 'testing', 'figma', 'apk', 'monetize', 'analytics']));
+  });
+
+  it('offers no second Database doorway — that screen belongs to Settings alone', () => {
+    // The removed tile opened a page whose only content was a link into Settings → Database, which
+    // read as a different database to configure. Two doorways to one screen is the bug.
+    const ids = HOME_TOOL_GROUPS.flatMap((g) => g.items.map((i) => i.id));
+    expect(ids).not.toContain('database');
   });
 
   it('every tool has a non-empty label and an icon component', () => {

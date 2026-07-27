@@ -12,7 +12,7 @@ import type { ComponentType } from 'react';
 import {
   Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2,
   Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, CloudUpload, Search,
-  Package, IndianRupee, Users2, TrendingUp, Database,
+  Package, IndianRupee, Users2, TrendingUp,
 } from 'lucide-react';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
@@ -93,7 +93,9 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       { id: 'whitelabel', label: 'Whitelabel', icon: Palette },
       { id: 'analytics', label: 'Analytics', icon: TrendingUp },
       { id: 'insights', label: 'Insights & Webhooks', icon: TrendingUp },
-      { id: 'database', label: 'Database', icon: Database },
+      // 'database' was REMOVED here (admin 2026-07-27). It opened a screen whose only real content was
+      // a link to Settings → App Settings → Database — a second doorway to the same place, which made
+      // users think there were two different databases to configure. The real screen stays in Settings.
     ],
   },
 ];

@@ -1957,3 +1957,93 @@ describe('import-files GitHub backstop — gating + never-blocks (large-zip-impo
     expect(mb).toBeLessThanOrEqual(50);
   });
 });
+
+// ═══ IMPORT/SURVEY TURN MUST NOT MUTATE THE USER'S FILES (mitrify autopsy 2026-07-27) ═══
+// ROOT CAUSE: the prompt was "Import this app … **Do not change any files yet**", yet the build
+// reported "✅ Done — I changed 2 files in your project": the pre-flight dependency reconcile added
+// `nanoid` to package.json, and the credential-log guard rewrote 8 console lines across 2 files.
+// Both are SIBLINGS of the exact class `shouldRunIntegrityHeal` closed on 2026-07-24 — file-MUTATING
+// passes that never checked `isImportTurn`. Every such pass is now gated; these tests lock all of them
+// so a future pass can't silently reintroduce the violation.
+describe('import/survey turn — every file-mutating pass is gated on !isImportTurn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  // Each entry: the env kill-switch that opens the pass, and what the pass writes.
+  const MUTATING_PASSES: Array<{ flag: string; what: string }> = [
+    { flag: 'AGENTV3_DEP_RECONCILE', what: 'adds missing deps to package.json' },
+    { flag: 'AGENTV3_IMPORT_NORMALIZE', what: 'rewrites import specifiers' },
+    { flag: 'AGENTV3_CSS_IMPORT_GUARD', what: 'injects a stylesheet import into the entry' },
+  ];
+
+  for (const { flag, what } of MUTATING_PASSES) {
+    it(`${flag} (${what}) is guarded by !isImportTurn`, () => {
+      const i = SRC.indexOf(`process.env.${flag} !== 'off'`);
+      expect(i).toBeGreaterThan(-1);
+      // the guard must be on the SAME condition, not merely somewhere later in the block
+      const condition = SRC.slice(i, SRC.indexOf('{', i));
+      expect(condition).toContain('!isImportTurn');
+    });
+  }
+
+  it('the credential-log guard DETECTS on an import turn but writes nothing', () => {
+    const i = SRC.indexOf("process.env.AGENTV3_CRED_LOG_GUARD !== 'off'");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 2200);
+    // it branches on isImportTurn...
+    expect(block).toContain('if (isImportTurn)');
+    // ...and the import-turn branch reports honestly instead of redacting
+    const importBranch = block.slice(block.indexOf('if (isImportTurn)'), block.indexOf('} else {'));
+    expect(importBranch).toContain('COMPLIANCE_LOG_LEAK_FOUND');
+    expect(importBranch).toContain('NOT changed');
+    expect(importBranch).not.toContain('actuator.writeFile'); // the whole point: no mutation
+  });
+
+  it('integrity FINDINGS are still recorded on an import turn (advisory, never hidden)', () => {
+    // Honesty half of the fix: we gate the WRITES, never the reporting.
+    expect(SRC).toContain('const obs = (message: string) => importTurnObservation(isImportTurn, message);');
+    expect(SRC).toContain("code: 'INTEGRITY_UNUSED_DEP', ...obs(");
+    expect(SRC).toContain("code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(");
+  });
+
+  it('an imported repo names its own mirror repo (no instruction-shaped repo names)', () => {
+    expect(SRC).toContain('readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl)');
+  });
+});
+
+// CENSUS TRIPWIRE — the invariant, not just today's four instances.
+//
+// The 2026-07-24 autopsy gated ONE mutating pass; three siblings stayed open and two of them fired
+// again on 2026-07-27, because nothing forced a NEW pass to consider the read-only turn. Per-pass
+// tests (above) lock the four we know about; this locks the CLASS: if anyone adds another writer to
+// `writtenFiles`, this fails and makes them prove the import-turn case was considered.
+//
+// `writtenFiles` is the shared invariant three separate guarantees key off — the reviewer skip
+// (`writtenFiles.size > 0`), the summary's honest "I analyzed your project — no files were changed"
+// (`changedFiles === 0`), and the billing/artifact checks. A pass that writes to it on a survey turn
+// silently breaks all three at once, which is exactly what shipped.
+describe('writtenFiles census — a new writer must consider the read-only (import/survey) turn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  it('has exactly the audited set of writtenFiles.set call sites', () => {
+    const count = (SRC.match(/writtenFiles\.set\(/g) ?? []).length;
+    // Audited 2026-07-27 — each site is one of:
+    //   1× the AGENT'S OWN tool write (onFileWrite) — deliberately NOT gated: if the model writes a
+    //      file, the report must honestly say so; gating it would make the summary lie.
+    //   1× one-shot fast lane import-path autofix — enclosing lane is already `&& !isImportTurn`.
+    //   3× integrity passes (import-normalize / css-guard / cred-log) — gated by this change.
+    //   3× post-build artifact passes (tests / index.html / scaffold) — gated on `expectsArtifacts`,
+    //      which is false on every import turn.
+    expect(count).toBe(8);
+  });
+
+  it('the reviewer still keys off writtenFiles.size (the guard the rogue writes defeated)', () => {
+    // If this ever stops being the gate, the "no reviewer on an analysis-only turn" guarantee — and
+    // the fake "Build Review (88/100)" over a user's own app — needs re-deriving from scratch.
+    expect(SRC).toContain('const reviewerAllowed = writtenFiles.size > 0');
+  });
+
+  it('the build summary still reports honestly from writtenFiles.size', () => {
+    // ProjectSummary picks "I analyzed your project — no files were changed" on changedFiles === 0.
+    expect(SRC).toContain('changedFiles: writtenFiles.size');
+  });
+});

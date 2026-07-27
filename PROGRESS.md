@@ -22211,3 +22211,174 @@ this session can verify.
 
 Also merged this session: PR #1899 (CLAUDE.md env registry — the three Nav App Store keys the admin set
 in Cloud Run), CI green.
+
+### 2026-07-27 (cont.) — FORENSIC AUTOPSY: mitrify import/survey build (buildId 321f4f6c, ok:true)
+### "Do not change any files yet" — and the engine changed 2 files anyway
+
+Admin sent a real v5.0 build report. Full five-bucket ledger per the fifth absolute rule, then DNA-level
+fixes for every item (rule 4's six-step method + the Step-5 50/50 law).
+
+**THE PROMPT:** *"Import this app from my GitHub repository and give me a short survey of what it is and
+how it is structured. **Do not change any files yet.**"*
+
+#### Step 1 — ITEMIZED LEDGER (61 events, 17 warnings, 14 counted "unresolved", 0 errors, ok:true)
+
+**✅ Self-healed (3)** — and per the 50/50 law each is a RED FLAG, not a win:
+1. `nanoid` added to package.json by the pre-flight dep reconcile. *Why did it need to heal at all?* It
+   didn't — this was an import turn; nothing needed to install. **The heal itself was the bug.**
+2. 8 credential-leaking console logs redacted across 2 files (`client/src/lib/firebase.ts`,
+   `server/routes.ts`). Real finding — but on the USER'S OWN repo, on a "don't change" turn.
+3. Server-side zipball import succeeded (80.3s) after the instant-connect tree. Genuinely good.
+
+**🔀 Worked around / alternative used (1)**
+4. GLM 429s → 8 provider fallbacks in 3 bursts (2+2+4) inside ~30s. Delivered via GLM:6 / KIMI:1, so the
+   ladder held — but the retries are deferred debt, not a clean run.
+
+**⏭️ Skipped / ignored (1)**
+5. Own-repo storage did NOT engage even though the user owns `aashishcpmt093-ui/mitrify` and imported it
+   by URL. The turn fell to MIRROR mode ("this build will be saved to <mirror>") — so edits would land in
+   a throwaway copy rather than their real repo.
+
+**❌ Still broken / shipped imperfect (4)** — the urgent ones:
+6. **INSTRUCTION VIOLATION.** "✅ Done — I changed 2 files in your project" on a turn that said *do not
+   change any files*. Two independent unguarded passes did it (items 1 and 2 above).
+7. **GARBAGE REPO NAME.** A permanent repo was created in the user's real GitHub account named
+   `import-this-app-from-my-github-repositor-10pm-270726-609c45` — for an app called **mitrify**.
+8. **FALSE "14 UNRESOLVED PROBLEMS"** on a successful survey. 13 were `INTEGRITY_UNUSED_DEP` about the
+   user's own dependencies; the 14th a focus-conflict in their own code. None were our failures.
+9. **FALSE ROOT CAUSE.** The report's headline `rootCause` was `"@hookform/resolvers" is declared … but no
+   project file imports it`. Worse: it is probably **wrong** — the scan saw 165 of the repo's 316 files
+   (binaries/oversize dropped by design), and `date-fns` / `next-themes` / `framer-motion` are standard
+   shadcn/ui deps a complete scan would have found used. The analyzer asserted certainty its input could
+   not support.
+
+**🥵 Struggle points (2)**
+10. ~7.5 min wall-clock for a READ-ONLY survey (4 heartbeats before the agent even started surveying;
+    80s of it in the zipball fetch).
+11. The reviewer re-surveyed the app from scratch after the architect had already surveyed it — duplicated
+    ~35s of read_file/glob work and produced a second, near-identical survey.
+
+#### Step 2 — THE MISSING SUBSYSTEM
+
+**There is no single enforced notion of a READ-ONLY turn.** `isImportTurn` existed, but every
+file-mutating pass had to remember to check it *individually* — so the guarantee was convention, not
+architecture. The 2026-07-24 mitrify autopsy closed exactly ONE of these passes
+(`shouldRunIntegrityHeal`); three more siblings were left open and two of them fired this time. That is
+the textbook signature of an instance-fix instead of a class-fix, and it is why the SAME bug came back
+three days later on the SAME app.
+
+#### Step 3 — DNA-LEVEL FIXES (all shipped in this change)
+
+- **Gated every remaining file-mutating pass on `!isImportTurn`** (the class, not the instance):
+  `AGENTV3_DEP_RECONCILE` (wrote package.json), `AGENTV3_IMPORT_NORMALIZE` (rewrote import specifiers),
+  `AGENTV3_CSS_IMPORT_GUARD` (injected stylesheet imports), plus the ADR-markdown writer (an
+  "architecture decision" for a turn that decided nothing). **Hunted the siblings:** audited every
+  `actuator.writeFile` in the post-build region — the remaining three are already gated on
+  `expectsArtifacts`, which is false on an import turn.
+- **Credential-log guard now DETECTS without mutating on an import turn** — a real security finding on
+  someone's repo is a *report*, not a licence to edit their code. New honest code
+  `COMPLIANCE_LOG_LEAK_FOUND`: *"NOT changed — you asked me not to modify files on this turn. Ask me to
+  fix them and I will redact every one."* The next real edit turn redacts as before.
+- **`readableAppNameForRepo()` (pure + tested)** — an imported repo names its own mirror. `mitrify` beats
+  a title derived from instruction text. Test locks STABILITY too: two different turn prompts must still
+  yield the SAME repo name, or `ensureRepo` would spawn a repo per turn.
+- **`importTurnObservation()` (pure + tested)** — on an import turn every integrity finding is recorded
+  as an honest ADVISORY, prefixed *"[observation about your existing code — nothing was changed]"* and
+  suffixed with the real caveat *"if part of the repo was too large to import, this may not be
+  accurate."* They still appear in full (we hide nothing) but can no longer be counted as OUR unresolved
+  defects or promoted to `rootCause`. **Fixed the system's honesty (rule-5), not just the code.**
+- **Regression tests (17 new)** encode the exact failure: static-source tests assert each pass carries
+  `!isImportTurn` *on its own condition*; `deriveRootCause` tests assert an advisory import finding can
+  never become the headline while the same finding on a real build turn still does. Each was verified to
+  genuinely FAIL against the pre-fix code (temporarily reverted one gate to prove it — not a tautology).
+
+#### Step 5 — THE 50/50 LAW: why did each arise AT ALL?
+
+- ❌ items 6/8/9: because "read-only turn" was a convention re-implemented per call site instead of an
+  invariant enforced where the data enters. Now every mutating pass carries the gate and a test proves it.
+- ✅ item 1 (`nanoid` heal): the deeper answer is that **no heal should have run at all**; the fix makes
+  the heal dead code on this turn rather than making it heal better.
+- ✅ item 2: same — detection kept, mutation removed.
+
+#### OPEN ROOT CAUSES (rule 6 — honestly recorded, NOT silently patched)
+
+- **🔀 item 4 (GLM 429 storm):** provider-side quota. `AGENTV3_RATE_PACER` is on per CLAUDE.md, yet 8
+  fallbacks still fired in ~30s. Needs real pacer telemetry before changing anything — guessing at
+  concurrency numbers from one report would be a surface patch. NOT fixed here.
+- **⏭️ item 5 (own-repo mode didn't engage):** most likely `AGENTV3_OWN_REPO_STORAGE` is unset in Cloud
+  Run (it is NOT in CLAUDE.md's verified live-key registry). **Admin check needed** — Claude cannot read
+  Cloud Run. Until it is on, a user importing their OWN repo still gets a mirror, which also blocks the
+  new "I host it myself" path from ever activating.
+- **🥵 items 10/11 (7.5-min survey, duplicated reviewer survey):** real inefficiency. The reviewer
+  re-reading an app the architect just surveyed is a genuine design question (independence vs. cost), not
+  a bug to patch blind. Deferred deliberately rather than half-fixed.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
+
+#### CORRECTION to the ledger above (same session, found while verifying the fix)
+
+I under-reported my own fix and wrongly deferred three ledger items. Recording the correction rather than
+editing the entry above (append-only), because the reasoning matters more than the tidy version.
+
+**Struggle points 10 + 11 are NOT a separate design question — they are DOWNSTREAM SYMPTOMS of the same
+root cause.** The reviewer is already gated on `writtenFiles.size > 0`, with an explicit comment saying
+exactly what should have happened: *"ANALYSIS-ONLY turns get NO reviewer … on a survey/import turn where
+ZERO files were written it has nothing to verify."* That guard was correct and it was DEFEATED by the two
+rogue mutating passes: the credential-log guard did `writtenFiles.set(...)` for 2 files, so
+`writtenFiles.size` became 2, so `reviewerAllowed` flipped true, so a full reviewer pass ran on a turn
+that built nothing. Verified the ordering in source — `AGENTV3_DEP_RECONCILE` (line ~6117) and
+`AGENTV3_CRED_LOG_GUARD` (~7999) both execute BEFORE the reviewer gate (~8578).
+
+So with the gates shipped in this change, a survey turn now gets `writtenFiles.size === 0`, and therefore:
+- **no reviewer pass** → item 11's duplicated ~35s survey disappears entirely;
+- **no fake "⚠️ Build Review (88/100)"** → we stop scoring the user's pre-existing app as if it were our
+  build output (an honesty defect I had not even listed);
+- **a whole LLM pass is not spent** → and since the reviewer's own calls are where 6 of the 8 GLM 429s
+  landed (timestamps 1785171534670 and 1785171547541 both sit inside the reviewer's read_file/glob run,
+  agent=reviewer), most of item 4's 🔀 429 storm was self-inflicted by work that should never have run.
+  Only the first burst (2 fallbacks, ts 1785171518860) happened during the legitimate architect survey.
+
+The same causal chain also restores a THIRD pre-existing guarantee I hadn't credited: `ProjectSummary`
+already had the honest branch *"🔍 I analyzed your project — no files were changed"* (built by the
+2026-07-05 report autopsy), selected by `changedFiles === 0` where `changedFiles: writtenFiles.size`. The
+rogue writes forced it down the `editRun` branch — which is literally where "✅ Done — I changed 2 files
+in your project" came from. The honest message was already written; it was being silently overridden.
+
+**The lesson, and it is the real one:** three independent, correctly-built guards (reviewer skip, summary
+honesty, and the 2026-07-24 integrity-heal gate) all keyed off state that an unrelated pass was free to
+corrupt. Gating each consumer was never going to be enough — `writtenFiles` is the shared invariant, and
+nothing stopped a non-build pass from writing to it. That is why the fix had to be "no mutation on a
+read-only turn" at the SOURCE, not "handle mutation better" at each reader.
+
+Revised open root causes: only TWO remain genuinely open — the residual GLM 429s during the architect's
+own survey (2 of 8, provider-side; still needs real pacer telemetry, still not guessed at), and own-repo
+storage not engaging (admin must confirm `AGENTV3_OWN_REPO_STORAGE` in Cloud Run). Items 10/11 and most
+of item 4 are CLOSED by this change, not deferred.
+
+#### Audit + tripwire (same session) — verifying the claim, then locking the CLASS
+
+Before telling the admin "the reviewer can no longer run on a survey turn", verified it instead of
+assuming. Enumerated all 8 `writtenFiles.set(` call sites and traced each one's reachability on an
+import turn:
+- **1× the agent's OWN tool write** (`onFileWrite`) — deliberately left UNGATED. If the model itself
+  writes a file, the report must honestly say so; gating this would make the summary lie about the
+  model's behaviour. The bug was platform passes writing without the model deciding to, not this.
+- **1× one-shot fast-lane import-path autofix** — its enclosing lane (L7070) already carries
+  `&& !isImportTurn`.
+- **3× integrity passes** — gated by this change.
+- **3× post-build artifact passes** (tests / index.html / scaffold) — gated on `expectsArtifacts`.
+
+Claim confirmed. But the audit exposed the thing that actually matters: **nothing forces the NEXT pass
+to consider this.** That is precisely how the 2026-07-24 fix regressed within three days — it gated the
+one pass in front of it and left no mechanism to catch the fourth, fifth, sixth. Per-instance tests
+cannot close a per-instance failure mode.
+
+So added a CENSUS TRIPWIRE test: it asserts the exact count of `writtenFiles.set(` call sites, with the
+audit of each recorded inline. Adding a new writer fails the suite and forces the author to state which
+category it falls into and whether the read-only turn was considered. It also pins the two consumers the
+rogue writes silently broke (`reviewerAllowed = writtenFiles.size > 0`, `changedFiles: writtenFiles.size`)
+so a refactor that decouples them has to be deliberate rather than accidental.
+
+A census test is a blunt instrument and will occasionally fail on a legitimate addition — that is the
+point. The cost is one deliberate line of thought per new writer; the alternative is what this autopsy
+documents: the same class of bug returning on the same app three days after being "fixed".

@@ -72,7 +72,7 @@ export { makeWebSearch, WebSearch, formatSearchResults, parseDuckDuckGo } from '
 export type { WebSearchFn, SearchResult } from './WebSearch';
 export { makeDeploy, FirebaseHostingDeployer, makeChannelId } from './Deployment';
 export type { DeployFn } from './Deployment';
-export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, githubStorageActive, repoNameForProject } from './GitHubAppClient';
+export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, githubStorageActive, repoNameForProject, readableAppNameForRepo } from './GitHubAppClient';
 export type { GitHubConfig, RepoInfo, CiVerdict, PullRequestInfo } from './GitHubAppClient';
 export { GitRepoSync, sanitizeRepoUrl } from './GitRepoSync';
 export type { HydrateResult, PushResult } from './GitRepoSync';

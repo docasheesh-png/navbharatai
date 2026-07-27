@@ -118,6 +118,32 @@ export function repoNameForProject(
   return `app-${u}-${p}`.slice(0, 90);
 }
 
+/**
+ * The READABLE app name to build a mirror repo name from.
+ *
+ * ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): the readable name came only from
+ * `deriveTitle(prompt)`. On an IMPORT turn the prompt is an instruction, not an app name — "Import this
+ * app from my GitHub repository and give me a short survey…" — so the user's mirror repo was created as
+ * `import-this-app-from-my-github-repositor-10pm-270726-609c45` for an app literally called **mitrify**.
+ * That is a real, permanent artifact in the user's own GitHub account, and no amount of later renaming
+ * un-confuses it. When this turn imports a repo, that repo's OWN name is the single best, most stable
+ * identity available — strictly better than any title derived from instruction text. So: imported repo
+ * name wins; otherwise fall back to the stored/derived title exactly as before.
+ *
+ * Deliberately ignores a title that is merely an instruction echo when a real repo name exists — an
+ * imported project's identity is the repo, not the sentence that asked for it. PURE + tested.
+ */
+export function readableAppNameForRepo(opts: {
+  /** `{ owner, repo }` of the repo being imported this turn, if any. */
+  importedRepo?: { owner: string; repo: string } | null;
+  /** The build's stored/derived title (today's source). */
+  fallbackTitle: string;
+}): string {
+  const repo = opts.importedRepo?.repo;
+  if (repo && slugSegment(repo)) return repo;
+  return opts.fallbackTitle;
+}
+
 function base64url(input: crypto.BinaryLike): string {
   return Buffer.from(input as Buffer).toString('base64url');
 }

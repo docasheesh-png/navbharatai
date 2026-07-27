@@ -49,6 +49,7 @@ import {
   mergeViaPullRequest,
   planRevert,
   repoNameForProject,
+  readableAppNameForRepo,
   resolveStorageTarget,
   ownRepoStorageEnabled,
   parseGitHubRepo,
@@ -131,7 +132,7 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -5758,6 +5759,11 @@ export function registerAgentV3Routes(app: Express): void {
               if (typeof idRec.createdAt === 'number' && idRec.createdAt > 0) readableCreatedAt = idRec.createdAt;
             }
           } catch { /* readable-name identity lookup is best-effort — prompt + now is a valid fallback */ }
+          // IMPORTED REPO NAME WINS (mitrify autopsy 2026-07-27): on an import turn the prompt/title is an
+          // INSTRUCTION ("Import this app … and give me a short survey"), so the mirror repo was named
+          // `import-this-app-from-my-github-repositor-…` for an app called `mitrify`. The imported repo's
+          // own name is the better, equally-stable identity. See readableAppNameForRepo (pure + tested).
+          readableAppName = readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl), fallbackTitle: readableAppName });
           const repoName = repoNameForProject(userId, projectId, { appName: readableAppName, createdAtMs: readableCreatedAt });
           const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
           // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
@@ -6103,7 +6109,12 @@ export function registerAgentV3Routes(app: Express): void {
           // holds the full durable map + live sandbox map in memory, so reconciling here is free —
           // deterministic, before the dev server or any model sees the workspace. Same kill switch
           // as the readiness-pass reconcile (AGENTV3_DEP_RECONCILE=off); readiness still backstops.
-          if (process.env.AGENTV3_DEP_RECONCILE !== 'off') {
+          // ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): this pre-flight reconcile
+          // mutated package.json on a turn whose prompt was "Import this app … Do not change any files
+          // yet" — a direct instruction violation. It is a SIBLING of the exact bug `shouldRunIntegrityHeal`
+          // was built to close on 2026-07-24 (same class: a file-mutating pass that didn't check
+          // isImportTurn) — that fix covered the integrity self-heal but not this pass. Gated the same way.
+          if (process.env.AGENTV3_DEP_RECONCILE !== 'off' && !isImportTurn) {
             try {
               const union = { ...saved, ...existing.files, ...plan.restore };
               // FRAMEWORK-DRIFT CORRECTION (PulseBoard autopsy 2026-07-20): the `framework` label is set
@@ -7937,7 +7948,12 @@ export function registerAgentV3Routes(app: Express): void {
         // module TWICE → two React contexts → "useTheme must be used within a ThemeProvider" crash that
         // only the user's preview showed). Rewrite every project import to ONE canonical relative form.
         // Kill: AGENTV3_IMPORT_NORMALIZE=off.
-        if (process.env.AGENTV3_IMPORT_NORMALIZE !== 'off') {
+        // ROOT CAUSE (mitrify import autopsy 2026-07-27): this and the two passes below mutated files on
+        // an import/survey-only turn ("do not change any files yet") — the same instruction-violation
+        // class `shouldRunIntegrityHeal` closed for the LLM self-heal on 2026-07-24, never applied to
+        // these deterministic siblings. Advisory findings (analyzeProjectIntegrity below) still always
+        // run and get recorded — only the file-WRITING passes are gated on !isImportTurn.
+        if (process.env.AGENTV3_IMPORT_NORMALIZE !== 'off' && !isImportTurn) {
           const norm = normalizeImportSpecifiers(integrityFiles);
           const touched = new Set(norm.rewrites.map((r) => r.file));
           for (const f of touched) {
@@ -7955,7 +7971,7 @@ export function registerAgentV3Routes(app: Express): void {
         // raw unstyled HTML because src/index.css was imported by nothing). When the global sheet can be
         // wired by construction (inject `import './index.css'` into the entry), do it directly — no LLM,
         // no flag: this is the same class of certainty as the HTML-entry guard. Kill: AGENTV3_CSS_IMPORT_GUARD=off.
-        if (process.env.AGENTV3_CSS_IMPORT_GUARD !== 'off') {
+        if (process.env.AGENTV3_CSS_IMPORT_GUARD !== 'off' && !isImportTurn) {
           const wired = injectGlobalStylesheetImport(integrityFiles);
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
@@ -7975,18 +7991,30 @@ export function registerAgentV3Routes(app: Express): void {
         // defense-in-depth: it also cleans the SHIPPED app on paths where the mandatory gate is skipped
         // (fast-lane type-checked, salvage, edit builds). Idempotent, so it's a no-op after the in-gate
         // heal already ran. Provably non-breaking. Kill: AGENTV3_CRED_LOG_GUARD=off.
+        // IMPORT-TURN EXCEPTION (mitrify autopsy 2026-07-27): on a "do not change any files" import/survey
+        // turn this pass rewrote 8 lines across 2 of the USER'S OWN files. A credential-in-logs finding on
+        // someone else's imported repo is REAL and must still be surfaced — but surfacing it is a REPORT,
+        // not a licence to edit their code. So on an import turn we DETECT and record it as an honest
+        // advisory warning, and mutate nothing; the next real edit/build turn redacts it as usual.
         if (process.env.AGENTV3_CRED_LOG_GUARD !== 'off') {
           const redacted = redactCredentialLogs(integrityFiles);
-          for (const r of redacted.redactions) {
-            const newContent = redacted.files[r.file];
-            if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
-            integrityFiles[r.file] = newContent;
-            writtenFiles.set(r.file, newContent);
-            try { await actuator.writeFile(workspaceId, r.file, newContent); } catch { /* sandbox write best-effort — the store copy is fixed */ }
-          }
-          if (redacted.redactions.length > 0) {
-            const files = [...new Set(redacted.redactions.map((r) => r.file))];
-            buildDiag.record({ phase: 'build', severity: 'info', code: 'COMPLIANCE_LOG_REDACTED', message: `Redacted ${redacted.redactions.length} console log(s) that leaked a credential/token (would have hard-blocked the readiness gate) across ${files.length} file(s).`, autoResolved: true, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
+          if (isImportTurn) {
+            if (redacted.redactions.length > 0) {
+              const files = [...new Set(redacted.redactions.map((r) => r.file))];
+              buildDiag.record({ phase: 'build', severity: 'warning', code: 'COMPLIANCE_LOG_LEAK_FOUND', message: `${redacted.redactions.length} console log(s) across ${files.length} file(s) print a credential/token. NOT changed — you asked me not to modify files on this turn. Ask me to fix them and I will redact every one.`, autoResolved: false, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
+            }
+          } else {
+            for (const r of redacted.redactions) {
+              const newContent = redacted.files[r.file];
+              if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
+              integrityFiles[r.file] = newContent;
+              writtenFiles.set(r.file, newContent);
+              try { await actuator.writeFile(workspaceId, r.file, newContent); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+            }
+            if (redacted.redactions.length > 0) {
+              const files = [...new Set(redacted.redactions.map((r) => r.file))];
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'COMPLIANCE_LOG_REDACTED', message: `Redacted ${redacted.redactions.length} console log(s) that leaked a credential/token (would have hard-blocked the readiness gate) across ${files.length} file(s).`, autoResolved: true, detail: redacted.redactions.slice(0, 10).map((r) => `${r.file}:${r.line}`).join('; ') });
+            }
           }
         }
         const integrity = analyzeProjectIntegrity(integrityFiles);
@@ -7994,33 +8022,40 @@ export function registerAgentV3Routes(app: Express): void {
         // benign; ES modules tolerate them and type-only cycles are harmless). Surfaced so the
         // reviewer/repair pass and the admin diagnostics can see a genuine runtime-hazard loop; never
         // auto-"fixed" because breaking a cycle can change behaviour.
+        // IMPORT-TURN HONESTY (mitrify autopsy 2026-07-27): on an import/survey turn every finding below
+        // is an OBSERVATION about the user's pre-existing repo, computed from a knowingly PARTIAL file map
+        // (binaries/oversize files are dropped by design). `importTurnObservation` records those as honest
+        // ADVISORY notes so they can never be counted as OUR unresolved defects or become the build's
+        // rootCause — which is exactly what made a successful survey report "14 unresolved problems" with
+        // an unused-dependency hint as its headline cause. Unchanged on a real build/edit turn.
+        const obs = (message: string) => importTurnObservation(isImportTurn, message);
         for (const c of findCircularDependencies(integrityFiles)) {
           const loop = c.cycle.length === 1
             ? `${c.cycle[0]} imports itself`
             : `${c.cycle.join(' → ')} → ${c.cycle[0]}`;
-          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_CIRCULAR_DEP', message: `Circular import dependency: ${loop}. Many JS/TS cycles are harmless; if this one breaks at runtime (undefined-on-import), break the loop by moving the shared symbol into a third module both sides import.`, autoResolved: false });
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_CIRCULAR_DEP', ...obs(`Circular import dependency: ${loop}. Many JS/TS cycles are harmless; if this one breaks at runtime (undefined-on-import), break the loop by moving the shared symbol into a third module both sides import.`) });
         }
         // Advisory-only unused-dependency detection (detection, NOT pruning — a declared dep can be
         // used via config/CLI/runtime, so removing it is unsafe; never blocks/fails a build). Only
         // runtime "dependencies" are inspected, with a conservative implicit-use allowlist.
         for (const u of findUnusedDependencies(integrityFiles)) {
-          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', message: `"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`, autoResolved: false });
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...obs(`"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`) });
         }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', message: `${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(`${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`) });
           }
           for (const d of integrity.duplicateStylesheets) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', message: `"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', ...obs(`"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`) });
           }
           for (const o of integrity.orphanStylesheets) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', message: `"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', ...obs(`"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`) });
           }
           for (const e of integrity.duplicateEntryPoints) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_ENTRY', message: `${e.entries.length} files each mount a React root: ${e.entries.join(', ')}. The preview boots one; the others are dead and can serve the wrong app — keep the single served entry and remove the extra root mount(s).`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_ENTRY', ...obs(`${e.entries.length} files each mount a React root: ${e.entries.join(', ')}. The preview boots one; the others are dead and can serve the wrong app — keep the single served entry and remove the extra root mount(s).`) });
           }
           for (const d of integrity.duplicateComponentModules) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_MODULE', message: `"${d.module}" exists in ${d.copies.length} places across different convention roots: ${d.copies.join(', ')}. Their interfaces drift and break the build (TaskForge autopsy). Keep the copy the app's entry imports; make each other copy a re-export stub from it (never delete the directory — governance refuses that).`, autoResolved: false });
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_MODULE', ...obs(`"${d.module}" exists in ${d.copies.length} places across different convention roots: ${d.copies.join(', ')}. Their interfaces drift and break the build (TaskForge autopsy). Keep the copy the app's entry imports; make each other copy a re-export stub from it (never delete the directory — governance refuses that).`) });
           }
           // Bounded LLM self-heal (flag-gated, default OFF). Never blocks or fails the build — a heal
           // that can't fix leaves the honest warnings above and the app still ships. NEVER on an
@@ -8766,7 +8801,11 @@ export function registerAgentV3Routes(app: Express): void {
       // a numbered/dated ADR, persist it per-project, and drop the markdown into the workspace so the
       // decision is both durable (read back into the next build above) and visible to the user. A
       // no-change rebuild appends nothing (stackChanged guard). Best-effort — never affects the outcome.
-      if (result.ok && userId && writtenFiles.size > 0) {
+      // NEVER on an import/survey turn (mitrify autopsy 2026-07-27): an "architecture decision" for a turn
+      // that decided nothing is meaningless, and writing ADR markdown into a repo the user asked us not to
+      // touch is the same instruction violation the gates above close. Today `writtenFiles` is empty on a
+      // survey turn so this could not fire — the gate makes that safety explicit instead of incidental.
+      if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn) {
         (async () => {
           try {
             const rec = await adrStore.record(userId, workspaceId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString());

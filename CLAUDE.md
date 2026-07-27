@@ -368,6 +368,24 @@ the code (it is actually read somewhere) on 2026-07-11.
   in `src/server/sonic/` + `src/components/sonic/` + a `/sonic` branch in `src/main.tsx`; deleting those
   removes it entirely. NOTE: the AWS keys belong to a dedicated IAM user (`navbharatai-sonic`, Bedrock
   scope) and are NOT the AWS Activate/Free-tier billing account — this is a separate, revocable credential.
+- **Nav App Store (user-published Android apps, admin 2026-07-27):** `NAV_STORE_BUCKET`
+  (= `navbharatai-appstore-1`, a Cloud Storage bucket in `gen-lang-client-0866594388` — the APK BYTES
+  live here because an app is 5–50 MB and a Firestore doc caps at 1 MB; the store also falls back to
+  `FIREBASE_STORAGE_BUCKET` if this is unset), `VIRUSTOTAL_API_KEY` (malware scanning, ~70 engines),
+  `NAV_STORE_ADMINS` (= `aashishcpmt09@gmail.com`; comma-separated. Falls back to `AGENTV3_FREE_LIST`
+  when unset, so the admin was already a reviewer before this was set). All three set in Cloud Run
+  2026-07-27.
+  ⚠️ **THE STORE'S SAFETY MODEL IS CODE, NOT CONFIG — do not weaken it without admin sign-off.** Every
+  upload is inspected (must be a genuinely SIGNED apk), scanned, and lands as `pending`. NOTHING in
+  the codebase can reach `approved` except an admin explicitly approving it, because malware built for
+  one campaign is routinely unknown to every engine on the day it ships. **No scan ⇒ no publication**:
+  a missing key, a rate limit, an oversized file or a timeout all BLOCK, and must never fall back to
+  publishing unscanned. Rejecting or removing an app DELETES its bytes, so a takedown is real.
+  ⚠️ **OPEN LICENSING ITEM (raised with the admin 2026-07-27):** VirusTotal's FREE/public API is, by
+  their terms, not for use in a commercial product — and NavBharatAI is one. The free tier is also
+  capped (~4 req/min, 500/day). Fine for testing and the first users; before the store carries real
+  traffic this needs either a VirusTotal paid plan or another scanner (e.g. MetaDefender). Recorded
+  here as an open item rather than left silent.
 
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`

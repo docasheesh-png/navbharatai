@@ -99,10 +99,19 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, storeKey]);
 
+  // ROOT-CAUSE FIX (sibling of the same bug in AgentV3Panel.tsx, admin 2026-07-26): a file over the
+  // limit used to vanish here with no feedback at all — the same silent-drop bug class. Now the user
+  // is told exactly which file was rejected and why, instead of wondering where their attachment went.
   const addFiles = (list: FileList | File[] | null) => {
     if (!list) return;
-    const incoming = Array.from(list).filter((f) => f.size <= MAX_FILE_BYTES);
-    setFiles((prev) => [...prev, ...incoming].slice(0, MAX_FILES));
+    const incoming = Array.from(list);
+    const tooBig = incoming.filter((f) => f.size > MAX_FILE_BYTES);
+    const allowed = incoming.filter((f) => f.size <= MAX_FILE_BYTES);
+    if (tooBig.length > 0) {
+      const names = tooBig.map((f) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+      setMessages((m) => [...m, { role: 'assistant', content: `⚠️ File too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB): ${names}` }]);
+    }
+    if (allowed.length > 0) setFiles((prev) => [...prev, ...allowed].slice(0, MAX_FILES));
   };
 
   const send = async (text?: string) => {

@@ -79,7 +79,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       { id: 'cloudeploy', label: 'Multi-Cloud', icon: CloudUpload },
       { id: 'domain', label: 'Custom Domain', icon: Globe },
       { id: 'seo', label: 'SEO Optimizer', icon: Search },
-      { id: 'appstore', label: 'App Store', icon: Package },
+      { id: 'appstore', label: 'Nav App Store', icon: Package },
     ],
   },
   {

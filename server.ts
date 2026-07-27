@@ -51,6 +51,7 @@ import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
 import { registerMinifyRoutes } from './src/server/routes/minify';
 import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
 import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
+import { registerNavStoreRoutes } from './src/server/routes/navStore';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
 // import { registerAppmakerRoutes } from './src/server/routes/appmaker';
@@ -544,6 +545,10 @@ setInterval(() => {
   // "Set up my app for the stores" — assembles a user's v5 app into a GitHub repo whose workflows
   // build a genuine signed .aab/.ipa on GitHub's runners. See routes/mobileSetup.ts for who does what.
   registerMobileSetupRoutes(app);
+
+  // Nav App Store — user-published Android apps. Every upload is inspected and malware-scanned, and
+  // NOTHING becomes public without an explicit admin approval. See routes/navStore.ts.
+  registerNavStoreRoutes(app);
 
   // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
   registerAuditRoutes(app);

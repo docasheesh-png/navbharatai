@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, RotateCcw, Save, Check, X, Loader2, History, ChevronDown, FolderOpen } from 'lucide-react';
 import { filesHaveRealContent } from '../../lib/workspaceSource';
+import { authedHeaders } from '../../App';
 
 // Code Versioning — "Time Machine" (admin 2026-07-24): a simple, mobile-first way for a NON-technical
 // user to go back to an earlier version of their app. It reads the DURABLE, cross-device build-history
@@ -62,7 +63,9 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
     let live = true;
     (async () => {
       try {
-        const res = await fetch('/api/versioning/apps');
+        // The route resolves the user from a Bearer token; without one it can only answer "no apps",
+        // so the dropdown was permanently empty. Found while wiring the same list into the Minifier.
+        const res = await fetch('/api/versioning/apps', { headers: await authedHeaders() });
         if (!res.ok) return;
         const data = await res.json().catch(() => null);
         if (live && data && Array.isArray(data.apps)) setApps(data.apps as AppOption[]);

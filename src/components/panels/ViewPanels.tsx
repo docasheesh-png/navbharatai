@@ -503,7 +503,7 @@ export function ViewPanels({
       {/* Phase 8 — Code Minifier */}
       {activeView === 'minifier' && (
         <div className="flex-1 h-full overflow-hidden">
-          <CodeMinifier generatedCode={generatedCode} files={files as Record<string, string>} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
+          <CodeMinifier generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
         </div>
       )}
 

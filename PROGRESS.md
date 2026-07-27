@@ -22354,3 +22354,31 @@ Revised open root causes: only TWO remain genuinely open — the residual GLM 42
 own survey (2 of 8, provider-side; still needs real pacer telemetry, still not guessed at), and own-repo
 storage not engaging (admin must confirm `AGENTV3_OWN_REPO_STORAGE` in Cloud Run). Items 10/11 and most
 of item 4 are CLOSED by this change, not deferred.
+
+#### Audit + tripwire (same session) — verifying the claim, then locking the CLASS
+
+Before telling the admin "the reviewer can no longer run on a survey turn", verified it instead of
+assuming. Enumerated all 8 `writtenFiles.set(` call sites and traced each one's reachability on an
+import turn:
+- **1× the agent's OWN tool write** (`onFileWrite`) — deliberately left UNGATED. If the model itself
+  writes a file, the report must honestly say so; gating this would make the summary lie about the
+  model's behaviour. The bug was platform passes writing without the model deciding to, not this.
+- **1× one-shot fast-lane import-path autofix** — its enclosing lane (L7070) already carries
+  `&& !isImportTurn`.
+- **3× integrity passes** — gated by this change.
+- **3× post-build artifact passes** (tests / index.html / scaffold) — gated on `expectsArtifacts`.
+
+Claim confirmed. But the audit exposed the thing that actually matters: **nothing forces the NEXT pass
+to consider this.** That is precisely how the 2026-07-24 fix regressed within three days — it gated the
+one pass in front of it and left no mechanism to catch the fourth, fifth, sixth. Per-instance tests
+cannot close a per-instance failure mode.
+
+So added a CENSUS TRIPWIRE test: it asserts the exact count of `writtenFiles.set(` call sites, with the
+audit of each recorded inline. Adding a new writer fails the suite and forces the author to state which
+category it falls into and whether the read-only turn was considered. It also pins the two consumers the
+rogue writes silently broke (`reviewerAllowed = writtenFiles.size > 0`, `changedFiles: writtenFiles.size`)
+so a refactor that decouples them has to be deliberate rather than accidental.
+
+A census test is a blunt instrument and will occasionally fail on a legitimate addition — that is the
+point. The cost is one deliberate line of thought per new writer; the alternative is what this autopsy
+documents: the same class of bug returning on the same app three days after being "fixed".

@@ -2009,3 +2009,41 @@ describe('import/survey turn — every file-mutating pass is gated on !isImportT
     expect(SRC).toContain('readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl)');
   });
 });
+
+// CENSUS TRIPWIRE — the invariant, not just today's four instances.
+//
+// The 2026-07-24 autopsy gated ONE mutating pass; three siblings stayed open and two of them fired
+// again on 2026-07-27, because nothing forced a NEW pass to consider the read-only turn. Per-pass
+// tests (above) lock the four we know about; this locks the CLASS: if anyone adds another writer to
+// `writtenFiles`, this fails and makes them prove the import-turn case was considered.
+//
+// `writtenFiles` is the shared invariant three separate guarantees key off — the reviewer skip
+// (`writtenFiles.size > 0`), the summary's honest "I analyzed your project — no files were changed"
+// (`changedFiles === 0`), and the billing/artifact checks. A pass that writes to it on a survey turn
+// silently breaks all three at once, which is exactly what shipped.
+describe('writtenFiles census — a new writer must consider the read-only (import/survey) turn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  it('has exactly the audited set of writtenFiles.set call sites', () => {
+    const count = (SRC.match(/writtenFiles\.set\(/g) ?? []).length;
+    // Audited 2026-07-27 — each site is one of:
+    //   1× the AGENT'S OWN tool write (onFileWrite) — deliberately NOT gated: if the model writes a
+    //      file, the report must honestly say so; gating it would make the summary lie.
+    //   1× one-shot fast lane import-path autofix — enclosing lane is already `&& !isImportTurn`.
+    //   3× integrity passes (import-normalize / css-guard / cred-log) — gated by this change.
+    //   3× post-build artifact passes (tests / index.html / scaffold) — gated on `expectsArtifacts`,
+    //      which is false on every import turn.
+    expect(count).toBe(8);
+  });
+
+  it('the reviewer still keys off writtenFiles.size (the guard the rogue writes defeated)', () => {
+    // If this ever stops being the gate, the "no reviewer on an analysis-only turn" guarantee — and
+    // the fake "Build Review (88/100)" over a user's own app — needs re-deriving from scratch.
+    expect(SRC).toContain('const reviewerAllowed = writtenFiles.size > 0');
+  });
+
+  it('the build summary still reports honestly from writtenFiles.size', () => {
+    // ProjectSummary picks "I analyzed your project — no files were changed" on changedFiles === 0.
+    expect(SRC).toContain('changedFiles: writtenFiles.size');
+  });
+});

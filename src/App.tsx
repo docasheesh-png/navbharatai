@@ -3366,8 +3366,6 @@ export default function App() {
           <ViewPanels
             v3Preview={v3Preview}
             previousFiles={previousFiles}
-            isAdmin={isAdmin}
-            onOpenAppDatabase={() => { toggleTab('settings'); setSettingsScreen('database'); }}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
             onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
             onAutoFixInV5={(workspaceId, text) => {

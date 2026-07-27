@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { escapeHtml } from '../../lib/escapeHtml';
 import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 import {
   Link,
@@ -17,12 +18,16 @@ import {
   FileCode,
   RefreshCw,
   Check,
-  Clock,
+  Clock, Save, History, AlertTriangle
 } from 'lucide-react';
+import { insertSnippet } from '../../lib/htmlInsert';
+import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface FigmaImporterProps {
   onCodeGenerated?: (code: string) => void;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
   /** Hand the imported design + a refine instruction to the REAL engine (Pro v5.0). Replaces the old
    *  "Refine with AI" call to /api/generate, which never existed (admin autopsy 2026-07-21). */
   onBuildViaV5?: (prompt: string) => void;
@@ -198,7 +203,7 @@ const saveHistory = (fileKey: string) => {
   localStorage.setItem(HISTORY_KEY, JSON.stringify([fileKey, ...prev].slice(0, 3)));
 };
 
-export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, onBuildViaV5 }) => {
+export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, onBuildViaV5, sessionId }) => {
   const [figmaUrl, setFigmaUrl] = useState('');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -222,6 +227,16 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
 
   const [isImporting, setIsImporting] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
+
+  // Saving the imported design into the user's REAL app (admin 2026-07-27). The Figma fetch was
+  // always genuine, but the generated HTML only ever reached the on-screen preview — there was no
+  // way to keep it, and no way to say which app it belonged to.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [targetPath, setTargetPath] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
   const [extractedAssets, setExtractedAssets] = useState<ExtractedAssets>({ colors: [], fonts: [] });
   const [copied, setCopied] = useState(false);
   const [aiRefineOpen, setAiRefineOpen] = useState(false);
@@ -328,6 +343,82 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
       setIsImporting(false);
     }
   }, [selectedFrameNode, selectedFrame, importOptions, onCodeGenerated]);
+
+  /** A safe file name for the imported frame, e.g. "Hero Section" → "pages/hero-section.html". */
+  const suggestedPath = useMemo(() => {
+    const slug = (selectedFrame?.name || 'figma-import')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'figma-import';
+    return `pages/${slug}.html`;
+  }, [selectedFrame]);
+
+  useEffect(() => {
+    if (!targetPath) setTargetPath(suggestedPath);
+  }, [suggestedPath, targetPath]);
+
+  /**
+   * Save the imported design into the user's app.
+   *
+   * A NEW file becomes a complete standalone page — the import is a fragment, and a fragment written
+   * to disk on its own is not something a browser can open. Adding to an EXISTING page appends the
+   * markup to its body instead, so the page it already has is not thrown away.
+   */
+  const saveDesignToApp = useCallback(async () => {
+    if (!targetSession || !targetPath || saving || !generatedCode) return;
+    setSaving(true);
+    setSaveNote('');
+    setSaveFailed(false);
+    try {
+      const current = await readAppFile(targetSession, targetPath);
+      let content: string;
+      let verb: string;
+      if (current === null) {
+        content = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(selectedFrame?.name || 'Imported design')}</title>
+</head>
+<body>
+${generatedCode}
+</body>
+</html>
+`;
+        verb = 'Created';
+      } else {
+        const merged = insertSnippet(targetPath, current, generatedCode);
+        if (!merged.ok) {
+          setSaveFailed(true);
+          setSaveNote(merged.error || 'That file cannot take this design.');
+          return;
+        }
+        content = merged.code;
+        verb = 'Added the design to';
+      }
+
+      const outcome = await saveFilesToApp(
+        targetSession,
+        { [targetPath]: content },
+        `Before importing "${selectedFrame?.name || 'a design'}" from Figma into ${targetPath}`,
+      );
+      if (!outcome.ok) {
+        setSaveFailed(true);
+        setSaveNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      if (outcome.unchanged) {
+        setSaveNote('Your app already has exactly this — nothing needed changing.');
+        return;
+      }
+      setSaveNote(`${verb} ${targetPath}. ${outcome.undoHint || ''}`.trim());
+      void reloadFiles(targetSession);
+    } catch {
+      setSaveFailed(true);
+      setSaveNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setSaving(false);
+    }
+  }, [targetSession, targetPath, saving, generatedCode, selectedFrame, reloadFiles]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(generatedCode);
@@ -501,10 +592,10 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
       </div>
 
       {/* Sections 2 & 3 */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
         {/* Section 2: Design Tree */}
         {fileInfo && (
-          <div className="w-[280px] flex-shrink-0 border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
+          <div className="w-full md:w-[280px] flex-shrink-0 max-h-[38vh] md:max-h-none border-b md:border-b-0 md:border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
             {/* File info card */}
             <div className="p-3 border-b border-white/10 flex-shrink-0">
               <div className="bg-[#161b22] border border-white/10 rounded-lg p-3">
@@ -654,6 +745,57 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
                     Open in Preview
                   </button>
                 </div>
+              </div>
+
+              {/* Save into the user's real app. Until now the imported design could only be copied
+                  by hand — the Figma fetch was real, but nothing it produced could be kept. */}
+              <div className="flex-shrink-0 border-b border-white/10" style={{ background: '#161b22' }}>
+                <div className="px-4 pt-3 text-sm font-semibold text-gray-200 flex items-center gap-2">
+                  <Save size={14} className="text-[#a259ff]" /> Save this design into your app
+                </div>
+                <AppTargetPicker
+                  apps={apps}
+                  appsLoading={appsLoading}
+                  files={appFiles}
+                  filesLoading={filesLoading}
+                  sessionId={targetSession}
+                  onSessionChange={(sid) => { setTargetSession(sid); setSaveNote(''); }}
+                  selectedPath={targetPath}
+                  onPathChange={(pth) => { setTargetPath(pth); setSaveNote(''); }}
+                  fileFilter={(f) => /\.html?$/i.test(f.path)}
+                  newPathOptions={[suggestedPath]}
+                  fileLabel="Save as"
+                />
+                {apps.length > 0 && (
+                  <div className="px-3 pb-3">
+                    <button
+                      onClick={() => void saveDesignToApp()}
+                      disabled={!targetSession || !targetPath || saving}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ background: '#a259ff' }}
+                    >
+                      {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                      {saving ? 'Saving into your app…' : 'Save into my app'}
+                    </button>
+                    <p className="mt-2 text-[11px] text-gray-500 leading-snug flex gap-1.5">
+                      <History size={11} className="mt-0.5 flex-shrink-0" />
+                      A new file becomes a complete page; an existing page keeps what it has and gains
+                      this design. A restore point is saved first, so you can undo it from Versioning.
+                    </p>
+                    {saveNote && (
+                      <p
+                        className="mt-2 px-3 py-2 rounded-lg text-xs leading-relaxed flex gap-2"
+                        style={{
+                          color: saveFailed ? '#fcd34d' : '#86efac',
+                          background: saveFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)',
+                        }}
+                      >
+                        {saveFailed && <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />}
+                        <span>{saveNote}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Code block */}

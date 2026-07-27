@@ -20,7 +20,6 @@ const ProjectInsightsPanel = _lz(() => import('./ProjectInsightsPanel'), 'Projec
 const CodeStudio        = _lz(() => import('../ide/CodeStudio'),         'CodeStudio');
 const TestPanel         = _lz(() => import('../ide/TestPanel'),          'TestPanel');
 const DiffViewer        = _lz(() => import('../ide/DiffViewer'),         'DiffViewer');
-const DatabaseUI        = _lz(() => import('../ide/DatabaseUI'),         'DatabaseUI');
 const VoiceToApp        = _lz(() => import('../ide/VoiceToApp'),         'VoiceToApp');
 const BotBuilder        = _lz(() => import('../ide/BotBuilder'),         'BotBuilder');
 const CostEstimator     = _lz(() => import('../ide/CostEstimator'),      'CostEstimator');
@@ -125,10 +124,6 @@ export interface ViewPanelsProps {
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
   /** Snapshot of the files taken before the last v5.0 build — the Diff Viewer's "previous version". */
   previousFiles?: Record<string, string>;
-  /** Whether the current user is a platform admin — gates the raw prod-DB console (DatabaseUI). */
-  isAdmin?: boolean;
-  /** Open Settings → Database (the user's own-app / BYOD database). */
-  onOpenAppDatabase?: () => void;
   /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
   /** Hand a build prompt to the REAL engine: prefills the Pro v5.0 composer and switches to that
@@ -155,7 +150,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -352,12 +347,9 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 3 — Database UI */}
-      {activeView === 'database' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <DatabaseUI userId={user?.uid} userTier={activeAgent} isAdmin={isAdmin} onOpenAppDatabase={onOpenAppDatabase} />
-        </div>
-      )}
+      {/* The 'database' view was REMOVED (admin 2026-07-27): its only real content was a link to
+          Settings → App Settings → Database, so it read as a second, different database to set up.
+          The real screen (DatabaseSettings) is unchanged and still lives in Settings. */}
 
       {/* Voice to App — REAL path (admin 2026-07-20): the spoken prompt is handed to the Pro v5.0
           engine (composer prefill + view switch); Send there starts a genuine live build. The old
@@ -529,7 +521,12 @@ export function ViewPanels({
       {/* Phase 8 — Monetization Wizard */}
       {activeView === 'monetize' && (
         <div className="flex-1 h-full overflow-hidden">
-          <MonetizationWizard generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <MonetizationWizard
+            sessionId={currentProSessionId}
+            userId={user?.uid}
+            githubToken={githubToken}
+            onConnectGitHub={connectGitHub}
+          />
         </div>
       )}
 

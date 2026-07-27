@@ -1957,3 +1957,55 @@ describe('import-files GitHub backstop — gating + never-blocks (large-zip-impo
     expect(mb).toBeLessThanOrEqual(50);
   });
 });
+
+// ═══ IMPORT/SURVEY TURN MUST NOT MUTATE THE USER'S FILES (mitrify autopsy 2026-07-27) ═══
+// ROOT CAUSE: the prompt was "Import this app … **Do not change any files yet**", yet the build
+// reported "✅ Done — I changed 2 files in your project": the pre-flight dependency reconcile added
+// `nanoid` to package.json, and the credential-log guard rewrote 8 console lines across 2 files.
+// Both are SIBLINGS of the exact class `shouldRunIntegrityHeal` closed on 2026-07-24 — file-MUTATING
+// passes that never checked `isImportTurn`. Every such pass is now gated; these tests lock all of them
+// so a future pass can't silently reintroduce the violation.
+describe('import/survey turn — every file-mutating pass is gated on !isImportTurn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  // Each entry: the env kill-switch that opens the pass, and what the pass writes.
+  const MUTATING_PASSES: Array<{ flag: string; what: string }> = [
+    { flag: 'AGENTV3_DEP_RECONCILE', what: 'adds missing deps to package.json' },
+    { flag: 'AGENTV3_IMPORT_NORMALIZE', what: 'rewrites import specifiers' },
+    { flag: 'AGENTV3_CSS_IMPORT_GUARD', what: 'injects a stylesheet import into the entry' },
+  ];
+
+  for (const { flag, what } of MUTATING_PASSES) {
+    it(`${flag} (${what}) is guarded by !isImportTurn`, () => {
+      const i = SRC.indexOf(`process.env.${flag} !== 'off'`);
+      expect(i).toBeGreaterThan(-1);
+      // the guard must be on the SAME condition, not merely somewhere later in the block
+      const condition = SRC.slice(i, SRC.indexOf('{', i));
+      expect(condition).toContain('!isImportTurn');
+    });
+  }
+
+  it('the credential-log guard DETECTS on an import turn but writes nothing', () => {
+    const i = SRC.indexOf("process.env.AGENTV3_CRED_LOG_GUARD !== 'off'");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 2200);
+    // it branches on isImportTurn...
+    expect(block).toContain('if (isImportTurn)');
+    // ...and the import-turn branch reports honestly instead of redacting
+    const importBranch = block.slice(block.indexOf('if (isImportTurn)'), block.indexOf('} else {'));
+    expect(importBranch).toContain('COMPLIANCE_LOG_LEAK_FOUND');
+    expect(importBranch).toContain('NOT changed');
+    expect(importBranch).not.toContain('actuator.writeFile'); // the whole point: no mutation
+  });
+
+  it('integrity FINDINGS are still recorded on an import turn (advisory, never hidden)', () => {
+    // Honesty half of the fix: we gate the WRITES, never the reporting.
+    expect(SRC).toContain('const obs = (message: string) => importTurnObservation(isImportTurn, message);');
+    expect(SRC).toContain("code: 'INTEGRITY_UNUSED_DEP', ...obs(");
+    expect(SRC).toContain("code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(");
+  });
+
+  it('an imported repo names its own mirror repo (no instruction-shaped repo names)', () => {
+    expect(SRC).toContain('readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl)');
+  });
+});

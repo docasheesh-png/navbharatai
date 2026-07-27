@@ -22211,3 +22211,106 @@ this session can verify.
 
 Also merged this session: PR #1899 (CLAUDE.md env registry — the three Nav App Store keys the admin set
 in Cloud Run), CI green.
+
+### 2026-07-27 (cont.) — FORENSIC AUTOPSY: mitrify import/survey build (buildId 321f4f6c, ok:true)
+### "Do not change any files yet" — and the engine changed 2 files anyway
+
+Admin sent a real v5.0 build report. Full five-bucket ledger per the fifth absolute rule, then DNA-level
+fixes for every item (rule 4's six-step method + the Step-5 50/50 law).
+
+**THE PROMPT:** *"Import this app from my GitHub repository and give me a short survey of what it is and
+how it is structured. **Do not change any files yet.**"*
+
+#### Step 1 — ITEMIZED LEDGER (61 events, 17 warnings, 14 counted "unresolved", 0 errors, ok:true)
+
+**✅ Self-healed (3)** — and per the 50/50 law each is a RED FLAG, not a win:
+1. `nanoid` added to package.json by the pre-flight dep reconcile. *Why did it need to heal at all?* It
+   didn't — this was an import turn; nothing needed to install. **The heal itself was the bug.**
+2. 8 credential-leaking console logs redacted across 2 files (`client/src/lib/firebase.ts`,
+   `server/routes.ts`). Real finding — but on the USER'S OWN repo, on a "don't change" turn.
+3. Server-side zipball import succeeded (80.3s) after the instant-connect tree. Genuinely good.
+
+**🔀 Worked around / alternative used (1)**
+4. GLM 429s → 8 provider fallbacks in 3 bursts (2+2+4) inside ~30s. Delivered via GLM:6 / KIMI:1, so the
+   ladder held — but the retries are deferred debt, not a clean run.
+
+**⏭️ Skipped / ignored (1)**
+5. Own-repo storage did NOT engage even though the user owns `aashishcpmt093-ui/mitrify` and imported it
+   by URL. The turn fell to MIRROR mode ("this build will be saved to <mirror>") — so edits would land in
+   a throwaway copy rather than their real repo.
+
+**❌ Still broken / shipped imperfect (4)** — the urgent ones:
+6. **INSTRUCTION VIOLATION.** "✅ Done — I changed 2 files in your project" on a turn that said *do not
+   change any files*. Two independent unguarded passes did it (items 1 and 2 above).
+7. **GARBAGE REPO NAME.** A permanent repo was created in the user's real GitHub account named
+   `import-this-app-from-my-github-repositor-10pm-270726-609c45` — for an app called **mitrify**.
+8. **FALSE "14 UNRESOLVED PROBLEMS"** on a successful survey. 13 were `INTEGRITY_UNUSED_DEP` about the
+   user's own dependencies; the 14th a focus-conflict in their own code. None were our failures.
+9. **FALSE ROOT CAUSE.** The report's headline `rootCause` was `"@hookform/resolvers" is declared … but no
+   project file imports it`. Worse: it is probably **wrong** — the scan saw 165 of the repo's 316 files
+   (binaries/oversize dropped by design), and `date-fns` / `next-themes` / `framer-motion` are standard
+   shadcn/ui deps a complete scan would have found used. The analyzer asserted certainty its input could
+   not support.
+
+**🥵 Struggle points (2)**
+10. ~7.5 min wall-clock for a READ-ONLY survey (4 heartbeats before the agent even started surveying;
+    80s of it in the zipball fetch).
+11. The reviewer re-surveyed the app from scratch after the architect had already surveyed it — duplicated
+    ~35s of read_file/glob work and produced a second, near-identical survey.
+
+#### Step 2 — THE MISSING SUBSYSTEM
+
+**There is no single enforced notion of a READ-ONLY turn.** `isImportTurn` existed, but every
+file-mutating pass had to remember to check it *individually* — so the guarantee was convention, not
+architecture. The 2026-07-24 mitrify autopsy closed exactly ONE of these passes
+(`shouldRunIntegrityHeal`); three more siblings were left open and two of them fired this time. That is
+the textbook signature of an instance-fix instead of a class-fix, and it is why the SAME bug came back
+three days later on the SAME app.
+
+#### Step 3 — DNA-LEVEL FIXES (all shipped in this change)
+
+- **Gated every remaining file-mutating pass on `!isImportTurn`** (the class, not the instance):
+  `AGENTV3_DEP_RECONCILE` (wrote package.json), `AGENTV3_IMPORT_NORMALIZE` (rewrote import specifiers),
+  `AGENTV3_CSS_IMPORT_GUARD` (injected stylesheet imports), plus the ADR-markdown writer (an
+  "architecture decision" for a turn that decided nothing). **Hunted the siblings:** audited every
+  `actuator.writeFile` in the post-build region — the remaining three are already gated on
+  `expectsArtifacts`, which is false on an import turn.
+- **Credential-log guard now DETECTS without mutating on an import turn** — a real security finding on
+  someone's repo is a *report*, not a licence to edit their code. New honest code
+  `COMPLIANCE_LOG_LEAK_FOUND`: *"NOT changed — you asked me not to modify files on this turn. Ask me to
+  fix them and I will redact every one."* The next real edit turn redacts as before.
+- **`readableAppNameForRepo()` (pure + tested)** — an imported repo names its own mirror. `mitrify` beats
+  a title derived from instruction text. Test locks STABILITY too: two different turn prompts must still
+  yield the SAME repo name, or `ensureRepo` would spawn a repo per turn.
+- **`importTurnObservation()` (pure + tested)** — on an import turn every integrity finding is recorded
+  as an honest ADVISORY, prefixed *"[observation about your existing code — nothing was changed]"* and
+  suffixed with the real caveat *"if part of the repo was too large to import, this may not be
+  accurate."* They still appear in full (we hide nothing) but can no longer be counted as OUR unresolved
+  defects or promoted to `rootCause`. **Fixed the system's honesty (rule-5), not just the code.**
+- **Regression tests (17 new)** encode the exact failure: static-source tests assert each pass carries
+  `!isImportTurn` *on its own condition*; `deriveRootCause` tests assert an advisory import finding can
+  never become the headline while the same finding on a real build turn still does. Each was verified to
+  genuinely FAIL against the pre-fix code (temporarily reverted one gate to prove it — not a tautology).
+
+#### Step 5 — THE 50/50 LAW: why did each arise AT ALL?
+
+- ❌ items 6/8/9: because "read-only turn" was a convention re-implemented per call site instead of an
+  invariant enforced where the data enters. Now every mutating pass carries the gate and a test proves it.
+- ✅ item 1 (`nanoid` heal): the deeper answer is that **no heal should have run at all**; the fix makes
+  the heal dead code on this turn rather than making it heal better.
+- ✅ item 2: same — detection kept, mutation removed.
+
+#### OPEN ROOT CAUSES (rule 6 — honestly recorded, NOT silently patched)
+
+- **🔀 item 4 (GLM 429 storm):** provider-side quota. `AGENTV3_RATE_PACER` is on per CLAUDE.md, yet 8
+  fallbacks still fired in ~30s. Needs real pacer telemetry before changing anything — guessing at
+  concurrency numbers from one report would be a surface patch. NOT fixed here.
+- **⏭️ item 5 (own-repo mode didn't engage):** most likely `AGENTV3_OWN_REPO_STORAGE` is unset in Cloud
+  Run (it is NOT in CLAUDE.md's verified live-key registry). **Admin check needed** — Claude cannot read
+  Cloud Run. Until it is on, a user importing their OWN repo still gets a mirror, which also blocks the
+  new "I host it myself" path from ever activating.
+- **🥵 items 10/11 (7.5-min survey, duplicated reviewer survey):** real inefficiency. The reviewer
+  re-reading an app the architect just surveyed is a genuine design question (independence vs. cost), not
+  a bug to patch blind. Deferred deliberately rather than half-fixed.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.

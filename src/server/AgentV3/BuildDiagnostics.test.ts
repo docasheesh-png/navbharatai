@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, userFacingReport, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 describe('isClaudeModel (pure helper)', () => {
@@ -1194,5 +1194,42 @@ describe('userFacingReport (Fix 68) — a non-admin user sees NO provider/model 
     const minimal = { schema: 'navbharatai.v3.build-diagnostics/1', startedAt: 1, counts: { total: 0, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 }, issues: [], problems: [] } as BuildDiagnosticsReport;
     const once = userFacingReport(minimal);
     expect(JSON.stringify(userFacingReport(once))).toBe(JSON.stringify(once));
+  });
+});
+
+// ── importTurnObservation — a survey turn's findings are OBSERVATIONS, not our unresolved defects ──
+// ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): a successful survey-only turn
+// ("Import this app … Do not change any files yet") reported 14 UNRESOLVED problems and named an
+// unused-dependency hint about the USER'S OWN repo as the build's rootCause — while the scan itself
+// ran on a knowingly partial file map (165 of the repo's 316 files landed).
+describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
+  const MSG = '"date-fns" is declared in package.json dependencies but no project file imports it.';
+
+  it('leaves a real build/edit turn completely unchanged', () => {
+    expect(importTurnObservation(false, MSG)).toEqual({ autoResolved: false, message: MSG });
+  });
+
+  it('marks an import-turn finding advisory so it can never count as unresolved', () => {
+    expect(importTurnObservation(true, MSG).autoResolved).toBe(true);
+  });
+
+  it('states BOTH honesty caveats: we changed nothing, and the scan may be incomplete', () => {
+    const out = importTurnObservation(true, MSG).message;
+    expect(out).toContain('nothing was changed');
+    expect(out).toContain('may not be accurate');
+    expect(out).toContain(MSG); // never hides the original finding
+  });
+
+  it('an advisory import-turn finding is never chosen as the build rootCause', () => {
+    const adv = importTurnObservation(true, MSG);
+    const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...adv }];
+    // ok:true + all findings autoResolved → the report says the build succeeded, not "unused dep".
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('the SAME finding on a real build turn still surfaces as the rootCause (no regression)', () => {
+    const real = importTurnObservation(false, MSG);
+    const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...real }];
+    expect(deriveRootCause({ issues, ok: true })).toBe(MSG);
   });
 });

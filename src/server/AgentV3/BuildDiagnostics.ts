@@ -996,6 +996,39 @@ export function isRecoverableOnSuccess(code: string): boolean {
   return RECOVERABLE_ON_SUCCESS.has(code);
 }
 
+/**
+ * PRE-EXISTING-CODE OBSERVATIONS on an IMPORT/SURVEY turn — advisory, never "our unresolved defect".
+ *
+ * ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): a survey-only turn ("Import this app
+ * … Do not change any files yet") finished `ok: true` yet reported **14 unresolved problems**, and named
+ * `"@hookform/resolvers" is declared … but no project file imports it` as the build's **rootCause**. Both
+ * claims were false, for two independent reasons:
+ *
+ *  1. WE DID NOT CAUSE THEM. Every one was an observation about the user's OWN pre-existing repository.
+ *     A build's `unresolved`/`rootCause` must describe what OUR engine failed to do, not tidiness hints
+ *     about code we were asked only to read.
+ *  2. THEY WERE COMPUTED FROM A KNOWINGLY PARTIAL FILE SET. The import itself reported 316 files in the
+ *     repo, of which 165 source files landed (binaries/oversize dropped by design). "No project file
+ *     imports it" is unprovable when half the project was never in the map — and indeed `date-fns`,
+ *     `next-themes` and `framer-motion` are standard shadcn/ui dependencies that a complete scan would
+ *     have found used. The analyzer asserted certainty its input could not support.
+ *
+ * So on an import turn these findings are recorded as ADVISORY (autoResolved) with wording that states
+ * both caveats honestly. They still appear in the report — we hide nothing — they simply stop being
+ * counted as our unresolved failures or promoted to rootCause. On a real build/edit turn (where the map
+ * IS the app we just wrote) nothing changes. PURE + tested.
+ */
+export function importTurnObservation(
+  isImportTurn: boolean,
+  message: string,
+): { autoResolved: boolean; message: string } {
+  if (!isImportTurn) return { autoResolved: false, message };
+  return {
+    autoResolved: true,
+    message: `[observation about your existing code — nothing was changed] ${message} (Noted from the files that were imported; if part of the repo was too large to import, this may not be accurate.)`,
+  };
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];

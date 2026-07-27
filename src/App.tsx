@@ -30,7 +30,7 @@ import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
-import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
+import { ConnectMyWebsitePanel } from './components/panels/ConnectMyWebsitePanel';
 import { fetchBuildSession } from './services/buildService';
 import {
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -148,6 +148,7 @@ import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
 import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
+import { chunkFilesForSync, totalFilesBytes } from './lib/chunkFilesForSync';
 import type { PreviewProblem } from './lib/previewProblems';
 import {
   type ApnapanProfile,
@@ -1769,31 +1770,62 @@ export default function App() {
   // also gates on v5.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
   // non-v5.0 users. The workspace id is the SAME one the v5.0 chat panel uses (shared localStorage
   // session), so the IDE and v5.0 operate on one workspace.
+  //
+  // ROOT-CAUSE FIX (report 2026-07-27, "100MB/1GB zip upload complete ho jaata hai lekin files
+  // v5.0 me nahi aati"): this used to send the ENTIRE file map as one JSON POST, which silently
+  // failed once the extracted content crossed the server's ~30MB body limit — true for almost any
+  // real app regardless of the original ZIP's size — and the failure was swallowed with no user
+  // feedback. Now the file map is split into safely-sized chunks (chunkFilesForSync) sent
+  // sequentially, so total project size no longer determines success; only genuine network/server
+  // failures are reported, honestly, instead of a fake "complete".
   const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>, opts?: { silent?: boolean; source?: 'ide-edit' | 'import' }): Promise<void> => {
     const uid = user?.uid;
     if (!uid) return;
     const paths = Object.keys(filesToSync || {});
     if (paths.length === 0) return;
+    const workspaceId = getAgentV3WorkspaceId(uid);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const workspaceId = getAgentV3WorkspaceId(uid);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const tok = await auth.currentUser?.getIdToken();
+      if (tok) headers.Authorization = `Bearer ${tok}`;
+    } catch { /* token optional — server falls back to claimed userId */ }
+    const chunks = chunkFilesForSync(filesToSync);
+    const totalBytes = totalFilesBytes(filesToSync);
+    let imported = 0;
+    let notEnabled = false;
+    let failedChunks = 0;
+    let githubUrl: string | null = null;
+    let needsGithub = false;
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
       try {
-        const tok = await auth.currentUser?.getIdToken();
-        if (tok) headers.Authorization = `Bearer ${tok}`;
-      } catch { /* token optional — server falls back to claimed userId */ }
-      const res = await fetch('/api/agentv3/import-files', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', files: filesToSync, ...(opts?.source ? { source: opts.source } : {}) }),
-      });
-      if (res.ok) {
+        const res = await fetch('/api/agentv3/import-files', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            workspaceId, userId: uid, email: user?.email || '', files: chunks[i],
+            ...(opts?.source ? { source: opts.source } : {}),
+            ...(isLast ? { finalize: true, totalBytes, githubToken: githubToken || undefined } : {}),
+          }),
+        });
+        if (res.status === 404) { notEnabled = true; break; } // v5.0 not enabled — silent no-op
+        if (!res.ok) { failedChunks++; continue; }
         const j = await res.json().catch(() => ({} as any));
-        const n = typeof j?.imported === 'number' ? j.imported : paths.length;
-        if (!opts?.silent) addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v5.0 ✓`, 'success');
-      }
-      // 404 (v5.0 not enabled) / other statuses: silent best-effort — IDE still has the files.
-    } catch { /* network/best-effort — never block the upload flow */ }
-  }, [user, addToast]);
+        imported += typeof j?.imported === 'number' ? j.imported : Object.keys(chunks[i]).length;
+        if (j?.github?.url) githubUrl = j.github.url;
+        if (j?.needsGithub) needsGithub = true;
+      } catch { failedChunks++; }
+    }
+    if (notEnabled || opts?.silent) return;
+    if (failedChunks === 0) {
+      addToast(`Synced ${imported} file${imported === 1 ? '' : 's'} to v5.0 ✓${githubUrl ? ' — also backed up to GitHub' : ''}`, 'success');
+    } else {
+      addToast(`⚠️ Synced ${imported} file(s), but ${failedChunks} batch${failedChunks === 1 ? '' : 'es'} failed — check your connection and try importing again`, 'warning');
+    }
+    if (needsGithub) {
+      addToast('This project is large — connect GitHub (⚙ → GitHub) so every file stays safely backed up', 'info');
+    }
+  }, [user, addToast, githubToken]);
 
   // Phase S1 — IDE↔v5.0 edit sync: a debounced, echo-suppressed syncer that durably pushes a user's
   // Code Studio edits into the v5.0 workspace (silent, best-effort). Re-created when syncFilesToV3
@@ -3334,7 +3366,7 @@ export default function App() {
           )}
 
           {activeView === 'connect_domain' && (
-            <ConnectDomainPanel onBack={() => toggleTab('home')} />
+            <ConnectMyWebsitePanel onBack={() => toggleTab('home')} uid={user?.uid} />
           )}
 
           {activeView === 'donation' && (

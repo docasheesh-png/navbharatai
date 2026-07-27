@@ -1,19 +1,27 @@
 // HostingChooser — the "Publish" surface for NavBharatAI Pro v5.0 (Hosting Phase 1).
 //
-// One screen, two paths, kept 100% in sync (both publish the SAME workspace files):
+// One screen, three paths, kept 100% in sync where it matters (all three publish/store the SAME
+// workspace files):
 //   1. Host on NavBharatAI  — our own hosting (the platform-paid Firebase static host, id 'firebase').
 //                             One-click, no account, Free. Full app (backend + DB) is a later phase, so
 //                             for a full-stack app this hosts the frontend and says so honestly.
-//   2. Host somewhere else  — the user's own provider (Vercel / Netlify / Cloudflare / GitHub Pages).
-//                             Free from us; they pay their own provider.
+//   2. Host somewhere else  — WE deploy to the user's own provider account (Vercel / Netlify /
+//                             Cloudflare / GitHub Pages) using a token they've connected. Free from us;
+//                             they pay their own provider.
+//   3. I host it myself     — WE NEVER TOUCH HOSTING. NavBharatAI only writes code + opens a PR into
+//                             the user's own GitHub repo (own-repo git storage — GitStorageTarget /
+//                             UserGitHubClient / GitHubPrFlow), merging only when CI is green. The
+//                             user's own host (already connected to that exact repo on ITS OWN
+//                             dashboard) picks up the merge and deploys it — zero NavBharatAI
+//                             involvement in the deploy itself (admin request 2026-07-27).
 //
 // It reuses the panel's existing, working deploy pipeline (`onDeploy(providerId)` → deployLive) and the
-// already-fetched provider list — no new backend. Only CONFIGURED providers are offered, so a deploy can
-// never target a host that isn't set up. Pricing here is intentionally simple + honest (static = Free);
-// it is the single place to change when the admin sets real numbers.
+// already-fetched provider list — no new backend for paths 1-2. Only CONFIGURED providers are offered,
+// so a deploy can never target a host that isn't set up. Pricing here is intentionally simple + honest
+// (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useState } from 'react';
-import { Rocket, X, Globe, Server, Link2 } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 
@@ -23,6 +31,8 @@ export interface HostingProvider {
   configured: boolean;
   requirement: string;
 }
+
+export interface OwnRepoInfo { owner: string; repo: string; workBranch: string; baseBranch: string; }
 
 export interface HostingChooserProps {
   providers: HostingProvider[];
@@ -35,12 +45,21 @@ export interface HostingChooserProps {
   workspaceId?: string;
   /** Whether the Firebase-native "connect your own domain" surface is live (server flag). */
   customDomainsEnabled?: boolean;
+  /** Set once this workspace is storing its code in the user's OWN GitHub repo (git-native storage). */
+  ownRepo?: OwnRepoInfo | null;
+  /** Whether a GitHub account is already connected (token present) — governs the "I host it myself" CTA. */
+  githubConnected?: boolean;
+  /** Start the GitHub connect flow (reuses the panel's existing OAuth redirect). */
+  onConnectGitHub?: () => void;
 }
 
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
-export function HostingChooser({ providers, onDeploy, onClose, busy, workspaceId, customDomainsEnabled }: HostingChooserProps) {
-  const [view, setView] = useState<'choose' | 'domain'>('choose');
+export function HostingChooser({
+  providers, onDeploy, onClose, busy, workspaceId, customDomainsEnabled,
+  ownRepo, githubConnected, onConnectGitHub,
+}: HostingChooserProps) {
+  const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
   const hasOurHosting = providers.some((p) => p.id === NBAI_HOST_ID && p.configured);
   const byo = providers.filter((p) => p.configured && p.id !== NBAI_HOST_ID);
   // "Connect your own domain" is offered only when the server feature is on AND we have a workspace
@@ -70,9 +89,70 @@ export function HostingChooser({ providers, onDeploy, onClose, busy, workspaceId
           <div className="p-4">
             <NbaiDomainConnect workspaceId={workspaceId} onBack={() => setView('choose')} />
           </div>
+        ) : view === 'selfhost' ? (
+          <div className="p-4 flex flex-col gap-3">
+            <button onClick={() => setView('choose')} className="text-[11px] text-zinc-400 hover:text-white self-start">← Back</button>
+            {ownRepo ? (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[13px] font-bold text-white">Connected — {ownRepo.owner}/{ownRepo.repo}</span>
+                </div>
+                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                  NavBharatAI writes your code to the <code className="text-zinc-300">{ownRepo.workBranch}</code> branch
+                  and opens a pull request. It only merges into <code className="text-zinc-300">{ownRepo.baseBranch}</code> once
+                  your checks are green — we never push straight to your live branch.
+                </p>
+                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                  Connect this exact repo in your own hosting dashboard — Vercel, Netlify, Render, or Cloudflare
+                  Pages all have an &quot;Import Git Repository&quot; option. Once connected there, every merge into
+                  <code className="text-zinc-300"> {ownRepo.baseBranch}</code> deploys automatically through YOUR
+                  account. NavBharatAI never touches your hosting or sees your deploy credentials.
+                </p>
+                <a
+                  href={`https://github.com/${ownRepo.owner}/${ownRepo.repo}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  View repo on GitHub
+                </a>
+              </div>
+            ) : !githubConnected ? (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-zinc-400" />
+                  <span className="text-[13px] font-bold text-white">Connect GitHub first</span>
+                </div>
+                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                  To use your own hosting, NavBharatAI needs to write code into a GitHub repo you own — nothing
+                  else. Connect your GitHub account to get started.
+                </p>
+                <button
+                  onClick={() => onConnectGitHub?.()}
+                  className="w-full py-2.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  Connect GitHub
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[13px] font-bold text-white">GitHub connected ✓</span>
+                </div>
+                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                  This app isn't linked to one of your own repos yet. Import your existing repo (paste its URL
+                  when you start a build, or ask NavBharatAI to import it) and this app's changes will go there
+                  as pull requests instead — ready for your own host's auto-deploy to pick up.
+                </p>
+              </div>
+            )}
+          </div>
         ) : (
         <>
-        <div className="p-4 grid gap-3 sm:grid-cols-2">
+        <div className="p-4 grid gap-3 sm:grid-cols-3">
           {/* Path 1 — Host on NavBharatAI */}
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
@@ -136,6 +216,25 @@ export function HostingChooser({ providers, onDeploy, onClose, busy, workspaceId
                 to your own account.
               </p>
             )}
+          </div>
+
+          {/* Path 3 — I host it myself: NavBharatAI never touches deployment, only your own GitHub repo */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold text-white">I host it myself</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">Your repo</span>
+            </div>
+            <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+              We only write code and open a pull request into your own GitHub repo — CI-gated. Your existing
+              host&apos;s own auto-deploy takes it from there. We never touch your hosting.
+            </p>
+            <button
+              onClick={() => setView('selfhost')}
+              className="mt-auto w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              {ownRepo ? `Connected: ${ownRepo.owner}/${ownRepo.repo}` : 'Set up'}
+            </button>
           </div>
         </div>
 

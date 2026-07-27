@@ -2536,6 +2536,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           busy={running}
           workspaceId={state.workspaceId}
           customDomainsEnabled={customDomainsEnabled}
+          ownRepo={state.ownRepo}
+          githubConnected={!!ghToken()}
+          onConnectGitHub={() => void connectGitHub()}
           onClose={() => setShowHostingChooser(false)}
           onDeploy={(id) => { setShowHostingChooser(false); deployLive(id); }}
         />

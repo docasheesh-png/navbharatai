@@ -24,7 +24,7 @@ import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
-import { checkAttachmentSizes } from '../../lib/attachmentLimits';
+import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -1037,10 +1037,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       img.src = url;
     });
 
+  // ROOT-CAUSE FIX (admin 2026-07-26: "zip upload complete ho jaata hai lekin files v5 me nahi
+  // aati") — this used to filter out any file over a hardcoded 15 MB with NO feedback at all, so a
+  // large zip silently vanished from the attachment list right here, before it ever reached the
+  // send-time size guard (Fix 36a / checkAttachmentSizes) whose entire job is to explain WHY an
+  // oversized upload can't go through. Two size limits had drifted apart — a silent one (15 MB, here)
+  // and an honest one (MAX_ATTACHMENT_BYTES, attachmentLimits.ts) — and the silent one always won.
+  // Now there is ONE limit, and a rejected file gets the same honest, actionable message as a
+  // rejected send, immediately, so the user knows their upload never happened and why.
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const MAX = 15 * 1024 * 1024; // 15MB/file
-    const picked = Array.from(list).filter((f) => f.size <= MAX);
+    const incoming = Array.from(list);
+    const tooBig = incoming.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    const picked = incoming.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+    if (tooBig.length > 0) {
+      const verdict = checkAttachmentSizes(tooBig);
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${verdict.reason || 'One or more files are too large to attach.'}`, ts: Date.now() }]);
+    }
     if (picked.length > 0) setFiles((prev) => [...prev, ...picked].slice(0, 8));
   };
 

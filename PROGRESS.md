@@ -22000,3 +22000,50 @@ registry endpoint retirement. Until npm's CLI ships a client that calls the new 
 rubber-stamping. Watch the next CI run on this PR to see whether GitHub's runners hit the same failure;
 if so, this needs an admin decision (wait it out / temporarily relax the CI gate with a tracked TODO /
 find a working audit mechanism) — flagging here rather than silently working around it.
+
+### 2026-07-26 (cont.) — audit-gate RESOLVED for real (npm 11.18.0 in CI); PR #1883 merged
+
+Confirmed on real CI, not a guess: pinned `ci.yml` to `npm install -g npm@11.18.0` (Node-20-compatible;
+npm 12.x needs Node 22+ and failed CI with EBADENGINE on the first attempt) right after Setup Node.js.
+Verified locally first, via `npx npm@11.18.0 audit --json` (no global install needed), that npm 11.x calls
+the correct new `/v1/security/advisories/bulk` endpoint instead of the retiring one — before spending a
+CI run on it. Result: full CI green, audit-gate genuinely passing real scans again. PR #1883 (push
+notifications + this fix) merged. iOS TestFlight build pushed with the push-notifications entitlement
+(admin confirmed the Firebase APNs key + Apple Developer capability were set up); Android signed `.aab`
+built and handed to the admin for Play Console upload.
+
+### 2026-07-26 (cont.) — ZIP-attach silent-drop bug fixed (admin: "old app ki zip direct upload kar raha
+hai, to ho nahi rahi hai" — upload completes but files never reach Pro v5.0)
+
+Root cause, traced end-to-end (not guessed): NavBharatAI Pro v5.0's chat-attach flow
+(`AgentV3Panel.tsx`'s `addFiles`) had its OWN hardcoded `15 MB` per-file filter that silently dropped
+anything larger — `.filter((f) => f.size <= MAX)`, zero feedback. This ran BEFORE the file could ever
+reach the existing, deliberately-honest size guard (`checkAttachmentSizes` / `MAX_ATTACHMENT_BYTES` =
+18 MB, built for exactly this scenario as "Fix 36a" on 2026-07-07, with a clear actionable message:
+shrink the zip or use GitHub import). Two size limits had drifted apart — one silent (this bug), one
+honest (Fix 36a) — and the silent one, being earlier in the flow, always won. The admin's 100 MB zip
+never even reached the honest check; it just vanished from the attachment list, no error, so the
+"complete" the admin saw was the build running on ZERO real files from their old app.
+
+Root-caused per the fourth absolute rule: (1) traced the actual code path — Code Studio's own ZIP
+importer (`useZipImport.ts` → `/api/extract-zip`) was a red herring; `classifyZipSize` there already
+correctly gates 50–500 MB zips to a "use GitHub" modal with no bypass, so a 100 MB direct-chat-attach
+had to be going through a DIFFERENT path — found it in `AgentV3Panel.tsx`. (2) hunted siblings: grepped
+every `.filter(...f.size...)` pattern across `src/`; found the EXACT same silent-drop bug in
+`ProfessionalChat.tsx` (Doctor AI / Teacher AI / etc.'s attach flow, `MAX_FILE_BYTES` = 10 MB) — fixed
+both in the same change. Confirmed two OTHER chat surfaces (`AIChat.tsx`, `SDAChat.tsx`) already handle
+this honestly (visible error message) — no fix needed there, which is exactly the deviation that let the
+other two drift silently.
+
+Fix: both `addFiles` functions now split incoming files into `allowed` / `tooBig`, and for anything
+oversized, push an immediate, explicit chat message naming the file + its size + the limit — using the
+canonical `MAX_ATTACHMENT_BYTES` constant (removed the local duplicate literal in AgentV3Panel.tsx) so
+there is exactly ONE size limit to keep honest, not two that can drift apart again. The underlying 18 MB
+cap itself is a genuine platform constraint (Cloud Run's request-body limit after base64 inflation) and
+was deliberately NOT raised — the real, working path for a 100 MB app is already built and correct
+(GitHub import via ⚙️ → Import Repo), so the fix makes the system tell the truth and point the user at
+the path that actually works, rather than silently failing.
+
+Gate: fe tsc 0 · full suite 9251/9251 green (reused already-tested `checkAttachmentSizes` logic — no new
+pure function needed, no regression risk to lock beyond the existing `attachmentLimits.test.ts` coverage)
+· build ✓.

@@ -461,7 +461,7 @@ export function ViewPanels({
       {/* Phase 6 — SEO Optimizer */}
       {activeView === 'seo' && (
         <div className="flex-1 h-full overflow-hidden">
-          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

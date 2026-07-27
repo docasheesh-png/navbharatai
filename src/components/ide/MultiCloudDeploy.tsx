@@ -241,7 +241,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
   return (
     <div style={containerStyle}>
       {/* Header */}
-      <div style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+      <div style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <CloudUpload size={20} color="#3b82f6" />
           <div>
@@ -264,7 +264,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
         {activeTab === 'deploy' && (
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Platform Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
               {(Object.entries(PLATFORMS) as [Platform, PlatformConfig][]).map(([id, p]) => (
                 <button key={id} onClick={() => setSelectedPlatform(id)} style={{ padding: '12px', borderRadius: 8, border: `2px solid ${selectedPlatform === id ? p.color : '#334155'}`, background: selectedPlatform === id ? `${p.color}15` : '#1e293b', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -283,7 +283,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                 <ServerCog size={14} color="#94a3b8" />
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{cfg.name} Configuration</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 10 }}>
                 <div>
                   <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Build Command</div>
                   <div style={{ background: '#0f172a', borderRadius: 4, padding: '6px 8px', fontSize: 11, color: '#a5f3fc', fontFamily: 'monospace' }}>{cfg.buildCmd}</div>

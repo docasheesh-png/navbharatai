@@ -614,7 +614,7 @@ export function ViewPanels({
 
       {activeView === 'cicd' && (
         <div className="flex-1 h-full overflow-hidden">
-          <CICDPipeline />
+          <CICDPipeline githubToken={githubToken} onConnectGitHub={connectGitHub} />
         </div>
       )}
 

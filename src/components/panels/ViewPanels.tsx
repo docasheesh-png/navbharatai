@@ -395,9 +395,13 @@ export function ViewPanels({
         <div className="flex-1 h-full overflow-hidden">
           <MultiPageBuilder
             initialCode={generatedCode}
+            sessionId={currentProSessionId}
             onExport={(pages: any) => {
-              const firstPage = Object.values(pages)[0];
-              if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
+              // EVERY page is now written into the user's real app by the tool itself. This handler
+              // only mirrors the home page into the preview so the result is visible straight away —
+              // it used to be the ONLY thing that happened, which silently discarded every other page.
+              const home = pages['index.html'] ?? Object.values(pages)[0];
+              if (home) { setGeneratedCode(home as string); toggleTab('preview'); }
             }}
             onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)}
           />
@@ -435,11 +439,12 @@ export function ViewPanels({
       {/* Phase 6 — Component Library */}
       {activeView === 'components' && (
         <div className="flex-1 h-full overflow-hidden">
-          <ComponentLibrary onInsert={(html: string) => {
-            // Insert into the REAL app (admin autopsy 2026-07-21), not the "Waiting for magic…"
-            // placeholder (where .replace('</body>') silently no-op'd and the snippet vanished).
+          {/* The component is written into the user's chosen app file by the tool itself (admin
+              2026-07-27) — this handler only mirrors the change into the on-screen preview, so what
+              was just saved is visible immediately as well. */}
+          <ComponentLibrary sessionId={currentProSessionId} onInsert={(html: string) => {
             const src = resolveAppSource(generatedCode, files as Record<string, string>);
-            if (!hasAnalysableApp(src)) { addToast(appSourceGuidance(src.kind), 'info'); return; }
+            if (!hasAnalysableApp(src)) return;
             const merged = src.html.includes('</body>')
               ? src.html.replace('</body>', html + '\n</body>')
               : src.html + '\n' + html;
@@ -449,7 +454,6 @@ export function ViewPanels({
             } else {
               setGeneratedCode(merged);
             }
-            toggleTab('preview');
           }} />
         </div>
       )}
@@ -472,6 +476,7 @@ export function ViewPanels({
       {activeView === 'figma' && (
         <div className="flex-1 h-full overflow-hidden">
           <FigmaImporter
+            sessionId={currentProSessionId}
             onCodeGenerated={(code: string) => { setGeneratedCode(code); toggleTab('preview'); }}
             onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)}
           />
@@ -510,7 +515,7 @@ export function ViewPanels({
       {/* Phase 8 — Dark Mode Generator */}
       {activeView === 'darkmode' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DarkModeGenerator generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DarkModeGenerator generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
@@ -629,7 +634,7 @@ export function ViewPanels({
 
       {activeView === 'designsys' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DesignSystem generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DesignSystem generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

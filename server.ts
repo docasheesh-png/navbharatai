@@ -49,6 +49,7 @@ import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
 import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
 import { registerMinifyRoutes } from './src/server/routes/minify';
+import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
 // import { registerAppmakerRoutes } from './src/server/routes/appmaker';
@@ -534,6 +535,10 @@ setInterval(() => {
   // restore point before anything is overwritten. See src/server/routes/minify.ts for why the
   // checkpoint and the write are both read back rather than trusted.
   registerMinifyRoutes(app);
+
+  // The shared "read and change one of my apps" API behind every Design & Build tool. Its writes go
+  // through the same verified-restore-point sequence the Minifier uses — see lib/workspaceEdit.ts.
+  registerWorkspaceFileRoutes(app);
 
   // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
   registerAuditRoutes(app);

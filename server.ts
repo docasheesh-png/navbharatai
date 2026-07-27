@@ -50,6 +50,7 @@ import { registerGithubRoutes } from './src/server/routes/github';
 import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
 import { registerMinifyRoutes } from './src/server/routes/minify';
 import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
+import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
 // import { registerAppmakerRoutes } from './src/server/routes/appmaker';
@@ -539,6 +540,10 @@ setInterval(() => {
   // The shared "read and change one of my apps" API behind every Design & Build tool. Its writes go
   // through the same verified-restore-point sequence the Minifier uses — see lib/workspaceEdit.ts.
   registerWorkspaceFileRoutes(app);
+
+  // "Set up my app for the stores" — assembles a user's v5 app into a GitHub repo whose workflows
+  // build a genuine signed .aab/.ipa on GitHub's runners. See routes/mobileSetup.ts for who does what.
+  registerMobileSetupRoutes(app);
 
   // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
   registerAuditRoutes(app);

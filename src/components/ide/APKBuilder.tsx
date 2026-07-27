@@ -568,7 +568,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
   // ── Renders ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen p-6 font-sans" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="h-full overflow-y-auto overscroll-contain p-4 sm:p-6 font-sans" style={{ background: '#0d1117', color: '#e6edf3', WebkitOverflowScrolling: 'touch' }}>
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">

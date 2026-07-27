@@ -333,7 +333,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-gray-100 p-4 font-sans">
+    <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-gray-100 p-4 font-sans">
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
       <div className="max-w-6xl mx-auto">

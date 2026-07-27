@@ -22314,3 +22314,43 @@ three days later on the SAME app.
   a bug to patch blind. Deferred deliberately rather than half-fixed.
 
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
+
+#### CORRECTION to the ledger above (same session, found while verifying the fix)
+
+I under-reported my own fix and wrongly deferred three ledger items. Recording the correction rather than
+editing the entry above (append-only), because the reasoning matters more than the tidy version.
+
+**Struggle points 10 + 11 are NOT a separate design question — they are DOWNSTREAM SYMPTOMS of the same
+root cause.** The reviewer is already gated on `writtenFiles.size > 0`, with an explicit comment saying
+exactly what should have happened: *"ANALYSIS-ONLY turns get NO reviewer … on a survey/import turn where
+ZERO files were written it has nothing to verify."* That guard was correct and it was DEFEATED by the two
+rogue mutating passes: the credential-log guard did `writtenFiles.set(...)` for 2 files, so
+`writtenFiles.size` became 2, so `reviewerAllowed` flipped true, so a full reviewer pass ran on a turn
+that built nothing. Verified the ordering in source — `AGENTV3_DEP_RECONCILE` (line ~6117) and
+`AGENTV3_CRED_LOG_GUARD` (~7999) both execute BEFORE the reviewer gate (~8578).
+
+So with the gates shipped in this change, a survey turn now gets `writtenFiles.size === 0`, and therefore:
+- **no reviewer pass** → item 11's duplicated ~35s survey disappears entirely;
+- **no fake "⚠️ Build Review (88/100)"** → we stop scoring the user's pre-existing app as if it were our
+  build output (an honesty defect I had not even listed);
+- **a whole LLM pass is not spent** → and since the reviewer's own calls are where 6 of the 8 GLM 429s
+  landed (timestamps 1785171534670 and 1785171547541 both sit inside the reviewer's read_file/glob run,
+  agent=reviewer), most of item 4's 🔀 429 storm was self-inflicted by work that should never have run.
+  Only the first burst (2 fallbacks, ts 1785171518860) happened during the legitimate architect survey.
+
+The same causal chain also restores a THIRD pre-existing guarantee I hadn't credited: `ProjectSummary`
+already had the honest branch *"🔍 I analyzed your project — no files were changed"* (built by the
+2026-07-05 report autopsy), selected by `changedFiles === 0` where `changedFiles: writtenFiles.size`. The
+rogue writes forced it down the `editRun` branch — which is literally where "✅ Done — I changed 2 files
+in your project" came from. The honest message was already written; it was being silently overridden.
+
+**The lesson, and it is the real one:** three independent, correctly-built guards (reviewer skip, summary
+honesty, and the 2026-07-24 integrity-heal gate) all keyed off state that an unrelated pass was free to
+corrupt. Gating each consumer was never going to be enough — `writtenFiles` is the shared invariant, and
+nothing stopped a non-build pass from writing to it. That is why the fix had to be "no mutation on a
+read-only turn" at the SOURCE, not "handle mutation better" at each reader.
+
+Revised open root causes: only TWO remain genuinely open — the residual GLM 429s during the architect's
+own survey (2 of 8, provider-side; still needs real pacer telemetry, still not guessed at), and own-repo
+storage not engaging (admin must confirm `AGENTV3_OWN_REPO_STORAGE` in Cloud Run). Items 10/11 and most
+of item 4 are CLOSED by this change, not deferred.

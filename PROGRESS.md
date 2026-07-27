@@ -22132,3 +22132,82 @@ Gate: fe tsc 0 · server tsc 0 · full suite 9554/9554 green (938 files) — inc
 actually set to a live value in Cloud Run — the consolidated "Connect my website" flow is only as real as
 that flag; if it's off, users see the honest "not enabled yet" message (never a fake success) but the
 feature won't actually work end-to-end until it's on.
+### 2026-07-27 — Monetization made real (admin: "user ko apni app selection ka option do … monetization
+ko jitna simple bana sakte ho, banao!!!!" + "database aur monetization dono ki real secret and key se
+jod do") — PR #1902
+
+Audited the whole Monetization wizard against what it CLAIMED to do. It looked finished and did almost
+nothing real. Five defects, each root-caused rather than patched (fourth absolute rule):
+
+1. **It never touched a real app.** "Inject into App" called `onCodeUpdate(merged)` — the in-memory
+   preview only. Closing the tab lost the work. This is the SAME bug class already killed in the five
+   Design & Build tools and the SEO Optimizer (2026-07-27 earlier today); Monetization was the last
+   surviving instance of it. Hunted the siblings: no other tool still writes only to the preview.
+2. **It asked for secrets and dropped them on the floor.** A Razorpay Key Secret typed into the wizard
+   lived in a React `useState` and NOWHERE else — never the vault, never the server, never the app. The
+   user reasonably believed their key was saved. It was not.
+3. **The Razorpay code it generated was EXPLOITABLE** — the most serious finding. It shipped
+   `amount: window.payAmount * 100` (price taken from a browser variable) and treated the browser's
+   `handler` callback as proof of payment, with no `order_id` and no signature verification. A customer
+   could set `window.payAmount = 1` in devtools and buy a Rs 10,000 item for Rs 1, or call the handler
+   and pay nothing at all. Any shop shipping that code gets defrauded. Razorpay's own docs are explicit
+   that the server must create an Order and verify `razorpay_signature` with HMAC-SHA256. Note the
+   Stripe and Cashfree templates did NOT have this flaw — only Razorpay's did, i.e. a per-provider
+   drift, which is why the fix centralizes ALL generation in one module instead of per-tab snippets.
+4. **Six choices deep before anything happened**, defaulting to a Razorpay form with key, secret,
+   company, currency, four payment-mode checkboxes and an amount — for an Indian seller whose actual
+   need is "paisa mere bank me aa jaye".
+5. **Two doorways to one Database screen.** Other AI -> Database opened a page whose only real content
+   was a link into Settings -> App Settings -> Database, which made users think there were two
+   different databases to configure. (Admin asked directly whether the second one was needed.)
+
+**Fixes shipped:**
+- **New `src/lib/paymentSetup.ts`** — the single source of truth for every payment integration:
+  method specs (label, plain-language summary, real cost, whether a server is needed, per-field "where
+  in the provider dashboard this lives"), `paymentEnvKeys()` (vault names, `VITE_` marking exactly the
+  browser-safe values), `generatePayment()` (the CORRECT flow for each method),
+  `missingRequiredFields()` and `candidatePages()` (the wizard's own gates, made pure so they are
+  testable — an empty UPI ID used to produce a link with no payee).
+- **Razorpay/Cashfree/Stripe now generate the real flow**: server creates the order and fixes the price;
+  Razorpay verifies `razorpay_signature` via `crypto.createHmac('sha256', …)` + `timingSafeEqual`;
+  Cashfree and Stripe confirm with the provider (`order-status` / `payment_status`). The browser
+  callback is explicitly labelled as NOT proof, in the generated code itself. Stripe went from a
+  copy-paste text block to a real generated integration.
+- **UPI first, ONE field.** No signup, no fees, no server, money straight to the bank. It states plainly
+  that UPI cannot tell a website a payment succeeded — check the bank app before delivering — instead of
+  implying automatic confirmation (rule 3 applied to generated output, not just to chat).
+- **App selection** — NavBharatAI Pro app (via the shared `useUserApps`/`useAppFiles`/`saveFilesToApp`
+  foundation) or the user's own GitHub repo (`/api/github/repos` -> `/api/github/fetch` ->
+  `/api/github/push-enhanced`, which uses `base_tree` so only the touched paths change). A NavBharatAI
+  write goes through the verified path (restore point PROVEN to hold the originals before overwriting,
+  write read back afterwards); a GitHub write is a real commit on that repo's own default branch.
+- **Vault integration** — credentials upsert into the same encrypted `user_secrets` store the Database
+  screen writes to, so they appear in Settings -> Secrets & Keys automatically and the build engine can
+  use them. Secret inputs are cleared from React state once stored. NOTHING secret is ever written into
+  the app's files; only public-by-design values (Razorpay Key Id, AdSense publisher id, Stripe
+  publishable key) reach the page.
+- **Removed the Other AI Database tile**, its `activeView === 'database'` branch, and the signpost
+  component it rendered (`DatabaseUI.tsx` deleted). The real screen in Settings is untouched. A
+  regression test asserts no second 'database' doorway can reappear in `HOME_TOOL_GROUPS`.
+- **Removed deliberately, and said so to the admin** (rule 2 — no half-real features): the
+  "Subscription" tab, whose Firebase snippet read a `subscriptions` collection that nothing in the flow
+  ever wrote (it could not make anyone subscribe); and the revenue calculator, whose AdSense branch
+  invented an RPM (`visitors * 0.01 * 0.3`) and presented it as an estimate.
+- **Mobile**: single column throughout, no fixed-width side panel (the old 260px left rail left nothing
+  on a 360px phone), full-width controls and buttons.
+
+**Regression tests** (`tests/paymentSetup.test.ts`, 34): encode the exact shipped defect —
+`expect(gen.html).not.toContain('window.payAmount')`, `toContain("createHmac('sha256'")`,
+`toContain('timingSafeEqual')`, and for EVERY method that no secret value appears in anything sent to a
+browser. Plus `candidatePages` / `missingRequiredFields` boundary cases.
+
+**AppKnowledgeBase**: new `monetization` entry (path, step-by-step howToUse, English + Hinglish
+keywords) so every AI can answer "paise kaise lu?" with the real navigation.
+
+Gate: fe tsc 0 · server tsc 0 · full suite 9568/9568 green · build ✓ · boot:check PASS · bundle within
+budget. HONEST LIMIT: the generated payment code is reviewed and test-locked but has NOT been run
+end-to-end against a live Razorpay/Stripe account — that needs the user's own keys and is outside what
+this session can verify.
+
+Also merged this session: PR #1899 (CLAUDE.md env registry — the three Nav App Store keys the admin set
+in Cloud Run), CI green.

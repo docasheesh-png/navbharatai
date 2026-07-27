@@ -510,7 +510,7 @@ export function ViewPanels({
       {/* Phase 8 — Dark Mode Generator */}
       {activeView === 'darkmode' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DarkModeGenerator generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DarkModeGenerator generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
@@ -629,7 +629,7 @@ export function ViewPanels({
 
       {activeView === 'designsys' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DesignSystem generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DesignSystem generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

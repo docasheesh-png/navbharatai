@@ -14,126 +14,20 @@
 //     minifies it here, and saves that. What lands in the file is provably the minified form of what
 //     was actually there — a tampered or stale client payload cannot become the user's source code.
 //
-//  3. A RESTORE POINT IS SAVED FIRST **AND VERIFIED BY READING IT BACK**. This is the only operation
-//     in the app that overwrites a user's source with machine-generated output, and minified code
-//     cannot be un-minified by hand. `buildHistoryStore.save()` is deliberately best-effort — it
-//     swallows every error and returns void — and it truncates large snapshots to fit Firestore's
-//     document limit. So "we called save()" proves nothing. We re-read the saved version and confirm
-//     it contains this exact file's ORIGINAL bytes; if it does not, the apply is refused. A safety net
-//     that was never checked is not a safety net.
-//
-//  4. THE WRITE IS VERIFIED THE SAME WAY. `mergeWorkspaceFiles()` returns void and no-ops when
-//     Firestore is unavailable, so reporting success off a resolved promise would be a fake success.
-//     We read the file back and confirm it changed before telling the user anything did.
+//  3. A RESTORE POINT IS SAVED FIRST **AND VERIFIED BY READING IT BACK**, and 4. THE WRITE IS
+//     VERIFIED THE SAME WAY. Both stores fail silently — `buildHistoryStore.save()` swallows every
+//     error and truncates large snapshots, `mergeWorkspaceFiles()` no-ops without a database — so
+//     neither can be taken on trust. That sequence now lives in ONE shared module used by every tool
+//     that writes into a user's app (src/server/lib/workspaceEdit.ts), rather than a copy per tool.
 
 import type { Express, Request, Response } from 'express';
 import { minifySource, isMinifiable, detectLanguage } from '../lib/codeMinifier';
-import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { sessionWorkspaceId, applyFilesToApp } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 
 /** Cap a single minify request so one huge paste cannot tie up the server. */
 export const MAX_MINIFY_BYTES = 2 * 1024 * 1024;
-
-/** How many recent restore points to search when confirming ours actually landed. */
-const RESTORE_POINT_SEARCH_DEPTH = 5;
-
-/**
- * Build the workspace id for one of THIS user's apps.
- *
- * Every Pro v5 app is stored as `agentv3-{uid}-{sessionId}`, so deriving the id from the verified uid
- * (rather than accepting one from the client) makes cross-account access impossible by construction
- * instead of by check. Returns null when the session id is not a plausible id.
- */
-export function sessionWorkspaceId(uid: string, sessionId: string): string | null {
-  if (!uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return null;
-  if (!sessionId || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return null;
-  return `agentv3-${uid}-${sessionId}`;
-}
-
-interface HistoryDeps {
-  save: typeof buildHistoryStore.save;
-  list: typeof buildHistoryStore.list;
-  get: typeof buildHistoryStore.get;
-}
-
-const realHistory: HistoryDeps = {
-  save: (...a) => buildHistoryStore.save(...a),
-  list: (...a) => buildHistoryStore.list(...a),
-  get: (...a) => buildHistoryStore.get(...a),
-};
-
-/**
- * Save a restore point AND prove it can actually restore this file.
- *
- * The proof is the whole point: we re-read the stored snapshot and require it to hold `original`
- * verbatim for `filePath`. That catches all three ways the net could be silently missing — Firestore
- * unavailable, the write failing inside the store's own try/catch, and the snapshot being truncated
- * past this file to fit the document size limit.
- *
- * Returns the restorable version's id, or null if no verified restore point exists.
- */
-export async function saveVerifiedRestorePoint(
-  sessionId: string,
-  files: Record<string, string>,
-  filePath: string,
-  original: string,
-  deps: HistoryDeps = realHistory,
-): Promise<string | null> {
-  try {
-    await deps.save(sessionId, {
-      commitMessage: `Before optimising ${filePath}`,
-      fileCount: Object.keys(files).length,
-      files,
-      isEdit: true,
-      tier: 'manual',
-      ok: true,
-    });
-    // Newest first. Ours should be first, but a concurrent save could beat us — and either way the
-    // question that matters is "does a restore point holding this exact file exist NOW?", not "was it
-    // the one I just wrote".
-    const recent = (await deps.list(sessionId)).slice(0, RESTORE_POINT_SEARCH_DEPTH);
-    for (const meta of recent) {
-      const full = await deps.get(sessionId, meta.id);
-      if (full?.files?.[filePath] === original) return meta.id;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-interface WorkspaceDeps {
-  load: typeof loadWorkspaceFiles;
-  merge: typeof mergeWorkspaceFiles;
-}
-
-const realWorkspace: WorkspaceDeps = {
-  load: (...a) => loadWorkspaceFiles(...a),
-  merge: (...a) => mergeWorkspaceFiles(...a),
-};
-
-/**
- * Write one file and confirm it really changed.
- *
- * `mergeWorkspaceFiles` resolves happily when there is no database and when the content exceeds its
- * own per-file cap, so the resolved promise means nothing on its own. Reading the file back is the
- * only honest way to tell the user their app changed.
- */
-export async function writeFileVerified(
-  workspaceId: string,
-  filePath: string,
-  code: string,
-  deps: WorkspaceDeps = realWorkspace,
-): Promise<boolean> {
-  try {
-    await deps.merge(workspaceId, { [filePath]: code });
-    const after = await deps.load(workspaceId);
-    return after[filePath] === code;
-  } catch {
-    return false;
-  }
-}
 
 export function registerMinifyRoutes(app: Express): void {
   /**
@@ -238,29 +132,28 @@ export function registerMinifyRoutes(app: Express): void {
       }
 
       // THE SAFETY NET — and the proof that it exists. Minified code cannot be un-minified, so an
-      // unverified restore point is worth nothing. No verified restore point ⇒ no write.
-      const versionId = await saveVerifiedRestorePoint(sid, files, filePath, original);
-      if (!versionId) {
-        return res.status(503).json({
-          error: 'Could not save a restore point you could undo from, so nothing was changed. Your app is exactly as it was — please try again.',
-        });
-      }
-
-      const written = await writeFileVerified(workspaceId, filePath, result.code);
-      if (!written) {
-        return res.status(502).json({ error: 'The change could not be saved, so your app is unchanged. Please try again.' });
+      // unverified restore point is worth nothing. The shared apply sequence refuses to write without
+      // one, and reads the write back before reporting success.
+      const applied = await applyFilesToApp(
+        workspaceId,
+        sid,
+        { [filePath]: result.code },
+        `Before optimising ${filePath}`,
+      );
+      if (!applied.ok) {
+        return res.status(applied.status).json({ error: applied.error });
       }
 
       return res.json({
         ok: true,
         applied: true,
         path: filePath,
-        versionId,
+        versionId: applied.versionId,
         originalBytes: result.originalBytes,
         minifiedBytes: result.minifiedBytes,
         savedBytes: result.savedBytes,
         savedPercent: result.savedPercent,
-        undoHint: 'A restore point was saved first — you can undo this any time from Versioning (Time Machine).',
+        undoHint: applied.undoHint,
       });
     } catch {
       return res.status(502).json({ error: 'Could not update that file. Your app is unchanged.' });

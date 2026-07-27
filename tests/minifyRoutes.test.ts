@@ -42,7 +42,8 @@ vi.mock('../src/server/project/BuildHistoryStore', () => ({
   },
 }));
 
-const { registerMinifyRoutes, sessionWorkspaceId } = await import('../src/server/routes/minify');
+const { registerMinifyRoutes } = await import('../src/server/routes/minify');
+const { sessionWorkspaceId } = await import('../src/server/lib/workspaceEdit');
 const routes = captureRoutes(registerMinifyRoutes);
 
 const apply = routes.get('POST /api/minify/apply')!;

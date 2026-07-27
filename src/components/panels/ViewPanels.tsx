@@ -44,7 +44,7 @@ const MonetizationWizard= _lz(() => import('../ide/MonetizationWizard'), 'Moneti
 const AIImageGenerator  = _lz(() => import('../ide/AIImageGenerator'),   'AIImageGenerator');
 const CodeVersioning    = _lz(() => import('../ide/CodeVersioning'),     'CodeVersioning');
 const APIMarketplace    = _lz(() => import('../ide/APIMarketplace'),     'APIMarketplace');
-const AppStorePublisher = _lz(() => import('../ide/AppStorePublisher'),  'AppStorePublisher');
+const NavAppStore       = _lz(() => import('../ide/NavAppStore'),        'NavAppStore');
 const LiveCollaboration = _lz(() => import('../ide/LiveCollaboration'),  'LiveCollaboration');
 const AITestingSuite    = _lz(() => import('../ide/AITestingSuite'),     'AITestingSuite');
 const LocalizationManager = _lz(() => import('../ide/LocalizationManager'), 'LocalizationManager');
@@ -461,7 +461,7 @@ export function ViewPanels({
       {/* Phase 6 — SEO Optimizer */}
       {activeView === 'seo' && (
         <div className="flex-1 h-full overflow-hidden">
-          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
@@ -563,10 +563,13 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 9 — App Store Publisher */}
+      {/* Nav App Store (admin 2026-07-27) — replaces the old App Store Publisher, which was a
+          metadata checklist that never published anything. The Play/App Store listing guidance it
+          offered now lives, step by step, inside the APK Builder's publishing guide; this screen is
+          the real thing: upload an .apk, and install apps other people have published. */}
       {activeView === 'appstore' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AppStorePublisher generatedCode={generatedCode} />
+          <NavAppStore />
         </div>
       )}
 

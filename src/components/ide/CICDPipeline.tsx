@@ -139,7 +139,7 @@ export function CICDPipeline() {
   return (
     <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-b border-white/5 bg-[#161b22]">
         <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center">
           <Rocket className="w-5 h-5 text-violet-400" />
         </div>
@@ -147,7 +147,7 @@ export function CICDPipeline() {
           <h2 className="font-semibold text-white text-base">CI/CD Pipeline</h2>
           <p className="text-xs text-white/40">Visual pipeline builder — GitHub Actions, Cloud Build, GitLab CI</p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 shrink-0">
           {/* This is a pipeline BUILDER — the real deliverable is the CI YAML, which your provider
               runs (admin autopsy 2026-07-21). The old "Run Pipeline" button faked pass/fail + console
               logs in the browser; nothing was ever executed. Download the real YAML instead. */}
@@ -167,7 +167,7 @@ export function CICDPipeline() {
           <span className="text-[10px] text-white/40">Env:</span>
           <input className="bg-transparent border-b border-white/20 text-xs text-white px-1 py-0.5 focus:outline-none focus:border-violet-500/50 w-24" value={envName} onChange={e => setEnvName(e.target.value)} />
         </div>
-        <div className="flex gap-1 ml-auto">
+        <div className="flex gap-1 sm:ml-auto flex-wrap">
           {(['github', 'cloudbuild', 'gitlab'] as Platform[]).map(p => (
             <button key={p} onClick={() => setPlatform(p)} className={`text-[10px] px-2.5 py-1 rounded-lg border capitalize transition-all ${platform === p ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-white/10 text-white/30 hover:border-white/20'}`}>
               {p === 'github' ? 'GitHub Actions' : p === 'cloudbuild' ? 'Cloud Build' : 'GitLab CI'}
@@ -176,9 +176,9 @@ export function CICDPipeline() {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
         {/* Pipeline Steps */}
-        <div className="w-72 flex flex-col border-r border-white/5 overflow-hidden">
+        <div className="w-full md:w-72 flex-shrink-0 max-h-[40vh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-white/5 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
             <span className="text-[10px] text-white/30 uppercase tracking-wider">Steps ({steps.filter(s => s.enabled).length} active)</span>
             <button onClick={() => setShowAddStep(!showAddStep)} className="text-[10px] text-violet-400 hover:text-violet-300 flex items-center gap-1">

@@ -370,7 +370,7 @@ export function AppStorePublisher({ generatedCode }: Props) {
               {/* Phone Screenshots */}
               <div>
                 <p className="text-xs text-white/50 uppercase tracking-wider mb-3">📱 Phone Screenshots (1080×1920)</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {data.screenshots.slice(0, 6).map((sc, i) => (
                     <div key={i} className="aspect-[9/16] bg-[#161b22] border border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center gap-1 relative group hover:border-rose-500/30 transition-all cursor-pointer"
                       onClick={() => {

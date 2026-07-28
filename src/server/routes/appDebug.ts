@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { callProfessionalAI } from '../lib/professionalRouting';
-import { workspaceRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
+import { workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { loadWorkspaceFiles, listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { scanFilesStatic } from '../lib/appStaticScan';
 import { scanAppGraph } from '../lib/appGraphScan';
@@ -87,7 +88,15 @@ export function registerAppDebugRoutes(app: Express): void {
 
   // ── Run a whole-app scan (NDJSON stream) ────────────────────────────────────────────────────────
   app.post('/api/app-debug/run', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const uid = await verifyFirebaseToken(req);
+    // Daily allowance / Professional Pass (flag-off = no-op). Checked BEFORE anything is loaded or
+    // streamed, so a blocked caller gets a clean JSON paywall rather than a half-open stream.
+    const identity = await verifyFirebaseIdentity(req);
+    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+    const uid = identity?.uid || null;
     const source = req.body?.source;
 
     // Resolve the file map from the chosen source (validate BEFORE we start streaming).
@@ -210,6 +219,8 @@ export function registerAppDebugRoutes(app: Express): void {
           ? 'The deep AI pass was briefly unavailable, so this scan shows the verified static findings only. Try again shortly for the full deep analysis.'
           : undefined,
       });
+      // A completed scan spends one allowance. A scan that errored below never does.
+      if (gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
       res.end();
     } catch {
       // Stream already started → emit an honest error event and close (no fake result).
@@ -220,6 +231,12 @@ export function registerAppDebugRoutes(app: Express): void {
 
   // ── Deep-dive: investigate ONE finding → root cause + full fix (interactive) ────────────────────
   app.post('/api/app-debug/investigate', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const investigateIdentity = await verifyFirebaseIdentity(req);
+    const investigateGate = await gateToolAction(investigateIdentity?.uid || null, investigateIdentity?.email || null, 'ai_tool');
+    if (!investigateGate.allow) {
+      res.status(investigateGate.status).json(investigateGate.body);
+      return;
+    }
     const problem = typeof req.body?.problem === 'string' ? req.body.problem.trim() : '';
     const file = typeof req.body?.file === 'string' ? req.body.file : '';
     if (!problem) {
@@ -254,6 +271,8 @@ export function registerAppDebugRoutes(app: Express): void {
         res.status(502).json({ error: 'The analysis came back empty — please try again.' });
         return;
       }
+      // Only a genuinely-answered investigation spends an allowance.
+      if (investigateGate.countsAgainstFree) burnToolAction(investigateGate.uid, 'ai_tool');
       res.json(parseDebugResponse(content));
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s engine is briefly busy — please try again in a minute.' });

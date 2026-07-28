@@ -9,6 +9,8 @@
 
 import type { Express, Request, Response } from 'express';
 import { callProfessionalAI } from '../lib/professionalRouting';
+import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
 import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y } from '../AppMakerLab/intelligence/A11yLinter';
@@ -22,9 +24,18 @@ export function registerDesignRoutes(app: Express): void {
 
   // Context-aware AI improvement suggestions for the current app.
   app.post('/api/design/suggest', async (req: Request, res: Response) => {
+    // Daily allowance / Professional Pass (flag-off = no-op).
+    const identity = await verifyFirebaseIdentity(req);
+    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
     try {
       const code = typeof req.body?.code === 'string' ? req.body.code.slice(0, MAX_CODE) : '';
       const suggestions = await aiSuggestions(code, routeFn);
+      // An empty result is the honest "nothing to say" path below, so only a real answer is charged.
+      if (suggestions.length && gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
       res.json({ suggestions });
     } catch {
       // Honest empty result — the client falls back to its static suggestions.
@@ -39,8 +50,15 @@ export function registerDesignRoutes(app: Express): void {
       res.status(400).json({ error: 'provide { brand: "<description of the brand/vibe>" }' });
       return;
     }
+    const paletteIdentity = await verifyFirebaseIdentity(req);
+    const paletteGate = await gateToolAction(paletteIdentity?.uid || null, paletteIdentity?.email || null, 'ai_tool');
+    if (!paletteGate.allow) {
+      res.status(paletteGate.status).json(paletteGate.body);
+      return;
+    }
     try {
       const palette = await aiPalette(brand, routeFn);
+      if (palette && paletteGate.countsAgainstFree) burnToolAction(paletteGate.uid, 'ai_tool');
       res.json({ palette });
     } catch {
       res.json({ palette: null });

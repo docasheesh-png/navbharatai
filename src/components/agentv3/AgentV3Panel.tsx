@@ -12,6 +12,7 @@ import {
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
+import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -1211,7 +1212,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       if (!res.ok || !data || typeof data.prompt !== 'string') {
         throw new Error((data && typeof data.error === 'string' && data.error) || 'Could not read the screenshot — try a clearer image.');
       }
-      await send({ text: data.prompt, importUrl: '' });
+      // KEEP WHAT THE USER TYPED (admin 2026-07-28). This flow used to send ONLY the prompt derived
+      // from the image, silently discarding the composer text — so "make this page but in Hindi" lost
+      // "but in Hindi", the single most likely thing a user adds to a screenshot. Their words come
+      // LAST so they read as the overriding instruction, and the composer is cleared like a normal send.
+      const typed = prompt.trim();
+      const combined = combineScreenshotPrompt(data.prompt, typed);
+      if (typed) setPrompt('');
+      await send({ text: combined, importUrl: '' });
     } catch (err) {
       setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${err instanceof Error ? err.message : 'Screenshot could not be read. Try again.'}`, ts: Date.now() }]);
     } finally {

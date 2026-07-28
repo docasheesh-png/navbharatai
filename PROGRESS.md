@@ -22545,3 +22545,24 @@ showing a live percentage. AppKnowledgeBase updated for both surfaces.
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓. 5 further tests lock the claim contract
 (single-claim ownership transfer, verified-uploader-only, cleanup on every path, the retained legacy
 path, and that inspection + malware scanning still run).
+
+#### Closing the open item from suggestion 2 — Screenshot → App no longer discards what you typed
+
+Recorded above as "open, and worth doing properly later"; done properly now rather than left to rot.
+
+The flow sent ONLY the prompt derived from the image and silently dropped the composer text. So
+"make this page but in Hindi" lost "but in Hindi" — the single most likely thing a user adds to a
+screenshot, and the part carrying their actual intent. The image says WHAT it looks like; the typed
+line says what to do DIFFERENTLY, so dropping it inverts the value of the two inputs.
+
+New pure `combineScreenshotPrompt(imagePrompt, typed)`: the user's words go LAST and are labelled as
+taking priority, because a model reading a long generated description followed by one short human
+instruction should treat the human as the override. Either side may be empty without leaving a stray
+separator. Extracted as a pure function specifically so it is testable — the logic was inline in a
+component handler, which is how it went unnoticed.
+
+Note this does NOT change the earlier decision: the flow still only runs when the user deliberately
+picks Screenshot → App. It is still not auto-fired from "image attached + some text", because that
+path calls send() immediately and starts a real, billed build — a misread ("why is this button
+broken?" + a screenshot) would launch a build against the user's app. Fixing the text-discard removes
+most of the reason the auto-fire was proposed, without taking on that risk.

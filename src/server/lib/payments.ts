@@ -1,10 +1,12 @@
 import axios from 'axios';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
-import { doc, getDoc, runTransaction, getServerDb as getDb } from './serverDb';
+import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
-import { professionalPassDays } from '../professionals/professionalPaid';
+import {
+  professionalPassPriceInr, passEntitlementForPayment, MAX_PASS_PERIODS,
+} from '../professionals/professionalPaid';
 
 // SECURITY (audit C4 — CRITICAL, financial): the vishwakarma order's paid amount is
 // `tokenAmount₹ + (buyPass ? pass : 0)` (client: createVishwakarmaOrder in App.tsx). The credit path
@@ -240,10 +242,39 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       // client poll can't double-grant). Days/plan come from the tx doc, falling back to the server
       // config (never trusts the client for the entitlement length).
       if (String(txData.productType || '') === 'professional_pass') {
-        const days = Number.isFinite(Number(txData.passDays)) && Number(txData.passDays) > 0 ? Number(txData.passDays) : professionalPassDays();
+        // SECURITY (money): the entitlement is DERIVED from the amount actually paid — which the block
+        // above has already reconciled against what Cashfree really charged — times the SERVER's own
+        // price. The client's `passDays` is deliberately ignored: it used to be trusted, so an order of
+        // `{ amount: 1, passDays: 36500 }` bought a hundred-year pass for one rupee. Same defect class
+        // as the C4 wallet fix (credited tokens derive from the verified paid amount), applied here.
+        const entitlement = passEntitlementForPayment(txData.amountPaid);
         const plan = String(txData.passPlan || 'monthly');
-        const expiresAt = await professionalPassStore.grant(txData.userId, days, plan);
-        return { success: true, data: { professionalPass: true, expiresAt, plan, days } };
+        if (entitlement.days <= 0) {
+          // Paid, but not enough for a single period. The order-creation guard should have refused this,
+          // so reaching here means money moved with nothing to grant — record it loudly for a refund
+          // rather than silently swallowing the payment.
+          console.error(
+            `[PASS] Order ${orderId} paid ₹${txData.amountPaid} — below the ₹${professionalPassPriceInr()} pass price. ` +
+            `NOTHING granted; this payment needs a manual refund.`,
+          );
+          try { await updateDoc(txRef, { fulfilmentError: 'amount_below_pass_price', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
+          return { success: false, error: 'That payment did not cover the Professional Pass price. Please contact support for a refund.' };
+        }
+        if (entitlement.capped) {
+          console.error(
+            `[PASS] Order ${orderId} paid ₹${txData.amountPaid} — covers more than the ${MAX_PASS_PERIODS}-period ` +
+            `automatic maximum. Granted ${entitlement.days} days; the remainder needs an admin decision.`,
+          );
+        }
+        const expiresAt = await professionalPassStore.grant(txData.userId, entitlement.days, plan);
+        try {
+          await updateDoc(txRef, {
+            passDaysGranted: entitlement.days,
+            ...(entitlement.capped ? { passCapped: true } : {}),
+            fulfilledAt: new Date().toISOString(),
+          });
+        } catch { /* the pass is granted; the audit note is best-effort */ }
+        return { success: true, data: { professionalPass: true, expiresAt, plan, days: entitlement.days } };
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);

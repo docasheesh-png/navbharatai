@@ -10,6 +10,9 @@ import { getSecretValue } from '../lib/secrets';
 import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal } from '../lib/payments';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
+import {
+  isAcceptablePassPayment, professionalPassPriceInr, professionalPassDays,
+} from '../professionals/professionalPaid';
 
 /**
  * Verify a Cashfree webhook signature. CRITICAL: the HMAC MUST be computed over the EXACT raw bytes
@@ -44,8 +47,15 @@ export function isValidCashfreeSignature(opts: {
 export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitRequestHandler): void {
   app.post('/api/payment/create-order', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { amount, userId, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount, productType, passPlan, passDays } = req.body;
-    if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
+    const { amount, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount, productType, passPlan, passDays } = req.body;
+
+    // SECURITY (money, 2026-07-27 — going to real production): the order's owner is the VERIFIED token
+    // identity, never the body's `userId`. This route used to take the uid straight from the request, so
+    // anyone could mint payment_transactions rows against any account, and every entitlement downstream
+    // was keyed on a value the caller chose. All three real callers (wallet recharge, Vishwakarma,
+    // Professional Pass) are signed-in flows, so requiring the token costs a legitimate user nothing.
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Please sign in to make a payment.' });
     // Product routed on fulfilment: 'professional_pass' grants a time-based Professional Pass (no wallet
     // tokens); anything else is the existing wallet recharge. Untrusted, but harmless — the fulfilment
     // path re-derives days/plan from the server config, and the amount is reconciled against Cashfree.
@@ -53,6 +63,19 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount <= 0) {
       return res.status(400).json({ error: 'Invalid order amount' });
+    }
+
+    // A Professional Pass order must cover at least one full period at the SERVER's price. Without
+    // this, a client could order the pass for ₹1: the fulfilment path now derives the entitlement from
+    // the paid amount and would grant nothing, so the customer would have paid for nothing and needed a
+    // refund. Refusing here means that situation never arises, and the real price is stated up front.
+    if (isProfessionalPass && !isAcceptablePassPayment(orderAmount)) {
+      return res.status(400).json({
+        error: `The Professional Pass costs ₹${professionalPassPriceInr()}. Please start the purchase again from the Professionals screen.`,
+        code: 'pass_amount_too_low',
+        passPriceInr: professionalPassPriceInr(),
+        passDays: professionalPassDays(),
+      });
     }
 
     // Cryptographically-random suffix avoids the collision/predictability of Math.random()*1000.

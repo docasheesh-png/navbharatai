@@ -48,7 +48,7 @@ import {
   Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
   Wand2, Package,
   Kanban, CloudUpload, LayoutTemplate, HeartPulse,
-  Briefcase, FileText, LayoutGrid
+  Briefcase, FileText, LayoutGrid, Layers
 } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
@@ -3593,6 +3593,34 @@ export default function App() {
                 {active && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             ))
+          ) : (activeView === 'nbi_chat' || activeView === 'professionals') ? (
+            // Per-AI footer (admin 2026-07-28): NavBharatAI Free and Professional get a focused, dynamic
+            // nav — History / AI / Mode (coming soon) / Settings. Home stays reachable from the ☰ / logo above.
+            [
+              { key: 'history',  id: 'history' as ViewType,  icon: History,   label: 'History',  comingSoon: false },
+              { key: 'ai',       id: (activeView === 'professionals' ? 'professionals' : 'nbi_chat') as ViewType, icon: activeView === 'professionals' ? Briefcase : MessageSquare, label: 'AI', comingSoon: false },
+              { key: 'mode',     id: null,                    icon: Layers,    label: 'Mode',     comingSoon: true },
+              { key: 'settings', id: 'settings' as ViewType, icon: Settings,  label: 'Settings', comingSoon: false },
+            ].map(({ key, id, icon: Icon, label, comingSoon }) => {
+              const isActive = !comingSoon && id != null && activeView === id;
+              return (
+                <button
+                  key={key}
+                  disabled={comingSoon}
+                  onClick={() => { if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; } if (id) toggleTab(id); }}
+                  aria-label={label}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-indigo-400' : comingSoon ? 'text-white/20' : 'text-[#484f58]'}`}
+                >
+                  <span className="relative inline-flex">
+                    <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
+                    {comingSoon && <span className="absolute -top-2 -right-3 text-[6px] font-black text-amber-400/80 uppercase tracking-tight">soon</span>}
+                  </span>
+                  <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                  {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
+                </button>
+              );
+            })
           ) : (
           [
             { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },

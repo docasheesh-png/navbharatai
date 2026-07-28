@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
-import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { validateBody, vobject, vstring, vboolean } from '../lib/validate';
 import { runVisionChain } from '../lib/visionChain';
@@ -88,7 +88,10 @@ ONLY if the result would be a pixel-perfect copy that reuses the ORIGINAL site's
 When unsure on a real-brand login/payment page, use Case B. Otherwise honour the user's request. Never build something that can impersonate a real service to phish real users.`;
 }
 
-const s2pLimiter = () => rateLimiter({ name: 'screenshot-to-prompt', authed: 40, anon: 10, noun: 'screenshot conversions' });
+// `anon: 0` — this runs a real vision call on NavBharatAI's account, so it needs an account to bill.
+const s2pLimiter = () => rateLimiter({
+  name: 'screenshot-to-prompt', authed: 40, anon: 0, anonGlobalPerHour: 0, noun: 'screenshot conversions',
+});
 
 export function registerScreenshotToPromptRoutes(app: Express): void {
   app.post('/api/screenshot/to-prompt', s2pLimiter(), validateBody(schema), async (req: Request, res: Response) => {
@@ -97,10 +100,17 @@ export function registerScreenshotToPromptRoutes(app: Express): void {
     if (!image) { res.status(400).json({ error: 'A screenshot image is required.' }); return; }
     const type = typeof body.imageType === 'string' && body.imageType.startsWith('image/') ? body.imageType : 'image/png';
 
+    // A vision call on NavBharatAI's account needs an account to bill it to. Unconditional — the
+    // allowance gate below is flag-gated and inert by default, so it cannot carry this on its own.
+    const account = await requireAccountForCostlyAi(req, 'screenshot to code');
+    if (!account.ok) {
+      res.status(account.status).json(account.body);
+      return;
+    }
+
     // Daily allowance / Professional Pass (flag-off = no-op). Runs after the cheap validity check so a
     // missing image never costs the user one of their actions.
-    const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    const gate = await gateToolAction(account.uid, account.email, 'ai_tool');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

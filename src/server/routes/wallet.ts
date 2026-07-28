@@ -5,7 +5,7 @@ import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy,
 import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
-import { decideWeeklyTopUp, topUpLedgerEntry } from '../lib/weeklyTopUp';
+import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { sendSafeError } from '../lib/httpError';
 
@@ -118,7 +118,22 @@ export function registerWalletRoutes(app: Express): void {
         }
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
         // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
-        return res.json({ ...data, tokensPerRupee: TOKENS_PER_RUPEE });
+        //
+        // `freeGift` travels with it too (2026-07-28): the grant used to be invisible — credit simply
+        // appeared and nothing said where it came from, how much was left, or when the next one lands.
+        // It is derived from the SAME inputs the grant uses, so the screen can never disagree with the
+        // ledger. It is also the moment that matters commercially: "this was your last free credit" is
+        // when someone decides to recharge.
+        return res.json({
+          ...data,
+          tokensPerRupee: TOKENS_PER_RUPEE,
+          freeGift: summarizeGiftLadder({
+            giftedSoFar: Number.isFinite(Number(data.freeGiftedTokens)) ? Number(data.freeGiftedTokens) : welcomeBonusTokens(),
+            lastTopUpAt: data.lastWeeklyTopUpAt ?? null,
+            createdAt: data.createdAt ?? null,
+            now: Date.now(),
+          }),
+        });
       } else {
         // The wallet doc is missing → (re)create it. MONEY-BLEED FIX (admin 2026-07-12): grant the
         // welcome bonus (₹250 since 2026-07-28) ONLY if this user has NEVER received it, guarded by the DURABLE welcome-bonus marker
@@ -154,8 +169,17 @@ export function registerWalletRoutes(app: Express): void {
           return initialWallet;
         });
 
-        // The rate travels WITH the wallet on the new-wallet path too (same as the existing-doc path).
-        return res.json({ ...createdWallet, tokensPerRupee: TOKENS_PER_RUPEE });
+        // The rate + the gift-ladder state travel WITH the wallet on the new-wallet path too.
+        return res.json({
+          ...createdWallet,
+          tokensPerRupee: TOKENS_PER_RUPEE,
+          freeGift: summarizeGiftLadder({
+            giftedSoFar: Number((createdWallet as Record<string, unknown>).freeGiftedTokens) || 0,
+            lastTopUpAt: (createdWallet as Record<string, unknown>).lastWeeklyTopUpAt as string ?? null,
+            createdAt: (createdWallet as Record<string, unknown>).createdAt as string ?? null,
+            now: Date.now(),
+          }),
+        });
       }
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);

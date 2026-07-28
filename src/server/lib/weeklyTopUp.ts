@@ -113,6 +113,52 @@ export function decideWeeklyTopUp(input: TopUpInput): TopUpDecision {
   };
 }
 
+export interface GiftLadderSummary {
+  /** Tokens gifted so far, out of `capTokens`. */
+  giftedTokens: number;
+  /** The lifetime ceiling. */
+  capTokens: number;
+  /** Still to come, 0 once finished. */
+  remainingTokens: number;
+  /** True when the ladder is over for good. */
+  exhausted: boolean;
+  /** ISO of the next rung, or null when there is no next one (finished, or the ladder is off). */
+  nextCreditAt: string | null;
+}
+
+/**
+ * The ladder's state, for showing the user.
+ *
+ * WHY THIS EXISTS: the grant itself was invisible. The credit landed, a ledger row was written, and
+ * nothing on any screen said where it came from, how much was left, or when the next one arrives — so
+ * the feature was, from the user's side, a number that occasionally changed on its own. It is also the
+ * moment that matters commercially: "this is your last free credit" is when someone decides to recharge,
+ * and we were not saying it.
+ *
+ * Derived from the SAME inputs as `decideWeeklyTopUp`, so what is displayed can never disagree with what
+ * is granted. Pure.
+ */
+export function summarizeGiftLadder(input: Omit<TopUpInput, 'now'> & { now: number }): GiftLadderSummary {
+  const cap = lifetimeGiftCapTokens();
+  const givenRaw = Number(input.giftedSoFar);
+  const giftedTokens = Math.min(cap, Number.isFinite(givenRaw) && givenRaw > 0 ? givenRaw : 0);
+  const remainingTokens = Math.max(0, cap - giftedTokens);
+  const off = weeklyTopUpTokens() <= 0;
+  const exhausted = remainingTokens <= 0;
+
+  let nextCreditAt: string | null = null;
+  if (!exhausted && !off) {
+    const anchorRaw = input.lastTopUpAt || input.createdAt || null;
+    const anchor = anchorRaw ? Date.parse(anchorRaw) : NaN;
+    // A due-but-not-yet-applied rung reads as "now" rather than a past date — it lands on the next read.
+    nextCreditAt = Number.isFinite(anchor)
+      ? new Date(Math.max(anchor + WEEK_MS, input.now)).toISOString()
+      : new Date(input.now + WEEK_MS).toISOString();
+  }
+
+  return { giftedTokens, capTokens: cap, remainingTokens, exhausted, nextCreditAt };
+}
+
 /** The ledger row a granted rung writes, so the user can see where the credit came from. */
 export function topUpLedgerEntry(grantTokens: number, nowIso: string): Record<string, unknown> {
   return {

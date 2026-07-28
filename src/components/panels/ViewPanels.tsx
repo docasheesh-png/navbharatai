@@ -599,7 +599,7 @@ export function ViewPanels({
       {/* Phase 10 — AI Code Review */}
       {activeView === 'codereview' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} sessions={sessions} githubToken={githubToken} />
         </div>
       )}
 

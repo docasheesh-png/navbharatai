@@ -69,6 +69,7 @@ import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
 import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
+import { registerAppReviewRoutes } from './src/server/routes/appReview';
 // DELETED — Engineer AI routes (/api/engineer-*) were unregistered in the v3.0 cutover and the
 // dead files (routes/engineer.ts, EngineerAIChat.tsx, EngineerRouterFactory, WebAgentLoop, legacy
 // LocalActuator) were removed on 2026-07-09. Replaced by Pro v3.0. NOTE: the rest of
@@ -564,6 +565,9 @@ setInterval(() => {
   registerSdaRoutes(app);
   registerProfessionalsRoutes(app);
   registerRepoAnalystRoutes(app);
+  // Connect-App code review (/api/app-review/review) — real AI review of a connected
+  // NavBharatAI app or GitHub repo, from the AI Code Review tool's "Connect App" flow.
+  registerAppReviewRoutes(app);
   // DELETED — Engineer AI (/api/engineer-*) was unregistered in the v3.0 cutover and its dead
   // files were removed on 2026-07-09 (see the import-block note above). Replaced by Pro v3.0.
 

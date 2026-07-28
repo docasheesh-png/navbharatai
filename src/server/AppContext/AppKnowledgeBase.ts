@@ -2408,6 +2408,16 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     aiSurface: 'engineer_ai',
   },
   {
+    id: 'ai-code-review-tool',
+    name: 'AI Code Review',
+    path: 'Home → Other AI → AI Tools → Code Review',
+    description: `Runs a REAL AI code review over a whole app\'s source: security (OWASP Top 10 — injection, XSS, hardcoded credentials, CSRF), quality (dead code, long functions, deep nesting), performance (N+1, missing memoization), tech debt (TODO/FIXME, deprecated APIs, "any" types) and accessibility. Press "Connect App" to choose a source: (1) NavBharatAI apps — any app YOU built (picked from your saved apps), or (2) GitHub apps — any of your GitHub repositories (needs GitHub connected). Pick one from the dependent dropdown, then "Review Code" fetches its real files and runs the review, returning a real 0-100 quality score + letter grade and per-finding severity/category/file:line/fix, filterable by category, dismissable, and exportable as a Markdown report. There is also a quick offline heuristic check of the current in-editor code. Backend: POST /api/app-review/review (runs the same reviewer as the post-build G5 gate, on the cheap tier); GitHub repos via GET /api/github/repos + POST /api/github/fetch.`,
+    howToUse: 'Open Home → Other AI → AI Tools → Code Review → press "Connect App" → choose "NavBharatAI apps" or "GitHub apps" → pick an app/repo from the dropdown → press "Review Code". The AI reviews the real code and shows a score + prioritized findings with fixes; use Export Report to download it. GitHub source needs your GitHub account connected (Settings → GitHub).',
+    relatedFeatures: ['auto-code-review', 'code-review-comments', 'build-health-check', 'agentv3_builder'],
+    keywords: ['code review', 'ai code review', 'review my app', 'review github repo', 'security review', 'owasp', 'quality score', 'audit code', 'connect app', 'review code', 'code review karo', 'app review', 'github repo review', 'code quality'],
+    aiSurface: 'engineer_ai',
+  },
+  {
     id: 'code-review-comments',
     name: 'Code Review Comments',
     path: 'Home → Other AI → Insights & Webhooks → Code Review  (also backend /api/workspace/:workspaceId/review)',

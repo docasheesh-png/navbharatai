@@ -1,7 +1,8 @@
-// Weekly free credit for the free tier (admin 2026-07-28: "₹250 signup, phir ₹200 weekly, maximum ₹750").
+// Weekly free credit for the free tier (admin 2026-07-28: "₹250 signup, phir ₹200 weekly, maximum ₹650").
 //
 // THE MODEL. One currency for everything: a new account is gifted ₹250 of wallet credit, and every week
-// it is topped up by ₹200 — but the free credit can never stack past ₹750. Anything that costs
+// it is topped up by ₹200 — but the free credit can never stack past ₹650, i.e. the signup grant plus
+// exactly two unspent weeks (250 + 200 + 200). A third idle week adds nothing. Anything that costs
 // NavBharatAI money (a build, an image, a strong-model answer) spends from that balance; anything that
 // costs nothing (a reply served by the free flash model) spends nothing, so it stays free by itself.
 // There are no per-feature daily quotas to tune — the price of the thing IS the limit.
@@ -15,7 +16,7 @@
 // of credit. Each visit grants at most one week, so being away is never rewarded over showing up.
 //
 // THE CAP EXCLUDES PAYING USERS BY CONSTRUCTION. The grant is limited to whatever is left below the
-// ₹750 ceiling, so a customer holding ₹5,000 of purchased credit receives nothing — the weekly gift is
+// ₹650 ceiling, so a customer holding ₹5,000 of purchased credit receives nothing — the weekly gift is
 // there to keep a FREE user building, not to discount a paying one.
 //
 // Pure and fully unit-tested; the caller supplies `now` and persists the result.
@@ -30,10 +31,16 @@ export function weeklyTopUpTokens(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 200 * TOKENS_PER_RUPEE; // ₹200
 }
 
-/** The ceiling free credit may stack to. A balance at or above this receives no weekly top-up. */
+/**
+ * The ceiling free credit may stack to. A balance at or above this receives no weekly top-up.
+ *
+ * ₹650 = the ₹250 signup grant plus two full unspent weeks (admin 2026-07-28). Someone who keeps
+ * building never notices it; someone who never spends stops accruing after a fortnight, which is
+ * exactly where a hoarded balance stops being a funnel and starts being a liability.
+ */
 export function freeCreditCapTokens(): number {
   const n = Number(process.env.WALLET_FREE_CAP_TOKENS);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 750 * TOKENS_PER_RUPEE; // ₹750
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 650 * TOKENS_PER_RUPEE; // ₹650
 }
 
 export type TopUpReason = 'disabled' | 'too-soon' | 'at-cap' | 'granted';

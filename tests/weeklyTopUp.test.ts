@@ -4,7 +4,8 @@ import {
 } from '../src/server/lib/weeklyTopUp';
 import { welcomeBonusTokens, TOKENS_PER_RUPEE } from '../src/server/lib/payments';
 
-// The free tier is now ONE wallet: ₹250 at signup, ₹200 a week after that, never stacking past ₹750.
+// The free tier is now ONE wallet: ₹250 at signup, ₹200 a week after that, never stacking past ₹650 —
+// the signup grant plus exactly two unspent weeks (250 + 200 + 200).
 // This is a giveaway, so every branch below is a cost decision — a bug here is money out of the door,
 // not a broken screen.
 
@@ -22,10 +23,15 @@ beforeEach(() => {
 afterEach(() => { process.env = { ...saved }; });
 
 describe('the amounts the admin asked for', () => {
-  it('₹250 at signup, ₹200 a week, capped at ₹750', () => {
+  it('₹250 at signup, ₹200 a week, capped at ₹650', () => {
     expect(welcomeBonusTokens()).toBe(250 * TOKENS_PER_RUPEE);
     expect(weeklyTopUpTokens()).toBe(200 * TOKENS_PER_RUPEE);
-    expect(freeCreditCapTokens()).toBe(750 * TOKENS_PER_RUPEE);
+    expect(freeCreditCapTokens()).toBe(650 * TOKENS_PER_RUPEE);
+  });
+
+  it('the cap is exactly the signup grant plus two unspent weeks', () => {
+    // 250 + 200 + 200 = 650. Stated as arithmetic so the three numbers can never drift apart.
+    expect(welcomeBonusTokens() + 2 * weeklyTopUpTokens()).toBe(freeCreditCapTokens());
   });
 
   it('every amount is retunable from Cloud Run without a deploy', () => {
@@ -69,16 +75,27 @@ describe('the week has to have actually passed', () => {
   });
 });
 
-describe('the ₹750 ceiling', () => {
+describe('the ₹650 ceiling', () => {
   it('tops up only into the space left below the cap', () => {
-    // ₹600 held → only ₹150 of room, not the full ₹200.
+    // ₹600 held → only ₹50 of room, not the full ₹200.
     const d = decideWeeklyTopUp({ tokenBalance: 600 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
-    expect(d.grantTokens).toBe(150 * TOKENS_PER_RUPEE);
+    expect(d.grantTokens).toBe(50 * TOKENS_PER_RUPEE);
     expect(d.reason).toBe('granted');
   });
 
+  it('an untouched account lands exactly on the cap after two weeks, then stops', () => {
+    // Week 1: ₹250 → ₹450. Week 2: ₹450 → ₹650. Week 3: nothing.
+    const wk1 = decideWeeklyTopUp({ tokenBalance: 250 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
+    expect(wk1.grantTokens).toBe(200 * TOKENS_PER_RUPEE);
+    const wk2 = decideWeeklyTopUp({ tokenBalance: 450 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
+    expect(wk2.grantTokens).toBe(200 * TOKENS_PER_RUPEE);
+    const wk3 = decideWeeklyTopUp({ tokenBalance: 650 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
+    expect(wk3.grantTokens).toBe(0);
+    expect(wk3.reason).toBe('at-cap');
+  });
+
   it('grants nothing at the ceiling, but still counts the week', () => {
-    const d = decideWeeklyTopUp({ tokenBalance: 750 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
+    const d = decideWeeklyTopUp({ tokenBalance: 650 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
     expect(d.grantTokens).toBe(0);
     expect(d.reason).toBe('at-cap');
     // The anchor MUST move: otherwise a user parked at the cap banks an instant grant the moment they
@@ -93,9 +110,11 @@ describe('the ₹750 ceiling', () => {
   });
 
   it('the free credit can never take a balance past the ceiling', () => {
-    for (const held of [0, 100, 400, 550, 700, 749, 750]) {
+    for (const held of [0, 100, 400, 550, 600, 649, 650, 900]) {
       const d = decideWeeklyTopUp({ tokenBalance: held * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - WEEK), now: T0 });
-      expect(held * TOKENS_PER_RUPEE + d.grantTokens, `held ₹${held}`).toBeLessThanOrEqual(750 * TOKENS_PER_RUPEE);
+      const after = held * TOKENS_PER_RUPEE + d.grantTokens;
+      // Never past the ceiling — and a balance already above it (a paying user) is never reduced either.
+      expect(after, `held ₹${held}`).toBeLessThanOrEqual(Math.max(650 * TOKENS_PER_RUPEE, held * TOKENS_PER_RUPEE));
     }
   });
 });

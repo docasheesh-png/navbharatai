@@ -58,3 +58,31 @@ describe('Connect-App review route is registered and gated', () => {
     expect(server).toContain('registerAppReviewRoutes(app)');
   });
 });
+
+describe('AI Code Review — Connect App flow calls REAL APIs (no fake)', () => {
+  const src = readFileSync(join(__dirname, '../src/components/ide/AICodeReview.tsx'), 'utf8');
+
+  it('lists GitHub repos, fetches repo files, and runs the real review — all via real endpoints', () => {
+    expect(src).toContain("fetch('/api/github/repos'");   // list the user's repos
+    expect(src).toContain("fetch('/api/github/fetch'");   // fetch a repo's real files
+    expect(src).toContain("fetch('/api/app-review/review'"); // run the real AI review
+  });
+
+  it('sources NavBharatAI apps from the user\'s real sessions (each carries files)', () => {
+    expect(src).toContain('sessions');
+    expect(src).toContain('.files');
+  });
+
+  it('renders the real server score + summary, not a fabricated one', () => {
+    expect(src).toContain('serverScore');
+    expect(src).toContain('serverSummary');
+    expect(src).toContain('mapServerFindings');
+  });
+
+  it('the connected review has no artificial setTimeout delay (that is only the offline quick-check)', () => {
+    // The connected path (runConnectedReview) must not fake a delay; only the local runReview does.
+    const connected = src.slice(src.indexOf('runConnectedReview'));
+    const untilNextFn = connected.slice(0, connected.indexOf('const runReview'));
+    expect(untilNextFn).not.toContain('setTimeout');
+  });
+});

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import { uploadZipProject } from '../../lib/zipProjectUpload';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -267,6 +268,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Attach-menu option) — 2 entries, one system.
   const screenshotInputRef = useRef<HTMLInputElement | null>(null);
   const [screenshotBusy, setScreenshotBusy] = useState(false);
+  // Project-import (.zip) progress — a large archive takes real time, so the user always sees where it is.
+  const [zipImporting, setZipImporting] = useState(false);
+  const [zipProgress, setZipProgress] = useState('');
   // Stop any live dictation when the panel unmounts (never leave the mic hot).
   useEffect(() => () => { try { voiceRef.current?.stop(); } catch { /* already stopped */ } }, []);
   // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
@@ -1212,6 +1216,48 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${err instanceof Error ? err.message : 'Screenshot could not be read. Try again.'}`, ts: Date.now() }]);
     } finally {
       setScreenshotBusy(false);
+    }
+  };
+
+  // PROJECT IMPORT (.zip) — admin 2026-07-28. A zip is a PROJECT, not a chat attachment: it is
+  // uploaded in chunks (so archive size is not a limit — see zipProjectUpload.ts), extracted and
+  // landed SERVER-SIDE into this workspace, and then shown in Files. It never becomes base64 in a
+  // build request, which is exactly what capped it at 18 MB and made a 161 MB import impossible.
+  const handleZipProject = async (file: File) => {
+    if (running || zipImporting) return;
+    setZipImporting(true);
+    const started = Date.now();
+    setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
+    try {
+      const result = await uploadZipProject(file, (p) => {
+        setZipProgress(p.phase === 'extracting' ? 'Extracting…' : `Uploading ${Math.round(p.fraction * 100)}%`);
+      });
+      setUserMsgs((c) => [...c, {
+        role: 'agent',
+        text: `✅ Imported ${result.fileCount} file${result.fileCount === 1 ? '' : 's'} from “${result.fileName}”. Your project is in Files — tell me what to change.`,
+        ts: Date.now(),
+      }]);
+      // Pull the landed project into the IDE/Files view through the SAME bridge a build's own file
+      // writes use, so an imported app behaves exactly like a built one from here on.
+      try {
+        const res = await fetch('/api/agentv3/workspace-files', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.files && typeof data.files === 'object') onFilesSync?.(data.files);
+      } catch { /* the files are already durable server-side; the Files view refreshes on next load */ }
+      setTab('files');
+    } catch (err) {
+      setUserMsgs((c) => [...c, {
+        role: 'agent',
+        text: `⚠️ ${err instanceof Error ? err.message : 'The project could not be imported.'}`,
+        ts: Date.now(),
+      }]);
+    } finally {
+      setZipImporting(false);
+      setZipProgress('');
     }
   };
 
@@ -3451,12 +3497,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   (the SAME flow as the glowing template button — 2 entries, one system). */}
               <AttachMenu
                 onFiles={(fl) => addFiles(fl)}
-                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
+                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.js,.ts,.tsx,.jsx,.py,.css"
                 disabled={running}
                 badge={files.length}
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
-                onScreenshotToApp={openScreenshotGallery}
+                onZipProject={(f) => void handleZipProject(f)}
               />
               {/* Voice to App — INLINE dictation (admin 2026-07-22): tap to speak → text types into THIS
                   input box live; tap again to stop. No separate page. Turns red/pulsing while listening. */}

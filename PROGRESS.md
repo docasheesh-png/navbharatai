@@ -22460,3 +22460,56 @@ but the dependency write happened on a "do not change any files" turn (closed by
   residual GLM 429s (needs telemetry across several reports).
 
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
+
+### 2026-07-28 — ZIP IMPORT ACTUALLY WORKS NOW (chunked upload) + a dedicated Attach entry
+### Admin: "are, mai zip file upload kiya woh nahi ho rahi — aap kya diagnose kar diye"
+
+**The admin was right, and my earlier fix answered the wrong question.** I had made the failure HONEST
+(a clear "161.3 MB is larger than the 18.0 MB limit" message instead of a silent drop) and fixed an
+ADJACENT path (Code Studio → v5.0 mirror chunking). Neither made a 161 MB zip actually upload. Owning
+that plainly: the user asked for working upload; I shipped honest failure.
+
+**The real constraint, verified before building (not assumed):** Cloud Run caps ANY single HTTP/1
+request at ~32 MB. I checked all three carriers and they ALL put the whole archive in one request:
+- v5.0 chat attach → base64 into the build JSON (the 18 MB `MAX_ATTACHMENT_BYTES` guard)
+- `/api/extract-zip` → one raw octet-stream body (`body: zipFile`) — the earlier investigation called
+  this "no size problem" because it has no JSON/base64 inflation, but it MISSED the platform cap
+- Nav App Store APK upload → `body.apkBase64`, same JSON path (a latent third instance)
+
+So no encoding, no streaming, and no amount of chunking the RESPONSE could ever have helped. The
+archive has to arrive as MANY requests or not at all.
+
+**Fix — `src/server/routes/zipUpload.ts` + `src/lib/zipProjectUpload.ts`:** begin → chunk×N → commit.
+The browser slices the file into 8 MB pieces (each a normal request, far under the cap); the server
+appends them to one temp file; commit runs the SAME proven `extractZipProject` →
+`writeWorkspaceFiles` + `mergeWorkspaceFiles` pipeline the GitHub import already uses. No new
+extraction logic. Deliberately chose this over signed-URL-to-GCS: signing needs an IAM role
+(`serviceAccountTokenCreator`) plus bucket CORS that only the admin can grant, so it could have been
+infra-blocked on arrival — chunked upload needs nothing outside this repo.
+
+Landing is SERVER-SIDE on purpose: returning a 161 MB project's file map to the browser so it could
+POST it back would re-create the very ceiling the route exists to remove (response and follow-up
+request are capped identically). Commit returns counts + paths only.
+
+**Admin suggestion 1, adopted in full (it was architecturally right):** a DEDICATED "Import project
+(.zip)" entry in the Attach menu with its own single-file picker, routed to `onZipProject` and never
+`onFiles`. `.zip` was also REMOVED from the generic `fileAccept`, so a project can no longer re-enter
+the attachment/base64 path that capped it. This encodes the admin's insight: *a zip is a project
+import, not context you hand to a model.* It does not start a build and spends no tokens.
+
+**Admin suggestion 2, adopted in part — and here is the disagreement, stated openly.** The suggestion
+was to drop the separate Screenshot→App button and instead auto-enable it when a user sends a photo
+saying "make a page like this". I removed the DUPLICATE entry from the Attach menu (it was redundant
+with the glowing empty-state button, and its slot is now the zip import). But I did NOT make it
+auto-fire, because `handleScreenshotPicked` calls `send()` IMMEDIATELY — it starts a real, billed
+build. Auto-detecting that intent from an image plus free text would mean a misread ("why is this
+button broken?" + a screenshot) silently launches a build against the user's app. The glowing
+empty-state button is kept as the deliberate, discoverable entry.
+OPEN, and worth doing properly later: the current flow DISCARDS the user's typed text and builds only
+from `data.prompt` derived from the image — so "make this page but in Hindi" loses the instruction.
+The right design is: attach image → type → press Send (the user's own send IS the intent signal) →
+enrich the prompt with the screenshot analysis while KEEPING their words. Recorded rather than rushed.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓. New: 14 tests (chunk-range coverage proves
+no gap/overlap/oversize across a 161 MB slice plan; route contract tests lock verified-owner-only
+commit, server-side landing, mid-stream size enforcement, and temp-file cleanup on every path).

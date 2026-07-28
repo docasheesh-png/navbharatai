@@ -99,6 +99,17 @@ describe('LiveCollaboration — shared in-room AI (Phase 1a) is REAL and billed 
     expect(src).toContain("type RoomTab = 'code' | 'ai' | 'team'");
     expect(src).toContain('setRoomTab');
   });
+
+  it('a new room is a CLEAN scratchpad — it never seeds the app preview/boot document', () => {
+    // createRoom must seed empty code, and the shared editor starts blank.
+    expect(src).toMatch(/code: '',\s*\/\/ clean scratchpad/);
+    expect(src).toContain("const [sharedCode, setSharedCode] = useState('')");
+    expect(src).not.toContain('code: generatedCode');
+    // the shared code is only mirrored into the user's app when non-empty (never blanks their app)
+    expect(src).toContain('if (d.code) onCodeUpdate(d.code)');
+    expect(src).toContain('if (data.code) onCodeUpdate(data.code)');
+    expect(src).toContain('if (code) onCodeUpdate(code)');
+  });
 });
 
 describe('LiveCollaboration — signed-in gate (no anonymous writes that the rules would deny)', () => {

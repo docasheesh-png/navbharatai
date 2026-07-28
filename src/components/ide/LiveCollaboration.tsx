@@ -61,14 +61,20 @@ function genId() { return Math.random().toString(36).slice(2, 10); }
 
 function shortId() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
 
-export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userName, userEmail }: Props) {
+export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }: Props) {
+  // `generatedCode` is intentionally NOT read: a room is a clean scratchpad and must never seed
+  // itself from the app's preview/boot document (admin-decided 2026-07-28). The prop stays on the
+  // interface for API stability / a future opt-in "Load my app" action.
   const [roomId, setRoomId] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [sharedCode, setSharedCode] = useState(generatedCode);
+  // A room is a CLEAN shared scratchpad (admin-decided 2026-07-28): it starts EMPTY — it never
+  // auto-dumps the app's preview/boot document — and it never blanks the user's own app preview
+  // (onCodeUpdate is only pushed for genuinely non-empty shared code, below).
+  const [sharedCode, setSharedCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -232,7 +238,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
     setStatus('connecting');
     try {
       await setDoc(doc(db, 'collab_rooms', id), {
-        code: generatedCode,
+        code: '', // clean scratchpad — never seed the app's preview/boot document
         createdAt: Date.now(),
         createdBy: myId,
         collaborators: [{ id: myId, name: myName, color: myColor, online: true, lastSeen: Date.now() }],
@@ -269,7 +275,9 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
         if (!snap.exists()) return;
         const d = snap.data();
         setCollaborators(d.collaborators || []);
-        if (!isEditing) { setSharedCode(d.code || ''); onCodeUpdate(d.code || ''); }
+        // Reflect the room's shared code; only push it into the user's own app preview when it is
+        // genuinely non-empty, so a blank scratchpad never wipes their current app.
+        if (!isEditing) { setSharedCode(d.code || ''); if (d.code) onCodeUpdate(d.code); }
       });
 
       const chatRef = collection(db, 'collab_rooms', id, 'chat');
@@ -325,7 +333,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
       try { await setDoc(doc(db, 'collab_rooms', id, 'presence', myId), { id: myId, name: myName, color: myColor, caretLine: 1, online: true, updatedAt: Date.now() }, { merge: true }); } catch { /* best-effort */ }
 
       setSharedCode(data.code || '');
-      onCodeUpdate(data.code || '');
+      if (data.code) onCodeUpdate(data.code); // don't blank the user's app when joining an empty room
       setActiveRoom(id);
       localStorage.setItem(STORAGE_KEY, id);
       setStatus('connected');
@@ -376,7 +384,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
       if (!activeRoom) return;
       try {
         await setDoc(doc(db, 'collab_rooms', activeRoom), { code }, { merge: true });
-        onCodeUpdate(code);
+        if (code) onCodeUpdate(code); // only mirror non-empty shared code into the app preview
       } catch {}
     }, 1000);
   };

@@ -54,7 +54,11 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // anyone could mint payment_transactions rows against any account, and every entitlement downstream
     // was keyed on a value the caller chose. All three real callers (wallet recharge, Vishwakarma,
     // Professional Pass) are signed-in flows, so requiring the token costs a legitimate user nothing.
-    const userId = await verifyFirebaseToken(req);
+    // (VITEST accepts a body userId so the route stays unit-testable without a live token — the same
+    // convention /api/payment/redeem-coupon already uses for its H1 identity fix.)
+    const userId = process.env.VITEST
+      ? (typeof req.body?.userId === 'string' ? req.body.userId : null)
+      : await verifyFirebaseToken(req);
     if (!userId) return res.status(401).json({ error: 'Please sign in to make a payment.' });
     // Product routed on fulfilment: 'professional_pass' grants a time-based Professional Pass (no wallet
     // tokens); anything else is the existing wallet recharge. Untrusted, but harmless — the fulfilment

@@ -4,7 +4,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { requireUserMatch } from '../lib/authMiddleware';
-import { TOKENS_PER_RUPEE } from '../lib/payments';
+import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { sendSafeError } from '../lib/httpError';
@@ -58,14 +58,19 @@ export function registerWalletRoutes(app: Express): void {
           await setDoc(walletRef, data, { merge: true });
         }
 
-        // WEEKLY FREE CREDIT (admin 2026-07-28) — applied LAZILY, right here on the wallet read, by
-        // comparing the stored anchor against now. No cron and no fan-out over every account in the
-        // database; and because it only fires for someone who actually opened the app, a dormant
-        // account accrues nothing. The grant runs inside a transaction that RE-READS the balance, so it
-        // can never lost-update against a build debit or a recharge landing at the same moment.
+        // THE FREE GIFT LADDER (admin 2026-07-28): ₹250 at signup → +₹200 → +₹200 → cut off for good.
+        // Applied LAZILY right here on the wallet read, against the SERVER clock — no cron, no fan-out
+        // over every account, and a dormant account accrues nothing until it comes back.
+        //
+        // `freeGiftedTokens` is what bounds it: the TOTAL ever gifted, never the balance. A balance cap
+        // would quietly become an unlimited weekly stipend the moment the user spent anything.
+        // Wallets created before this field existed are seeded from the signup bonus they received.
         try {
+          const giftedSoFar = Number.isFinite(Number(data.freeGiftedTokens))
+            ? Number(data.freeGiftedTokens)
+            : welcomeBonusTokens();
           const decision = decideWeeklyTopUp({
-            tokenBalance: data.tokenBalance,
+            giftedSoFar,
             lastTopUpAt: data.lastWeeklyTopUpAt ?? null,
             createdAt: data.createdAt ?? null,
             now: Date.now(),
@@ -78,18 +83,24 @@ export function registerWalletRoutes(app: Express): void {
               const w = fresh.data();
               // Re-decide on the IN-TRANSACTION balance: a concurrent debit may have changed how much
               // room is left under the cap since the read above.
+              const given2 = Number.isFinite(Number(w.freeGiftedTokens))
+                ? Number(w.freeGiftedTokens)
+                : welcomeBonusTokens();
               const d2 = decideWeeklyTopUp({
-                tokenBalance: w.tokenBalance,
+                giftedSoFar: given2,
                 lastTopUpAt: w.lastWeeklyTopUpAt ?? null,
                 createdAt: w.createdAt ?? null,
                 now: Date.now(),
               });
-              if (!d2.newLastTopUpAt) return null; // another request already applied this week
+              if (!d2.newLastTopUpAt) return null; // already applied, or the ladder is finished
               const patch: Record<string, unknown> = { lastWeeklyTopUpAt: d2.newLastTopUpAt, updatedAt: nowIso };
               if (d2.grantTokens > 0) {
                 const held = Number(w.tokenBalance) > 0 ? Number(w.tokenBalance) : 0;
                 patch.tokenBalance = held + d2.grantTokens;
                 patch.totalTokensPurchased = (Number(w.totalTokensPurchased) || 0) + d2.grantTokens;
+                // The running total that ENDS the ladder. Written in the same transaction as the credit,
+                // so a grant can never land without being counted against the lifetime cap.
+                patch.freeGiftedTokens = given2 + d2.grantTokens;
                 const creditInr = d2.grantTokens / TOKENS_PER_RUPEE;
                 patch.remaining_balance = (Number(w.remaining_balance) || 0) + creditInr;
                 patch.total_balance = (Number(w.total_balance) || 0) + creditInr;

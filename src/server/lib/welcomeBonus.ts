@@ -53,6 +53,9 @@ export function buildInitialWallet(i: NewWalletInput): Record<string, unknown> {
     // immediately on the next page load.
     createdAt: i.nowIso,
     lastWeeklyTopUpAt: i.nowIso,
+    // Running total of everything EVER gifted to this account. The weekly ladder stops permanently once
+    // this reaches the lifetime cap (₹650), so it must start at whatever the signup grant actually was.
+    freeGiftedTokens: i.welcomeTokens,
     walletLedger:
       i.welcomeTokens > 0
         ? [

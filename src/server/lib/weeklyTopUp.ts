@@ -1,23 +1,28 @@
-// Weekly free credit for the free tier (admin 2026-07-28: "₹250 signup, phir ₹200 weekly, maximum ₹650").
+// The free tier's ONE-TIME gift ladder (admin 2026-07-28).
 //
-// THE MODEL. One currency for everything: a new account is gifted ₹250 of wallet credit, and every week
-// it is topped up by ₹200 — but the free credit can never stack past ₹650, i.e. the signup grant plus
-// exactly two unspent weeks (250 + 200 + 200). A third idle week adds nothing. Anything that costs
-// NavBharatAI money (a build, an image, a strong-model answer) spends from that balance; anything that
-// costs nothing (a reply served by the free flash model) spends nothing, so it stays free by itself.
-// There are no per-feature daily quotas to tune — the price of the thing IS the limit.
+//     ₹250 at signup  →  +₹200 a week later  →  +₹200 a week after that  →  CUT OFF, permanently.
 //
-// WHY LAZY, NOT SCHEDULED. The top-up is applied when the user's wallet is READ, by comparing the stored
-// `lastTopUpAt` against now. That means no cron, no fan-out across every account in the database, and —
-// most importantly — a dormant account accrues nothing. Only someone who comes back gets topped up,
-// which is exactly the retention behaviour the weekly credit is FOR, and it is where the saving is.
+// Lifetime gift per account: ₹650. Not ₹650 a month, not ₹650 held at once — ₹650 EVER. After the
+// second weekly rung the ladder ends and the account is an ordinary paying account.
 //
-// ONE WEEK PER VISIT, DELIBERATELY. Someone who disappears for five weeks does not return to five weeks
-// of credit. Each visit grants at most one week, so being away is never rewarded over showing up.
+// WHY THAT DISTINCTION IS THE WHOLE POINT. An ongoing "₹200 every week while you are under the cap"
+// looks almost identical in code and costs a completely different amount: a continuously-active free
+// account would draw ₹200 a week forever — about ₹2,600 of billed credit a year, roughly ₹650 of real
+// provider spend PER USER PER YEAR. This ladder costs ₹650 of billed credit ONCE, about ₹163 of real
+// spend, and then nothing at all. That is why the cap is measured against the TOTAL EVER GIFTED and
+// never against the current balance: a balance cap quietly becomes the expensive version the moment the
+// user spends anything.
 //
-// THE CAP EXCLUDES PAYING USERS BY CONSTRUCTION. The grant is limited to whatever is left below the
-// ₹650 ceiling, so a customer holding ₹5,000 of purchased credit receives nothing — the weekly gift is
-// there to keep a FREE user building, not to discount a paying one.
+// ONE CURRENCY. The gift lands in the same wallet everything spends from. Anything that costs
+// NavBharatAI money (a build, an image, a strong-model answer) draws it down; anything that costs
+// nothing (a reply served by the free flash model) draws nothing, so it stays free by itself. There are
+// no per-feature daily quotas to tune — the price of the thing IS the limit.
+//
+// LAZY, NOT SCHEDULED. A rung is applied when the wallet is READ, comparing the stored anchor against
+// the SERVER clock. No cron, no fan-out over every account — and a dormant account accrues nothing
+// until it comes back, which is the retention behaviour the ladder exists for.
+//
+// ONE RUNG PER VISIT. Someone who disappears for five weeks does not return to five weeks of credit.
 //
 // Pure and fully unit-tested; the caller supplies `now` and persists the result.
 
@@ -25,79 +30,90 @@ import { TOKENS_PER_RUPEE } from './payments';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Weekly free credit in wallet tokens. `WEEKLY_TOPUP_TOKENS=0` switches the whole thing off. */
+/** One rung of the ladder, in wallet tokens. `WEEKLY_TOPUP_TOKENS=0` switches the ladder off. */
 export function weeklyTopUpTokens(): number {
   const n = Number(process.env.WEEKLY_TOPUP_TOKENS);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 200 * TOKENS_PER_RUPEE; // ₹200
 }
 
 /**
- * The ceiling free credit may stack to. A balance at or above this receives no weekly top-up.
+ * The TOTAL gift an account may ever receive, signup bonus included. ₹650 = ₹250 + ₹200 + ₹200.
  *
- * ₹650 = the ₹250 signup grant plus two full unspent weeks (admin 2026-07-28). Someone who keeps
- * building never notices it; someone who never spends stops accruing after a fortnight, which is
- * exactly where a hoarded balance stops being a funnel and starts being a liability.
+ * Reaching it is a permanent cut-off, not a pause: spending the balance back down does NOT re-open the
+ * ladder, because this counts what was GIVEN, never what is held.
  */
-export function freeCreditCapTokens(): number {
+export function lifetimeGiftCapTokens(): number {
   const n = Number(process.env.WALLET_FREE_CAP_TOKENS);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 650 * TOKENS_PER_RUPEE; // ₹650
 }
 
-export type TopUpReason = 'disabled' | 'too-soon' | 'at-cap' | 'granted';
+export type TopUpReason = 'disabled' | 'too-soon' | 'exhausted' | 'granted';
 
 export interface TopUpDecision {
   /** Tokens to add. 0 means write nothing to the balance. */
   grantTokens: number;
-  /** The new `lastTopUpAt` to persist, or null to leave it untouched. */
+  /** The new anchor to persist, or null to leave it untouched. */
   newLastTopUpAt: string | null;
+  /** True once the account has had its full lifetime gift — the ladder is over for good. */
+  exhausted: boolean;
   reason: TopUpReason;
 }
 
 export interface TopUpInput {
-  /** Current wallet token balance. */
-  tokenBalance: unknown;
-  /** ISO of the last weekly top-up, or null/absent for a wallet that has never had one. */
+  /**
+   * Total tokens EVER gifted to this account (signup bonus + every rung so far). NOT the balance — see
+   * the header for why that distinction is the entire cost model.
+   */
+  giftedSoFar: unknown;
+  /** ISO of the last rung, or null/absent for an account that has had none. */
   lastTopUpAt?: string | null;
-  /** ISO the wallet was created — the anchor for wallets that predate this feature. */
+  /** ISO the wallet was created — the anchor for accounts that predate this feature. */
   createdAt?: string | null;
   now: number;
 }
 
 /**
- * Decide this wallet's weekly top-up.
+ * Decide this account's next rung.
  *
- * A wallet with no `lastTopUpAt` anchors on `createdAt` when it has one, so an existing account does not
- * receive a surprise grant the instant this ships — it waits out its first week like everyone else. With
+ * An account with no `lastTopUpAt` anchors on `createdAt` when it has one, so an existing account does
+ * not receive a surprise grant the instant this ships — it waits out its week like everyone else. With
  * neither timestamp the clock simply starts now (grant nothing, stamp the anchor).
  */
 export function decideWeeklyTopUp(input: TopUpInput): TopUpDecision {
   const weekly = weeklyTopUpTokens();
   const nowIso = new Date(input.now).toISOString();
-  if (weekly <= 0) return { grantTokens: 0, newLastTopUpAt: null, reason: 'disabled' };
+  const NONE = { grantTokens: 0, newLastTopUpAt: null, exhausted: false } as const;
+  if (weekly <= 0) return { ...NONE, reason: 'disabled' };
+
+  const givenRaw = Number(input.giftedSoFar);
+  const given = Number.isFinite(givenRaw) && givenRaw > 0 ? givenRaw : 0;
+  const remaining = lifetimeGiftCapTokens() - given;
+  if (remaining <= 0) {
+    // Finished, for good. Nothing is written — not even the anchor, because there is no longer any week
+    // left to measure.
+    return { grantTokens: 0, newLastTopUpAt: null, exhausted: true, reason: 'exhausted' };
+  }
 
   const anchorRaw = input.lastTopUpAt || input.createdAt || null;
   const anchor = anchorRaw ? Date.parse(anchorRaw) : NaN;
   if (!Number.isFinite(anchor)) {
     // No usable anchor — start the clock now rather than granting on an unknown history.
-    return { grantTokens: 0, newLastTopUpAt: nowIso, reason: 'too-soon' };
+    return { grantTokens: 0, newLastTopUpAt: nowIso, exhausted: false, reason: 'too-soon' };
   }
   if (input.now - anchor < WEEK_MS) {
-    return { grantTokens: 0, newLastTopUpAt: null, reason: 'too-soon' };
+    return { ...NONE, reason: 'too-soon' };
   }
 
-  const balance = Number(input.tokenBalance);
-  const held = Number.isFinite(balance) && balance > 0 ? balance : 0;
-  const room = freeCreditCapTokens() - held;
-  if (room <= 0) {
-    // At or above the free ceiling. The week still counts — otherwise a user parked at the cap would
-    // bank an instant grant the moment they spent anything.
-    return { grantTokens: 0, newLastTopUpAt: nowIso, reason: 'at-cap' };
-  }
-
-  return { grantTokens: Math.min(weekly, room), newLastTopUpAt: nowIso, reason: 'granted' };
+  const grantTokens = Math.min(weekly, remaining);
+  return {
+    grantTokens,
+    newLastTopUpAt: nowIso,
+    exhausted: given + grantTokens >= lifetimeGiftCapTokens(),
+    reason: 'granted',
+  };
 }
 
-/** The ledger row a granted top-up writes, so the user can see where the credit came from. */
+/** The ledger row a granted rung writes, so the user can see where the credit came from. */
 export function topUpLedgerEntry(grantTokens: number, nowIso: string): Record<string, unknown> {
   return {
     type: 'purchase',

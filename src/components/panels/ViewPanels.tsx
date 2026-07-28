@@ -578,6 +578,7 @@ export function ViewPanels({
             onCodeUpdate={(c: string) => setGeneratedCode(c)}
             userId={user?.uid}
             userName={user?.displayName || user?.email?.split('@')[0]}
+            userEmail={user?.email || undefined}
           />
         </div>
       )}

@@ -201,6 +201,16 @@ service cloud.firestore {
         allow update: if isSignedIn();
         allow delete: if false;
       }
+      // Shared in-room AI thread (Phase 1a) — every member sees the same AI conversation. The member
+      // who triggers a turn writes BOTH the user prompt and the AI reply (authorId == their uid), and
+      // the AI call is billed to that member's own account (client-relayed). Immutable once written.
+      match /ai_chat/{msgId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                         && incoming().authorId == request.auth.uid
+                         && incoming().text is string && incoming().text.size() <= 20000;
+        allow update, delete: if false;
+      }
     }
   }
 }

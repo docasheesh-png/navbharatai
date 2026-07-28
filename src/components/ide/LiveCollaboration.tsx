@@ -1,8 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2, Sparkles, Bot, Send, Code2 } from 'lucide-react';
 import { db } from '../../App';
 import { doc, setDoc, getDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
+
+/** A shared in-room AI message — every member sees the same AI thread (Phase 1a). */
+interface AiMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  authorId: string;
+  authorName: string;
+  color: string;
+  text: string;
+  timestamp: number;
+}
+
+type RoomTab = 'code' | 'ai' | 'team';
 
 /** A remote collaborator's live cursor position (which line they're editing). */
 interface RemotePresence {
@@ -36,6 +49,9 @@ interface Props {
   onCodeUpdate: (code: string) => void;
   userId?: string;
   userName?: string;
+  /** Signed-in user's email — sent as the billing identity so an in-room AI turn is charged
+   *  to the member who triggered it (client-relayed, "everyone pays their own"). */
+  userEmail?: string;
 }
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
@@ -45,7 +61,7 @@ function genId() { return Math.random().toString(36).slice(2, 10); }
 
 function shortId() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
 
-export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userName }: Props) {
+export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userName, userEmail }: Props) {
   const [roomId, setRoomId] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
@@ -69,10 +85,18 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
   const [comments, setComments] = useState<CommentAnnotation[]>([]);
   const [commentInput, setCommentInput] = useState('');
   const [caretLine, setCaretLine] = useState(1);
+  // Phase 1a — shared in-room AI thread + mobile tab layout.
+  const [roomTab, setRoomTab] = useState<RoomTab>('code');
+  const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
+  const [aiInput, setAiInput] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const unsubChatRef = useRef<(() => void) | null>(null);
   const unsubPresenceRef = useRef<(() => void) | null>(null);
   const unsubCommentsRef = useRef<(() => void) | null>(null);
+  const unsubAiRef = useRef<(() => void) | null>(null);
+  const aiBottomRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCaretLineRef = useRef(1);
@@ -137,6 +161,50 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
     setCaretLine(line);
   };
 
+  // Phase 1a — ask the shared in-room AI. The prompt AND the reply are written to the room's
+  // ai_chat subcollection so EVERY member sees the same conversation live. The AI call is real
+  // (the same Free chat engine the solo NavBharatAI chat uses) and billed to the member who
+  // triggered it (their own account, via the x-user-* identity headers) — "everyone pays their own".
+  const sendAiPrompt = async () => {
+    const text = aiInput.trim();
+    if (!text || !activeRoom || aiBusy) return;
+    setAiInput('');
+    setAiError('');
+    setAiBusy(true);
+    try {
+      // 1) publish the prompt so all members see who asked what.
+      await addDoc(collection(db, 'collab_rooms', activeRoom, 'ai_chat'), {
+        role: 'user', authorId: myId, authorName: myName, color: myColor, text: text.slice(0, 20000), timestamp: Date.now(),
+      });
+      // 2) call the real Free AI, billed to the triggering member.
+      const history = aiMessages.slice(-16).map(m => ({ sender: m.role === 'user' ? 'user' : 'ai', text: String(m.text || '').slice(0, 2000) }));
+      const res = await fetch('/api/chat/navbharat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': myId,
+          'x-user-email': userEmail || '',
+          'x-user-name': myName,
+        },
+        body: JSON.stringify({ message: text, history, agent: 'navbharatai', stream: false }),
+      });
+      const data = await res.json().catch(() => null);
+      const reply = data && typeof data.reply === 'string' ? data.reply.trim() : '';
+      if (!res.ok || !reply) {
+        throw new Error((data && (data.error || data.reply)) || 'The AI could not respond. Please try again.');
+      }
+      // 3) publish the reply so all members see the same answer.
+      await addDoc(collection(db, 'collab_rooms', activeRoom, 'ai_chat'), {
+        role: 'assistant', authorId: myId, authorName: myName, color: myColor, text: reply.slice(0, 20000), timestamp: Date.now(),
+      });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI request failed. Please try again.');
+      setTimeout(() => setAiError(''), 5000);
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) setRoomId(saved);
@@ -145,6 +213,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
       unsubChatRef.current?.();
       unsubPresenceRef.current?.();
       unsubCommentsRef.current?.();
+      unsubAiRef.current?.();
       if (presenceThrottleRef.current) clearTimeout(presenceThrottleRef.current);
     };
   }, []);
@@ -152,6 +221,10 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
+
+  useEffect(() => {
+    aiBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [aiMessages]);
 
   const createRoom = async () => {
     if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to create a collaboration room.'); return; }
@@ -229,6 +302,25 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
         setComments(sortAnnotations(list));
       });
 
+      // Phase 1a — shared AI thread: every member sees the same AI conversation live.
+      const aiRef = collection(db, 'collab_rooms', id, 'ai_chat');
+      const aiQ = query(aiRef, orderBy('timestamp', 'asc'), limit(100));
+      unsubAiRef.current = onSnapshot(aiQ, (snap) => {
+        const msgs: AiMessage[] = snap.docs.map(d => {
+          const m = d.data() as Partial<AiMessage>;
+          return {
+            id: d.id,
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            authorId: String(m.authorId || ''),
+            authorName: String(m.authorName || 'User'),
+            color: String(m.color || '#6366f1'),
+            text: String(m.text || ''),
+            timestamp: Number(m.timestamp) || 0,
+          };
+        });
+        setAiMessages(msgs);
+      });
+
       // Register my initial presence.
       try { await setDoc(doc(db, 'collab_rooms', id, 'presence', myId), { id: myId, name: myName, color: myColor, caretLine: 1, online: true, updatedAt: Date.now() }, { merge: true }); } catch { /* best-effort */ }
 
@@ -262,6 +354,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
     unsubChatRef.current?.();
     unsubPresenceRef.current?.();
     unsubCommentsRef.current?.();
+    unsubAiRef.current?.();
     if (presenceThrottleRef.current) { clearTimeout(presenceThrottleRef.current); presenceThrottleRef.current = null; }
     setActiveRoom(null);
     setStatus('idle');
@@ -269,6 +362,8 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
     setChatMessages([]);
     setPresence([]);
     setComments([]);
+    setAiMessages([]);
+    setRoomTab('code');
     localStorage.removeItem(STORAGE_KEY);
   };
 
@@ -389,24 +484,36 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
           </p>
         </div>
       ) : (
-        /* — Active Room — */
-        <div className="flex flex-1 overflow-hidden">
-          {/* Code Editor */}
+        /* — Active Room (mobile-friendly tabs: Code / AI / Team) — */
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Tab bar — one panel at a time, works on phone and desktop */}
+          <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-[#161b22]">
+            {([{ key: 'code', label: 'Code', icon: Code2 }, { key: 'ai', label: 'AI', icon: Sparkles }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
+              const Icon = t.icon; const active = roomTab === t.key; const online = collaborators.filter(c => c.online).length;
+              return (
+                <button key={t.key} onClick={() => setRoomTab(t.key)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-600 text-white' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
+                  <Icon className="w-3.5 h-3.5" /> {t.label}
+                  {t.key === 'team' && online > 0 && <span className="text-[9px] bg-white/20 rounded-full px-1.5">{online}</span>}
+                </button>
+              );
+            })}
+            <div className="ml-auto flex items-center gap-1.5">
+              <button onClick={copyLink} className={`flex items-center gap-1 text-[10px] px-2 py-1.5 rounded-lg border transition-all ${copied ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-white/10 text-white/40 bg-white/5 hover:text-white'}`}>
+                {copied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> <span className="hidden sm:inline">Share ID</span></>}
+              </button>
+              <button onClick={leaveRoom} className="flex items-center gap-1 text-[10px] px-2 py-1.5 rounded-lg border border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 transition-all">
+                <X className="w-3 h-3" /> <span className="hidden sm:inline">Leave</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── Code tab ── */}
+          {roomTab === 'code' && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 bg-[#161b22]">
-              <div className="flex items-center gap-2">
-                <Edit2 className="w-3.5 h-3.5 text-white/40" />
-                <span className="text-xs text-white/50">Shared Code</span>
-                {isEditing && <span className="text-[9px] text-amber-400 animate-pulse">Syncing...</span>}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button onClick={copyLink} className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-all ${copied ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-white/10 text-white/40 bg-white/5'}`}>
-                  {copied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Share Room ID</>}
-                </button>
-                <button onClick={leaveRoom} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 transition-all">
-                  <X className="w-3 h-3" /> Leave
-                </button>
-              </div>
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#161b22]">
+              <Edit2 className="w-3.5 h-3.5 text-white/40" />
+              <span className="text-xs text-white/50">Shared Code</span>
+              {isEditing && <span className="text-[9px] text-amber-400 animate-pulse">Syncing...</span>}
             </div>
             <textarea
               ref={textareaRef}
@@ -454,9 +561,59 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
               )}
             </div>
           </div>
+          )}
 
-          {/* Right Panel: Collaborators + Chat */}
-          <div className="w-64 flex flex-col border-l border-white/5 bg-[#161b22]">
+          {/* ── AI tab — shared NavBharatAI thread (Phase 1a) ── */}
+          {roomTab === 'ai' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#161b22]">
+              <Bot className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-xs text-white/50">Shared AI — NavBharatAI</span>
+              <span className="text-[9px] text-white/25 ml-auto hidden sm:inline">Everyone pays for their own asks</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {aiMessages.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
+                  <Sparkles className="w-8 h-8 text-blue-400/40" />
+                  <p className="text-xs text-white/30 max-w-xs">Ask NavBharatAI anything — the whole team sees the question and the answer, live.</p>
+                </div>
+              ) : aiMessages.map(m => (
+                <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <span className="text-[8px] text-white/30 mb-0.5 flex items-center gap-1">
+                    {m.role === 'assistant' ? <><Bot className="w-2.5 h-2.5 text-blue-400" /> NavBharatAI</> : m.authorName}
+                  </span>
+                  <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-[11px] whitespace-pre-wrap break-words ${m.role === 'assistant' ? 'bg-blue-500/10 border border-blue-500/20 text-white/90' : 'text-white'}`} style={m.role === 'user' ? { backgroundColor: m.color + '30' } : undefined}>
+                    {m.text}
+                  </div>
+                </div>
+              ))}
+              {aiBusy && (
+                <div className="flex items-center gap-2 text-[10px] text-blue-300"><RefreshCw className="w-3 h-3 animate-spin" /> NavBharatAI is thinking…</div>
+              )}
+              <div ref={aiBottomRef} />
+            </div>
+            {aiError && <p className="px-3 py-1.5 text-[10px] text-red-300 bg-red-500/10 border-t border-red-500/20">{aiError}</p>}
+            <div className="p-2 border-t border-white/5 bg-[#161b22]">
+              <div className="flex gap-1.5">
+                <input
+                  className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 focus:outline-none focus:border-blue-500/40 disabled:opacity-50"
+                  placeholder="Ask the shared AI…"
+                  value={aiInput}
+                  disabled={aiBusy}
+                  onChange={e => setAiInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') sendAiPrompt(); }}
+                />
+                <button onClick={sendAiPrompt} disabled={!aiInput.trim() || aiBusy} className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-xl transition-all">
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* ── Team tab — collaborators + chat ── */}
+          {roomTab === 'team' && (
+          <div className="flex-1 flex flex-col overflow-hidden bg-[#161b22]">
             {/* Collaborators — with live cursor line (P-DESIGN.7) */}
             <div className="p-3 border-b border-white/5">
               <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Online ({collaborators.filter(c => c.online).length})</p>
@@ -516,6 +673,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
               </div>
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

@@ -121,10 +121,13 @@ describe('welcomeBonusTokens — new-wallet mint (admin routing plan 2026-07-11)
     else process.env.WELCOME_BONUS_TOKENS = ORIG;
   });
 
-  it('defaults to 50,000 tokens (₹500 equivalent — a first real build fits inside the bonus)', () => {
+  it('defaults to 25,000 tokens (₹250 — the opening rung of the free gift ladder)', () => {
+    // Lowered from 50,000 (₹500) on 2026-07-28. The old figure came from the era when the signup bonus
+    // was the ONLY free credit and had to carry a first build on its own; it is now the first rung of
+    // ₹250 → +₹200 → +₹200 → cut off (see weeklyTopUp.ts), so it no longer has to.
     delete process.env.WELCOME_BONUS_TOKENS;
-    expect(welcomeBonusTokens()).toBe(50_000);
-    expect(welcomeBonusTokens() / TOKENS_PER_RUPEE).toBe(500); // the ₹ mirror derives cleanly
+    expect(welcomeBonusTokens()).toBe(25_000);
+    expect(welcomeBonusTokens() / TOKENS_PER_RUPEE).toBe(250); // the ₹ mirror derives cleanly
   });
 
   it('is env-overridable from Cloud Run (no deploy needed to tune it)', () => {
@@ -136,8 +139,8 @@ describe('welcomeBonusTokens — new-wallet mint (admin routing plan 2026-07-11)
 
   it('a bad override (non-numeric / negative) falls back to the default, never NaN', () => {
     process.env.WELCOME_BONUS_TOKENS = 'lots';
-    expect(welcomeBonusTokens()).toBe(50_000);
+    expect(welcomeBonusTokens()).toBe(25_000);
     process.env.WELCOME_BONUS_TOKENS = '-5';
-    expect(welcomeBonusTokens()).toBe(50_000);
+    expect(welcomeBonusTokens()).toBe(25_000);
   });
 });

@@ -22566,3 +22566,45 @@ picks Screenshot → App. It is still not auto-fired from "image attached + some
 path calls send() immediately and starts a real, billed build — a misread ("why is this button
 broken?" + a screenshot) would launch a build against the user's app. Fixing the text-discard removes
 most of the reason the auto-fire was proposed, without taking on that risk.
+
+### 2026-07-28 — Kimi K3 prepended to the PAID ladder (admin-approved) + the money bug it exposed
+
+Admin asked: "jahan jahan hum kimi k2.7 use kar rahe hai, waha kimi k3 use karenge to kaisa rahega?"
+Answered honestly rather than just agreeing, and the investigation found a real defect.
+
+**What I could NOT confirm, and said so:** whether `kimi-k3` exists as a live id. My knowledge cutoff
+is May 2026; CLAUDE.md's own admin-verified Kimi list (2026-07-12) has only k2.5 / k2.6 / k2.7. So the
+adoption was designed to be safe EVEN IF the model does not exist.
+
+**Shipped (admin approved "yahi karo"):** `kimi-k3` PREPENDED to the paid/default ladder —
+`['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6']` — never a replacement. `parseModelLadder`'s comma ladder
+falls through on error, so an unknown-id 4xx drops straight to k2.7-code and no build breaks.
+**The FREE/weak ladder is UNCHANGED** (admin: "weak module abhi jaisa hai vaise hi") — it is ordered
+cheapest-first with the flagship LAST, so putting a newer flagship in front would invert the free
+tier's entire cost model. The two ladders are deliberately NOT symmetric.
+
+**THE MONEY BUG THIS EXPOSED (fixed in the same change — shipping the ladder alone would have caused
+a silent loss on every paid build).** `realRateFor` read:
+```
+if (m.includes('kimi')) return m.includes('k2.7') ? card['kimi-k2.7'] : card.kimi;
+```
+`kimi-k3` matches `kimi` but NOT `k2.7` → it fell to `card.kimi`, the **k2.5/k2.6 CHEAP rate**
+($0.60/$2.50 vs k2.7's $0.95/$4.00). Under the Fix-65 model (`bill = tieredMarkup(REAL cost)`), the
+real cost would be under-computed, so we would pay flagship price and bill the cheap price — losing
+money on every build, silently. The same shape existed for GLM (a future `glm-6` → the 4.x rate).
+This directly contradicted the function's OWN documented contract: *"never under-bill an unknown
+model"*. It was a latent bug already, independent of K3.
+
+Fix: known-cheap ids are now matched EXPLICITLY (`k2.5`/`k2.6`, `glm-4.x`) and anything else in the
+family bills at the most expensive rate we know — so an unrecognized model can only ever OVER-state
+cost, never under-state it. Plus an explicit env-tunable `kimi-k3` rate line. Verified the 3 new tests
+genuinely FAIL against the old logic (temporarily restored it to confirm they are not tautologies).
+
+**OPEN ITEM for the admin (rule 6):** `RATE_KIMI3_IN` / `_OUT` / `_CACHE` default to the k2.7 rate
+because K3's published price is not verifiable from here — I refused to invent a number. If K3 is
+genuinely pricier, that UNDER-states our real cost until the admin sets the env (a margin risk, never
+a user over-charge). Set them the moment K3's real pricing is known.
+
+CLAUDE.md's `KIMI_MODEL` documented default updated to match the shipped code, so the doc does not lie.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.

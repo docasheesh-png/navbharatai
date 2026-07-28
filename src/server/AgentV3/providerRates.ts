@@ -52,6 +52,12 @@ export function realRateCard(): Record<string, TokenRate> {
     'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2), cacheReadPerMTok: envRate('RATE_GLM_CACHE', 0.15) }, // glm-4.x coder
     // ── Kimi (Moonshot) ─────────────────────────────────────────────────────────────────────────
     'kimi-k2.7': { inputPerMTok: envRate('RATE_KIMI27_IN', 0.95), outputPerMTok: envRate('RATE_KIMI27_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI27_CACHE', 0.24) },
+    // kimi-k3 (admin 2026-07-28, prepended to the PAID ladder). Its published price is NOT known here,
+    // so the default deliberately mirrors k2.7 — the highest Kimi rate we can actually verify — rather
+    // than an invented number. ⚠️ SET `RATE_KIMI3_IN`/`_OUT`/`_CACHE` to the real published rate once
+    // it is known: until then a genuinely pricier K3 is billed at the k2.7 rate, which UNDER-states our
+    // real cost (margin risk, never a user over-charge). Recorded as an open item in PROGRESS.md.
+    'kimi-k3': { inputPerMTok: envRate('RATE_KIMI3_IN', 0.95), outputPerMTok: envRate('RATE_KIMI3_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI3_CACHE', 0.24) },
     'kimi': { inputPerMTok: envRate('RATE_KIMI_IN', 0.6), outputPerMTok: envRate('RATE_KIMI_OUT', 2.5), cacheReadPerMTok: envRate('RATE_KIMI_CACHE', 0.15) }, // k2.5/k2.6
     // ── Google (Vertex / Gemini) ──────────────────────────────────────────────────────────────────
     'gemini-pro': { inputPerMTok: envRate('RATE_GEMINI_PRO_IN', 1.25), outputPerMTok: envRate('RATE_GEMINI_PRO_OUT', 10) },
@@ -80,8 +86,23 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     if (m.includes('opus')) return { inputPerMTok: 15, outputPerMTok: 75 }; // completeness; opus tiers bill elsewhere
     if (m.includes('sonnet')) return card.sonnet;
     if (m.includes('haiku')) return card.haiku;
-    if (m.includes('glm')) return m.includes('flash') ? card['glm-flash'] : m.includes('glm-5') ? card['glm-5'] : card.glm;
-    if (m.includes('kimi')) return m.includes('k2.7') || m.includes('k2-7') ? card['kimi-k2.7'] : card.kimi;
+    // NEWER-MODEL SAFETY (autopsy 2026-07-28): these branches used to send ANY unrecognized id in the
+    // family to the CHEAPEST rung — so the moment a newer flagship shipped (kimi-k3, a future glm-6) we
+    // would pay flagship price and bill the k2.5/glm-4.x price, losing money on every build, silently.
+    // That directly contradicted this function's own stated contract ("never under-bill an unknown
+    // model"). Now: known-cheap ids are matched EXPLICITLY, and anything else in the family bills at the
+    // most expensive rate we know — so an unrecognized model can only ever over-state cost, never
+    // under-state it. Adding a real rate line for a new id (see 'kimi-k3') makes it exact.
+    if (m.includes('glm')) {
+      if (m.includes('flash')) return card['glm-flash'];
+      if (/glm-?4/.test(m)) return card.glm;              // the known cheap 4.x coder
+      return card['glm-5'];                                // 5.x and anything newer/unknown
+    }
+    if (m.includes('kimi')) {
+      if (m.includes('k3')) return card['kimi-k3'];
+      if (/k2[.\-]?[56]/.test(m)) return card.kimi;        // the known cheap k2.5 / k2.6
+      return card['kimi-k2.7'];                            // k2.7 and anything newer/unknown
+    }
     if (m.includes('gemini')) return m.includes('pro') ? card['gemini-pro'] : card.gemini;
     if (m.includes('grok')) return card.grok;
   }

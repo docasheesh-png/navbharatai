@@ -409,7 +409,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   is SAFE** — `parseModelLadder` falls back to the code default. Confirmed exact ids (admin screenshots 2026-07-12):
   - **GLM_MODEL** default `glm-5.2,glm-4.7` (flagship coder → 1-step-back). GLM ids: `glm-5.2` (flagship),
     `glm-4.7` (cheap coder), `glm-4.7-flash` (cheapest, free-tier only).
-  - **KIMI_MODEL** default `kimi-k2.7-code,kimi-k2.6`. Kimi ids (from platform.kimi.ai/docs/models):
+  - **KIMI_MODEL** default `kimi-k3,kimi-k2.7-code,kimi-k2.6` (admin 2026-07-28: K3 PREPENDED, never a
+    replacement — if `kimi-k3` is not a live id the call errors and the ladder falls through to k2.7-code
+    exactly as before, so adopting it cannot break a build even if the model does not exist. The FREE
+    ladder was deliberately left UNCHANGED — it is cheapest-first with the flagship LAST, so a newer
+    flagship in front would invert the free tier's cost model). ⚠️ **Set `RATE_KIMI3_IN`/`_OUT`/`_CACHE`
+    to K3's real published price** — `providerRates.ts` defaults them to the k2.7 rate because K3's price
+    is not verifiable here, which UNDER-states our real cost if K3 is pricier (margin risk, never a user
+    over-charge). Kimi ids (from platform.kimi.ai/docs/models):
     `kimi-k2.7-code` (strongest coder, 256k), `kimi-k2.7-code-highspeed`, `kimi-k2.6`, `kimi-k2.5` (older/cheaper).
   - Per the Model Routing Policy above, this is the flagship-first PAID/default ladder; the FREE-tier flash-first
     ladder is a SEPARATE (Slice-3) env, not `GLM_MODEL`/`KIMI_MODEL`. (Supersedes the old "flagship stays OUT of

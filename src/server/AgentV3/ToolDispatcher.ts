@@ -150,6 +150,7 @@ import { generateHospitalErpIntegration } from '../lib/HospitalErpGenerator';
 import { generateSchoolErpIntegration } from '../lib/SchoolErpGenerator';
 import { generateCourierIntegration } from '../lib/CourierGenerator';
 import { generateRestaurantPosIntegration } from '../lib/RestaurantPosGenerator';
+import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3620,6 +3621,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('restaurant-pos starter');
         const restDeps = restcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Restaurant / POS backend:\n${restWritten.join('\n')}\nAdd the dependencies: ${restDeps}\n\n${restcfg.instructions}`;
+      }
+
+      case 'generate_real_estate': {
+        // Breadth recipe (domain vertical) — Real-estate / property portal (server/realestate/): a real
+        // RealEstateService with a listing STATE-MACHINE (invalid jumps → 409) + append-only price history +
+        // on-market-only inquiries, plus an Express router. Pure gen in RealEstateGenerator.ts.
+        const recfg = generateRealEstateIntegration();
+        const reWritten: string[] = [];
+        for (const [path, content] of Object.entries(recfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          reWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('real-estate starter');
+        const reDeps = recfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Real-estate / property-portal backend:\n${reWritten.join('\n')}\nAdd the dependencies: ${reDeps}\n\n${recfg.instructions}`;
       }
 
       case 'generate_events': {

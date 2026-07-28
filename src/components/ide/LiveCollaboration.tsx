@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2, Sparkles, Bot, Send, Code2 } from 'lucide-react';
 import { db } from '../../App';
-import { doc, setDoc, getDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
 
 /** A shared in-room AI message — every member sees the same AI thread (Phase 1a). */
@@ -27,12 +27,15 @@ interface RemotePresence {
   updatedAt: number;
 }
 
-interface Collaborator {
+// A room member. `status` drives owner approval: a joiner starts 'pending' and cannot read the
+// shared code / chat / AI or write anything until the owner sets them 'approved'. The owner can
+// also kick a member (delete their member doc), which revokes access immediately (rules-enforced).
+interface Member {
   id: string;
   name: string;
   color: string;
-  online: boolean;
-  lastSeen: number;
+  status: 'pending' | 'approved';
+  requestedAt: number;
 }
 
 interface ChatMessage {
@@ -68,7 +71,9 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const [roomId, setRoomId] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
-  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [roomOwner, setRoomOwner] = useState('');      // createdBy uid of the active/pending room
+  const [bootedMsg, setBootedMsg] = useState('');      // set when the owner rejects or kicks you
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   // A room is a CLEAN shared scratchpad (admin-decided 2026-07-28): it starts EMPTY — it never
@@ -76,7 +81,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   // (onCodeUpdate is only pushed for genuinely non-empty shared code, below).
   const [sharedCode, setSharedCode] = useState('');
   const [copied, setCopied] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+  // 'pending' = waiting for the owner to approve your join request.
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'pending' | 'connected' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [myName] = useState(userName || 'User_' + genId().slice(0, 4));
   const [myId] = useState(userId || genId());
@@ -102,6 +108,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const unsubPresenceRef = useRef<(() => void) | null>(null);
   const unsubCommentsRef = useRef<(() => void) | null>(null);
   const unsubAiRef = useRef<(() => void) | null>(null);
+  const unsubMembersRef = useRef<(() => void) | null>(null);  // roster (owner + approved)
+  const unsubMyMemberRef = useRef<(() => void) | null>(null); // my own request doc (pending → approved / kicked)
   const aiBottomRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -220,6 +228,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
       unsubPresenceRef.current?.();
       unsubCommentsRef.current?.();
       unsubAiRef.current?.();
+      unsubMembersRef.current?.();
+      unsubMyMemberRef.current?.();
       if (presenceThrottleRef.current) clearTimeout(presenceThrottleRef.current);
     };
   }, []);
@@ -232,20 +242,105 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
     aiBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [aiMessages]);
 
+  // Tear down all listeners + reset room state (no writes).
+  const teardown = () => {
+    unsubscribeRef.current?.(); unsubChatRef.current?.(); unsubPresenceRef.current?.();
+    unsubCommentsRef.current?.(); unsubAiRef.current?.(); unsubMembersRef.current?.(); unsubMyMemberRef.current?.();
+    unsubMyMemberRef.current = null;
+    if (presenceThrottleRef.current) { clearTimeout(presenceThrottleRef.current); presenceThrottleRef.current = null; }
+    setActiveRoom(null);
+    setMembers([]); setChatMessages([]); setPresence([]); setComments([]); setAiMessages([]);
+    setSharedCode(''); setRoomTab('code');
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
+  // Booted — the owner rejected the request or kicked you. Tear down and show an honest message.
+  const handleBooted = (msg: string) => {
+    teardown();
+    setStatus('error');
+    setBootedMsg(msg);
+    setErrorMsg(msg);
+  };
+
+  // Enter a room I'm allowed in (owner or approved): wire up all the live subscriptions.
+  const enterRoom = (id: string, ownerUid: string) => {
+    setRoomOwner(ownerUid);
+
+    // Shared code — approval-gated content doc (clean scratchpad, never the app's preview dump).
+    unsubscribeRef.current = onSnapshot(doc(db, 'collab_rooms', id, 'content', 'shared'), (snap) => {
+      const code = (snap.exists() ? (snap.data().code as string) : '') || '';
+      if (!isEditing) { setSharedCode(code); if (code) onCodeUpdate(code); }
+    });
+
+    const chatQ = query(collection(db, 'collab_rooms', id, 'chat'), orderBy('timestamp', 'asc'), limit(50));
+    unsubChatRef.current = onSnapshot(chatQ, (snap) => {
+      setChatMessages(snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)));
+    });
+
+    // Live cursors — other members' current line.
+    unsubPresenceRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'presence'), (snap) => {
+      const now = Date.now();
+      const others: RemotePresence[] = [];
+      snap.forEach((d) => {
+        const p = d.data() as Partial<RemotePresence>;
+        if (p.id && p.id !== myId && p.online !== false && typeof p.updatedAt === 'number' && now - p.updatedAt < 30000) {
+          others.push({ id: String(p.id), name: String(p.name || 'User'), color: String(p.color || '#6366f1'), caretLine: Math.max(1, Number(p.caretLine) || 1), online: true, updatedAt: p.updatedAt });
+        }
+      });
+      setPresence(others);
+    });
+
+    unsubCommentsRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'comments'), (snap) => {
+      const list: CommentAnnotation[] = snap.docs.map((d) => {
+        const c = d.data() as Partial<CommentAnnotation>;
+        return buildAnnotation({ id: d.id, line: Number(c.line) || 1, text: String(c.text || ''), authorId: String(c.authorId || ''), authorName: String(c.authorName || 'User'), color: String(c.color || '#6366f1'), timestamp: Number(c.timestamp) || 0 });
+      }).map((c, i) => ({ ...c, resolved: (snap.docs[i].data() as any).resolved === true }));
+      setComments(sortAnnotations(list));
+    });
+
+    const aiQ = query(collection(db, 'collab_rooms', id, 'ai_chat'), orderBy('timestamp', 'asc'), limit(100));
+    unsubAiRef.current = onSnapshot(aiQ, (snap) => {
+      setAiMessages(snap.docs.map(d => {
+        const m = d.data() as Partial<AiMessage>;
+        return { id: d.id, role: m.role === 'assistant' ? 'assistant' : 'user', authorId: String(m.authorId || ''), authorName: String(m.authorName || 'User'), color: String(m.color || '#6366f1'), text: String(m.text || ''), timestamp: Number(m.timestamp) || 0 };
+      }));
+    });
+
+    // Roster + kick-detection: watch the members collection. If MY approved membership disappears
+    // while I'm in the room (owner kicked me), boot me out immediately (rules would also deny me).
+    unsubMembersRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'members'), (snap) => {
+      const list: Member[] = snap.docs.map(d => {
+        const m = d.data() as Partial<Member>;
+        return { id: d.id, name: String(m.name || 'User'), color: String(m.color || '#6366f1'), status: m.status === 'approved' ? 'approved' : 'pending', requestedAt: Number(m.requestedAt) || 0 };
+      });
+      setMembers(list);
+      if (myId !== ownerUid) {
+        const me = list.find(m => m.id === myId);
+        if (!me || me.status !== 'approved') handleBooted('You were removed from the room by the owner.');
+      }
+    });
+
+    // Register my presence (best-effort).
+    setDoc(doc(db, 'collab_rooms', id, 'presence', myId), { id: myId, name: myName, color: myColor, caretLine: 1, online: true, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+
+    setActiveRoom(id);
+    localStorage.setItem(STORAGE_KEY, id);
+    setStatus('connected');
+  };
+
   const createRoom = async () => {
     if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to create a collaboration room.'); return; }
     const id = shortId();
     setStatus('connecting');
+    setBootedMsg('');
     try {
-      await setDoc(doc(db, 'collab_rooms', id), {
-        code: '', // clean scratchpad — never seed the app's preview/boot document
-        createdAt: Date.now(),
-        createdBy: myId,
-        collaborators: [{ id: myId, name: myName, color: myColor, online: true, lastSeen: Date.now() }],
-      });
-      localStorage.setItem(STORAGE_KEY, id);
+      // Room metadata only (the shared CODE lives in the approval-gated content doc, not here).
+      await setDoc(doc(db, 'collab_rooms', id), { createdAt: Date.now(), createdBy: myId, ownerName: myName });
+      await setDoc(doc(db, 'collab_rooms', id, 'content', 'shared'), { code: '' });
+      // The creator is an auto-approved member (the owner).
+      await setDoc(doc(db, 'collab_rooms', id, 'members', myId), { id: myId, name: myName, color: myColor, status: 'approved', requestedAt: Date.now() });
       setRoomId(id);
-      await joinRoom(id);
+      enterRoom(id, myId);
     } catch (e: any) {
       setStatus('error');
       setErrorMsg('Room could not be created: ' + (e.message || 'Unknown error'));
@@ -255,124 +350,64 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const joinRoom = async (id: string) => {
     if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to join a collaboration room.'); return; }
     setStatus('connecting');
+    setBootedMsg('');
     try {
-      const roomRef = doc(db, 'collab_rooms', id);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) {
-        setStatus('error');
-        setErrorMsg('Room not found. Check the ID.');
-        return;
+      const roomSnap = await getDoc(doc(db, 'collab_rooms', id));
+      if (!roomSnap.exists()) { setStatus('error'); setErrorMsg('Room not found. Check the ID.'); return; }
+      const ownerUid = String(roomSnap.data().createdBy || '');
+      setRoomOwner(ownerUid);
+      setRoomId(id);
+
+      // The owner always enters directly.
+      if (myId === ownerUid) { enterRoom(id, ownerUid); return; }
+
+      // Already an approved member? Enter. Otherwise create/keep a pending request and wait.
+      const meRef = doc(db, 'collab_rooms', id, 'members', myId);
+      const meSnap = await getDoc(meRef);
+      if (meSnap.exists() && meSnap.data().status === 'approved') { enterRoom(id, ownerUid); return; }
+      if (!meSnap.exists()) {
+        await setDoc(meRef, { id: myId, name: myName, color: myColor, status: 'pending', requestedAt: Date.now() });
       }
-      const data = roomSnap.data();
-      const collabs: Collaborator[] = data.collaborators || [];
-      const exists = collabs.find(c => c.id === myId);
-      const updated = exists
-        ? collabs.map(c => c.id === myId ? { ...c, online: true, lastSeen: Date.now() } : c)
-        : [...collabs, { id: myId, name: myName, color: myColor, online: true, lastSeen: Date.now() }];
-      await setDoc(roomRef, { ...data, collaborators: updated });
-
-      unsubscribeRef.current = onSnapshot(roomRef, (snap) => {
-        if (!snap.exists()) return;
-        const d = snap.data();
-        setCollaborators(d.collaborators || []);
-        // Reflect the room's shared code; only push it into the user's own app preview when it is
-        // genuinely non-empty, so a blank scratchpad never wipes their current app.
-        if (!isEditing) { setSharedCode(d.code || ''); if (d.code) onCodeUpdate(d.code); }
+      setStatus('pending');
+      // Watch my own request doc: approved → enter; deleted (rejected) → declined.
+      unsubMyMemberRef.current = onSnapshot(meRef, (snap) => {
+        if (!snap.exists()) { handleBooted('Your request to join was declined by the owner.'); return; }
+        if (snap.data().status === 'approved') {
+          unsubMyMemberRef.current?.(); unsubMyMemberRef.current = null;
+          enterRoom(id, ownerUid);
+        }
       });
-
-      const chatRef = collection(db, 'collab_rooms', id, 'chat');
-      const chatQ = query(chatRef, orderBy('timestamp', 'asc'), limit(50));
-      unsubChatRef.current = onSnapshot(chatQ, (snap) => {
-        const msgs: ChatMessage[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
-        setChatMessages(msgs);
-      });
-
-      // P-DESIGN.7 — live cursors: other collaborators' current line (presence subcollection).
-      unsubPresenceRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'presence'), (snap) => {
-        const now = Date.now();
-        const others: RemotePresence[] = [];
-        snap.forEach((d) => {
-          const p = d.data() as Partial<RemotePresence>;
-          // Show only other members seen in the last 30s (stale/offline cursors drop off).
-          if (p.id && p.id !== myId && p.online !== false && typeof p.updatedAt === 'number' && now - p.updatedAt < 30000) {
-            others.push({ id: String(p.id), name: String(p.name || 'User'), color: String(p.color || '#6366f1'), caretLine: Math.max(1, Number(p.caretLine) || 1), online: true, updatedAt: p.updatedAt });
-          }
-        });
-        setPresence(others);
-      });
-
-      // P-DESIGN.7 — line-anchored comments (comments subcollection).
-      unsubCommentsRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'comments'), (snap) => {
-        const list: CommentAnnotation[] = snap.docs.map((d) => {
-          const c = d.data() as Partial<CommentAnnotation>;
-          return buildAnnotation({ id: d.id, line: Number(c.line) || 1, text: String(c.text || ''), authorId: String(c.authorId || ''), authorName: String(c.authorName || 'User'), color: String(c.color || '#6366f1'), timestamp: Number(c.timestamp) || 0 });
-        }).map((c, i) => ({ ...c, resolved: (snap.docs[i].data() as any).resolved === true }));
-        setComments(sortAnnotations(list));
-      });
-
-      // Phase 1a — shared AI thread: every member sees the same AI conversation live.
-      const aiRef = collection(db, 'collab_rooms', id, 'ai_chat');
-      const aiQ = query(aiRef, orderBy('timestamp', 'asc'), limit(100));
-      unsubAiRef.current = onSnapshot(aiQ, (snap) => {
-        const msgs: AiMessage[] = snap.docs.map(d => {
-          const m = d.data() as Partial<AiMessage>;
-          return {
-            id: d.id,
-            role: m.role === 'assistant' ? 'assistant' : 'user',
-            authorId: String(m.authorId || ''),
-            authorName: String(m.authorName || 'User'),
-            color: String(m.color || '#6366f1'),
-            text: String(m.text || ''),
-            timestamp: Number(m.timestamp) || 0,
-          };
-        });
-        setAiMessages(msgs);
-      });
-
-      // Register my initial presence.
-      try { await setDoc(doc(db, 'collab_rooms', id, 'presence', myId), { id: myId, name: myName, color: myColor, caretLine: 1, online: true, updatedAt: Date.now() }, { merge: true }); } catch { /* best-effort */ }
-
-      setSharedCode(data.code || '');
-      if (data.code) onCodeUpdate(data.code); // don't blank the user's app when joining an empty room
-      setActiveRoom(id);
-      localStorage.setItem(STORAGE_KEY, id);
-      setStatus('connected');
     } catch (e: any) {
       setStatus('error');
       setErrorMsg('Failed to join room: ' + (e.message || 'Check Firestore rules'));
     }
   };
 
-  const leaveRoom = async () => {
-    if (!activeRoom) return;
+  // Owner-only: approve a pending request, or reject/kick a member (delete their member doc).
+  const approveMember = async (uid: string) => {
+    if (!activeRoom || myId !== roomOwner) return;
+    try { await setDoc(doc(db, 'collab_rooms', activeRoom, 'members', uid), { status: 'approved' }, { merge: true }); } catch {}
+  };
+  const removeMember = async (uid: string) => {
+    if (!activeRoom || myId !== roomOwner || uid === roomOwner) return;
     try {
-      const roomRef = doc(db, 'collab_rooms', activeRoom);
-      const snap = await getDoc(roomRef);
-      if (snap.exists()) {
-        const d = snap.data();
-        const updated = (d.collaborators || []).map((c: Collaborator) =>
-          c.id === myId ? { ...c, online: false, lastSeen: Date.now() } : c
-        );
-        await setDoc(roomRef, { ...d, collaborators: updated });
-      }
-      // Drop my live cursor so teammates stop seeing it.
-      await setDoc(doc(db, 'collab_rooms', activeRoom, 'presence', myId), { online: false, updatedAt: Date.now() }, { merge: true });
+      await deleteDoc(doc(db, 'collab_rooms', activeRoom, 'members', uid));
+      await deleteDoc(doc(db, 'collab_rooms', activeRoom, 'presence', uid)).catch(() => {});
     } catch {}
-    unsubscribeRef.current?.();
-    unsubChatRef.current?.();
-    unsubPresenceRef.current?.();
-    unsubCommentsRef.current?.();
-    unsubAiRef.current?.();
-    if (presenceThrottleRef.current) { clearTimeout(presenceThrottleRef.current); presenceThrottleRef.current = null; }
-    setActiveRoom(null);
+  };
+
+  const leaveRoom = async () => {
+    const id = activeRoom;
+    try {
+      if (id) {
+        await setDoc(doc(db, 'collab_rooms', id, 'presence', myId), { online: false, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+        // A non-owner leaving gives up their membership (they'd need re-approval to return).
+        if (myId !== roomOwner) await deleteDoc(doc(db, 'collab_rooms', id, 'members', myId)).catch(() => {});
+      }
+    } catch {}
+    teardown();
     setStatus('idle');
-    setCollaborators([]);
-    setChatMessages([]);
-    setPresence([]);
-    setComments([]);
-    setAiMessages([]);
-    setRoomTab('code');
-    localStorage.removeItem(STORAGE_KEY);
+    setRoomOwner('');
   };
 
   const handleCodeChange = (code: string) => {
@@ -383,7 +418,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
       setIsEditing(false);
       if (!activeRoom) return;
       try {
-        await setDoc(doc(db, 'collab_rooms', activeRoom), { code }, { merge: true });
+        await setDoc(doc(db, 'collab_rooms', activeRoom, 'content', 'shared'), { code }, { merge: true });
         if (code) onCodeUpdate(code); // only mirror non-empty shared code into the app preview
       } catch {}
     }, 1000);
@@ -415,6 +450,12 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
     return `${Math.floor(d / 3600000)}h ago`;
   };
 
+  const isOwner = !!roomOwner && myId === roomOwner;
+  const approvedMembers = members.filter(m => m.status === 'approved');
+  const pendingMembers = members.filter(m => m.status === 'pending');
+  // Online = me, or anyone with a fresh presence heartbeat.
+  const onlineCount = approvedMembers.filter(m => m.id === myId || presence.some(p => p.id === m.id)).length;
+
   return (
     <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
       {/* Header */}
@@ -427,14 +468,28 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           <p className="text-xs text-white/40">Real-time code sharing — build together with your team</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-400 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-white/20'}`} />
-          <span className={`text-xs ${status === 'connected' ? 'text-emerald-400' : status === 'connecting' ? 'text-amber-400' : 'text-white/40'}`}>
-            {status === 'connected' ? `Room: ${activeRoom}` : status === 'connecting' ? 'Connecting...' : 'Not connected'}
+          <div className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-400 animate-pulse' : (status === 'connecting' || status === 'pending') ? 'bg-amber-400 animate-pulse' : 'bg-white/20'}`} />
+          <span className={`text-xs ${status === 'connected' ? 'text-emerald-400' : (status === 'connecting' || status === 'pending') ? 'text-amber-400' : 'text-white/40'}`}>
+            {status === 'connected' ? `Room: ${activeRoom}` : status === 'pending' ? 'Awaiting approval…' : status === 'connecting' ? 'Connecting...' : 'Not connected'}
           </span>
         </div>
       </div>
 
-      {status !== 'connected' ? (
+      {status === 'pending' ? (
+        /* — Waiting for the owner to approve the join request — */
+        <div className="flex-1 flex flex-col items-center justify-center p-6 gap-5 text-center">
+          <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center border border-amber-500/20">
+            <Clock className="w-8 h-8 text-amber-400 animate-pulse" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-1">Waiting for approval</h3>
+            <p className="text-sm text-white/40 max-w-xs">You asked to join room <span className="text-white/70 font-mono">{roomId}</span>. The room owner needs to approve you before you can see the code and chat.</p>
+          </div>
+          <button onClick={leaveRoom} className="px-4 py-2 bg-[#161b22] border border-white/10 rounded-xl text-sm text-white/60 hover:text-white transition-all">
+            Cancel request
+          </button>
+        </div>
+      ) : status !== 'connected' ? (
         /* — Room Setup Screen — */
         <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
           <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center border border-blue-500/20">
@@ -442,7 +497,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           </div>
           <div className="text-center">
             <h3 className="text-lg font-semibold text-white mb-1">Code with your team</h3>
-            <p className="text-sm text-white/40">Create a room or join an existing one</p>
+            <p className="text-sm text-white/40">Create a room or join — joining needs the owner's approval</p>
           </div>
 
           {!signedIn && (
@@ -497,7 +552,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           {/* Tab bar — one panel at a time, works on phone and desktop */}
           <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-[#161b22]">
             {([{ key: 'code', label: 'Code', icon: Code2 }, { key: 'ai', label: 'AI', icon: Sparkles }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
-              const Icon = t.icon; const active = roomTab === t.key; const online = collaborators.filter(c => c.online).length;
+              const Icon = t.icon; const active = roomTab === t.key; const online = onlineCount;
               return (
                 <button key={t.key} onClick={() => setRoomTab(t.key)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-600 text-white' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
                   <Icon className="w-3.5 h-3.5" /> {t.label}
@@ -619,28 +674,62 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           </div>
           )}
 
-          {/* ── Team tab — collaborators + chat ── */}
+          {/* ── Team tab — members + chat ── */}
           {roomTab === 'team' && (
           <div className="flex-1 flex flex-col overflow-hidden bg-[#161b22]">
-            {/* Collaborators — with live cursor line (P-DESIGN.7) */}
+            {/* Join requests — OWNER ONLY: approve or reject pending members */}
+            {isOwner && pendingMembers.length > 0 && (
+              <div className="p-3 border-b border-white/5 bg-amber-500/5">
+                <p className="text-[10px] text-amber-300/80 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3" /> Join requests ({pendingMembers.length})
+                </p>
+                <div className="space-y-1.5">
+                  {pendingMembers.map(m => (
+                    <div key={m.id} className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ backgroundColor: m.color }}>
+                        {m.name[0].toUpperCase()}
+                      </div>
+                      <p className="text-[10px] text-white truncate flex-1">{m.name}</p>
+                      <button onClick={() => approveMember(m.id)} title="Approve" className="px-2 py-1 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white text-[9px] font-medium transition-all flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Approve
+                      </button>
+                      <button onClick={() => removeMember(m.id)} title="Reject" className="p-1 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Members — approved roster, with live cursor line + owner Kick */}
             <div className="p-3 border-b border-white/5">
-              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Online ({collaborators.filter(c => c.online).length})</p>
+              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Members ({approvedMembers.length})</p>
               <div className="space-y-1.5">
-                {collaborators.map(c => {
-                  const remote = c.id !== myId ? presence.find(p => p.id === c.id) : null;
-                  const line = c.id === myId ? caretLine : remote?.caretLine;
+                {approvedMembers.map(c => {
+                  const isMe = c.id === myId;
+                  const remote = !isMe ? presence.find(p => p.id === c.id) : null;
+                  const online = isMe || !!remote;
+                  const line = isMe ? caretLine : remote?.caretLine;
                   return (
                     <div key={c.id} className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ backgroundColor: c.color }}>
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ backgroundColor: c.color }}>
                         {c.name[0].toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[10px] text-white truncate">{c.name} {c.id === myId ? '(you)' : ''}</p>
-                        {line != null && (c.id === myId || remote) && (
+                        <p className="text-[10px] text-white truncate">
+                          {c.name} {isMe ? '(you)' : ''}{c.id === roomOwner ? <span className="text-amber-400/80"> · owner</span> : ''}
+                        </p>
+                        {line != null && (isMe || remote) && (
                           <p className="text-[8px] text-white/35">✎ line {line}</p>
                         )}
                       </div>
-                      <div className={`w-1.5 h-1.5 rounded-full ${c.online ? 'bg-emerald-400' : 'bg-white/20'}`} title={c.online ? 'online' : 'offline'} />
+                      <div className={`w-1.5 h-1.5 rounded-full ${online ? 'bg-emerald-400' : 'bg-white/20'}`} title={online ? 'online' : 'offline'} />
+                      {isOwner && !isMe && c.id !== roomOwner && (
+                        <button onClick={() => removeMember(c.id)} title="Remove from room" className="p-1 rounded hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-colors shrink-0">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}

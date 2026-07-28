@@ -702,6 +702,25 @@ export function zeroBillForUnrenderedPreview(expectsArtifacts: boolean, previewV
 }
 
 /**
+ * "WORKING APP OR FREE" — does a FAILED build get charged? Never.
+ *
+ * ROOT CAUSE (navbharatai self-import autopsy 2026-07-27, buildId d1623410): the failed-build guard was
+ * written as `expectsArtifacts && !result.ok`. `expectsArtifacts` is FALSE on every import/survey turn,
+ * so an import turn that genuinely FAILED — this one ended with `OUTCOME_SYNTAX_ERROR` *and*
+ * `BUILD_TIMEOUT` after 29 minutes — sailed straight past the guard and was billed (₹19.08 recorded).
+ * Meanwhile the user-facing summary said, verbatim, "You have NOT been charged for this build". The
+ * report and the message contradicted each other, and the message was the one that was wrong.
+ *
+ * The guard's INTENT was always "a build that did not succeed is never charged"; only its condition was
+ * narrower than its intent. `!ok` is the whole rule — an import turn is still a build the user paid for,
+ * and a failed one must be free exactly like any other. A SUCCESSFUL import/survey turn still bills
+ * normally (the survey is real delivered work). Only ever REDUCES a charge. PURE + tested.
+ */
+export function zeroBillForFailedBuild(resultOk: boolean): boolean {
+  return resultOk === false;
+}
+
+/**
  * Should the post-build INTEGRITY heal (a file-MUTATING LLM pass) run?
  *
  * ROOT CAUSE (mitrify import autopsy 2026-07-24, report fdc35433): the user's prompt was "Import this app …
@@ -8980,7 +8999,10 @@ export function registerAgentV3Routes(app: Express): void {
       // (readiness 0/100, 7 unresolved imports) yet was still billed ₹811. Same "working app or free"
       // law as the empty-build + unrendered-preview rules above — extended to any unsuccessful build
       // that slipped past them (files written but the build reported failure). Only ever REDUCES a charge.
-      if (expectsArtifacts && !result.ok && effectiveBilledUsd > 0) {
+      // 2026-07-27: condition widened from `expectsArtifacts && !result.ok` to just `!ok` — see
+      // zeroBillForFailedBuild. An import/survey turn has expectsArtifacts=false, so a FAILED one
+      // (syntax error + 29-min timeout) was billed ₹19.08 while telling the user it was free.
+      if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
         effectiveBilledUsd = 0;
         zeroBillReason = 'build did not succeed — "working app or free", so no charge';
         events.emit({ type: 'narration', agent: 'architect', text: '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });

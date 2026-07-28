@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, userFacingReport, importTurnObservation, honestModelLabel, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 describe('isClaudeModel (pure helper)', () => {
@@ -1231,5 +1231,34 @@ describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
     const real = importTurnObservation(false, MSG);
     const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...real }];
     expect(deriveRootCause({ issues, ok: true })).toBe(MSG);
+  });
+});
+
+// honestModelLabel — the report must name the model that ACTUALLY ran (autopsy 2026-07-27).
+// The reported build showed `model: "claude-sonnet-4-6"` while noClaude:true, builtBy:"KIMI" and
+// all 8 delivered turns were kimi-k2.5. Naming a model that never executed misdirects the one
+// person who reads this field: whoever is debugging routing.
+describe('honestModelLabel (autopsy 2026-07-27)', () => {
+  it('reports what actually delivered, not the router intent', () => {
+    expect(honestModelLabel('claude-sonnet-4-6', [
+      { model: 'kimi-k2.5', ok: true }, { model: 'kimi-k2.5', ok: true },
+    ])).toBe('kimi-k2.5');
+  });
+
+  it('uses the LAST successful call (the one that produced the delivered result)', () => {
+    expect(honestModelLabel('planned', [
+      { model: 'glm-4.7', ok: true }, { model: 'kimi-k2.5', ok: true },
+    ])).toBe('kimi-k2.5');
+  });
+
+  it('skips failed calls — a provider that errored did not deliver anything', () => {
+    expect(honestModelLabel('planned', [
+      { model: 'glm-5.2', ok: true }, { model: 'kimi-k2.5', ok: false },
+    ])).toBe('glm-5.2');
+  });
+
+  it('falls back to the planned label when nothing ran (never blank)', () => {
+    expect(honestModelLabel('claude-sonnet-4-6', [])).toBe('claude-sonnet-4-6');
+    expect(honestModelLabel(undefined, [])).toBeUndefined();
   });
 });

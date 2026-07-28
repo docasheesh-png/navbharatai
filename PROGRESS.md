@@ -22382,3 +22382,81 @@ so a refactor that decouples them has to be deliberate rather than accidental.
 A census test is a blunt instrument and will occasionally fail on a legitimate addition — that is the
 point. The cost is one deliberate line of thought per new writer; the alternative is what this autopsy
 documents: the same class of bug returning on the same app three days after being "fixed".
+
+### 2026-07-27 (cont.) — AUTOPSY #2: navbharatai self-import (buildId d1623410, ok:FALSE, 29-min timeout)
+### The engine CORRUPTED a real source file, then billed for the failure
+
+Admin imported NavBharatAI's OWN repo (2460 files) into Pro v5.0 with the same "do not change any
+files yet" prompt. Build FAILED: syntax error + 29-minute wall-clock timeout.
+
+**TIMELINE FIRST (verified, not assumed):** this build ran **17:30–18:04 UTC**; PR #1906 (the read-only
+turn gates) merged at **20:07 UTC** — two hours LATER. So every import-turn violation visible here
+(import-normalize firing, credential-log redaction firing, "I changed 12 files", the garbage repo name
+`overall-layout-structure-the-page-is-str-…`, the duplicate reviewer survey, the inflated unresolved
+count) was ALREADY FIXED AND MERGED, just not yet deployed when this ran. Not re-fixing those.
+
+#### Ledger — what is genuinely NEW
+
+**❌ 1. WE CORRUPTED THE USER'S CODE — and it killed the build.**
+`OUTCOME_SYNTAX_ERROR: src/server/lib/DbConfigGenerator.ts (line 125:158) Expected identifier but
+found "."`. Traced to `normalizeImportSpecifiers`, which rewrote `@/lib/firebase → ../../lib/firebase`
+in that file. Line 125 is not code — it is a single-quoted DOCUMENTATION string:
+`instructions: 'Create a Firebase project … Then import { db } from "@/lib/firebase". Your config …'`
+
+Two independent defects, both REPRODUCED locally before fixing (never theorised):
+- **Scope:** the regex `(['"])SPEC\1` matched any quoted occurrence ANYWHERE — string literals,
+  comments, and this repo's many code-generator template literals. It also silently rewrote test
+  fixtures (`ViteReactProvider.test.ts`, `previewBundle.test.ts`, `reactPreview.test.ts`).
+- **Quote handling:** it always emitted `'…'` regardless of the original quote. Replacing a
+  DOUBLE-quoted token nested inside a SINGLE-quoted string terminates the enclosing string:
+  `'… from '../../lib/firebase'. …'` → `Unexpected token '.'`. Exactly the reported error, at exactly
+  the reported column.
+
+Fix: new pure `codePositions(src)` scanner marks real-code offsets (handles line/block comments, both
+quote styles with escapes, template literals with `${…}` returning to code, and the standard
+prev-significant-char heuristic for regex-vs-division). `normalizeImportSpecifiers` now rewrites ONLY
+at genuine module-specifier positions (`from "X"`, bare `import "X"`, `require("X")`, `import("X")`)
+whose leading keyword sits at a real-code offset, and PRESERVES the original quote character.
+Deliberately conservative: the only accepted failure mode is "declined a legitimate rewrite", never
+"corrupted a file". Verified all four genuine specifier forms still rewrite (feature not gutted), and
+verified the 5 new tests genuinely FAIL against the old implementation.
+
+**❌ 2. A FAILED BUILD WAS BILLED — while telling the user it was free.**
+Report: `billing.billedUsd 0.197479 / billedInr 19.08`. Summary text, verbatim: *"You have NOT been
+charged for this build."* Both cannot be true. Root cause: the failed-build guard was written
+`expectsArtifacts && !result.ok`, and `expectsArtifacts` is FALSE on every import/survey turn — so a
+FAILED import turn sailed past the "working app or free" law entirely. The guard's INTENT was always
+"a build that did not succeed is never charged"; only its condition was narrower than its intent.
+Fix: new pure `zeroBillForFailedBuild(ok)` — `!ok` is the whole rule. A SUCCESSFUL survey still bills
+(real delivered work); a failed one never does. A test asserts the function takes only `ok`, so
+reintroducing an artifacts condition fails CI.
+(This user is on the free list so no wallet was actually debited — but any paying user hitting this
+same path WOULD have been charged ₹19.08 for a build that timed out with a syntax error.)
+
+**❌ 3. THE REPORT NAMED A MODEL THAT NEVER RAN.** Top-level `model: "claude-sonnet-4-6"` while
+`noClaude: true`, `builtBy: "KIMI"`, `providerDelivery {KIMI: 8}`, and every llmCall was `kimi-k2.5`.
+`meta.model` was the router's INTENT captured at build start and never reconciled with reality — an
+admin diagnostic that misdirects precisely the person debugging routing. Fix: pure
+`honestModelLabel()` — the report now leads with the last successfully-delivering model and keeps the
+intent under `plannedModel`, so nothing is lost.
+
+**🥵 4. STRUGGLE — a 2460-file repo is at/over the engine's capacity.** Zipball import alone took
+**526s**; the build then hit `BUILD_TIMEOUT` at the 1740s cap having produced nothing usable. 16 of
+the first 17 minutes were a single un-progressing heartbeat.
+
+**✅ 5. Self-heals (red flags per the 50/50 law):** `DATA_LOSS_EVENT` — 11 files missing from the
+sandbox, recovered from durable+GitHub; and 11 dependencies auto-added to package.json. Both worked,
+but the dependency write happened on a "do not change any files" turn (closed by #1906).
+
+#### OPEN ROOT CAUSES (rule 6 — recorded, not patched)
+
+- **Large-repo capacity (item 4).** A 526s import + a 29-min cap means very large repos cannot complete
+  today. Real fixes (incremental/partial materialisation, a capacity-aware cap, or an honest
+  "this repo is too large — here is what I can do" upfront) are a design change, not a tuning tweak.
+  Deliberately NOT guessed at from one report.
+- **`framework` disagreement:** report says `vite-react`, manifest says `node-express` for the same
+  build. Cosmetic here but it is two sources of truth; worth unifying, not urgent.
+- Carried forward from autopsy #1 and still open: `AGENTV3_OWN_REPO_STORAGE` unset (admin), and the
+  residual GLM 429s (needs telemetry across several reports).
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.

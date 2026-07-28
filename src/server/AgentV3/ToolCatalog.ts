@@ -1196,6 +1196,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_real_estate',
+      description:
+        'Add a real Real-estate / property-portal backend to the app (server/realestate/) — a packaged domain ' +
+        'vertical for property listing sites and brokerages. THREE real guarantees: (1) LISTING STATE-MACHINE — ' +
+        'a property moves draft → available → under_offer → sold|rented along allowed transitions only (withdraw ' +
+        'from market; sold/rented/withdrawn terminal), an invalid jump rejected (409); (2) APPEND-ONLY price ' +
+        'history — every price change logs {from,to,at}; (3) INQUIRY CAPTURE — inquiries + price changes are ' +
+        'accepted only while the listing is on the market (409 otherwise). Emits a dependency-free ' +
+        'RealEstateService (createListing, setStatus, changePrice, addInquiry, priceHistory, search) + an Express ' +
+        'router (GET/POST /listings, GET /listings/:id, PATCH /listings/:id/status, PATCH /listings/:id/price, ' +
+        'GET /listings/:id/price-history, POST/GET /listings/:id/inquiries) + a README. In-memory by default — ' +
+        'swap the Maps for your DB. Pairs with the auth/notification/maps recipes. Use for real-estate / property ' +
+        '/ listing / broker prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2811,6 +2827,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_school_erp',
   'generate_courier',
   'generate_restaurant_pos',
+  'generate_real_estate',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

@@ -138,3 +138,41 @@ describe('explainRealCostBuild — honest breakdown whose billedUsd equals the c
     expect(b.perProvider.find((p) => p.provider === 'GLM')?.costUsd).toBeGreaterThan(0);
   });
 });
+
+// NEWER-MODEL SAFETY (admin 2026-07-28, when kimi-k3 was prepended to the paid ladder).
+// The old branches sent any unrecognized id in a family to the CHEAPEST rung, so a new flagship
+// would be paid at flagship price and billed at the k2.5 / glm-4.x price — a silent loss on every
+// build, and a direct contradiction of this module's own "never under-bill an unknown model" rule.
+describe('realRateFor — an unknown/newer model can never bill at the cheap rate', () => {
+  const cheapKimi = realRateFor('KIMI', 'kimi-k2.5');
+  const cheapGlm = realRateFor('GLM', 'glm-4.7');
+
+  it('kimi-k3 is NOT billed at the k2.5/k2.6 rate', () => {
+    const k3 = realRateFor('KIMI', 'kimi-k3');
+    expect(k3.inputPerMTok).toBeGreaterThan(cheapKimi.inputPerMTok);
+    expect(k3.outputPerMTok).toBeGreaterThan(cheapKimi.outputPerMTok);
+  });
+
+  it('a future unknown Kimi id falls to the most expensive KNOWN rate, not the cheapest', () => {
+    const future = realRateFor('KIMI', 'kimi-k4-turbo');
+    expect(future.inputPerMTok).toBeGreaterThanOrEqual(realRateFor('KIMI', 'kimi-k2.7-code').inputPerMTok);
+    expect(future.inputPerMTok).toBeGreaterThan(cheapKimi.inputPerMTok);
+  });
+
+  it('the genuinely cheap Kimi rungs still bill cheap (no over-charging today)', () => {
+    expect(realRateFor('KIMI', 'kimi-k2.5')).toEqual(cheapKimi);
+    expect(realRateFor('KIMI', 'kimi-k2.6')).toEqual(cheapKimi);
+  });
+
+  it('k2.7 keeps its own rate', () => {
+    const k27 = realRateFor('KIMI', 'kimi-k2.7-code');
+    expect(k27.inputPerMTok).toBeGreaterThan(cheapKimi.inputPerMTok);
+  });
+
+  it('the same guard applies to GLM — a future glm-6 cannot bill at the 4.x rate', () => {
+    const future = realRateFor('GLM', 'glm-6');
+    expect(future.inputPerMTok).toBeGreaterThan(cheapGlm.inputPerMTok);
+    expect(realRateFor('GLM', 'glm-4.7')).toEqual(cheapGlm);       // known cheap unchanged
+    expect(realRateFor('GLM', 'glm-4.7-flash').inputPerMTok).toBe(0); // flash still free
+  });
+});

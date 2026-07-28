@@ -452,10 +452,28 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     // default ladder = ['glm-5.2','glm-4.7'] → two runners, both named GLM (clean deliveredVia split)
     expect(runners.map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
-  it('wires KIMI as a 2-rung ladder by default when flag=kimi AND key present', () => {
+  // 3 rungs since 2026-07-28: kimi-k3 was PREPENDED to the paid ladder (admin-approved), never
+  // swapped in — so an unknown-id error on K3 falls through to k2.7-code exactly as before and no
+  // build can break even if K3 is not a live model. Asserting the COUNT alone would pass for a
+  // replacement too, which is the one shape we must not ship; the free-ladder test below pins the
+  // other half of the decision (the weak module was deliberately left untouched).
+  it('wires KIMI as a 3-rung ladder by default when flag=kimi AND key present, K3 leading', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
     process.env.KIMI_API_KEY = 'kimi-test-key';
-    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'KIMI']);
+    const runners = cheapBuildFloorRunners();
+    expect(runners.map((r) => r.name)).toEqual(['KIMI', 'KIMI', 'KIMI']);
+    // k2.7-code must still be present BELOW k3 — the fall-through that makes adoption safe.
+    expect(parseModelLadder(undefined, ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6']))
+      .toEqual(['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6']);
+  });
+
+  it('the FREE/weak Kimi ladder is UNCHANGED — cheapest first, flagship last, no K3', () => {
+    // Admin 2026-07-28: "weak module abhi jaisa hai vaise hi". The free ladder climbs cheapest-first,
+    // so a newer flagship in front would invert the free tier's cost model. If someone later
+    // "harmonises" the two ladders, this fails.
+    const free = parseModelLadder(undefined, ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code']);
+    expect(free[0]).toBe('kimi-k2.5');
+    expect(free).not.toContain('kimi-k3');
   });
   // FLOOR BALANCE (admin directive 2026-07-21 — "GLM par pura load na dalo, smartly divide"): the
   // GLM↔KIMI lead alternates per construction so first-attempt load spreads across both cheap coders.

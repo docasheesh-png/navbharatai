@@ -1633,7 +1633,13 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
   // + the Grok judge loop) when it must. Paid/default stays flagship-first. Its own env overrides
   // (AGENTV3_FREE_GLM_MODEL / AGENTV3_FREE_KIMI_MODEL) so the free ladder is tunable without touching paid.
   const glmDefault = opts?.free ? ['glm-4.7-flash', 'glm-4.7', 'glm-5.2'] : ['glm-5.2', 'glm-4.7'];
-  const kimiDefault = opts?.free ? ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k2.7-code', 'kimi-k2.6'];
+  // KIMI K3 (admin 2026-07-28): PREPENDED to the paid ladder, never a replacement. If `kimi-k3` is not
+  // a live id yet, the call errors and `parseModelLadder`'s comma ladder falls through to k2.7-code
+  // exactly as before — so adopting it cannot break a build even if the model does not exist.
+  // The FREE ladder is deliberately UNCHANGED (admin: "weak module abhi jaisa hai vaise hi"): it is
+  // ordered cheapest-first with the flagship LAST, so putting a newer flagship in front would invert
+  // the free tier's whole cost model.
+  const kimiDefault = opts?.free ? ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'];
   const glmEnv = opts?.free ? process.env.AGENTV3_FREE_GLM_MODEL : process.env.GLM_MODEL;
   const kimiEnv = opts?.free ? process.env.AGENTV3_FREE_KIMI_MODEL : process.env.KIMI_MODEL;
   if (floor === 'glm' || floor === 'both' || floor === 'on') {

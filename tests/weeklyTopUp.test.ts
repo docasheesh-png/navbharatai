@@ -140,6 +140,43 @@ describe('the user can see where the credit came from', () => {
   });
 });
 
+describe('a user cannot farm credit by changing their device clock', () => {
+  // The whole decision is computed from values only the SERVER controls: `now` (the Cloud Run clock,
+  // passed as Date.now() at the single call site) and the anchor read out of Firestore, which is only
+  // ever written server-side. Nothing the browser or phone sends reaches this function, so moving the
+  // device date forward a year changes nothing.
+
+  it('the same stored anchor always yields the same answer, whatever a device believes the time is', () => {
+    const anchor = iso(T0 - 2 * DAY);
+    // Whatever a tampered device might claim, the server's own clock is what is passed in.
+    const serverSaysTooSoon = decideWeeklyTopUp({ tokenBalance: 0, lastTopUpAt: anchor, now: T0 });
+    expect(serverSaysTooSoon.reason).toBe('too-soon');
+    expect(serverSaysTooSoon.grantTokens).toBe(0);
+  });
+
+  it('re-reading the wallet again and again inside the same week grants nothing extra', () => {
+    // A user hammering refresh (or a script doing it) gets one grant, then nothing until the week is up.
+    let anchor = iso(T0 - WEEK);
+    const first = decideWeeklyTopUp({ tokenBalance: 0, lastTopUpAt: anchor, now: T0 });
+    expect(first.grantTokens).toBe(200 * TOKENS_PER_RUPEE);
+    anchor = first.newLastTopUpAt!;
+
+    for (const minutesLater of [1, 60, 60 * 24, 60 * 24 * 6]) {
+      const again = decideWeeklyTopUp({ tokenBalance: 200 * TOKENS_PER_RUPEE, lastTopUpAt: anchor, now: T0 + minutesLater * 60_000 });
+      expect(again.grantTokens, `${minutesLater}m later`).toBe(0);
+      expect(again.newLastTopUpAt, `${minutesLater}m later`).toBeNull();
+    }
+  });
+
+  it('an anchor in the FUTURE grants nothing — a bad write can never mint credit', () => {
+    // Defence in depth: if a clock skew or a bad migration ever stored a future timestamp, the elapsed
+    // time is negative, which must read as "too soon", never as "many weeks owed".
+    const d = decideWeeklyTopUp({ tokenBalance: 0, lastTopUpAt: iso(T0 + 10 * WEEK), now: T0 });
+    expect(d.grantTokens).toBe(0);
+    expect(d.reason).toBe('too-soon');
+  });
+});
+
 describe('the running cost of the giveaway, stated in the tests so it cannot be forgotten', () => {
   it('a fully-spending free user costs about ₹50 of real provider spend a week', () => {
     // Builds bill at ~4x real cost, so ₹200 of credit ≈ ₹50 of real spend. Over a year that is ~₹2,600

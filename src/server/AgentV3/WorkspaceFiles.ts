@@ -128,38 +128,77 @@ function isSafeImportPath(path: string): boolean {
  * then deploy/push it back. Best-effort + bounded: an unsafe path or a failed write
  * is skipped, never fatal. Reuses the same size/exclusion guards as the collector.
  */
+/**
+ * Bounded-concurrency runner. Same shape as GithubApiTree's `pool` — kept local so this module has no
+ * new dependency, and small enough that duplicating it beats coupling two unrelated files.
+ */
+async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let idx = 0;
+  const runners = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
+    while (idx < items.length) await worker(items[idx++]);
+  });
+  await Promise.all(runners);
+}
+
+/**
+ * How many sandbox writes may be in flight at once. Each write is a NETWORK round-trip to the E2B
+ * cloud VM, so this is latency-bound, not CPU-bound — concurrency is the whole win. Deliberately
+ * conservative and env-overridable: the exact optimum depends on E2B's own limits and wants
+ * measurement, but 1 (the old behaviour) is provably wrong for a large import.
+ */
+const WRITE_CONCURRENCY = Math.max(1, Math.min(64, Number(process.env.AGENTV3_IMPORT_WRITE_CONCURRENCY) || 12));
+
+/**
+ * SELECTION — which files land, and which are skipped. Pure, deterministic, ORDER-DEPENDENT (the
+ * byte/count budgets are consumed in iteration order), so it is separated from the writing step:
+ * parallelising the writes must not change WHICH files are chosen. Exported for testing.
+ */
+export function selectImportableFiles(files: Record<string, string>): { accepted: Array<[string, string]>; skipped: string[] } {
+  const accepted: Array<[string, string]> = [];
+  const skipped: string[] = [];
+  let totalBytes = 0;
+  for (const [path, content] of Object.entries(files)) {
+    if (accepted.length >= MAX_FILES) { skipped.push(path); continue; }
+    if (!isSafeImportPath(path) || typeof content !== 'string') { skipped.push(path); continue; }
+    const bytes = Buffer.byteLength(content, 'utf8');
+    if (bytes > MAX_FILE_BYTES || totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }
+    accepted.push([path, content]);
+    totalBytes += bytes;
+  }
+  return { accepted, skipped };
+}
+
+/**
+ * Write an imported project into the workspace.
+ *
+ * ROOT CAUSE (navbharatai self-import autopsy, buildId d1623410 — 2460 files): this used to `await`
+ * ONE `sink.writeFile` at a time inside a for-loop. Against an E2B sandbox every write is a network
+ * round-trip, so the landing took ~648 SECONDS — measured between "zipball SUCCEEDED" (526s) and
+ * "Editing your existing app" (1174s) in that build. The agent did not start until 21 minutes in and
+ * then had 8 minutes before the 29-minute cap killed it. The download was never the main cost; the
+ * serial landing was.
+ *
+ * Selection stays sequential and byte-exact (see selectImportableFiles) so the SAME files are chosen
+ * as before; only the latency-bound writes are parallelised. Ordering between independent file writes
+ * carries no meaning, so this is safe by construction.
+ */
 export async function writeWorkspaceFiles(
   sink: WorkspaceFileSink,
   workspaceId: string,
   files: Record<string, string>,
 ): Promise<ImportedFiles> {
+  const { accepted, skipped } = selectImportableFiles(files);
   const written: string[] = [];
-  const skipped: string[] = [];
-  let totalBytes = 0;
+  const failed: string[] = [];
 
-  for (const [path, content] of Object.entries(files)) {
-    if (written.length >= MAX_FILES) {
-      skipped.push(path);
-      continue;
-    }
-    if (!isSafeImportPath(path) || typeof content !== 'string') {
-      skipped.push(path);
-      continue;
-    }
-    const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > MAX_FILE_BYTES || totalBytes + bytes > MAX_TOTAL_BYTES) {
-      skipped.push(path);
-      continue;
-    }
+  await pool(accepted, WRITE_CONCURRENCY, async ([path, content]) => {
     try {
       await sink.writeFile(workspaceId, path, content);
+      written.push(path);
     } catch {
-      skipped.push(path);
-      continue;
+      failed.push(path); // a write failure is a skip, exactly as before
     }
-    written.push(path);
-    totalBytes += bytes;
-  }
+  });
 
-  return { written, skipped };
+  return { written, skipped: [...skipped, ...failed] };
 }

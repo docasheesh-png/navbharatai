@@ -19,15 +19,22 @@ export const VISHWAKARMA_PASS_PRICE_RUPEES = 100;
 export const TOKENS_PER_RUPEE = 100;
 
 /**
- * WELCOME BONUS tokens minted for a brand-new wallet (admin routing plan 2026-07-11: raised
- * 1,000 → 50,000 = ₹500 equivalent, so a new user's FIRST real app build fits inside the bonus —
- * it runs on the free-tier cheap engines, never Claude, per NAVBHARATAI_ROUTING_PLAN.md §1).
+ * WELCOME BONUS tokens minted for a brand-new wallet.
+ *
+ * 25,000 = ₹250 (admin 2026-07-28). Previously 50,000 (₹500), from the era when the bonus only had to
+ * cover a first app BUILD. It is now the opening balance of a single wallet that pays for everything —
+ * builds, images, strong-model answers — and it is followed by a weekly top-up (see weeklyTopUp.ts), so
+ * the SIGNUP grant no longer has to carry a user on its own. ₹250 still funds a complete first app.
+ *
+ * What it actually costs us: builds bill at roughly 4x the real provider cost, so ₹250 of credit is
+ * about ₹62 of real spend per new account — the number that matters when signups scale.
+ *
  * Env-overridable (WELCOME_BONUS_TOKENS) so the admin can tune it from Cloud Run without a deploy;
  * non-finite/negative overrides fall back to the default.
  */
 export function welcomeBonusTokens(): number {
   const n = Number(process.env.WELCOME_BONUS_TOKENS);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 50_000;
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 250 * TOKENS_PER_RUPEE;
 }
 
 /**

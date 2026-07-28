@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
-import { rateLimiter, verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { rateLimiter } from '../lib/authMiddleware';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { validateBody, vobject, vstring } from '../lib/validate';
 import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
@@ -28,7 +29,12 @@ const schema = vobject({
 });
 
 // Image generation is costlier than text — its own tighter bucket, separate from the workspace one.
-const imageGenLimiter = () => rateLimiter({ name: 'imagegen', authed: 40, anon: 10, noun: 'image generations' });
+// `anon: 0` because the route now requires an account (see costlyAiAccess.ts): every image carries a
+// real per-image provider charge, and an anonymous caller has no wallet to draw it from. The global
+// anonymous ceiling is belt-and-braces in case the sign-in check is ever relaxed.
+const imageGenLimiter = () => rateLimiter({
+  name: 'imagegen', authed: 40, anon: 0, anonGlobalPerHour: 0, noun: 'image generations',
+});
 
 export function registerImageGenRoutes(app: Express): void {
   app.post('/api/image/generate', imageGenLimiter(), validateBody(schema), async (req: Request, res: Response) => {
@@ -42,11 +48,19 @@ export function registerImageGenRoutes(app: Express): void {
       return;
     }
 
+    // Real money per image → a real account to bill it to. This runs REGARDLESS of any feature flag:
+    // the allowance gate below is flag-gated and therefore inert by default, so without this an
+    // anonymous caller could generate images on NavBharatAI's account with nothing to charge.
+    const account = await requireAccountForCostlyAi(req, 'image generation');
+    if (!account.ok) {
+      res.status(account.status).json(account.body);
+      return;
+    }
+
     // Daily allowance / Professional Pass (flag-off = no-op). Every image carries a real per-image
     // provider charge, so this is the ONE Other AI action capped even for a Pass holder. The gate runs
     // AFTER the cheap validity checks so a malformed request never costs a user one of their images.
-    const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'image');
+    const gate = await gateToolAction(account.uid, account.email, 'image');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

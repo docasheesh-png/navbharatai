@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -2045,5 +2045,32 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
   it('the build summary still reports honestly from writtenFiles.size', () => {
     // ProjectSummary picks "I analyzed your project — no files were changed" on changedFiles === 0.
     expect(SRC).toContain('changedFiles: writtenFiles.size');
+  });
+});
+
+// "WORKING APP OR FREE" must not have a hole (autopsy 2026-07-27, buildId d1623410).
+// The old guard read `expectsArtifacts && !result.ok`. expectsArtifacts is FALSE on every
+// import/survey turn, so an import turn that failed with OUTCOME_SYNTAX_ERROR *and* BUILD_TIMEOUT
+// after 29 minutes was still billed (₹19.08 recorded) — while the user-facing summary said
+// verbatim "You have NOT been charged for this build".
+describe('zeroBillForFailedBuild — a failed build is never charged, import turns included', () => {
+  it('zeroes the bill whenever the build did not succeed', () => {
+    expect(zeroBillForFailedBuild(false)).toBe(true);
+  });
+
+  it('leaves a SUCCESSFUL build billable (a real survey is delivered work)', () => {
+    expect(zeroBillForFailedBuild(true)).toBe(false);
+  });
+
+  it('does not depend on expectsArtifacts — that dependence WAS the bug', () => {
+    // The rule takes only `ok`. If a future refactor reintroduces an artifacts condition,
+    // an import/survey turn silently becomes billable-on-failure again.
+    expect(zeroBillForFailedBuild.length).toBe(1);
+  });
+
+  it('is wired into the billing path (not merely defined)', () => {
+    const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+    expect(SRC).toContain('zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0');
+    expect(SRC).not.toContain('expectsArtifacts && !result.ok && effectiveBilledUsd > 0');
   });
 });

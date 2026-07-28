@@ -169,7 +169,10 @@ export interface BuildDiagnosticsReport {
   sessionId?: string;
   workspaceId?: string;
   prompt?: string;
+  /** What ACTUALLY delivered (last successful call). See honestModelLabel. */
   model?: string;
+  /** What the router INTENDED at build start — kept so routing intent is never lost. */
+  plannedModel?: string;
   framework?: string;
   startedAt: number;
   endedAt?: number;
@@ -831,7 +834,14 @@ export class BuildDiagnostics {
       sessionId: this.meta.sessionId,
       workspaceId: this.meta.workspaceId,
       prompt: this.meta.prompt,
-      model: this.meta.model,
+      // HONEST MODEL LABEL (autopsy 2026-07-27): `meta.model` is the ROUTER'S INTENT, captured at
+      // build start (selectBuildModel) and never revisited. On the reported build it read
+      // `claude-sonnet-4-6` while `noClaude: true`, `builtBy: "KIMI"` and every one of the 8 delivered
+      // turns was kimi-k2.5 — the admin diagnostic named a model that provably never ran. The report
+      // now leads with what ACTUALLY delivered and keeps the intent under `plannedModel`, so no
+      // information is lost and the headline field stops asserting something untrue.
+      model: honestModelLabel(this.meta.model, this.llmCalls),
+      plannedModel: this.meta.model,
       framework: this.meta.framework,
       startedAt: this.startedAt,
       endedAt: this.endedAt,
@@ -994,6 +1004,30 @@ const RECOVERABLE_ON_SUCCESS: ReadonlySet<string> = new Set([
 ]);
 export function isRecoverableOnSuccess(code: string): boolean {
   return RECOVERABLE_ON_SUCCESS.has(code);
+}
+
+/**
+ * The model label the report should LEAD with: what actually delivered, not what was planned.
+ *
+ * ROOT CAUSE (autopsy 2026-07-27, buildId d1623410): the report's `model` came from the router's
+ * intent at build start and was never reconciled with reality, so a weak-tier build that ran entirely
+ * on kimi-k2.5 (`noClaude: true`, `builtBy: "KIMI"`, 8/8 KIMI turns) reported `claude-sonnet-4-6`.
+ * An admin diagnostic that names a model which never executed is worse than no label at all — it
+ * misdirects exactly the person debugging routing.
+ *
+ * Uses the LAST successful call's model (the one that actually produced the delivered result). Falls
+ * back to the planned label when nothing ran, so a build that died before its first call still reports
+ * something meaningful rather than blank. PURE + tested.
+ */
+export function honestModelLabel(
+  plannedModel: string | undefined,
+  llmCalls: ReadonlyArray<{ model?: string; ok?: boolean }>,
+): string | undefined {
+  for (let i = llmCalls.length - 1; i >= 0; i--) {
+    const c = llmCalls[i];
+    if (c?.ok !== false && typeof c?.model === 'string' && c.model) return c.model;
+  }
+  return plannedModel;
 }
 
 /**

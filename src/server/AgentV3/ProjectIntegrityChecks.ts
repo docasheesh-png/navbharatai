@@ -487,8 +487,118 @@ export function relativeSpecifier(importer: string, module: string): string {
 }
 
 /**
+ * Positions in `src` that are REAL CODE — i.e. not inside a string, template literal, or comment.
+ *
+ * ROOT CAUSE (navbharatai self-import autopsy 2026-07-27, buildId d1623410): `normalizeImportSpecifiers`
+ * rewrote specifiers with a blind regex over raw file text, so it also matched quoted text inside
+ * ordinary string literals, comments, and the template literals of this repo's many CODE GENERATORS.
+ * It corrupted `src/server/lib/DbConfigGenerator.ts` line 125 — a single-quoted *documentation* string
+ * that happens to contain `import { db } from "@/lib/firebase"` — producing
+ * `'… from '../../lib/firebase'. …'`, which terminates the enclosing string early and yields exactly
+ * the reported `Expected identifier but found "."`. It also silently rewrote test fixtures
+ * (ViteReactProvider.test.ts, previewBundle.test.ts, reactPreview.test.ts).
+ *
+ * Deliberately CONSERVATIVE — the only failure mode we accept is "declined a legitimate rewrite",
+ * never "corrupted a file". Handles line/block comments, both quote styles with escapes, template
+ * literals (with `${…}` returning to code), and uses the standard prev-significant-char heuristic to
+ * tell a regex literal from division. Anything it cannot classify stays marked NOT-code, so no rewrite
+ * happens there. PURE + tested.
+ */
+export function codePositions(src: string): Uint8Array {
+  const n = src.length;
+  const mask = new Uint8Array(n); // 1 = real code position
+  // Template-literal nesting: each entry is the brace depth at which the current `${` began.
+  const tmplStack: number[] = [];
+  let braceDepth = 0;
+  let i = 0;
+  let prevSignificant = '';
+  while (i < n) {
+    const c = src[i];
+    const next = src[i + 1];
+    // ── comments ──────────────────────────────────────────────────────────────
+    if (c === '/' && next === '/') {
+      while (i < n && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    // ── regex literal (heuristic: a `/` right after an operator/keyword position) ──
+    if (c === '/' && /[=([,;:!&|?{}+\-*%~^<>]|^$/.test(prevSignificant)) {
+      i++;
+      let closed = false;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '\n') break;              // unterminated → bail out safely
+        if (src[i] === '[') { while (i < n && src[i] !== ']' && src[i] !== '\n') { if (src[i] === '\\') i++; i++; } }
+        if (src[i] === '/') { i++; closed = true; break; }
+        i++;
+      }
+      if (!closed) { /* not a regex after all — keep scanning from here */ }
+      prevSignificant = '/';
+      continue;
+    }
+    // ── strings ───────────────────────────────────────────────────────────────
+    if (c === '\'' || c === '"') {
+      const quote = c;
+      i++;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '\n') break;              // unterminated string → stop, stay safe
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      prevSignificant = quote;
+      continue;
+    }
+    // ── template literals (code resumes inside `${ … }`) ──────────────────────
+    if (c === '`') {
+      i++;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '`') { i++; break; }
+        if (src[i] === '$' && src[i + 1] === '{') {
+          tmplStack.push(braceDepth);
+          braceDepth++;
+          i += 2;
+          // Inside ${…} we are back in code: mark it and let the outer loop handle it.
+          const start = i;
+          let d = 1;
+          while (i < n && d > 0) {
+            if (src[i] === '{') d++;
+            else if (src[i] === '}') d--;
+            if (d > 0) i++;
+          }
+          for (let k = start; k < i && k < n; k++) mask[k] = 1;
+          braceDepth--;
+          tmplStack.pop();
+          if (i < n) i++; // consume '}'
+          continue;
+        }
+        i++;
+      }
+      prevSignificant = '`';
+      continue;
+    }
+    // ── ordinary code ─────────────────────────────────────────────────────────
+    mask[i] = 1;
+    if (!/\s/.test(c)) prevSignificant = c;
+    i++;
+  }
+  return mask;
+}
+
+/**
  * DETERMINISTIC FIX: rewrite every import of a mixed-specifier module to the canonical relative form,
  * so every bundler (including the in-browser preview) sees ONE module instance. Pure.
+ *
+ * SAFETY (autopsy 2026-07-27 — see codePositions): a rewrite happens ONLY when the specifier sits in a
+ * genuine module-specifier position (`from "X"`, bare `import "X"`, `require("X")`, `import("X")`) at a
+ * REAL CODE offset — never inside a string, comment, or generator template — and the ORIGINAL QUOTE
+ * CHARACTER is preserved, so a replacement can never terminate an enclosing string.
  */
 export function normalizeImportSpecifiers(
   files: Record<string, string>,
@@ -506,9 +616,24 @@ export function normalizeImportSpecifiers(
       for (const spec of specs) {
         if (spec === canonical) continue;
         if (resolveProjectSpecifier(files, file, spec) !== module) continue; // this file's spec resolves elsewhere
-        const re = new RegExp(`(['"])${spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`, 'g');
-        const replaced = next.replace(re, `'${canonical}'`);
-        if (replaced !== next) { next = replaced; rewrites.push({ file, from: spec, to: canonical }); }
+        const esc = spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Genuine module-specifier positions only: `… from "X"`, bare `import "X"`,
+        // `require("X")`, `import("X")`. The leading group is preserved verbatim.
+        const re = new RegExp(
+          `(\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s+)(['"])${esc}\\2`,
+          'g',
+        );
+        // Recomputed per pass: an earlier rewrite shifts offsets, and the mask must match `next`.
+        const mask = codePositions(next);
+        let changed = false;
+        const replaced = next.replace(re, (match, lead: string, quote: string, offset: number) => {
+          // Test the LEADING KEYWORD's offset, not the quote's: a string's opening quote is never
+          // itself a "code" position, so checking it would reject every genuine import too.
+          if (!mask[offset]) return match; // keyword sits inside a string/comment/template → leave it
+          changed = true;
+          return `${lead}${quote}${canonical}${quote}`;       // preserve the ORIGINAL quote character
+        });
+        if (changed) { next = replaced; rewrites.push({ file, from: spec, to: canonical }); }
       }
     }
     if (next !== raw) out[file] = next;

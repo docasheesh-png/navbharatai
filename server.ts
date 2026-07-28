@@ -78,6 +78,7 @@ import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
 import { registerNbaiDomainsRoutes } from './src/server/routes/nbaiDomains';
 import { registerZipRoutes } from './src/server/routes/zip';
+import { registerZipUploadRoutes } from './src/server/routes/zipUpload';
 import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerBuildRoutes } from './src/server/routes/build';
 import { getPreviewService } from './src/server/runtime/PreviewService';
@@ -631,6 +632,8 @@ setInterval(() => {
   registerFigmaProxyRoutes(app); // Figma Import — server-side Figma fetch (POST /api/figma/proxy)
   registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);
+  // Chunked zip import — the only path a project larger than one HTTP request can take (see zipUpload.ts).
+  registerZipUploadRoutes(app);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);
   // Engine-backed build route (Phase 4 — VFS + EditEngine + Verifier + RepairLoop + preview).

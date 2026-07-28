@@ -292,7 +292,12 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
  * enabling iterative building ("add a login page" after "build a todo app").
  */
 let sharedActuator: IEngineerActuator | null = null;
-function buildActuator(): IEngineerActuator {
+/**
+ * The ONE sandbox-selection decision (E2B → Docker → Local). Exported so other routes that write
+ * workspace files — e.g. the chunked zip import — reuse the SAME actuator instance and the same
+ * environment rules, instead of duplicating the selection and drifting from it.
+ */
+export function buildActuator(): IEngineerActuator {
   if (sharedActuator) return sharedActuator;
   if (process.env.E2B_API_KEY) sharedActuator = new E2BActuator();
   else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();

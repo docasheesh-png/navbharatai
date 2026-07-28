@@ -59,7 +59,12 @@ describe('P-TQA.10 — production security headers', () => {
     // Helmet's default `form-action 'self'` blocks that POST — the SDK loads and an order is created,
     // but the browser refuses the redirect (payment never opens). This allowance is what actually
     // opens the pay page; guard it (and that 'self' is retained) so a CSP change can't re-break it.
-    expect(csp).toContain("form-action 'self' https://*.cashfree.com");
+    expect(csp).toContain("form-action 'self' https://*.cashfree.com https://appleid.apple.com");
+    // "Sign in with Apple" on the WEB: authDomain is our own origin, so Firebase's OAuth handler runs
+    // under THIS CSP and auto-SUBMITS a form to appleid.apple.com (Apple uses response_mode=form_post).
+    // form-action 'self' silently blocked it → browser Apple login failed (native/Google were unaffected).
+    // Guard the Apple auth host stays in form-action so a CSP tighten can't re-break browser Apple login.
+    expect(csp).toContain('https://appleid.apple.com');
   });
 
   it('sets X-Content-Type-Options: nosniff (blocks MIME sniffing)', async () => {

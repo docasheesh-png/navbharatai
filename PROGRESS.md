@@ -22608,3 +22608,28 @@ a user over-charge). Set them the moment K3's real pricing is known.
 CLAUDE.md's `KIMI_MODEL` documented default updated to match the shipped code, so the doc does not lie.
 
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
+
+---
+
+## 2026-07-21 — Browser "Sign in with Apple" fix: CSP form-action blocked Apple's form_post
+
+**Report (admin):** Apple login works in the phone app but FAILS in the browser (Google/GitHub browser login
+work fine).
+
+**Root cause:** `authDomain` = our own origin (navbharatai.com, served via the reverse-proxy), so Firebase's
+OAuth handler runs under OUR CSP. Apple's WEB "Sign in with Apple" uses `response_mode=form_post` — the
+handler auto-SUBMITS a form to `https://appleid.apple.com/auth/authorize`. Our CSP `form-action` was
+`'self' https://*.cashfree.com` only, so that POST was **silently blocked** → browser Apple login never
+reached Apple. Google/GitHub use redirect GETs (not form_post) so they were unaffected; the phone app uses
+the NATIVE Apple sheet (no CSP) so it worked. Exactly the same class as the documented Cashfree form-action
+fix ("load hota hai, phir kuch nahi").
+
+**Fix:** add `https://appleid.apple.com` to the CSP `form-action` directive in `securityHeaders.ts` (the
+single source of truth applied by `server.ts` via helmet). Domain-scoped to Apple's own auth host — no broad
+weakening. Updated `tests/security/headers.test.ts` to lock the Apple host into form-action so a future CSP
+tighten can't silently re-break browser Apple login. Server + frontend tsc clean; headers test green.
+
+**Honest note (rule 6):** if browser Apple STILL fails after this, the next suspect is the Firebase Apple
+provider's WEB OAuth config (Apple **Services ID** + **Return URL** `https://navbharatai.com/__/auth/handler`
++ Team ID/Key ID/private key in the Firebase Console) — admin-only Apple Developer + Firebase infra, separate
+from this code fix.

@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
-import { rateLimiter } from '../lib/authMiddleware';
+import { rateLimiter, verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { validateBody, vobject, vstring } from '../lib/validate';
 import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
@@ -40,6 +41,17 @@ export function registerImageGenRoutes(app: Express): void {
       res.status(503).json({ error: 'Image generation is not configured on this server yet — please try again later.' });
       return;
     }
+
+    // Daily allowance / Professional Pass (flag-off = no-op). Every image carries a real per-image
+    // provider charge, so this is the ONE Other AI action capped even for a Pass holder. The gate runs
+    // AFTER the cheap validity checks so a malformed request never costs a user one of their images.
+    const identity = await verifyFirebaseIdentity(req);
+    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'image');
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+
     try {
       const { GoogleGenAI } = await import('@google/genai');
       const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
@@ -58,6 +70,8 @@ export function registerImageGenRoutes(app: Express): void {
           }));
           const img = parseImagePartsResponse(result);
           if (img) {
+            // Only a genuinely-delivered image spends an allowance — a failed rung never does.
+            if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
             res.json({ image: `data:${img.mimeType};base64,${img.base64}`, mimeType: img.mimeType });
             return;
           }

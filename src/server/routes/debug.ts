@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from 'express';
 import { callProfessionalAI } from '../lib/professionalRouting';
-import { workspaceRateLimiter } from '../lib/authMiddleware';
+import { workspaceRateLimiter, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring } from '../lib/validate';
+import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import {
   buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse, isValidDebugRequest,
 } from '../lib/debugAnalysis';
@@ -33,6 +34,13 @@ export function registerDebugRoutes(app: Express): void {
       res.status(400).json({ error: 'A non-empty "error" text is required.' });
       return;
     }
+    // Daily allowance / Professional Pass (flag-off = no-op).
+    const identity = await verifyFirebaseIdentity(req);
+    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
     const { error, code, errorType } = req.body;
     try {
       // Same AI engine as Professional AI (admin 2026-07-24): professional-free chain, honest failures.
@@ -47,6 +55,8 @@ export function registerDebugRoutes(app: Express): void {
         res.status(502).json({ error: 'The AI analysis came back empty — please try again.' });
         return;
       }
+      // Only a genuinely-answered analysis spends an allowance.
+      if (gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
       res.json(parseDebugResponse(content));
     } catch {
       // White-label honest failure: no provider names, no fake result.

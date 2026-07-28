@@ -1,5 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
+import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { validateBody, vobject, vstring, vboolean } from '../lib/validate';
 import { runVisionChain } from '../lib/visionChain';
 
@@ -94,6 +96,16 @@ export function registerScreenshotToPromptRoutes(app: Express): void {
     const image = typeof body.image === 'string' ? body.image.trim() : '';
     if (!image) { res.status(400).json({ error: 'A screenshot image is required.' }); return; }
     const type = typeof body.imageType === 'string' && body.imageType.startsWith('image/') ? body.imageType : 'image/png';
+
+    // Daily allowance / Professional Pass (flag-off = no-op). Runs after the cheap validity check so a
+    // missing image never costs the user one of their actions.
+    const identity = await verifyFirebaseIdentity(req);
+    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+
     try {
       const result = await runVisionChain(
         [{ name: 'screenshot', type, base64: image }],
@@ -108,6 +120,8 @@ export function registerScreenshotToPromptRoutes(app: Express): void {
       // Hard-append the anti-phishing guardrails server-side so they can NEVER be dropped by the vision
       // model or bypassed from the client — every screenshot→app clone ships as an honest demo.
       const prompt = `${visionSpec}\n\n${cloneGuardrailsBlock()}`;
+      // Only a screenshot we genuinely read spends an allowance.
+      if (gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
       res.json({ prompt });
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s vision engine is briefly busy — please try again.' });

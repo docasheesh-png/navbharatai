@@ -155,5 +155,52 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
+
+    // Live Collaboration rooms (src/components/ide/LiveCollaboration.tsx).
+    // Access model (admin-decided 2026-07-28): SIGNED-IN users only; the 6-char Room ID is the
+    // shared access token — any signed-in user who has the ID may join, read, and edit the room
+    // (shareable-link collaboration). Listing the whole collection is blocked so rooms can't be
+    // enumerated; you can only `get` a room by its exact ID. Sizes are capped so a room document
+    // (and its messages) stay well under Firestore's 1 MB per-document limit.
+    function isValidRoomCode(data) {
+      return !('code' in data) || (data.code is string && data.code.size() <= 700000);
+    }
+    match /collab_rooms/{roomId} {
+      allow get: if isSignedIn();
+      allow list: if false; // no enumerating all rooms — a room is reachable only by its exact ID
+      // The creator must stamp themselves as owner (createdBy == their uid).
+      allow create: if isSignedIn() && isValidId(roomId)
+                       && incoming().createdBy == request.auth.uid
+                       && isValidRoomCode(incoming());
+      // Any signed-in member may update the shared room, but the owner stamp is immutable and the
+      // shared code stays size-bounded.
+      allow update: if isSignedIn()
+                       && isValidRoomCode(incoming())
+                       && incoming().createdBy == existing().createdBy;
+      allow delete: if false; // rooms are cleaned up server-side (TTL), never client-deleted
+
+      // Live cursors — you may only write your OWN presence doc (id must match your uid).
+      match /presence/{memberId} {
+        allow read: if isSignedIn();
+        allow write: if isOwner(memberId);
+      }
+      // Team chat — members read all; you may only author your own messages; immutable after.
+      match /chat/{msgId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                         && incoming().authorId == request.auth.uid
+                         && incoming().text is string && incoming().text.size() <= 2000;
+        allow update, delete: if false;
+      }
+      // Line-anchored comments — you may only author your own; any member may resolve (merge update).
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                         && incoming().authorId == request.auth.uid
+                         && incoming().text is string && incoming().text.size() <= 1000;
+        allow update: if isSignedIn();
+        allow delete: if false;
+      }
+    }
   }
 }

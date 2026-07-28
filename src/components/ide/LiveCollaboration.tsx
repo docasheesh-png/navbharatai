@@ -59,6 +59,10 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
   const [myName] = useState(userName || 'User_' + genId().slice(0, 4));
   const [myId] = useState(userId || genId());
   const [myColor] = useState(COLORS[Math.floor(Math.random() * COLORS.length)]);
+  // Collaboration rooms require a signed-in identity: the secure Firestore rules bind every write
+  // to request.auth.uid (createdBy / presence / message authorship), so an anonymous visitor is
+  // refused. Gate the UI honestly instead of letting a denied write surface as a permission error.
+  const signedIn = !!userId;
   const [isEditing, setIsEditing] = useState(false);
   // P-DESIGN.7 — live cursors + line-anchored comments.
   const [presence, setPresence] = useState<RemotePresence[]>([]);
@@ -150,6 +154,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
   }, [chatMessages]);
 
   const createRoom = async () => {
+    if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to create a collaboration room.'); return; }
     const id = shortId();
     setStatus('connecting');
     try {
@@ -169,6 +174,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
   };
 
   const joinRoom = async (id: string) => {
+    if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to join a collaboration room.'); return; }
     setStatus('connecting');
     try {
       const roomRef = doc(db, 'collab_rooms', id);
@@ -336,6 +342,13 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
             <p className="text-sm text-white/40">Create a room or join an existing one</p>
           </div>
 
+          {!signedIn && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 flex items-center gap-2 max-w-sm w-full">
+              <Users className="w-4 h-4 text-amber-400 shrink-0" />
+              <p className="text-xs text-amber-300">Sign in to create or join a collaboration room.</p>
+            </div>
+          )}
+
           {status === 'error' && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 flex items-center gap-2 max-w-sm w-full">
               <X className="w-4 h-4 text-red-400 shrink-0" />
@@ -346,8 +359,8 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
           <div className="flex gap-3 w-full max-w-sm">
             <button
               onClick={createRoom}
-              disabled={status === 'connecting'}
-              className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all"
+              disabled={status === 'connecting' || !signedIn}
+              className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all"
             >
               <Plus className="w-4 h-4" /> New Room
             </button>
@@ -355,16 +368,17 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
 
           <div className="flex gap-2 w-full max-w-sm">
             <input
-              className="flex-1 bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-blue-500/50"
+              className="flex-1 bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-blue-500/50 disabled:opacity-50"
               placeholder="Paste Room ID (e.g. AB1C2D)"
               value={joinInput}
+              disabled={!signedIn}
               onChange={e => setJoinInput(e.target.value.toUpperCase())}
               onKeyDown={e => { if (e.key === 'Enter' && joinInput.trim()) joinRoom(joinInput.trim()); }}
             />
             <button
               onClick={() => joinInput.trim() && joinRoom(joinInput.trim())}
-              disabled={!joinInput.trim() || status === 'connecting'}
-              className="px-4 py-2.5 bg-[#161b22] hover:bg-white/5 border border-white/10 rounded-xl text-sm text-white/60 disabled:opacity-40 transition-all"
+              disabled={!joinInput.trim() || status === 'connecting' || !signedIn}
+              className="px-4 py-2.5 bg-[#161b22] hover:bg-white/5 border border-white/10 rounded-xl text-sm text-white/60 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               Join
             </button>

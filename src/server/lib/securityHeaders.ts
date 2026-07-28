@@ -27,6 +27,13 @@ import type { HelmetOptions } from 'helmet';
  *    loads, an order is created, but the browser silently refuses the redirect ("load hota hai, phir
  *    kuch nahi"). Allowing Cashfree's own domain here is the piece that actually opens the pay page;
  *    it is domain-scoped (only *.cashfree.com), so it does not broadly weaken form-action.
+ *  - `formAction` ALSO allows `https://appleid.apple.com` — "Sign in with Apple" on the WEB is the same
+ *    class of bug as Cashfree above. authDomain = our own origin (navbharatai.com, served via the
+ *    reverse-proxy), so Firebase's OAuth handler runs under THIS CSP. Apple's web OAuth uses
+ *    `response_mode=form_post` and the handler auto-SUBMITS A FORM to `appleid.apple.com/auth/authorize`
+ *    — which `form-action 'self'` silently blocks, so browser Apple login never reaches Apple and fails.
+ *    Google/GitHub use redirect GETs (not form_post) so they were unaffected; the phone app uses the
+ *    NATIVE Apple sheet (no CSP) so it worked. Scoped to Apple's own auth host — no broad weakening.
  */
 export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
@@ -41,7 +48,7 @@ export const securityHeadersConfig: HelmetOptions = {
       objectSrc:  ["'none'"],
       // Cashfree checkout redirects by POSTing a form from our page to its hosted pay URL; Helmet's
       // default `form-action 'self'` blocks it. Scope the allowance to Cashfree's own subdomains.
-      formAction: ["'self'", "https://*.cashfree.com"],
+      formAction: ["'self'", "https://*.cashfree.com", "https://appleid.apple.com"],
     },
   },
   crossOriginEmbedderPolicy: false,

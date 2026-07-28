@@ -22513,3 +22513,56 @@ enrich the prompt with the screenshot analysis while KEEPING their words. Record
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓. New: 14 tests (chunk-range coverage proves
 no gap/overlap/oversize across a 161 MB slice plan; route contract tests lock verified-owner-only
 commit, server-side landing, mid-stream size enforcement, and temp-file cleanup on every path).
+
+#### Sibling hunted the same session — the Nav App Store advertised 150 MB and could take ~24 MB
+
+Rule 3 ("the same root cause almost always lives in more than one place") applied to the finding above.
+While tracing the zip carriers I flagged the store's APK upload as a third instance; verified it rather
+than leaving it as a note, and it is worse than flagged:
+
+- `MAX_APK_BYTES = 150 MB`, and the store SURFACES that number to users (`maxSizeMb` in the status
+  response, shown on the Publish form).
+- The transport is `apkBase64` inside a JSON body. With ×1.33 base64 inflation, the ~32 MB platform
+  request cap puts the REAL ceiling at roughly 24 MB.
+- A genuine Android app is 5-50 MB — so a large share of honest submissions could never publish, and
+  above the ceiling the request died at the platform, meaning the route's own honest 413 never even ran.
+  The user saw a dead request, not a reason.
+
+That is a "real features only" violation: the advertised limit was fiction.
+
+Fix, reusing what was just built rather than duplicating it: extracted the generic transfer half of the
+client uploader as `uploadFileChunked()` (the zip import now composes it with its commit step), and added
+`claimUpload(uploadId, uid)` on the server — it hands the assembled temp file to another route and
+DELETES the pending entry, so an id cannot be claimed twice and ownership of cleanup is unambiguous. The
+store's publish route now prefers `uploadId` and keeps the base64 path as a fallback, so small
+submissions that already worked keep working. `cleanupUpload()` runs before every early return, not only
+on success. The APK still goes through the same real `inspectApk` + `scanFile` gates — the TRANSPORT
+changed, the safety model did not (that model is code, not config, per CLAUDE.md).
+
+The client no longer base64s the file at pick time either; it holds the `File` and transfers at submit,
+showing a live percentage. AppKnowledgeBase updated for both surfaces.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓. 5 further tests lock the claim contract
+(single-claim ownership transfer, verified-uploader-only, cleanup on every path, the retained legacy
+path, and that inspection + malware scanning still run).
+
+#### Closing the open item from suggestion 2 — Screenshot → App no longer discards what you typed
+
+Recorded above as "open, and worth doing properly later"; done properly now rather than left to rot.
+
+The flow sent ONLY the prompt derived from the image and silently dropped the composer text. So
+"make this page but in Hindi" lost "but in Hindi" — the single most likely thing a user adds to a
+screenshot, and the part carrying their actual intent. The image says WHAT it looks like; the typed
+line says what to do DIFFERENTLY, so dropping it inverts the value of the two inputs.
+
+New pure `combineScreenshotPrompt(imagePrompt, typed)`: the user's words go LAST and are labelled as
+taking priority, because a model reading a long generated description followed by one short human
+instruction should treat the human as the override. Either side may be empty without leaving a stray
+separator. Extracted as a pure function specifically so it is testable — the logic was inline in a
+component handler, which is how it went unnoticed.
+
+Note this does NOT change the earlier decision: the flow still only runs when the user deliberately
+picks Screenshot → App. It is still not auto-fired from "image attached + some text", because that
+path calls send() immediately and starts a real, billed build — a misread ("why is this button
+broken?" + a screenshot) would launch a build against the user's app. Fixing the text-discard removes
+most of the reason the auto-fire was proposed, without taking on that risk.

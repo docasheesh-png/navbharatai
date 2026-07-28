@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { uploadFileChunked } from '../../lib/zipProjectUpload';
 import {
   Store, Upload, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info,
@@ -77,7 +78,8 @@ export const NavAppStore: React.FC = () => {
 
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [apkName, setApkName] = useState('');
-  const [apkBase64, setApkBase64] = useState('');
+  const [apkFile, setApkFile] = useState<File | null>(null);
+  const [uploadPct, setUploadPct] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{ ok: boolean; message: string; highRisk?: HighRisk[] } | null>(null);
   const [reviewing, setReviewing] = useState('');
@@ -125,20 +127,17 @@ export const NavAppStore: React.FC = () => {
   useEffect(() => { void loadStatus(); void loadApps(); }, [loadStatus, loadApps]);
   useEffect(() => { if (tab === 'mine') void loadMine(); if (tab === 'review') void loadQueue(); }, [tab, loadMine, loadQueue]);
 
+  // KEEP THE FILE, don't base64 it (2026-07-28). Reading a 50 MB APK into a base64 string only to
+  // post it inside JSON is what capped the store at ~24 MB against the platform's request limit —
+  // while the UI advertised 150 MB. The file is now transferred in chunks at submit time.
   const pickApk = useCallback((file: File) => {
     setSubmitResult(null);
     if (!/\.apk$/i.test(file.name)) {
       setSubmitResult({ ok: false, message: 'Please choose a .apk file.' });
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const s = String(reader.result || '');
-      setApkBase64(s.includes(',') ? s.slice(s.indexOf(',') + 1) : s);
-      setApkName(file.name);
-    };
-    reader.onerror = () => setSubmitResult({ ok: false, message: 'That file could not be read.' });
-    reader.readAsDataURL(file);
+    setApkFile(file);
+    setApkName(file.name);
   }, []);
 
   const submit = useCallback(async () => {
@@ -146,10 +145,13 @@ export const NavAppStore: React.FC = () => {
     setSubmitting(true);
     setSubmitResult(null);
     try {
+      if (!apkFile) { setSubmitResult({ ok: false, message: 'Please choose your .apk file.' }); return; }
+      // Chunked transfer — every request clears the platform cap, so a real 5-150 MB APK gets through.
+      const { uploadId } = await uploadFileChunked(apkFile, (p) => setUploadPct(Math.round(p.fraction * 100)));
       const res = await fetch('/api/nav-store/submit', {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ ...form, apkBase64 }),
+        body: JSON.stringify({ ...form, uploadId }),
       });
       const data = await res.json().catch(() => null);
       if (!liveRef.current) return;
@@ -159,15 +161,17 @@ export const NavAppStore: React.FC = () => {
       }
       setSubmitResult({ ok: true, message: data.message, highRisk: data.highRisk });
       setForm({ ...EMPTY_FORM });
-      setApkBase64('');
+      setApkFile(null);
       setApkName('');
       void loadMine();
-    } catch {
-      if (liveRef.current) setSubmitResult({ ok: false, message: 'Could not reach the server. Nothing was uploaded.' });
+    } catch (err) {
+      if (liveRef.current) {
+        setSubmitResult({ ok: false, message: err instanceof Error ? err.message : 'Could not reach the server. Nothing was uploaded.' });
+      }
     } finally {
-      if (liveRef.current) setSubmitting(false);
+      if (liveRef.current) { setSubmitting(false); setUploadPct(0); }
     }
-  }, [form, apkBase64, submitting, loadMine]);
+  }, [form, apkFile, submitting, loadMine]);
 
   const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed') => {
     setReviewing(id);
@@ -356,11 +360,13 @@ export const NavAppStore: React.FC = () => {
 
               <button
                 onClick={() => void submit()}
-                disabled={submitting || !apkBase64}
+                disabled={submitting || !apkFile}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {submitting ? <Loader2 size={17} className="animate-spin" /> : <Upload size={17} />}
-                {submitting ? 'Scanning and uploading…' : 'Submit my app'}
+                {submitting
+                  ? (uploadPct > 0 && uploadPct < 100 ? `Uploading ${uploadPct}%…` : 'Scanning your app…')
+                  : 'Submit my app'}
               </button>
 
               {submitResult && (

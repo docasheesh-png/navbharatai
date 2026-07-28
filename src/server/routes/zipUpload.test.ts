@@ -56,3 +56,33 @@ describe('zip-upload route contract', () => {
     expect(SRC).toContain('req.destroy()');
   });
 });
+
+// claimUpload — the seam that let the Nav App Store stop base64-ing a 150 MB APK into a JSON body.
+describe('claimUpload contract', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./zipUpload.ts', import.meta.url)), 'utf8');
+  const STORE = readFileSync(fileURLToPath(new URL('./navStore.ts', import.meta.url)), 'utf8');
+
+  it('transfers ownership so the temp file cannot be claimed twice', () => {
+    expect(SRC).toContain('pending.delete(uploadId); // ownership transfers to the caller');
+  });
+
+  it('only the uploading user can claim (reuses the same ownership check)', () => {
+    expect(SRC).toContain('if (!uploadOwnedBy(u, uid)) return null;');
+  });
+
+  it('the store prefers the chunked upload and still deletes the temp file on every path', () => {
+    expect(STORE).toContain('claimUpload(body.uploadId, me?.uid ?? null)');
+    // cleanup must run before EACH early return, not only on success
+    expect(STORE).toContain('cleanupUpload(); return res.status(400)');
+    expect(STORE).toContain('cleanupUpload();\n      return res.status(413)');
+  });
+
+  it('the legacy base64 path is kept, so small submissions that worked still work', () => {
+    expect(STORE).toContain('decodeUpload(body.apkBase64)');
+  });
+
+  it('the APK still passes the real inspection + malware scan (transport changed, safety did not)', () => {
+    expect(STORE).toContain('await inspectApk(bytes)');
+    expect(STORE).toContain('await scanFile(bytes, facts.sha256)');
+  });
+});

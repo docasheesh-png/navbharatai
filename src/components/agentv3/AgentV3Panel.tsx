@@ -1229,7 +1229,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const started = Date.now();
     setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
     try {
-      const result = await uploadZipProject(file, (p) => {
+      const result = await uploadZipProject(file, state.workspaceId, (p) => {
         setZipProgress(p.phase === 'extracting' ? 'Extracting…' : `Uploading ${Math.round(p.fraction * 100)}%`);
       });
       setUserMsgs((c) => [...c, {

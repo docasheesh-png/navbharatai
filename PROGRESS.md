@@ -22513,3 +22513,35 @@ enrich the prompt with the screenshot analysis while KEEPING their words. Record
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓. New: 14 tests (chunk-range coverage proves
 no gap/overlap/oversize across a 161 MB slice plan; route contract tests lock verified-owner-only
 commit, server-side landing, mid-stream size enforcement, and temp-file cleanup on every path).
+
+#### Sibling hunted the same session — the Nav App Store advertised 150 MB and could take ~24 MB
+
+Rule 3 ("the same root cause almost always lives in more than one place") applied to the finding above.
+While tracing the zip carriers I flagged the store's APK upload as a third instance; verified it rather
+than leaving it as a note, and it is worse than flagged:
+
+- `MAX_APK_BYTES = 150 MB`, and the store SURFACES that number to users (`maxSizeMb` in the status
+  response, shown on the Publish form).
+- The transport is `apkBase64` inside a JSON body. With ×1.33 base64 inflation, the ~32 MB platform
+  request cap puts the REAL ceiling at roughly 24 MB.
+- A genuine Android app is 5-50 MB — so a large share of honest submissions could never publish, and
+  above the ceiling the request died at the platform, meaning the route's own honest 413 never even ran.
+  The user saw a dead request, not a reason.
+
+That is a "real features only" violation: the advertised limit was fiction.
+
+Fix, reusing what was just built rather than duplicating it: extracted the generic transfer half of the
+client uploader as `uploadFileChunked()` (the zip import now composes it with its commit step), and added
+`claimUpload(uploadId, uid)` on the server — it hands the assembled temp file to another route and
+DELETES the pending entry, so an id cannot be claimed twice and ownership of cleanup is unambiguous. The
+store's publish route now prefers `uploadId` and keeps the base64 path as a fallback, so small
+submissions that already worked keep working. `cleanupUpload()` runs before every early return, not only
+on success. The APK still goes through the same real `inspectApk` + `scanFile` gates — the TRANSPORT
+changed, the safety model did not (that model is code, not config, per CLAUDE.md).
+
+The client no longer base64s the file at pick time either; it holds the `File` and transfers at submit,
+showing a live percentage. AppKnowledgeBase updated for both surfaces.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓. 5 further tests lock the claim contract
+(single-claim ownership transfer, verified-uploader-only, cleanup on every path, the retained legacy
+path, and that inspection + malware scanning still run).

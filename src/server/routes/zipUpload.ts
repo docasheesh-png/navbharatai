@@ -71,6 +71,25 @@ function discard(id: string): void {
   pending.delete(id);
 }
 
+/**
+ * Hand an assembled upload to another route that wants the RAW BYTES (rather than a zip extraction).
+ *
+ * ROOT CAUSE this exists for (2026-07-28): the Nav App Store advertises a 150 MB APK limit
+ * (`MAX_APK_BYTES`, surfaced to users as `maxSizeMb`) but ships the file as `apkBase64` inside a JSON
+ * body — so ~24 MB is the real ceiling and everything above it dies against the platform cap BEFORE
+ * the route's own honest 413 can run. The advertised number was fiction. Rather than duplicate the
+ * chunked transport, the store now claims the assembled file here.
+ *
+ * Claiming REMOVES the upload from the pending map: the caller owns the temp file and must delete it.
+ * Returns null when the id is unknown/expired or the caller is not its uploader.
+ */
+export function claimUpload(uploadId: string, uid: string | null): { filePath: string; fileName: string; bytes: number } | null {
+  const u = pending.get(uploadId);
+  if (!uploadOwnedBy(u, uid)) return null;
+  pending.delete(uploadId); // ownership transfers to the caller (which deletes it)
+  return { filePath: u.filePath, fileName: u.fileName, bytes: u.bytes };
+}
+
 export function registerZipUploadRoutes(app: Express): void {
   // ── 1. Begin: mint an upload id + temp file ────────────────────────────────────────────────
   app.post('/api/zip-upload/begin', workspaceRateLimiter(), async (req: Request, res: Response) => {

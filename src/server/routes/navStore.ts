@@ -18,7 +18,9 @@
 
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import * as fs from 'node:fs';
 import { inspectApk, MAX_APK_BYTES } from '../lib/apkInspect';
+import { claimUpload } from './zipUpload';
 import { scanFile, isScanningConfigured } from '../lib/malwareScan';
 import {
   isStorageConfigured, putApk, getApk, deleteApk, saveApp, getApp, updateApp,
@@ -161,11 +163,32 @@ export function registerNavStoreRoutes(app: Express): void {
     const parsed = validateSubmission(body as Partial<SubmissionForm>);
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
-    const bytes = decodeUpload(body.apkBase64);
-    if (!bytes) return res.status(400).json({ error: 'Please choose your .apk file.' });
+    // APK BYTES — chunked upload first, legacy base64 as a fallback (2026-07-28).
+    //
+    // The store advertises a 150 MB limit but `apkBase64` rides inside a JSON body, and the platform
+    // caps a single request at ~32 MB — so ~24 MB was the REAL ceiling and anything larger died before
+    // this route's own honest 413 could ever run. The advertised number was fiction. A real APK is
+    // 5-50 MB, so most genuine submissions were unpublishable. The client now transfers the file in
+    // chunks and passes `uploadId`; `claimUpload` hands over the assembled bytes. The base64 path is
+    // kept for small files so nothing that worked before breaks.
+    let bytes: Buffer | null = null;
+    let claimedPath: string | null = null;
+    if (typeof body.uploadId === 'string' && body.uploadId) {
+      const claimed = claimUpload(body.uploadId, me?.uid ?? null);
+      if (!claimed) return res.status(403).json({ error: 'That upload has expired — please choose the file again.' });
+      claimedPath = claimed.filePath;
+      try { bytes = fs.readFileSync(claimed.filePath); } catch { bytes = null; }
+    } else {
+      bytes = decodeUpload(body.apkBase64);
+    }
+    const cleanupUpload = () => { if (claimedPath) { try { fs.unlinkSync(claimedPath); } catch { /* already gone */ } claimedPath = null; } };
+    if (!bytes) { cleanupUpload(); return res.status(400).json({ error: 'Please choose your .apk file.' }); }
     if (bytes.length > MAX_APK_BYTES) {
+      cleanupUpload();
       return res.status(413).json({ error: `That file is over the ${MAX_APK_BYTES / 1024 / 1024} MB limit.` });
     }
+    // The assembled temp file is never needed past this point — the bytes are in memory now.
+    cleanupUpload();
 
     // 1) Is this genuinely an installable Android app?
     const facts = await inspectApk(bytes);

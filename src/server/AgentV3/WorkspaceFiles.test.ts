@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectWorkspaceFiles, writeWorkspaceFiles, type WorkspaceFileSource, type WorkspaceFileSink } from './WorkspaceFiles';
+import { collectWorkspaceFiles, writeWorkspaceFiles, type WorkspaceFileSource, type WorkspaceFileSink, selectImportableFiles} from './WorkspaceFiles';
 
 /** A fake actuator backed by an in-memory path→content map. */
 function fakeSource(map: Record<string, string>): WorkspaceFileSource {
@@ -130,5 +130,76 @@ describe('writeWorkspaceFiles (import from GitHub/other into the sandbox)', () =
     });
     expect(written).toEqual(['good.ts']);
     expect(skipped).toContain('bad.ts');
+  });
+});
+
+// PARALLEL LANDING (autopsy buildId d1623410 — a 2460-file import took ~648s to land).
+// Every sandbox write is a network round-trip, so writing them one at a time made the agent wait
+// 21 minutes before it could start. Writes are now concurrent — but SELECTION must stay byte-exact,
+// because the byte/count budgets are consumed in iteration order.
+describe('writeWorkspaceFiles — concurrent writes, identical selection', () => {
+  const mkSink = (opts?: { failOn?: string }) => {
+    let inFlight = 0;
+    const peak = { n: 0 };
+    const order: string[] = [];
+    return {
+      peak,
+      order,
+      sink: {
+        writeFile: async (_ws: string, p: string, _c: string) => {
+          inFlight++; peak.n = Math.max(peak.n, inFlight);
+          await new Promise((r) => setTimeout(r, 5)); // stand in for network latency
+          inFlight--;
+          if (opts?.failOn === p) throw new Error('write failed');
+          order.push(p);
+        },
+      } as any,
+    };
+  };
+
+  it('actually writes concurrently (the whole point of the fix)', async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 40; i++) files[`src/f${i}.ts`] = 'x';
+    const { sink, peak } = mkSink();
+    await writeWorkspaceFiles(sink, 'ws', files);
+    expect(peak.n).toBeGreaterThan(1); // sequential would peak at exactly 1
+  });
+
+  it('writes every accepted file exactly once', async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 25; i++) files[`src/f${i}.ts`] = 'x';
+    const { sink, order } = mkSink();
+    const res = await writeWorkspaceFiles(sink, 'ws', files);
+    expect(res.written.sort()).toEqual(Object.keys(files).sort());
+    expect(new Set(order).size).toBe(order.length); // no duplicates
+  });
+
+  it('a failed write is reported as skipped, never as written', async () => {
+    const files = { 'src/a.ts': 'x', 'src/b.ts': 'x', 'src/c.ts': 'x' };
+    const { sink } = mkSink({ failOn: 'src/b.ts' });
+    const res = await writeWorkspaceFiles(sink, 'ws', files);
+    expect(res.written).not.toContain('src/b.ts');
+    expect(res.skipped).toContain('src/b.ts');
+    expect(res.written.sort()).toEqual(['src/a.ts', 'src/c.ts']);
+  });
+
+  it('selection is unchanged: unsafe paths and non-strings are still skipped', () => {
+    const { accepted, skipped } = selectImportableFiles({
+      'src/ok.ts': 'x',
+      '../escape.ts': 'x',
+      '/abs.ts': 'x',
+      'bad.ts': 123 as unknown as string,
+    });
+    expect(accepted.map(([p]) => p)).toEqual(['src/ok.ts']);
+    expect(skipped).toEqual(expect.arrayContaining(['../escape.ts', '/abs.ts', 'bad.ts']));
+  });
+
+  it('selection stays ORDER-DEPENDENT on the byte budget (parallelism must not change who is chosen)', () => {
+    // Two runs over the same input must pick the same files, deterministically.
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) files[`src/f${i}.ts`] = 'y'.repeat(1000);
+    const a = selectImportableFiles(files).accepted.map(([p]) => p);
+    const b = selectImportableFiles(files).accepted.map(([p]) => p);
+    expect(a).toEqual(b);
   });
 });

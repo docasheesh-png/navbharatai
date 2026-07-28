@@ -22609,6 +22609,7 @@ CLAUDE.md's `KIMI_MODEL` documented default updated to match the shipped code, s
 
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
 
+<<<<<<< Updated upstream
 ---
 
 ## 2026-07-21 — Browser "Sign in with Apple" fix: CSP form-action blocked Apple's form_post
@@ -22633,3 +22634,56 @@ tighten can't silently re-break browser Apple login. Server + frontend tsc clean
 provider's WEB OAuth config (Apple **Services ID** + **Return URL** `https://navbharatai.com/__/auth/handler`
 + Team ID/Key ID/private key in the Firebase Console) — admin-only Apple Developer + Firebase infra, separate
 from this code fix.
+=======
+### 2026-07-28 — LARGE-REPO CAPACITY, part 1: the landing was the bottleneck, not the download
+### Admin: "design change chahiye to change karoge? ya nahi" — yes.
+
+I had deferred this twice across two autopsies as "needs a design change, not tuning". The admin
+pushed back and was right to: that reasoning justified not GUESSING TUNING NUMBERS from one report,
+it did not justify never doing the design work. The evidence needed was already in the report.
+
+**Timeline from buildId d1623410 (2460-file repo), measured from the recorded timestamps:**
+
+| t | event |
+|---|---|
+| 1.6s | INSTANT CONNECT succeeded — full tree + key files already in hand |
+| 526s | zipball download finished |
+| **1174s** | "Editing your existing app" — **648s AFTER the download** |
+| 1260s | agent finally starts (21 minutes in) |
+| 2050s | BUILD_TIMEOUT at the 1740s cap |
+
+Two findings that change the picture:
+1. **The download was never the main cost.** The 648-second gap between "download done" and "agent
+   starts" is the LANDING. That is the bigger half and nobody had looked at it.
+2. **Everything a survey needs existed at 1.6 seconds** and the user waited 21 minutes for it.
+
+**Root cause of the landing cost:** `writeWorkspaceFiles` awaited ONE `sink.writeFile` at a time
+inside a for-loop. Against E2B every write is a network round-trip (`sandbox.files.write`), so 2460
+files × ~250ms ≈ 10 minutes — matching the observed 648s almost exactly. It is latency-bound work
+executed strictly serially.
+
+**Fix (part 1, shipped):** selection and writing are now separated. `selectImportableFiles` keeps the
+sequential, ORDER-DEPENDENT budget logic byte-exact (the MAX_FILES / MAX_TOTAL_BYTES budgets are
+consumed in iteration order, so parallelising selection would silently change WHICH files land); only
+the latency-bound writes go through a bounded pool (`AGENTV3_IMPORT_WRITE_CONCURRENCY`, default 12).
+Ordering between independent file writes carries no meaning, so this is safe by construction.
+Expected effect: ~648s → ~55s, giving the agent roughly 10 extra minutes of the 29-minute budget.
+Verified the concurrency test genuinely FAILS against the old loop (peak in-flight = 1), while the
+other 13 pass under BOTH implementations — which is the proof that selection semantics are unchanged.
+
+I am NOT claiming a measured production number: the 12 is a conservative, env-overridable bounded-pool
+choice, and the true optimum depends on E2B's own limits and wants measurement. What is not a close
+call is that 1 was wrong.
+
+**PART 2 — STILL OPEN, and this is the other half of the design change.** The turn still AWAITS full
+materialization before the agent runs, even for a survey that only needed the tree. My own task list
+recorded "land in background" as done (#8) — the intent was right, the code still blocks. The correct
+design is lazy materialization: start the agent on the instant-connect tree + key files, land the bulk
+in the background, and serve any `read_file` for a not-yet-written path on demand via the ALREADY
+EXISTING `fetchRepoTextFile` (~200ms). Deliberately not bundled here: it touches the highest-blast-
+radius path in the repo, and without the lazy-read fallback an agent read would simply miss files —
+trading a slow import for a wrong one. Part 1 is measurable on its own; part 2 should follow with
+part 1's real numbers in hand.
+
+Gate: fe tsc 0 · server tsc 0 · 9668/9668 · build ✓.
+>>>>>>> Stashed changes

@@ -55,6 +55,50 @@ describe('firestore.rules — collab_rooms (Live Collaboration) security invaria
     expect(rules).toMatch(/data\.code\.size\(\) <= 700000/);
     expect(block).toContain('isValidRoomCode(incoming())');
   });
+
+  it('the shared AI thread (Phase 1a) is authored by the sender, size-bounded, and immutable', () => {
+    const ai = block.slice(block.indexOf('match /ai_chat/{msgId}'));
+    expect(block).toContain('match /ai_chat/{msgId}');
+    expect(ai).toMatch(/incoming\(\)\.authorId == request\.auth\.uid/);
+    expect(ai).toMatch(/text\.size\(\) <= 20000/);
+    expect(ai).toMatch(/allow update, delete: if false/);
+  });
+});
+
+describe('LiveCollaboration — shared in-room AI (Phase 1a) is REAL and billed to the sender', () => {
+  const src = readFileSync(join(__dirname, '../src/components/ide/LiveCollaboration.tsx'), 'utf8');
+
+  it('calls the real Free chat engine (not a stub)', () => {
+    expect(src).toContain("fetch('/api/chat/navbharat'");
+    expect(src).toContain("agent: 'navbharatai'");
+  });
+
+  it('bills the triggering member (their own identity headers)', () => {
+    expect(src).toContain("'x-user-id': myId");
+    expect(src).toContain("'x-user-email': userEmail");
+  });
+
+  it('publishes BOTH the prompt and the reply to the shared ai_chat thread so all members see them', () => {
+    const fn = src.slice(src.indexOf('sendAiPrompt = async'));
+    const body = fn.slice(0, fn.indexOf('\n  };'));
+    expect(body).toContain("'ai_chat'");
+    expect(body).toContain("role: 'user'");
+    expect(body).toContain("role: 'assistant'");
+  });
+
+  it('surfaces a real error instead of a fake reply when the AI fails', () => {
+    const fn = src.slice(src.indexOf('sendAiPrompt = async'));
+    const body = fn.slice(0, fn.indexOf('\n  };'));
+    expect(body).toContain('setAiError');
+    // The reply is only trusted when the response is ok AND non-empty — never a fabricated answer.
+    expect(body).toMatch(/if \(!res\.ok \|\| !reply\)/);
+    expect(body).toContain('throw new Error');
+  });
+
+  it('has a mobile-friendly tab layout (Code / AI / Team)', () => {
+    expect(src).toContain("type RoomTab = 'code' | 'ai' | 'team'");
+    expect(src).toContain('setRoomTab');
+  });
 });
 
 describe('LiveCollaboration — signed-in gate (no anonymous writes that the rules would deny)', () => {

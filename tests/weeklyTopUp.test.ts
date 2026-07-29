@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  decideWeeklyTopUp, weeklyTopUpTokens, lifetimeGiftCapTokens, topUpLedgerEntry,
+  decideWeeklyTopUp, weeklyTopUpTokens, lifetimeGiftCapTokens, topUpLedgerEntry, summarizeGiftLadder,
 } from '../src/server/lib/weeklyTopUp';
 import { welcomeBonusTokens, TOKENS_PER_RUPEE } from '../src/server/lib/payments';
 
@@ -221,5 +221,66 @@ describe('the running cost of the giveaway, stated in the tests so it cannot be 
     const lifetimeBilledInr = lifetimeGiftCapTokens() / TOKENS_PER_RUPEE;
     expect(lifetimeBilledInr).toBe(650);
     expect(Math.round(lifetimeBilledInr / 4)).toBe(163); // 650 / 4 = 162.5
+  });
+});
+
+// ── The ladder, made visible ──────────────────────────────────────────────────
+// The grant used to be invisible: credit appeared, a ledger row was written that no screen rendered,
+// and nothing said how much was left or when the next one arrived. `summarizeGiftLadder` is what the
+// wallet screen reads — and it is derived from the SAME inputs as the grant, so what is displayed can
+// never disagree with what is actually given.
+
+describe('summarizeGiftLadder — what the user is shown', () => {
+  it('reports progress along the one-time gift, not a balance', () => {
+    const s = summarizeGiftLadder({ giftedSoFar: 450 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0), now: T0 });
+    expect(s.giftedTokens).toBe(450 * TOKENS_PER_RUPEE);
+    expect(s.capTokens).toBe(650 * TOKENS_PER_RUPEE);
+    expect(s.remainingTokens).toBe(200 * TOKENS_PER_RUPEE);
+    expect(s.exhausted).toBe(false);
+  });
+
+  it('says when the next rung lands — a week after the last one', () => {
+    const s = summarizeGiftLadder({ giftedSoFar: 250 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0), now: T0 });
+    expect(s.nextCreditAt).toBe(iso(T0 + WEEK));
+  });
+
+  it('a rung that is already DUE reads as "now", never as a date in the past', () => {
+    // It lands on the very next wallet read, so telling the user it was due last Tuesday would be wrong.
+    const s = summarizeGiftLadder({ giftedSoFar: 250 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0 - 3 * WEEK), now: T0 });
+    expect(s.nextCreditAt).toBe(iso(T0));
+  });
+
+  it('an exhausted ladder has no next date at all', () => {
+    const s = summarizeGiftLadder({ giftedSoFar: 650 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0), now: T0 });
+    expect(s.exhausted).toBe(true);
+    expect(s.remainingTokens).toBe(0);
+    expect(s.nextCreditAt).toBeNull();
+  });
+
+  it('never shows more than the cap, even if the stored total somehow exceeds it', () => {
+    const s = summarizeGiftLadder({ giftedSoFar: 99_999 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0), now: T0 });
+    expect(s.giftedTokens).toBe(s.capTokens);
+    expect(s.remainingTokens).toBe(0);
+    expect(s.exhausted).toBe(true);
+  });
+
+  it('promises no next credit when the ladder is switched off', () => {
+    process.env.WEEKLY_TOPUP_TOKENS = '0';
+    const s = summarizeGiftLadder({ giftedSoFar: 250 * TOKENS_PER_RUPEE, lastTopUpAt: iso(T0), now: T0 });
+    expect(s.nextCreditAt).toBeNull();
+  });
+
+  it('agrees with the grant: whatever it says is remaining is what the rungs actually deliver', () => {
+    // The display and the decision must never drift. Walk the whole ladder and check the sum.
+    let gifted = 250 * TOKENS_PER_RUPEE;
+    const promised = summarizeGiftLadder({ giftedSoFar: gifted, lastTopUpAt: iso(T0), now: T0 }).remainingTokens;
+    let delivered = 0;
+    for (let i = 0; i < 10; i++) {
+      const d = decideWeeklyTopUp({ giftedSoFar: gifted, lastTopUpAt: iso(T0 - WEEK), now: T0 });
+      if (d.grantTokens <= 0) break;
+      delivered += d.grantTokens;
+      gifted += d.grantTokens;
+    }
+    expect(delivered).toBe(promised);
   });
 });

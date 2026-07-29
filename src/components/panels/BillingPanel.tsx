@@ -10,6 +10,7 @@
  */
 import React from 'react';
 import { cn } from '../../lib/utils';
+import { FreeGiftBanner } from './FreeGiftBanner';
 import {
   Wallet, Zap, RefreshCw, AlertCircle, Sparkles, Gift, CreditCard,
   Activity, CheckCircle2, ShieldCheck, ExternalLink,
@@ -218,6 +219,17 @@ export function BillingPanel(props: BillingPanelProps) {
               </div>
             </div>
           )}
+
+          {/* THE FREE GIFT LADDER, made visible (2026-07-28). It used to grant silently: credit
+              appeared, a ledger row was written that nothing rendered, and no screen said how much was
+              left or when the next one arrived. Placed ABOVE the balance cards because it explains the
+              number in them — and because "this was your last free credit" is the moment someone
+              decides to recharge. */}
+          <FreeGiftBanner
+            freeGift={wallet?.freeGift}
+            tokensPerRupee={wallet?.tokensPerRupee}
+            onRecharge={() => onSetActiveBillingDetailTab('purchase')}
+          />
 
           {/* iOS / iPhone App Icons Styled Clickable Cards Panel */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">

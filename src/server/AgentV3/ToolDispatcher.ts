@@ -153,6 +153,7 @@ import { generateRestaurantPosIntegration } from '../lib/RestaurantPosGenerator'
 import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
 import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
+import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3680,6 +3681,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('pharmacy starter');
         const phDeps = phcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Pharmacy backend:\n${phWritten.join('\n')}\nAdd the dependencies: ${phDeps}\n\n${phcfg.instructions}`;
+      }
+
+      case 'generate_recruitment': {
+        // Breadth recipe (domain vertical) — Recruitment / job-board (server/recruitment/): a real
+        // RecruitmentService with a hiring-pipeline STATE-MACHINE (invalid jumps → 409), one-application-per-
+        // candidate-per-job, and a closed-job guard, plus an Express router. Pure gen in RecruitmentGenerator.ts.
+        const rccfg = generateRecruitmentIntegration();
+        const rcWritten: string[] = [];
+        for (const [path, content] of Object.entries(rccfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('recruitment starter');
+        const rcDeps = rccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Recruitment / job-board backend:\n${rcWritten.join('\n')}\nAdd the dependencies: ${rcDeps}\n\n${rccfg.instructions}`;
       }
 
       case 'generate_events': {

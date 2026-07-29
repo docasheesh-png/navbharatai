@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2, Sparkles, Bot, Send, Code2 } from 'lucide-react';
+import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2, Sparkles, Bot, Send, Code2, Briefcase, ChevronDown, Zap } from 'lucide-react';
 import { db } from '../../App';
 import { doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
@@ -15,7 +15,22 @@ interface AiMessage {
   timestamp: number;
 }
 
-type RoomTab = 'code' | 'ai' | 'team';
+// Header AI switcher (admin 2026-07-28): the room's header picks WHICH AI the team uses.
+//  - 'free'         → shared NavBharatAI Free chat (real; billed to whoever asks)
+//  - 'pro'          → NavBharatAI Pro v5.0 real in-room build (coming soon)
+//  - 'professional' → a Professional the OWNER selects from a dropdown (coming soon)
+//  - 'team'         → members / approvals / chat (kept)
+type RoomTab = 'free' | 'pro' | 'professional' | 'team';
+
+// Professionals the room owner can pick for the Professional tab.
+const ROOM_PROFESSIONALS: { id: string; label: string }[] = [
+  { id: 'doctor', label: 'Doctor AI' },
+  { id: 'teacher', label: 'Teacher AI' },
+  { id: 'lawyer', label: 'Lawyer AI' },
+  { id: 'ca', label: 'CA / Accountant AI' },
+  { id: 'astrologer', label: 'Astrologer AI' },
+  { id: 'kisan', label: 'Kisan (Farmer) AI' },
+];
 
 /** A remote collaborator's live cursor position (which line they're editing). */
 interface RemotePresence {
@@ -98,7 +113,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const [commentInput, setCommentInput] = useState('');
   const [caretLine, setCaretLine] = useState(1);
   // Phase 1a — shared in-room AI thread + mobile tab layout.
-  const [roomTab, setRoomTab] = useState<RoomTab>('code');
+  const [roomTab, setRoomTab] = useState<RoomTab>('free');
+  const [selectedProfessional, setSelectedProfessional] = useState('doctor'); // owner picks (Professional tab)
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
   const [aiInput, setAiInput] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
@@ -250,7 +266,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
     if (presenceThrottleRef.current) { clearTimeout(presenceThrottleRef.current); presenceThrottleRef.current = null; }
     setActiveRoom(null);
     setMembers([]); setChatMessages([]); setPresence([]); setComments([]); setAiMessages([]);
-    setSharedCode(''); setRoomTab('code');
+    setSharedCode(''); setRoomTab('free');
     localStorage.removeItem(STORAGE_KEY);
   };
 
@@ -549,18 +565,20 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
       ) : (
         /* — Active Room (mobile-friendly tabs: Code / AI / Team) — */
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar — one panel at a time, works on phone and desktop */}
+          {/* Tab bar — AI switcher: Free / Pro v5 / Professional / Team (scrolls on small phones) */}
           <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-[#161b22]">
-            {([{ key: 'code', label: 'Code', icon: Code2 }, { key: 'ai', label: 'AI', icon: Sparkles }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
-              const Icon = t.icon; const active = roomTab === t.key; const online = onlineCount;
-              return (
-                <button key={t.key} onClick={() => setRoomTab(t.key)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-600 text-white' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
-                  <Icon className="w-3.5 h-3.5" /> {t.label}
-                  {t.key === 'team' && online > 0 && <span className="text-[9px] bg-white/20 rounded-full px-1.5">{online}</span>}
-                </button>
-              );
-            })}
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+              {([{ key: 'free', label: 'Free', icon: Sparkles }, { key: 'pro', label: 'Pro v5', icon: Zap }, { key: 'professional', label: 'Professional', icon: Briefcase }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
+                const Icon = t.icon; const active = roomTab === t.key; const online = onlineCount;
+                return (
+                  <button key={t.key} onClick={() => setRoomTab(t.key)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-600 text-white' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
+                    <Icon className="w-3.5 h-3.5" /> {t.label}
+                    {t.key === 'team' && online > 0 && <span className="text-[9px] bg-white/20 rounded-full px-1.5">{online}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
               <button onClick={copyLink} className={`flex items-center gap-1 text-[10px] px-2 py-1.5 rounded-lg border transition-all ${copied ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-white/10 text-white/40 bg-white/5 hover:text-white'}`}>
                 {copied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> <span className="hidden sm:inline">Share ID</span></>}
               </button>
@@ -570,68 +588,54 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
             </div>
           </div>
 
-          {/* ── Code tab ── */}
-          {roomTab === 'code' && (
+          {/* ── Pro v5 tab — real in-room build (coming soon) ── */}
+          {roomTab === 'pro' && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+            <div className="w-14 h-14 bg-violet-500/10 rounded-2xl flex items-center justify-center border border-violet-500/20">
+              <Zap className="w-7 h-7 text-violet-400" />
+            </div>
+            <h3 className="text-sm font-semibold text-white">NavBharatAI Pro v5.0 — in the room</h3>
+            <p className="text-xs text-white/40 max-w-xs">Build a real app together — the whole team watches Pro v5.0 build live. <span className="text-amber-400/80 font-medium">Coming soon.</span></p>
+          </div>
+          )}
+
+          {/* ── Professional tab — owner picks a professional (chat coming soon) ── */}
+          {roomTab === 'professional' && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#161b22]">
-              <Edit2 className="w-3.5 h-3.5 text-white/40" />
-              <span className="text-xs text-white/50">Shared Code</span>
-              {isEditing && <span className="text-[9px] text-amber-400 animate-pulse">Syncing...</span>}
+              <Briefcase className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-xs text-white/50">Professional</span>
             </div>
-            <textarea
-              ref={textareaRef}
-              className="flex-1 bg-[#0d1117] font-mono text-xs text-white/80 p-4 resize-none focus:outline-none"
-              value={sharedCode}
-              onChange={e => { handleCodeChange(e.target.value); handleCaret(); }}
-              onSelect={handleCaret}
-              onKeyUp={handleCaret}
-              onClick={handleCaret}
-              placeholder="Write code here — all members see it live..."
-            />
-            {/* P-DESIGN.7 — line-anchored comments composer + list */}
-            <div className="border-t border-white/5 bg-[#0d1117]">
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
-                <MessageCircle className="w-3.5 h-3.5 text-white/40" />
-                <span className="text-xs text-white/50">Comment on line {caretLine}</span>
-                <input
-                  className="flex-1 bg-[#161b22] border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white placeholder-white/20 focus:outline-none focus:border-blue-500/40"
-                  placeholder={`Add a note for line ${caretLine}…`}
-                  value={commentInput}
-                  onChange={e => setCommentInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') addComment(); }}
-                />
-                <button onClick={addComment} disabled={!commentInput.trim()} className="px-2 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg text-[10px] text-white transition-all">Add</button>
+            <div className="p-3 border-b border-white/5">
+              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">
+                {isOwner ? 'Choose the professional (owner)' : 'Professional selected by the owner'}
+              </p>
+              <div className="relative max-w-xs">
+                <select
+                  value={selectedProfessional}
+                  onChange={e => setSelectedProfessional(e.target.value)}
+                  disabled={!isOwner}
+                  className="w-full appearance-none bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 pr-9 text-sm text-white focus:outline-none focus:border-emerald-500/50 disabled:opacity-60"
+                >
+                  {ROOM_PROFESSIONALS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+                <ChevronDown className="w-4 h-4 text-white/30 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
-              {comments.length > 0 && (
-                <div className="max-h-40 overflow-y-auto p-2 space-y-1.5">
-                  {comments.map(c => (
-                    <div key={c.id} className={`flex items-start gap-2 px-2 py-1.5 rounded-lg ${c.resolved ? 'bg-white/5 opacity-60' : 'bg-[#161b22]'}`}>
-                      <button onClick={() => jumpToLine(c.line)} title={`Go to line ${c.line}`} className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ backgroundColor: c.color + '30', color: c.color }}>
-                        L{c.line}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[10px] text-white/80 break-words ${c.resolved ? 'line-through' : ''}`}>{c.text}</p>
-                        <p className="text-[8px] text-white/30 mt-0.5">{c.authorName}</p>
-                      </div>
-                      {!c.resolved && (
-                        <button onClick={() => resolveComment(c.id)} title="Resolve" className="text-white/30 hover:text-emerald-400 transition-colors shrink-0">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              {!isOwner && <p className="text-[9px] text-white/25 mt-1.5">Only the room owner can change this.</p>}
+            </div>
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
+              <Briefcase className="w-8 h-8 text-emerald-400/40" />
+              <p className="text-xs text-white/40 max-w-xs">Shared chat with <span className="text-white/70 font-medium">{ROOM_PROFESSIONALS.find(p => p.id === selectedProfessional)?.label || 'the professional'}</span> for the whole room. <span className="text-amber-400/80 font-medium">Coming soon.</span></p>
             </div>
           </div>
           )}
 
-          {/* ── AI tab — shared NavBharatAI thread (Phase 1a) ── */}
-          {roomTab === 'ai' && (
+          {/* ── Free tab — shared NavBharatAI Free thread (Phase 1a) ── */}
+          {roomTab === 'free' && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#161b22]">
-              <Bot className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-xs text-white/50">Shared AI — NavBharatAI</span>
+              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-xs text-white/50">NavBharatAI Free — shared</span>
               <span className="text-[9px] text-white/25 ml-auto hidden sm:inline">Everyone pays for their own asks</span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">

@@ -130,9 +130,16 @@ describe('LiveCollaboration — shared in-room AI (Phase 1a) is REAL and billed 
     expect(body).toContain('throw new Error');
   });
 
-  it('has a mobile-friendly tab layout (Code / AI / Team)', () => {
-    expect(src).toContain("type RoomTab = 'code' | 'ai' | 'team'");
+  it('has the AI-switcher tab layout (Free / Pro v5 / Professional / Team)', () => {
+    expect(src).toContain("type RoomTab = 'free' | 'pro' | 'professional' | 'team'");
     expect(src).toContain('setRoomTab');
+    // the shared Free AI thread now lives under the 'free' tab
+    expect(src).toContain("roomTab === 'free'");
+    // Pro v5 + Professional are present (coming soon), owner picks the professional
+    expect(src).toContain("roomTab === 'pro'");
+    expect(src).toContain("roomTab === 'professional'");
+    expect(src).toContain('ROOM_PROFESSIONALS');
+    expect(src).toContain('setSelectedProfessional');
   });
 
   it('a new room is a CLEAN scratchpad — content starts empty, never the app preview/boot dump', () => {

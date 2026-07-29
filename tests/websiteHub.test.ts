@@ -18,7 +18,7 @@ describe('App Settings — Your Website hub', () => {
   it('App Settings group leads with the real-website essentials as tiles', () => {
     const start = src.indexOf("title: 'App Settings'");
     expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 1100);
+    const block = src.slice(start, start + 1400);
     expect(block).toContain("id: 'domain'");
     expect(block).toContain("id: 'hosting'");
     expect(block).toContain("id: 'database'");
@@ -26,16 +26,17 @@ describe('App Settings — Your Website hub', () => {
     expect(block).toContain("id: 'storage'");
     expect(block).toContain("id: 'secrets'");
     // The section carries the honest one-line purpose.
-    expect(block).toContain('Everything your live website needs');
+    expect(block).toContain('Everything your app needs');
   });
 
-  it('Build & Debug is a separate group holding the developer tools', () => {
-    const start = src.indexOf("title: 'Build & Debug'");
-    expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 500);
+  it('Terminal, Logs and General stay INSIDE App Settings (admin: do not remove them)', () => {
+    const start = src.indexOf("title: 'App Settings'");
+    const block = src.slice(start, start + 1400);
     expect(block).toContain("id: 'general'");
-    expect(block).toContain("id: 'shell'");
+    expect(block).toContain("id: 'shell'"); // Terminal
     expect(block).toContain("id: 'logs'");
+    // They were not spun out into a separate group.
+    expect(src).not.toContain("title: 'Build & Debug'");
   });
 
   it('the Domain sub-screen mounts the ONE real ConnectMyWebsitePanel flow', () => {

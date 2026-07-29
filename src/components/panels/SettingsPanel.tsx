@@ -417,7 +417,7 @@ export function SettingsPanel({
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,
-                    desc: 'Everything your live website needs',
+                    desc: 'Everything your app needs — website, data & tools',
                     items: [
                       // The real-website essentials, in one hub. Domain covers DNS + SSL (auto). Database
                       // also provides login + storage when you connect Firebase/Supabase; the dedicated
@@ -428,14 +428,8 @@ export function SettingsPanel({
                       { id: 'auth', label: 'Authentication', icon: ShieldCheck },
                       { id: 'storage', label: 'Storage', icon: HardDrive },
                       { id: 'secrets', label: 'Secrets & API Keys', icon: Lock },
-                    ],
-                  },
-                  {
-                    title: 'Build & Debug',
-                    color: 'text-emerald-400',
-                    icon: Terminal,
-                    desc: 'Developer tools for your app',
-                    items: [
+                      // Developer tools stay right here in App Settings (admin 2026-07-29:
+                      // "app settings me se terminal aur logs ko hatana mat").
                       { id: 'general', label: 'General', icon: LayoutDashboard },
                       { id: 'shell', label: 'Terminal', icon: Terminal },
                       { id: 'logs', label: 'Logs', icon: Activity },
@@ -444,8 +438,8 @@ export function SettingsPanel({
                   // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
                   // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card
                   // (admin 2026-07-23) — see src/components/home/homeToolGroups.ts. Settings now keeps
-                  // only genuine settings (Account & Profile, App Settings, Build & Debug). The tool
-                  // destinations (toggleTab ids) are unchanged; only the doorway moved.
+                  // only genuine settings (Account & Profile, App Settings). The tool destinations
+                  // (toggleTab ids) are unchanged; only the doorway moved.
                 ].map(group => (
                   <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
                     <div className={cn('flex items-center gap-2', group.desc ? 'mb-1' : 'mb-3')}>

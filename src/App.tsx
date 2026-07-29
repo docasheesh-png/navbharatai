@@ -410,6 +410,10 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewType>(() =>
     readAdminRoute() ? 'admin' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home'),
   );
+  // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
+  // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.
+  const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free'>('all');
+  useEffect(() => { if (activeView !== 'history') setHistoryInitialFilter('all'); }, [activeView]);
   // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
   useEffect(() => {
@@ -3385,7 +3389,7 @@ export default function App() {
 
 
           {activeView === 'report' && <ReportsListView user={user} />}
-          {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} />}
+          {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} />}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel
@@ -3607,7 +3611,12 @@ export default function App() {
                 <button
                   key={key}
                   disabled={comingSoon}
-                  onClick={() => { if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; } if (id) toggleTab(id); }}
+                  onClick={() => {
+                    if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; }
+                    // History from the NavBharatAI Free footer shows ONLY Free sessions (not the whole app).
+                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : 'all');
+                    if (id) toggleTab(id);
+                  }}
                   aria-label={label}
                   aria-current={isActive ? 'page' : undefined}
                   className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-indigo-400' : comingSoon ? 'text-white/20' : 'text-[#484f58]'}`}

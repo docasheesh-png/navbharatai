@@ -39,4 +39,13 @@ describe('dynamic per-AI footer', () => {
     expect(branch).toContain("id: 'settings' as ViewType");
     expect(branch).toContain('toggleTab(id)');
   });
+
+  it('History from the Free footer opens History scoped to Free sessions only', () => {
+    const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
+    const branch = src.slice(branchStart, branchStart + 1600);
+    expect(branch).toContain("if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : 'all')");
+    // the scoped filter resets to 'all' when leaving History, and is passed into HistoryView
+    expect(src).toContain("if (activeView !== 'history') setHistoryInitialFilter('all')");
+    expect(src).toContain('initialFilter={historyInitialFilter}');
+  });
 });

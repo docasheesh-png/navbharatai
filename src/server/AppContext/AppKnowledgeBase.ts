@@ -580,19 +580,20 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'connect_domain',
     name: 'Connect my website (custom domain)',
-    path: 'Sidebar → More menu → "Connect my website" (also: Home → Other AI → Publish & Deploy → "Custom Domain" — same real flow)',
+    path: 'Settings → App Settings → Domain  (also: Sidebar → More menu → "Connect my website", or Home → Other AI → Publish & Deploy → "Custom Domain" — all the same real flow)',
     description: `Connect your own purchased domain (e.g. from Hostinger or GoDaddy) to a NavBharatAI Pro v5.0 app you built.
 • First pick WHICH app the domain should point to (auto-picked if you only have one).
 • Enter your domain (e.g. myshop.com) and press Connect — this attaches it directly to that app's own hosting.
 • You get the EXACT DNS records to add at your registrar (Hostinger, GoDaddy, Cloudflare, Namecheap, BigRock, etc.).
 • Press "Check" to see the real live status (ownership / DNS / SSL) — HTTPS is issued automatically once the records resolve.
 Honest throughout: it never claims a domain is connected until it verifiably is, and it never offers this for an account with no built app yet — it tells you to build one first. Root-cause fix 2026-07-27: this used to be two different half-working screens; both entries now share one real, working flow.`,
-    howToUse: 'Open the sidebar More menu → Connect my website (or Home → Other AI → Publish & Deploy → Custom Domain) → pick the app → enter your domain → Connect → add the DNS records shown → press Check until it shows Live.',
-    relatedFeatures: ['engineer_ai', 'engineer_ai_deploy'],
+    howToUse: 'Open Settings → App Settings → Domain (or Sidebar → More → Connect my website, or Home → Other AI → Publish & Deploy → Custom Domain) → pick the app → enter your domain → Connect → add the DNS records shown → press Check until it shows Live.',
+    relatedFeatures: ['engineer_ai', 'engineer_ai_deploy', 'settings_root'],
     keywords: [
       'connect domain', 'custom domain', 'my website', 'apna domain', 'website connect',
       'hostinger', 'godaddy', 'dns', 'point domain', 'live website', 'own domain',
       'connect my website', 'domain jodo', 'website live karo',
+      'app settings domain', 'settings domain', 'domain setting',
     ],
   },
   {
@@ -1945,10 +1946,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'settings_root',
     name: 'Settings',
     path: 'Sidebar → Settings  OR  Header → Settings tab',
-    description: 'The settings hub. Organized into groups: Account & Profile and App Settings (General, Secrets & Keys, Database, Terminal, Logs). The builder tools (AI Tools, Developer Tools, Design & Build, Publish & Deploy, Monetization & Team) now live on the HOME page under the "Other AI" card (admin 2026-07-23) — open Home → Other AI. (Git lives in the sidebar → Git, not in Settings.)',
-    howToUse: 'Open Settings from the sidebar, then pick the group and sub-item you need.',
-    relatedFeatures: ['settings_database', 'settings_secrets', 'settings_general', 'settings_modules', 'settings_git'],
-    keywords: ['settings', 'options', 'configuration', 'preferences', 'config', 'setting kahan', 'settings kahan hai'],
+    description: 'The settings hub. Organized into groups: Account & Profile; and App Settings — everything a real, live website needs, brought into ONE place (admin 2026-07-29): Domain (connect your own domain — DNS + SSL included), Hosting & Publish (your app is auto-hosted; connect a domain or open more publish targets), Database (connect your own DB — also provides login + storage when you connect Firebase/Supabase), Authentication (connect Clerk/Auth0 for login), Storage (connect S3/Cloudinary for uploads), Secrets & API Keys, plus the developer tools General, Terminal and Logs. Frontend + Backend CODE is built for you by NavBharatAI Pro, so they are not settings. The builder tools (AI Tools, Developer Tools, Design & Build, Publish & Deploy, Monetization & Team) live on the HOME page under the "Other AI" card (admin 2026-07-23) — open Home → Other AI. (Git lives in the sidebar → Git, not in Settings.)',
+    howToUse: 'Open Settings from the sidebar, then pick the group and sub-item you need. To get a website live: App Settings → Domain (connect your domain), Database (connect your data), Secrets & API Keys (your keys).',
+    relatedFeatures: ['settings_database', 'settings_secrets', 'settings_general', 'settings_modules', 'settings_git', 'connect_domain'],
+    keywords: ['settings', 'options', 'configuration', 'preferences', 'config', 'setting kahan', 'settings kahan hai', 'app settings', 'domain', 'hosting', 'database', 'website settings', 'website banane ke liye kya chahiye'],
   },
   {
     id: 'settings_reduce_motion',
@@ -2009,6 +2010,32 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
       'database', 'db', 'supabase', 'firebase', 'mongodb', 'neon', 'appwrite',
       'byod', 'connect database', 'database credentials', 'database kahan', 'db settings',
       'database key', 'api key database', 'connection string',
+    ],
+  },
+  {
+    id: 'settings_auth',
+    name: 'Authentication Settings (Bring Your Own Login)',
+    path: 'Settings → App Settings → Authentication',
+    description: 'Connect a login/signup provider for the apps NavBharatAI Pro builds for you. Dedicated providers: Clerk and Auth0. You can also point auth at Supabase Auth or Firebase Auth — but their login already comes with your Database connection, so pick Clerk/Auth0 here only if you want a dedicated auth provider instead. Each field shows a "Where to find this" hint pointing at the exact spot in the provider\'s dashboard. Your credentials are AES-encrypted in Secrets & Keys (never kept in the browser). When you build, NavBharatAI Pro detects your connected provider and wires real login/signup/sessions with its SDK — it never rolls its own password auth or asks you to set one up. If a database is also connected, it uses the database for DATA and this provider for AUTH.',
+    howToUse: 'Settings → App Settings → Authentication → select Clerk / Auth0 (or Supabase/Firebase) → paste your keys (each field shows where to find it) → Save (encrypted into Secrets & Keys). Your next build wires real login to that provider. Using Firebase/Supabase as your database? Their login is already covered there.',
+    relatedFeatures: ['settings_database', 'settings_secrets', 'engineer_ai'],
+    keywords: [
+      'authentication', 'auth', 'login', 'signup', 'sign in', 'sign up', 'users', 'user login',
+      'clerk', 'auth0', 'supabase auth', 'firebase auth', 'connect auth', 'auth settings',
+      'login kaise', 'login provider', 'user account', 'session', 'oauth',
+    ],
+  },
+  {
+    id: 'settings_storage',
+    name: 'Storage Settings (Bring Your Own File Storage)',
+    path: 'Settings → App Settings → Storage',
+    description: 'Connect your own file/image storage provider for the uploads in apps NavBharatAI Pro builds for you. Supported standalone providers: S3-compatible (AWS S3, Cloudflare R2, Supabase Storage or MinIO) and Cloudinary. Each field shows a "Where to find this" hint pointing at the exact spot in that provider\'s console. Your credentials are AES-encrypted in Secrets & Keys (never kept in the browser). When you build, NavBharatAI Pro detects your connected storage and wires a REAL direct-to-storage upload — the browser uploads straight to your bucket via a presigned/signed URL, so the secret never leaves the server and your files live in YOUR storage. Note: if you connect Firebase or Supabase as your Database, their storage already comes with that connection — you only need this screen for S3/R2/Cloudinary.',
+    howToUse: 'Settings → App Settings → Storage → select S3-compatible or Cloudinary → paste your bucket/keys (each field shows where to find it) → Save (encrypted into Secrets & Keys). Your next build wires real uploads to that storage. Using Firebase/Supabase? Their storage is already covered by Settings → Database.',
+    relatedFeatures: ['settings_database', 'settings_secrets', 'engineer_ai'],
+    keywords: [
+      'storage', 'file storage', 'upload', 'uploads', 'image upload', 'file upload',
+      's3', 'aws s3', 'cloudflare r2', 'r2', 'minio', 'cloudinary', 'bucket',
+      'connect storage', 'storage settings', 'storage kahan', 'file kahan save', 'media storage',
     ],
   },
   {

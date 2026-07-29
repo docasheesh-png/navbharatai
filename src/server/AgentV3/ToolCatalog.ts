@@ -1227,6 +1227,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_pharmacy',
+      description:
+        'Add a real Pharmacy backend to the app (server/pharmacy/) — a packaged domain vertical for pharmacies ' +
+        'and medical stores. THREE real guarantees (distinct from the inventory recipe): (1) EXPIRY GATE — an ' +
+        'expired batch can never be dispensed (409 if all stock is expired); (2) FEFO DISPENSING — draws from ' +
+        'the earliest-expiry non-expired batch first (First-Expiry-First-Out) and never oversells (409 on ' +
+        'insufficient non-expired stock); (3) CONTROLLED-SUBSTANCE — a prescription-only (Schedule-H) drug needs ' +
+        'a prescription id to dispense (403 otherwise). Emits a dependency-free PharmacyService (addDrug, ' +
+        'addBatch, availableStock, dispense, expiringBefore, dispenseHistory) + an Express router (GET/POST ' +
+        '/drugs, POST /batches, GET /drugs/:id/stock, POST /dispense, GET /dispense/history) + a README. ' +
+        'In-memory by default — swap the Maps for your DB. Pairs with the auth/inventory/notification recipes. ' +
+        'Use for pharmacy / chemist / medical-store / drug-inventory prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2844,6 +2859,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_restaurant_pos',
   'generate_real_estate',
   'generate_fitness',
+  'generate_pharmacy',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

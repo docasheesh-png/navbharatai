@@ -152,6 +152,7 @@ import { generateCourierIntegration } from '../lib/CourierGenerator';
 import { generateRestaurantPosIntegration } from '../lib/RestaurantPosGenerator';
 import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
 import { generateFitnessIntegration } from '../lib/FitnessGenerator';
+import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3660,6 +3661,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('fitness starter');
         const fitDeps = fitcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Fitness / gym backend:\n${fitWritten.join('\n')}\nAdd the dependencies: ${fitDeps}\n\n${fitcfg.instructions}`;
+      }
+
+      case 'generate_pharmacy': {
+        // Breadth recipe (domain vertical) — Pharmacy (server/pharmacy/): a real PharmacyService with an
+        // expiry gate (409), FEFO dispensing that never oversells (409), and a controlled-substance Rx gate
+        // (403), plus an Express router. Pure gen in PharmacyGenerator.ts.
+        const phcfg = generatePharmacyIntegration();
+        const phWritten: string[] = [];
+        for (const [path, content] of Object.entries(phcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          phWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pharmacy starter');
+        const phDeps = phcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Pharmacy backend:\n${phWritten.join('\n')}\nAdd the dependencies: ${phDeps}\n\n${phcfg.instructions}`;
       }
 
       case 'generate_events': {

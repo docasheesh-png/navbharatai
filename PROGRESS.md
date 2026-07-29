@@ -22609,7 +22609,6 @@ CLAUDE.md's `KIMI_MODEL` documented default updated to match the shipped code, s
 
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
 
-<<<<<<< Updated upstream
 ---
 
 ## 2026-07-21 — Browser "Sign in with Apple" fix: CSP form-action blocked Apple's form_post
@@ -22634,7 +22633,6 @@ tighten can't silently re-break browser Apple login. Server + frontend tsc clean
 provider's WEB OAuth config (Apple **Services ID** + **Return URL** `https://navbharatai.com/__/auth/handler`
 + Team ID/Key ID/private key in the Firebase Console) — admin-only Apple Developer + Firebase infra, separate
 from this code fix.
-=======
 ### 2026-07-28 — LARGE-REPO CAPACITY, part 1: the landing was the bottleneck, not the download
 ### Admin: "design change chahiye to change karoge? ya nahi" — yes.
 
@@ -22686,4 +22684,76 @@ trading a slow import for a wrong one. Part 1 is measurable on its own; part 2 s
 part 1's real numbers in hand.
 
 Gate: fe tsc 0 · server tsc 0 · 9668/9668 · build ✓.
->>>>>>> Stashed changes
+
+#### Correction to the same day's App Store fix — I overstated it, and the number was still fiction
+
+I told the admin "a real 5-150 MB APK can actually be published now". **That was wrong**, and I only
+found it because they asked "ab kuch next bacha hai?" and I checked instead of reciting.
+
+The chunked-upload fix removed the ~24 MB TRANSPORT ceiling. It did not touch the SCANNER: VirusTotal's
+direct-upload endpoint caps at 32 MB (`VT_DIRECT_UPLOAD_LIMIT`), and "no scan ⇒ no publication" is the
+store's founding rule. So the real publishable ceiling went from ~24 MB to **32 MB — not 150 MB**, and
+the Publish form still advertised 150. I fixed the transport, declared the fiction dead, and left the
+number just as fictional. Checking the downstream limit was my job before making that claim.
+
+Fix — DERIVE the number instead of maintaining it: new pure `publishableApkLimitBytes(storeCap, scanCap)`
+returns the smaller of the two. The Publish form's `maxSizeMb` AND the route's 413 refusal now both read
+from it, so the advertised promise and the enforcement can never disagree again, and the moment the
+scanner is upgraded (paid plan, large-file endpoint, another vendor) the advertised limit rises with it
+automatically. `MAX_SCANNABLE_BYTES` is exported from malwareScan and env-overridable
+(`MALWARE_SCAN_MAX_BYTES`) for exactly that day. Kept dependency-free by passing both caps IN rather
+than importing — malwareScan already references apkInspect, so an import would have created a cycle.
+
+**Still open (rule 6), and this fix does not close it:** VirusTotal's free API is, by their own terms,
+not licensed for a commercial product, and is capped (~4 req/min, 500/day). CLAUDE.md already records
+this as an open item "before the store carries real traffic" — and making the store genuinely usable is
+precisely what brings that traffic closer. The 32 MB ceiling and the licensing question are the same
+decision: a paid VirusTotal plan or a different scanner resolves both at once.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
+
+#### A test of mine proved nothing — caught by testing the test
+
+While making the App Store's advertised limit honest, one of my own earlier assertions pinned a literal
+string (`'cleanupUpload();\n      return res.status(413)'`). Reformatting that branch broke it — a test
+flagging FORMATTING, not a defect. Rewrote it structurally.
+
+The rewrite then passed for the wrong reason twice, and both are worth recording because the failure
+mode is invisible unless you check:
+
+1. **Too broad a scope.** "Cleanup appears before this return" was satisfied by returns that predate any
+   temp file at all (form validation) or that fire because the claim itself failed. Bounded it to start
+   at the `cleanupUpload` definition — where cleanup is first possible, and therefore first required.
+2. **A tautology.** Even scoped, "cleanup appears somewhere earlier in the string" was satisfied by the
+   400 branch's cleanup when checking the 413 return. **Verified by deleting the 413 branch's cleanup:
+   the test still passed.** It proved nothing. Narrowed to the SAME BLOCK (last `{` before the return),
+   then re-verified: passes on the real code, FAILS on the injected leak.
+
+The discipline that caught it is the one applied to every fix this session — run the new test against
+the broken code and confirm it actually fails. Applied to my own test here, it found a test that would
+have sat green forever while the leak it was written to prevent shipped underneath it.
+
+No production defect was involved: the navStore cleanup was correct throughout. Only the test was wrong.
+
+#### I committed conflict markers into this file, and my own check missed them
+
+Commit `eb04d72` (shipped as PR #1917) put `<<<<<<< Updated upstream` / `=======` / `>>>>>>> Stashed
+changes` into PROGRESS.md, and they reached `main`. Found only when a later PR showed
+`mergeable_state: dirty` and CI never started — I first assumed the repo's known webhook stall, checked,
+and it was a real merge conflict caused by my own corruption.
+
+**Why the check missed it:** after that `git stash pop` reported "The stash entry is kept", I *did* grep
+for conflict markers — but scoped it to `-- 'src/**' 'server.ts'`. PROGRESS.md was outside the scope. The
+verification ran, reported clean, and was clean *for the files it looked at*. A check that excludes the
+file most likely to conflict (the one every session appends to) is not a check.
+
+Impact was documentation-only: no code path, no test, no user-facing behaviour. But the audit trail —
+the thing PROGRESS.md exists to be — carried garbage on `main` for several commits.
+
+Resolved by keeping ALL content from both sides (append-only: every side was a real entry) and deleting
+only the six marker lines. Verified nothing from main was lost: the sole removals relative to
+`origin/main` are the three stale markers.
+
+**Lesson, recorded rather than absorbed silently:** when checking for conflict markers, scope the grep to
+the WHOLE tree, not the files you happen to be editing. Docs conflict more often than code here, because
+every session appends to the same tail.

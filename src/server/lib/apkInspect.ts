@@ -22,6 +22,22 @@
 export const MAX_APK_BYTES = 150 * 1024 * 1024;
 
 /**
+ * The largest APK that can actually be PUBLISHED — the store's own cap AND the malware scanner's,
+ * whichever is smaller. Both caps are passed IN (no import) so this module stays dependency-free.
+ *
+ * ROOT CAUSE (2026-07-28): the store advertised `MAX_APK_BYTES` (150 MB) as its limit, but "no scan
+ * ⇒ no publication" is the store's founding rule and the scanner tops out at 32 MB — so anything
+ * above 32 MB uploaded fine and was then refused as unscannable. Fixing the transport ceiling earlier
+ * the same day moved the REAL limit from ~24 MB to 32 MB but left the advertised 150 MB just as
+ * fictional. DERIVING the number instead of maintaining it by hand keeps the promise true by
+ * construction: raise the scanner (paid plan, large-file endpoint, another vendor) and the advertised
+ * limit rises with it automatically. PURE.
+ */
+export function publishableApkLimitBytes(storeCap: number, scanCap: number): number {
+  return Math.min(storeCap, scanCap);
+}
+
+/**
  * Permissions that mean a human must look at this app before anyone installs it.
  *
  * These are the ones real Android malware needs to do its damage: read the one-time password out of

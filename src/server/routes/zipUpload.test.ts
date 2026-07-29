@@ -72,9 +72,30 @@ describe('claimUpload contract', () => {
 
   it('the store prefers the chunked upload and still deletes the temp file on every path', () => {
     expect(STORE).toContain('claimUpload(body.uploadId, me?.uid ?? null)');
-    // cleanup must run before EACH early return, not only on success
-    expect(STORE).toContain('cleanupUpload(); return res.status(400)');
-    expect(STORE).toContain('cleanupUpload();\n      return res.status(413)');
+    // Every early return AFTER the upload is claimed must delete the temp file first. Scoped to the
+    // post-claim region on purpose: returns BEFORE the claim (e.g. form validation) have no temp file
+    // to clean, and the 30-minute sweep covers an upload the client never submits.
+    // Asserted STRUCTURALLY, not as an exact string — an earlier version of this test pinned literal
+    // whitespace and broke when the 413 branch was reformatted, flagging formatting rather than a defect.
+    // Scope starts where cleanup becomes POSSIBLE (the helper's definition), not at the claim: the
+    // returns above it either predate any temp file (form validation) or fire because the claim
+    // itself failed, so there is nothing to delete. Bounding it correctly is the difference between
+    // testing the invariant and testing an accident of line order.
+    const claimAt = STORE.indexOf('const cleanupUpload =');
+    expect(claimAt).toBeGreaterThan(-1);
+    const scanEnd = STORE.indexOf('await inspectApk(bytes)');
+    expect(scanEnd).toBeGreaterThan(claimAt);
+    const postClaim = STORE.slice(claimAt, scanEnd);
+    const earlyReturns = [...postClaim.matchAll(/return res\.status\((\d{3})\)/g)];
+    expect(earlyReturns.length).toBeGreaterThan(1); // both the 400 and the 413 paths
+    for (const m of earlyReturns) {
+      // Check the SAME BLOCK, not "anywhere earlier in the function". Verified by deleting the 413
+      // branch's cleanup: the looser version still passed, because the 400 branch's cleanup sat
+      // earlier in the string and satisfied it — a test that proved nothing.
+      const blockStart = postClaim.lastIndexOf('{', m.index);
+      const block = postClaim.slice(blockStart, m.index);
+      expect(block).toContain('cleanupUpload()');
+    }
   });
 
   it('the legacy base64 path is kept, so small submissions that worked still work', () => {

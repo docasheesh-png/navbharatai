@@ -27,6 +27,9 @@ vi.mock('../src/server/lib/authMiddleware', () => ({
 }));
 
 vi.mock('../src/server/lib/malwareScan', () => ({
+  // The store's ADVERTISED limit is derived from this (publishableApkLimitBytes), so the mock must
+  // carry it or the route silently loses the scanner half of the cap.
+  MAX_SCANNABLE_BYTES: 32 * 1024 * 1024,
   isScanningConfigured: () => state.scanning,
   scanFile: async () => ({
     verdict: state.scanVerdict,

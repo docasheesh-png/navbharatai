@@ -47,17 +47,25 @@ export function inrToWalletTokens(inr: number): number {
 }
 
 /**
- * The ₹→token conversion for a DEBIT (a build charge). Rounds UP (ceil), never down — the spec's
- * margin-protection rule: a fractional token of cost is always charged as a whole token so the
- * platform never eats sub-token spend. The difference vs inrToWalletTokens (round, used for
- * credit/display) is at most 1 token (₹0.01) per build. Float noise is scrubbed BEFORE the ceil so a
- * clean ₹ amount (0.3 × 100 = 30.000000000000004 in IEEE-754) can never inflate a whole extra token.
- * Non-finite / non-positive → 0.
+ * The ₹→token conversion for a DEBIT (a build charge), as an EXACT possibly-fractional amount.
+ *
+ * It used to round UP, for margin protection. That had two costs. The small one: every build charged
+ * the user up to ₹0.01 more than it really cost, which the White-Label Law's "the bill they pay is
+ * always the real one" does not allow. The real one: `tokenBalance` was debited with the ceil while
+ * `remaining_balance` was debited with the paisa-rounded ₹, so the wallet's TWO views of the same
+ * money drifted a little further apart on every single build.
+ *
+ * Margin is not given away — the sub-token remainder is CARRIED to the user's next charge
+ * (computeDebitedWallet), so nothing is forgiven, only deferred by at most ₹0.01. That also makes
+ * per-message charges honest: rounding a ₹0.002 chat turn up to ₹0.01 would have billed 5× the real
+ * cost, which is the wrong answer for one shared wallet spent everywhere.
+ *
+ * Float noise is scrubbed so a clean ₹ amount (0.3 × 100 = 30.000000000000004 in IEEE-754) stays
+ * clean. Non-finite / non-positive → 0.
  */
 export function inrToDebitTokens(inr: number): number {
   if (!Number.isFinite(inr) || inr <= 0) return 0;
-  const cleaned = Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // kill IEEE-754 noise before ceil
-  return Math.ceil(cleaned);
+  return Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // exact to a millionth of a token
 }
 
 /** Tokens a vishwakarma order may credit, derived ONLY from the amount actually paid. Pure + tested. */

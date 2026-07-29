@@ -22781,3 +22781,32 @@ Everything else genuinely left is DECISION-gated (flip a flag: ask_user / escala
 E2E; define a quota: daily-spend gauge) or INFRA/KEYS (frameworks needing sandbox runtimes, Lighthouse/axe
 CI, signed binaries, job-queue, embeddings, OAuth creds). None are code Claude can ship without the admin.
 Highest-signal work from here = real build-report autopsies (rule 5).
+
+---
+
+## 2026-07-29 — Visual Editor reliability fix (admin: "preview me Edit button kaam nahi kar raha") — Phase 1
+
+Root cause (not a dead button — a fragile mapping): the in-browser inspector mapped a clicked element to its
+source via React's `_debugSource` (walk the fiber for `fiber._debugSource`). But `_debugSource` is present
+ONLY on the user's own JSX (transpiled by our in-browser Babel with development:true) — it is **null for
+library/nested elements** (shadcn buttons, lucide icons, cards — which nearly every v5 app uses) and was
+**removed entirely in React 19**. So clicking most elements silently did nothing (no feedback), which felt
+like "Edit doesn't work."
+
+**Phase 1 fix — reliable element→source mapping + honest feedback (`ReactPreview.ts`):**
+- A small Babel plugin (`nbaiSrcPlugin`) added to the in-browser transform stamps `data-nbai-src="file:line:col"`
+  onto every HOST (lowercase) JSX element of the user's code. Line/col use `_debugSource`'s 1-based convention
+  so `VisualEditPatcher` is unchanged. Components (`<Button/>`) are skipped (only host elements become DOM
+  nodes carrying the attribute).
+- The inspector now resolves source via `el.closest('[data-nbai-src]')` (reliable for library/nested elements
+  and every React version), falling back to `_debugSource`. Hover highlights the resolved host; click edits it.
+- `flashNotEditable` gives a brief red-dashed outline when an element maps to no source — the silent no-op that
+  made Edit feel broken is gone.
+- Tests (`ReactPreview.visualEditor.test.ts`): the plugin stamps `<div>`/`<h1>` with correct file:line:col and
+  skips `<Button>`; the built preview HTML carries the plugin + closest-lookup + feedback.
+
+**Phase 2 (next, admin's #2): text + RESIZE + REPOSITION + style.** With reliable mapping as the foundation,
+add a selection toolbar (font size / color / bold / align / padding) + safe resize (width/height for images/
+boxes). Free-drag reposition breaks responsive layouts, so a layout-safe nudge/move will be offered instead.
+
+Gate: server tsc 0 · ReactPreview 8/8 + visualEditor 2/2 · full suite (running/green).

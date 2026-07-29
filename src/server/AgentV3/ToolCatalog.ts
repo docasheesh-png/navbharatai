@@ -1212,6 +1212,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_fitness',
+      description:
+        'Add a real Fitness / gym backend to the app (server/fitness/) — a packaged domain vertical for gyms, ' +
+        'studios and fitness apps. THREE real guarantees: (1) MEMBERSHIP VALIDITY GATE — a check-in is accepted ' +
+        'only with an ACTIVE membership (an expired or frozen membership is rejected, 409); (2) DETERMINISTIC ' +
+        'renew/freeze date-math — renew() extends by the plan days from max(now, currentEnd) so an early renewal ' +
+        'loses no days, and freeze()/unfreeze() shift the end date by the exact frozen duration so no paid day ' +
+        'is lost; (3) IDEMPOTENT check-in — at most one per member per day. Emits a dependency-free ' +
+        'FitnessService (addPlan, join, isActive/statusOf, renew, freeze, unfreeze, checkIn, checkInsFor, ' +
+        'listMembers) + an Express router (POST /plans, POST/GET /members(/:id), POST /members/:id/renew, ' +
+        '/freeze, /unfreeze, /checkin, GET /members/:id/checkins) + a README. In-memory by default — swap the ' +
+        'Maps for your DB. Pairs with the auth/payment/notification recipes. Use for gym / fitness / membership prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2828,6 +2843,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_courier',
   'generate_restaurant_pos',
   'generate_real_estate',
+  'generate_fitness',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

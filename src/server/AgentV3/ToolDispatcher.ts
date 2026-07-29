@@ -151,6 +151,7 @@ import { generateSchoolErpIntegration } from '../lib/SchoolErpGenerator';
 import { generateCourierIntegration } from '../lib/CourierGenerator';
 import { generateRestaurantPosIntegration } from '../lib/RestaurantPosGenerator';
 import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
+import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3640,6 +3641,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('real-estate starter');
         const reDeps = recfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Real-estate / property-portal backend:\n${reWritten.join('\n')}\nAdd the dependencies: ${reDeps}\n\n${recfg.instructions}`;
+      }
+
+      case 'generate_fitness': {
+        // Breadth recipe (domain vertical) — Fitness / gym (server/fitness/): a real FitnessService with a
+        // membership validity gate (inactive → 409), deterministic renew/freeze date-math, and idempotent
+        // check-ins, plus an Express router. Pure gen in FitnessGenerator.ts.
+        const fitcfg = generateFitnessIntegration();
+        const fitWritten: string[] = [];
+        for (const [path, content] of Object.entries(fitcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fitWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('fitness starter');
+        const fitDeps = fitcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Fitness / gym backend:\n${fitWritten.join('\n')}\nAdd the dependencies: ${fitDeps}\n\n${fitcfg.instructions}`;
       }
 
       case 'generate_events': {

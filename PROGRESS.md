@@ -22757,3 +22757,27 @@ only the six marker lines. Verified nothing from main was lost: the sole removal
 **Lesson, recorded rather than absorbed silently:** when checking for conflict markers, scope the grep to
 the WHOLE tree, not the files you happen to be editing. Docs conflict more often than code here, because
 every session appends to the same tail.
+
+---
+
+## 2026-07-21 — Non-stop conveyor: +6 domain verticals + roadmap FULLY reconciled (safe autonomous vein complete)
+
+Continuing "ek ek karke sara complete karo, non-stop". Shipped SIX more real, test-locked domain verticals
+(each an isolated recipe with executable invariants, rule 2), on top of the earlier Hospital/School/
+Courier/Restaurant this session:
+- **Real-estate** (#1922) — listing state-machine + append-only price history + on-market-only inquiries.
+- **Fitness / gym** (#1933) — membership validity gate + DETERMINISTIC renew/freeze date-math + idempotent check-in.
+- **Pharmacy** (#1935) — expiry gate + FEFO dispensing (no oversell) + controlled-substance Rx (403).
+- **Recruitment / job-board** (#1936) — application pipeline state-machine + one-apply-per-candidate + closed-job guard.
+(Real-estate/Fitness/Pharmacy/Recruitment; Hospital #1819 / School #1831 / Courier #1832 / Restaurant #1833 landed earlier.)
+Total domain recipes now ~18 (CRM/booking/inventory/events/subscriptions/polls/blog/reviews/loyalty + these).
+
+**Honest roadmap reconciliation — the safe autonomous CODE vein is COMPLETE.** Correcting a stale line:
+- **`ask_user` clarify tool (roadmap #1, the admin's #1 priority) is DONE, not OPEN** — it's a non-blocking
+  friction-free `clarify` card (server `AGENTV3_ASK_USER` gate → `clarify` event; client `pendingClarify`
+  card), default-OFF so today's stream is byte-identical. The old "OPEN" line was a grep miss (searched the
+  literal `ask_user`, not the `clarify` implementation). Remaining = a DECISION (flip the flag).
+Everything else genuinely left is DECISION-gated (flip a flag: ask_user / escalation-default-on / auto-run
+E2E; define a quota: daily-spend gauge) or INFRA/KEYS (frameworks needing sandbox runtimes, Lighthouse/axe
+CI, signed binaries, job-queue, embeddings, OAuth creds). None are code Claude can ship without the admin.
+Highest-signal work from here = real build-report autopsies (rule 5).

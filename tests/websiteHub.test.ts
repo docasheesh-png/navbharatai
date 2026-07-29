@@ -1,0 +1,88 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
+import type { SettingsScreen } from '../src/types';
+
+/**
+ * "Your Website" hub (admin 2026-07-29): Settings → App Settings now brings the real-website
+ * essentials into ONE place — Domain (+ DNS + SSL), Hosting & Publish, Database, Secrets & API Keys
+ * — with Build & Debug (General/Terminal/Logs) split out, and an honest note that Frontend + Backend
+ * CODE is built by NavBharatAI (not a fake tile). Source-level lock (the hub lives inline in
+ * SettingsPanel.tsx) + KB/navigation lock.
+ */
+const src = readFileSync(join(__dirname, '../src/components/panels/SettingsPanel.tsx'), 'utf8');
+const kb = (id: string) => APP_KNOWLEDGE_BASE.find((f) => f.id === id);
+
+describe('App Settings — Your Website hub', () => {
+  it('App Settings group leads with the real-website essentials as tiles', () => {
+    const start = src.indexOf("title: 'App Settings'");
+    expect(start).toBeGreaterThan(-1);
+    const block = src.slice(start, start + 900);
+    expect(block).toContain("id: 'domain'");
+    expect(block).toContain("id: 'hosting'");
+    expect(block).toContain("id: 'database'");
+    expect(block).toContain("id: 'secrets'");
+    // The section carries the honest one-line purpose.
+    expect(block).toContain('Everything your live website needs');
+  });
+
+  it('Build & Debug is a separate group holding the developer tools', () => {
+    const start = src.indexOf("title: 'Build & Debug'");
+    expect(start).toBeGreaterThan(-1);
+    const block = src.slice(start, start + 500);
+    expect(block).toContain("id: 'general'");
+    expect(block).toContain("id: 'shell'");
+    expect(block).toContain("id: 'logs'");
+  });
+
+  it('the Domain sub-screen mounts the ONE real ConnectMyWebsitePanel flow', () => {
+    expect(src).toContain("settingsScreen === 'domain'");
+    // It reuses the real, shared component (not a new half-working screen).
+    expect(src).toContain('<ConnectMyWebsitePanel');
+    expect(src).toContain("onBack={() => setSettingsScreen('root')}");
+  });
+
+  it('the Hosting sub-screen is honest — explains auto-hosting and links to Domain (no fake deploy)', () => {
+    const start = src.indexOf("settingsScreen === 'hosting'");
+    expect(start).toBeGreaterThan(-1);
+    const block = src.slice(start, start + 2200);
+    expect(block).toContain('hosted automatically');
+    // Real navigation to the Domain flow — a working button, not a dead one.
+    expect(block).toContain("onClick={() => setSettingsScreen('domain')}");
+    // No fabricated deploy button / fake status.
+    expect(block).not.toMatch(/Deploy Now|Deployed successfully/i);
+  });
+
+  it('Frontend & Backend get an honest info line, NOT a fake tile', () => {
+    expect(src).toContain('Frontend &amp; Backend — built for you');
+    // They are NOT clickable settings tiles (no settingsScreen ids for them).
+    expect(src).not.toContain("id: 'frontend'");
+    expect(src).not.toContain("id: 'backend'");
+  });
+
+  it('SettingsScreen type carries the new hub screens', () => {
+    const domain: SettingsScreen = 'domain';
+    const hosting: SettingsScreen = 'hosting';
+    const auth: SettingsScreen = 'auth';
+    const storage: SettingsScreen = 'storage';
+    expect([domain, hosting, auth, storage]).toEqual(['domain', 'hosting', 'auth', 'storage']);
+  });
+});
+
+describe('App Settings hub — KB awareness', () => {
+  it('settings_root describes the website essentials in App Settings', () => {
+    const root = kb('settings_root');
+    expect(root).toBeTruthy();
+    expect(root!.description).toMatch(/Domain/);
+    expect(root!.description).toMatch(/Hosting/);
+    // Honest: Frontend/Backend are built, not configured.
+    expect(root!.description).toMatch(/built for you by NavBharatAI/i);
+  });
+
+  it('connect_domain is now reachable from Settings → App Settings → Domain', () => {
+    const d = kb('connect_domain');
+    expect(d).toBeTruthy();
+    expect(d!.path).toContain('Settings → App Settings → Domain');
+  });
+});

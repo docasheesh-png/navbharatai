@@ -580,19 +580,20 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'connect_domain',
     name: 'Connect my website (custom domain)',
-    path: 'Sidebar → More menu → "Connect my website" (also: Home → Other AI → Publish & Deploy → "Custom Domain" — same real flow)',
+    path: 'Settings → App Settings → Domain  (also: Sidebar → More menu → "Connect my website", or Home → Other AI → Publish & Deploy → "Custom Domain" — all the same real flow)',
     description: `Connect your own purchased domain (e.g. from Hostinger or GoDaddy) to a NavBharatAI Pro v5.0 app you built.
 • First pick WHICH app the domain should point to (auto-picked if you only have one).
 • Enter your domain (e.g. myshop.com) and press Connect — this attaches it directly to that app's own hosting.
 • You get the EXACT DNS records to add at your registrar (Hostinger, GoDaddy, Cloudflare, Namecheap, BigRock, etc.).
 • Press "Check" to see the real live status (ownership / DNS / SSL) — HTTPS is issued automatically once the records resolve.
 Honest throughout: it never claims a domain is connected until it verifiably is, and it never offers this for an account with no built app yet — it tells you to build one first. Root-cause fix 2026-07-27: this used to be two different half-working screens; both entries now share one real, working flow.`,
-    howToUse: 'Open the sidebar More menu → Connect my website (or Home → Other AI → Publish & Deploy → Custom Domain) → pick the app → enter your domain → Connect → add the DNS records shown → press Check until it shows Live.',
-    relatedFeatures: ['engineer_ai', 'engineer_ai_deploy'],
+    howToUse: 'Open Settings → App Settings → Domain (or Sidebar → More → Connect my website, or Home → Other AI → Publish & Deploy → Custom Domain) → pick the app → enter your domain → Connect → add the DNS records shown → press Check until it shows Live.',
+    relatedFeatures: ['engineer_ai', 'engineer_ai_deploy', 'settings_root'],
     keywords: [
       'connect domain', 'custom domain', 'my website', 'apna domain', 'website connect',
       'hostinger', 'godaddy', 'dns', 'point domain', 'live website', 'own domain',
       'connect my website', 'domain jodo', 'website live karo',
+      'app settings domain', 'settings domain', 'domain setting',
     ],
   },
   {
@@ -1945,10 +1946,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'settings_root',
     name: 'Settings',
     path: 'Sidebar → Settings  OR  Header → Settings tab',
-    description: 'The settings hub. Organized into groups: Account & Profile and App Settings (General, Secrets & Keys, Database, Terminal, Logs). The builder tools (AI Tools, Developer Tools, Design & Build, Publish & Deploy, Monetization & Team) now live on the HOME page under the "Other AI" card (admin 2026-07-23) — open Home → Other AI. (Git lives in the sidebar → Git, not in Settings.)',
-    howToUse: 'Open Settings from the sidebar, then pick the group and sub-item you need.',
-    relatedFeatures: ['settings_database', 'settings_secrets', 'settings_general', 'settings_modules', 'settings_git'],
-    keywords: ['settings', 'options', 'configuration', 'preferences', 'config', 'setting kahan', 'settings kahan hai'],
+    description: 'The settings hub. Organized into groups: Account & Profile; App Settings — everything a real, live website needs, brought into ONE place (admin 2026-07-29): Domain (connect your own domain — DNS + SSL included), Hosting & Publish (your app is auto-hosted; connect a domain or open more publish targets), Database (connect your own DB — also provides login + storage when you connect Firebase/Supabase), and Secrets & API Keys; and Build & Debug (General, Terminal, Logs). Frontend + Backend CODE is built for you by NavBharatAI Pro, so they are not settings. The builder tools (AI Tools, Developer Tools, Design & Build, Publish & Deploy, Monetization & Team) live on the HOME page under the "Other AI" card (admin 2026-07-23) — open Home → Other AI. (Git lives in the sidebar → Git, not in Settings.)',
+    howToUse: 'Open Settings from the sidebar, then pick the group and sub-item you need. To get a website live: App Settings → Domain (connect your domain), Database (connect your data), Secrets & API Keys (your keys).',
+    relatedFeatures: ['settings_database', 'settings_secrets', 'settings_general', 'settings_modules', 'settings_git', 'connect_domain'],
+    keywords: ['settings', 'options', 'configuration', 'preferences', 'config', 'setting kahan', 'settings kahan hai', 'app settings', 'domain', 'hosting', 'database', 'website settings', 'website banane ke liye kya chahiye'],
   },
   {
     id: 'settings_reduce_motion',

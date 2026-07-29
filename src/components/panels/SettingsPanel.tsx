@@ -26,6 +26,9 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 
 const SecretManager    = _lz(() => import('../SecretManager'),             'SecretManager');
 const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'DatabaseSettings');
+// "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
+// App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
+const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
 // The REAL sandbox terminal (same component Code Studio mounts) — runs actual commands in the
 // user's warm v5.0 sandbox via POST /api/agentv3/exec. Rendered by the 'shell' settings screen so
 // users can run a quick command without opening the full Code Studio.
@@ -389,12 +392,19 @@ export function SettingsPanel({
                     Auto follows your screen size. Mobile shows the compact layout (menu + bottom bar); Tablet & Desktop show the side rail.
                   </p>
                 </div>
-                {/* 6 grouped sections */}
+                {/* Grouped settings sections.
+                    "App Settings" now leads with EVERYTHING a real, working website needs, brought into
+                    ONE place (admin 2026-07-29): Domain (+ DNS + SSL), Hosting & Publish, Database, and
+                    Secrets & API keys — plus Authentication + Storage as they ship. These were previously
+                    scattered (Domain lived only under Sidebar → More / Home → Other AI). "Build & Debug"
+                    keeps the developer tools (General, Terminal, Logs). Frontend + Backend CODE is built
+                    for the user by NavBharatAI Pro, so they are not settings — see the honest note below. */}
                 {[
                   {
                     title: 'Account',
                     color: 'text-indigo-400',
                     icon: User as any,
+                    desc: '',
                     items: [
                       // Opens the SAME real profile page as the top-right avatar → Profile (view
                       // 'my_profile'). It used to point at a non-existent 'profile' view → blank page.
@@ -405,14 +415,24 @@ export function SettingsPanel({
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,
+                    desc: 'Everything your live website needs',
                     items: [
-                      // 'connections' and 'git' tiles removed (admin 2026-07-20): both were redundant
-                      // doorways — GitHub connect lives inside the Git panel flow (sidebar → Git →
-                      // Connect GitHub → this same 'connections' sub-screen), and the Git tile only
-                      // relaunched the sidebar's Git panel. The sub-screens themselves stay reachable.
-                      { id: 'general', label: 'General', icon: LayoutDashboard },
-                      { id: 'secrets', label: 'Secrets & Keys', icon: Lock },
+                      // The real-website essentials, in one hub. Domain covers DNS + SSL (auto). Database
+                      // also provides login + storage when you connect Firebase/Supabase; dedicated
+                      // Authentication + Storage tiles (Clerk/Auth0, S3/Cloudinary) ship in follow-up slices.
+                      { id: 'domain', label: 'Domain', icon: Globe },
+                      { id: 'hosting', label: 'Hosting & Publish', icon: Rocket },
                       { id: 'database', label: 'Database', icon: Database },
+                      { id: 'secrets', label: 'Secrets & API Keys', icon: Lock },
+                    ],
+                  },
+                  {
+                    title: 'Build & Debug',
+                    color: 'text-emerald-400',
+                    icon: Terminal,
+                    desc: 'Developer tools for your app',
+                    items: [
+                      { id: 'general', label: 'General', icon: LayoutDashboard },
                       { id: 'shell', label: 'Terminal', icon: Terminal },
                       { id: 'logs', label: 'Logs', icon: Activity },
                     ],
@@ -420,14 +440,17 @@ export function SettingsPanel({
                   // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
                   // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card
                   // (admin 2026-07-23) — see src/components/home/homeToolGroups.ts. Settings now keeps
-                  // only genuine settings (Account & Profile, App Settings). The tool destinations
-                  // (toggleTab ids) are unchanged; only the doorway moved.
+                  // only genuine settings (Account & Profile, App Settings, Build & Debug). The tool
+                  // destinations (toggleTab ids) are unchanged; only the doorway moved.
                 ].map(group => (
                   <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className={cn('flex items-center gap-2', group.desc ? 'mb-1' : 'mb-3')}>
                       <group.icon className={`w-3.5 h-3.5 ${group.color}`} />
                       <span className={`text-[10px] font-black uppercase tracking-widest ${group.color}`}>{group.title}</span>
                     </div>
+                    {group.desc && (
+                      <p className="text-[10px] text-[#586069] font-bold mb-3 leading-relaxed">{group.desc}</p>
+                    )}
                     {/* Mobile-friendly tiles (admin 2026-07-21): a comfortable ≥52px tap target, labels
                         WRAP instead of truncating (so "Insights & Webhooks"/"Screenshot→Code" read fully on
                         a phone), and the icon is visible at rest (no hover on touch). 2 columns fit a phone
@@ -450,6 +473,23 @@ export function SettingsPanel({
                     </div>
                   </div>
                 ))}
+
+                {/* Honest note (admin 2026-07-29): of the 10 things a real website needs, the FRONTEND
+                    (the UI code) and the BACKEND (the API/server code) are not settings you configure —
+                    NavBharatAI Pro builds them for you. So they get an honest info line here, not a fake
+                    tile that does nothing (real-features rule). */}
+                <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-white leading-relaxed">Frontend &amp; Backend — built for you</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5 leading-relaxed">
+                      Your app&apos;s screens (frontend) and its server/API (backend) are written automatically by
+                      NavBharatAI Pro when you build. There&apos;s nothing to configure here — just describe your app.
+                    </p>
+                  </div>
+                </div>
 
                 {/* Support — direct email to the NavBharatAI team. An <a href="mailto:"> anchor is used
                     (not a JS handler) because Capacitor's native WebView opens the device mail app for
@@ -800,6 +840,89 @@ export function SettingsPanel({
                 ) : (
                   <div className="p-6 text-white text-center">Please log in to configure your database</div>
                 )}
+              </motion.div>
+            )}
+
+            {/* Domain (admin 2026-07-29): the ONE real "connect my website" flow — pick the app you
+                built, enter your purchased domain, get the exact DNS records, press Check until Live.
+                DNS + SSL are handled inside this flow (SSL auto-provisions once DNS verifies). Same
+                real component used by Sidebar → More and Home → Other AI → Custom Domain. */}
+            {settingsScreen === 'domain' && (
+              <motion.div
+                key="domain"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                {user ? (
+                  <Suspense fallback={null}>
+                    <ConnectMyWebsitePanel onBack={() => setSettingsScreen('root')} uid={user.uid} />
+                  </Suspense>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to connect a domain to your app</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Hosting & Publish (admin 2026-07-29): an HONEST hosting screen — it explains the real
+                behaviour (every NavBharatAI build is auto-hosted with a live URL) and links to the real
+                next steps (connect a custom domain here; more publish targets under Home → Other AI →
+                Publish & Deploy). No fake "deploy" button or fake status (real-features rule). */}
+            {settingsScreen === 'hosting' && (
+              <motion.div
+                key="hosting"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="px-1 pt-4">
+                  <h2 className="text-2xl font-black text-white tracking-tight">Hosting &amp; Publish</h2>
+                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Where your app goes live</p>
+                </div>
+
+                <div className="bg-[#161b22] border border-emerald-500/20 rounded-2xl p-5 flex items-start gap-3">
+                  <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
+                    <CloudUpload className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-white leading-relaxed">Your app is hosted automatically</p>
+                    <p className="text-[11px] text-[#8b949e] font-medium mt-1 leading-relaxed">
+                      Every app you build on NavBharatAI is hosted for you and gets a live, shareable URL — with
+                      HTTPS/SSL — the moment it builds. There&apos;s no server to set up and no deploy button to press.
+                      To put it on your <span className="text-white font-bold">own domain</span>, connect one below.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setSettingsScreen('domain')}
+                  className="w-full flex items-center gap-3 p-4 min-h-[56px] bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
+                >
+                  <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0">
+                    <Globe className="w-5 h-5 text-indigo-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">Connect your own domain</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Point mywebsite.com at your app — DNS + SSL included</p>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
+                </button>
+
+                <button
+                  onClick={() => toggleTab('home')}
+                  className="w-full flex items-center gap-3 p-4 min-h-[56px] bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
+                >
+                  <div className="p-2 bg-amber-500/10 rounded-lg shrink-0">
+                    <Rocket className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">More publish options</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Android APK, multi-cloud deploy, CI/CD — Home → Other AI → Publish &amp; Deploy</p>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
+                </button>
               </motion.div>
             )}
 

@@ -76,7 +76,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     items: [
       { id: 'apk', label: 'APK Builder', icon: Smartphone },
       { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket },
-      { id: 'cloudeploy', label: 'Multi-Cloud', icon: CloudUpload },
+      // 'Multi-Cloud' MOVED to Settings → App Settings → Multi-Cloud Deploy (admin 2026-07-29).
       { id: 'domain', label: 'Custom Domain', icon: Globe },
       { id: 'seo', label: 'SEO Optimizer', icon: Search },
       { id: 'appstore', label: 'Nav App Store', icon: Package },

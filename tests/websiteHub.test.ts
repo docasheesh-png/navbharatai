@@ -18,10 +18,11 @@ describe('App Settings — Your Website hub', () => {
   it('App Settings group leads with the real-website essentials as tiles', () => {
     const start = src.indexOf("title: 'App Settings'");
     expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 900);
+    const block = src.slice(start, start + 1000);
     expect(block).toContain("id: 'domain'");
     expect(block).toContain("id: 'hosting'");
     expect(block).toContain("id: 'database'");
+    expect(block).toContain("id: 'storage'");
     expect(block).toContain("id: 'secrets'");
     // The section carries the honest one-line purpose.
     expect(block).toContain('Everything your live website needs');
@@ -54,6 +55,11 @@ describe('App Settings — Your Website hub', () => {
     expect(block).not.toMatch(/Deploy Now|Deployed successfully/i);
   });
 
+  it('the Storage sub-screen mounts the real StorageSettings connection panel', () => {
+    expect(src).toContain("settingsScreen === 'storage'");
+    expect(src).toContain('<StorageSettings');
+  });
+
   it('Frontend & Backend get an honest info line, NOT a fake tile', () => {
     expect(src).toContain('Frontend &amp; Backend — built for you');
     // They are NOT clickable settings tiles (no settingsScreen ids for them).
@@ -84,5 +90,17 @@ describe('App Settings hub — KB awareness', () => {
     const d = kb('connect_domain');
     expect(d).toBeTruthy();
     expect(d!.path).toContain('Settings → App Settings → Domain');
+  });
+
+  it('settings_storage KB entry exists, is honest about S3/Cloudinary, and names the real path', () => {
+    const s = kb('settings_storage');
+    expect(s).toBeTruthy();
+    expect(s!.path).toContain('Settings → App Settings → Storage');
+    expect(s!.description).toMatch(/S3-compatible/);
+    expect(s!.description).toMatch(/Cloudinary/);
+    // Honest: Firebase/Supabase storage comes with the Database connection.
+    expect(s!.description).toMatch(/Database/);
+    // White-label: never leaks an internal AI vendor.
+    expect(s!.description).not.toMatch(/\b(glm|kimi|claude|anthropic|sonnet|opus|grok)\b/i);
   });
 });

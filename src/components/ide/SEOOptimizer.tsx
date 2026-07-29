@@ -222,7 +222,7 @@ const MetaTab: React.FC<{
     setMeta(prev => ({ ...prev, [k]: e.target.value }));
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 h-full overflow-y-auto md:overflow-visible">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
       {/* Form */}
       <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         {/* Auto-extract toggle */}
@@ -362,7 +362,7 @@ const OGTab: React.FC<{
   const displaySite = dOG.ogSiteName || 'example.com';
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 h-full overflow-y-auto md:overflow-visible">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
       {/* Form */}
       <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         <div>
@@ -408,7 +408,7 @@ const OGTab: React.FC<{
       </div>
 
       {/* Previews + Code */}
-      <div className="flex-1 min-w-0 space-y-4 overflow-y-auto">
+      <div className="flex-1 min-w-0 space-y-4 md:overflow-y-auto">
         {/* Google SERP preview */}
         <div>
           <p className="text-xs text-white/40 mb-2 font-medium uppercase tracking-wide">Google Search Preview</p>
@@ -537,7 +537,7 @@ ${dPages.map(p => `  <url>
 </urlset>`;
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 h-full overflow-y-auto md:overflow-visible">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
       <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         <div>
           <label className={labelCls}>Base URL</label>
@@ -634,7 +634,7 @@ const RobotsTab: React.FC<{
   const toggle = (k: keyof RobotsConfig) => setRobots(prev => ({ ...prev, [k]: !prev[k as keyof RobotsConfig] }));
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 h-full overflow-y-auto md:overflow-visible">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
       <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         <div className="space-y-2">
           {([
@@ -867,9 +867,10 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
   ];
 
   return (
-    <div className="flex h-full bg-[#0d1117] text-white overflow-hidden">
+    // Mobile: single vertical scroll, sidebar stacks below. Desktop: bounded two-pane with inner scroll.
+    <div className="flex flex-col md:flex-row h-full bg-[#0d1117] text-white overflow-y-auto md:overflow-hidden">
       {/* Main area */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <div className="w-full md:flex-1 min-w-0 flex flex-col md:overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 px-5 pt-4 pb-0 border-b border-white/10">
           <div className="flex items-center gap-2 mb-3">
@@ -877,8 +878,8 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
             <h2 className="text-sm font-semibold text-white/90">SEO Optimizer</h2>
             <span className="text-xs text-white/30 ml-1">— meta tags, OG, sitemap &amp; robots</span>
           </div>
-          {/* Tabs */}
-          <div className="flex gap-1">
+          {/* Tabs — scroll horizontally on narrow phones instead of clipping */}
+          <div className="flex gap-1 overflow-x-auto no-scrollbar">
             {tabs.map((t, i) => (
               <button
                 key={i}
@@ -935,7 +936,7 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
         </div>
 
         {/* Tab content */}
-        <div className="flex-1 overflow-hidden p-4">
+        <div className="flex-1 md:overflow-hidden p-4">
           {tab === 0 && (
             <MetaTab meta={meta} setMeta={setMeta} generatedCode={appHtml} copy={copy} copied={copied} />
           )}
@@ -952,7 +953,7 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
       </div>
 
       {/* Score sidebar */}
-      <div className="flex-shrink-0 p-4 border-l border-white/10 overflow-y-auto">
+      <div className="w-full md:w-auto flex-shrink-0 p-4 border-t border-white/10 md:border-t-0 md:border-l md:overflow-y-auto pb-24 md:pb-4">
         <ScoreSidebar meta={meta} og={og} pages={pages} />
       </div>
     </div>

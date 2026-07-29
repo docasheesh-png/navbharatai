@@ -1242,6 +1242,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_recruitment',
+      description:
+        'Add a real Recruitment / job-board (ATS) backend to the app (server/recruitment/) — a packaged domain ' +
+        'vertical for job portals and hiring apps. THREE real guarantees (a HIRING pipeline, distinct from the ' +
+        'CRM sales pipeline): (1) APPLICATION STATE-MACHINE — applied → screening → interview → offer → hired ' +
+        'along allowed transitions only (reject/withdraw from any non-terminal stage; hired/rejected/withdrawn ' +
+        'terminal), an invalid jump rejected (409); (2) ONE application per candidate per job (a duplicate is ' +
+        'rejected, 409); (3) CLOSED-JOB GUARD — a closed job accepts no applications (409). Emits a ' +
+        'dependency-free RecruitmentService (postJob, closeJob/reopenJob, addCandidate, apply, advance, ' +
+        'applicationsFor, listJobs) + an Express router (GET/POST /jobs, POST /jobs/:id/close|/reopen, POST ' +
+        '/candidates, POST /jobs/:id/apply, GET /jobs/:id/applications, PATCH /applications/:id/stage) + a ' +
+        'README. In-memory by default — swap the Maps for your DB. Pairs with the auth/notification/email ' +
+        'recipes. Use for job-board / recruitment / hiring / ATS prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2860,6 +2876,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_real_estate',
   'generate_fitness',
   'generate_pharmacy',
+  'generate_recruitment',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

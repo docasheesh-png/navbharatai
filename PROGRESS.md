@@ -22609,7 +22609,6 @@ CLAUDE.md's `KIMI_MODEL` documented default updated to match the shipped code, s
 
 Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
 
-<<<<<<< Updated upstream
 ---
 
 ## 2026-07-21 — Browser "Sign in with Apple" fix: CSP form-action blocked Apple's form_post
@@ -22634,7 +22633,6 @@ tighten can't silently re-break browser Apple login. Server + frontend tsc clean
 provider's WEB OAuth config (Apple **Services ID** + **Return URL** `https://navbharatai.com/__/auth/handler`
 + Team ID/Key ID/private key in the Firebase Console) — admin-only Apple Developer + Firebase infra, separate
 from this code fix.
-=======
 ### 2026-07-28 — LARGE-REPO CAPACITY, part 1: the landing was the bottleneck, not the download
 ### Admin: "design change chahiye to change karoge? ya nahi" — yes.
 
@@ -22686,7 +22684,6 @@ trading a slow import for a wrong one. Part 1 is measurable on its own; part 2 s
 part 1's real numbers in hand.
 
 Gate: fe tsc 0 · server tsc 0 · 9668/9668 · build ✓.
->>>>>>> Stashed changes
 
 #### Correction to the same day's App Store fix — I overstated it, and the number was still fiction
 
@@ -22737,3 +22734,26 @@ the broken code and confirm it actually fails. Applied to my own test here, it f
 have sat green forever while the leak it was written to prevent shipped underneath it.
 
 No production defect was involved: the navStore cleanup was correct throughout. Only the test was wrong.
+
+#### I committed conflict markers into this file, and my own check missed them
+
+Commit `eb04d72` (shipped as PR #1917) put `<<<<<<< Updated upstream` / `=======` / `>>>>>>> Stashed
+changes` into PROGRESS.md, and they reached `main`. Found only when a later PR showed
+`mergeable_state: dirty` and CI never started — I first assumed the repo's known webhook stall, checked,
+and it was a real merge conflict caused by my own corruption.
+
+**Why the check missed it:** after that `git stash pop` reported "The stash entry is kept", I *did* grep
+for conflict markers — but scoped it to `-- 'src/**' 'server.ts'`. PROGRESS.md was outside the scope. The
+verification ran, reported clean, and was clean *for the files it looked at*. A check that excludes the
+file most likely to conflict (the one every session appends to) is not a check.
+
+Impact was documentation-only: no code path, no test, no user-facing behaviour. But the audit trail —
+the thing PROGRESS.md exists to be — carried garbage on `main` for several commits.
+
+Resolved by keeping ALL content from both sides (append-only: every side was a real entry) and deleting
+only the six marker lines. Verified nothing from main was lost: the sole removals relative to
+`origin/main` are the three stale markers.
+
+**Lesson, recorded rather than absorbed silently:** when checking for conflict markers, scope the grep to
+the WHOLE tree, not the files you happen to be editing. Docs conflict more often than code here, because
+every session appends to the same tail.

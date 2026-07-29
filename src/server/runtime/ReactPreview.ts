@@ -482,7 +482,29 @@ ${babelTag}
       ? [['react', { runtime: 'automatic', development: true }], ['typescript', { isTSX: isTsx, allExtensions: true, allowDeclareFields: true }]]
       : [['react', { runtime: 'automatic', development: true }]];
     var transformed;
-    try { transformed = Babel.transform(code, { filename: path, presets: presets, plugins: ['transform-modules-commonjs'], sourceType: 'module' }).code; }
+    // VISUAL EDITOR mapping (reliable, admin 2026-07-29): stamp data-nbai-src="file:line:col" onto every
+    // HOST (lowercase) JSX element of the USER's code so the inspector can map ANY clicked element back to
+    // its real source via el.closest('[data-nbai-src]') — instead of React's _debugSource, which is null
+    // for library/nested elements (shadcn/lucide/etc.) and gone in React 19, the reason "Edit" silently
+    // did nothing on most clicks. Line/col match _debugSource's 1-based convention so VisualEditPatcher is
+    // unchanged. Runs before the react preset transforms the JSX away.
+    var nbaiSrcPlugin = function (babel) {
+      var t = babel.types;
+      return { visitor: { JSXOpeningElement: function (p) {
+        var nm = p.node.name;
+        if (!nm || nm.type !== 'JSXIdentifier') return;                 // skip <Component/> and member/namespace
+        var tag = nm.name;
+        if (tag.charAt(0) !== tag.charAt(0).toLowerCase()) return;       // host (lowercase) elements only
+        if (!p.node.loc) return;
+        for (var i = 0; i < p.node.attributes.length; i++) {
+          var a = p.node.attributes[i];
+          if (a.type === 'JSXAttribute' && a.name && a.name.name === 'data-nbai-src') return; // no dup
+        }
+        var v = path + ':' + p.node.loc.start.line + ':' + (p.node.loc.start.column + 1);
+        p.node.attributes.push(t.jsxAttribute(t.jsxIdentifier('data-nbai-src'), t.stringLiteral(v)));
+      } } };
+    };
+    try { transformed = Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
     catch (e) { throw new Error('Compile ' + path + ': ' + e.message); }
     var module = { exports: {} };
     cache[path] = module;
@@ -686,13 +708,39 @@ const VISUAL_EDITOR_SCRIPT = `<script>
     }
     return null;
   }
+  // Reliable source: the nearest ancestor carrying data-nbai-src="file:line:col" (stamped at transform
+  // time). Works for library/nested elements and every React version. Falls back to _debugSource.
+  function srcFor(el) {
+    var host = el && el.closest ? el.closest('[data-nbai-src]') : null;
+    if (host) {
+      var raw = host.getAttribute('data-nbai-src') || '';
+      var c2 = raw.lastIndexOf(':'), c1 = raw.lastIndexOf(':', c2 - 1);
+      if (c1 > 0 && c2 > c1) {
+        var f = raw.slice(0, c1), ln = parseInt(raw.slice(c1 + 1, c2), 10), co = parseInt(raw.slice(c2 + 1), 10);
+        if (f && ln) return { host: host, fileName: f, lineNumber: ln, columnNumber: co || 1 };
+      }
+    }
+    var d = debugSourceFor(el);
+    if (d && d.fileName) return { host: el, fileName: d.fileName, lineNumber: d.lineNumber, columnNumber: d.columnNumber };
+    return null;
+  }
+  // Honest feedback: a brief red dashed outline when a clicked element maps to no editable source (so the
+  // user never faces a silent no-op — the old behaviour that made "Edit" feel broken).
+  function flashNotEditable(el) {
+    if (!el || !el.style) return;
+    var prev = el.style.outline;
+    el.style.outline = '2px dashed #f43f5e';
+    setTimeout(function () { el.style.outline = prev; }, 600);
+  }
   function clearHover() {
     if (hovered) { hovered.style.outline = ''; hovered.style.cursor = ''; hovered = null; }
   }
   function onMouseOver(e) {
     if (!editMode || editing) return;
-    if (hovered && hovered !== e.target) clearHover();
-    hovered = e.target;
+    var info = srcFor(e.target);
+    var host = info ? info.host : e.target;
+    if (hovered && hovered !== host) clearHover();
+    hovered = host;
     hovered.style.outline = '2px solid #6366f1';
     hovered.style.cursor = 'text';
   }
@@ -714,13 +762,13 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   }
   function onClick(e) {
     if (!editMode || editing) return;
-    var src = debugSourceFor(e.target);
-    if (!src || !src.fileName) return;
+    var info = srcFor(e.target);
+    if (!info) { flashNotEditable(e.target); return; }
     e.preventDefault();
     e.stopPropagation();
     clearHover();
-    editing = e.target;
-    editing.__nbaiSrc = src;
+    editing = info.host;
+    editing.__nbaiSrc = { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber };
     editing.contentEditable = 'true';
     editing.style.outline = '2px solid #10b981';
     editing.focus();

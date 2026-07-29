@@ -22687,3 +22687,53 @@ part 1's real numbers in hand.
 
 Gate: fe tsc 0 · server tsc 0 · 9668/9668 · build ✓.
 >>>>>>> Stashed changes
+
+#### Correction to the same day's App Store fix — I overstated it, and the number was still fiction
+
+I told the admin "a real 5-150 MB APK can actually be published now". **That was wrong**, and I only
+found it because they asked "ab kuch next bacha hai?" and I checked instead of reciting.
+
+The chunked-upload fix removed the ~24 MB TRANSPORT ceiling. It did not touch the SCANNER: VirusTotal's
+direct-upload endpoint caps at 32 MB (`VT_DIRECT_UPLOAD_LIMIT`), and "no scan ⇒ no publication" is the
+store's founding rule. So the real publishable ceiling went from ~24 MB to **32 MB — not 150 MB**, and
+the Publish form still advertised 150. I fixed the transport, declared the fiction dead, and left the
+number just as fictional. Checking the downstream limit was my job before making that claim.
+
+Fix — DERIVE the number instead of maintaining it: new pure `publishableApkLimitBytes(storeCap, scanCap)`
+returns the smaller of the two. The Publish form's `maxSizeMb` AND the route's 413 refusal now both read
+from it, so the advertised promise and the enforcement can never disagree again, and the moment the
+scanner is upgraded (paid plan, large-file endpoint, another vendor) the advertised limit rises with it
+automatically. `MAX_SCANNABLE_BYTES` is exported from malwareScan and env-overridable
+(`MALWARE_SCAN_MAX_BYTES`) for exactly that day. Kept dependency-free by passing both caps IN rather
+than importing — malwareScan already references apkInspect, so an import would have created a cycle.
+
+**Still open (rule 6), and this fix does not close it:** VirusTotal's free API is, by their own terms,
+not licensed for a commercial product, and is capped (~4 req/min, 500/day). CLAUDE.md already records
+this as an open item "before the store carries real traffic" — and making the store genuinely usable is
+precisely what brings that traffic closer. The 32 MB ceiling and the licensing question are the same
+decision: a paid VirusTotal plan or a different scanner resolves both at once.
+
+Gate: fe tsc 0 · server tsc 0 · full suite green · build ✓.
+
+#### A test of mine proved nothing — caught by testing the test
+
+While making the App Store's advertised limit honest, one of my own earlier assertions pinned a literal
+string (`'cleanupUpload();\n      return res.status(413)'`). Reformatting that branch broke it — a test
+flagging FORMATTING, not a defect. Rewrote it structurally.
+
+The rewrite then passed for the wrong reason twice, and both are worth recording because the failure
+mode is invisible unless you check:
+
+1. **Too broad a scope.** "Cleanup appears before this return" was satisfied by returns that predate any
+   temp file at all (form validation) or that fire because the claim itself failed. Bounded it to start
+   at the `cleanupUpload` definition — where cleanup is first possible, and therefore first required.
+2. **A tautology.** Even scoped, "cleanup appears somewhere earlier in the string" was satisfied by the
+   400 branch's cleanup when checking the 413 return. **Verified by deleting the 413 branch's cleanup:
+   the test still passed.** It proved nothing. Narrowed to the SAME BLOCK (last `{` before the return),
+   then re-verified: passes on the real code, FAILS on the injected leak.
+
+The discipline that caught it is the one applied to every fix this session — run the new test against
+the broken code and confirm it actually fails. Applied to my own test here, it found a test that would
+have sat green forever while the leak it was written to prevent shipped underneath it.
+
+No production defect was involved: the navStore cleanup was correct throughout. Only the test was wrong.

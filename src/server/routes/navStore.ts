@@ -19,9 +19,9 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import * as fs from 'node:fs';
-import { inspectApk, MAX_APK_BYTES } from '../lib/apkInspect';
+import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
 import { claimUpload } from './zipUpload';
-import { scanFile, isScanningConfigured } from '../lib/malwareScan';
+import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import {
   isStorageConfigured, putApk, getApk, deleteApk, saveApp, getApp, updateApp,
   listApps, listAppsByUid, toPublic,
@@ -133,7 +133,8 @@ export function registerNavStoreRoutes(app: Express): void {
       acceptingUploads: storage && scanning,
       uploadFeeInr: UPLOAD_FEE_INR,
       categories: STORE_CATEGORIES,
-      maxSizeMb: MAX_APK_BYTES / 1024 / 1024,
+      // The number users see must be the one that can actually publish (see publishableApkLimitBytes).
+      maxSizeMb: publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES) / 1024 / 1024,
       isAdmin: isStoreAdmin(me?.email ?? null),
       // Named plainly so the admin knows exactly what to switch on, rather than seeing a dead button.
       missing: [
@@ -183,9 +184,11 @@ export function registerNavStoreRoutes(app: Express): void {
     }
     const cleanupUpload = () => { if (claimedPath) { try { fs.unlinkSync(claimedPath); } catch { /* already gone */ } claimedPath = null; } };
     if (!bytes) { cleanupUpload(); return res.status(400).json({ error: 'Please choose your .apk file.' }); }
-    if (bytes.length > MAX_APK_BYTES) {
+    const publishCap = publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES);
+    if (bytes.length > publishCap) {
       cleanupUpload();
-      return res.status(413).json({ error: `That file is over the ${MAX_APK_BYTES / 1024 / 1024} MB limit.` });
+      // Same derived number the Publish form advertises — the refusal can never contradict the promise.
+      return res.status(413).json({ error: `That file is over the ${publishCap / 1024 / 1024} MB limit.` });
     }
     // The assembled temp file is never needed past this point — the bytes are in memory now.
     cleanupUpload();

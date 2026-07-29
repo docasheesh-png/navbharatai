@@ -23,10 +23,14 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
 ## 🟢 BUILD NOW — code-tractable, real upgrade, no infra needed
 
 ### A. Engine quality & intelligence (highest leverage)
-1. **Bounded `ask_user` clarification tool** — on an ambiguous/large prompt, ask 2–4 high-value scoping
-   questions BEFORE building (multi-tenant? RBAC? offline? which DB?), bounded so it never over-asks or
-   breaks the fast default path. OPEN (grep: no `ask_user` tool; `DialogueStateManager` has a requirements
-   phase but no interactive gate). *The admin's #1-priority category. Coherent + bounded → not a downgrade.*
+1. **Bounded `ask_user` clarification tool** — ✅ **DONE (verified 2026-07-21, corrected):** it IS built as
+   a NON-BLOCKING, friction-free clarify card. On a fresh domain build with real askable gaps the server
+   emits a `clarify` event (`routes/agentv3.ts` ~6800, gated `AGENTV3_ASK_USER=on`, default-OFF ⇒
+   byte-identical to today) and the client renders a dismissible card (`AgentV3Panel.tsx`
+   `state.pendingClarify`) — the build NEVER waits for an answer (honours "text reply > build app"); the
+   user adjusts any assumption via a normal follow-up. The old "OPEN — no `ask_user` tool" line was a STALE
+   grep miss (it searched the literal name `ask_user`, not the `clarify`-event implementation). REMAINING =
+   a DECISION only: flip `AGENTV3_ASK_USER=on` in Cloud Run (the admin's call — friction-free vs. zero-UI).
 2. **Prompt-cache stable prefixes for GLM/Kimi (AP-5)** — the stable-prefix STRUCTURE is **already built**
    (`systemPromptCache.ts` + `AGENTV3_CACHE_PREFIX`: it splits the volatile prefix out and keeps the large
    static body as a byte-stable prefix; the 2026-07-21 AP-4 fix-dispatch change preserves that byte-stability

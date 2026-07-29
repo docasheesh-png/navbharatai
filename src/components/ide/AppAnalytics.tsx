@@ -396,7 +396,9 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
   // ── Render ──
   return (
     <div
-      className="min-h-full w-full overflow-y-auto p-4 md:p-6 space-y-6 text-sm"
+      // h-full (not min-h-full) gives the scroll container a BOUNDED height so overflow-y-auto
+      // actually scrolls on mobile; the extra bottom padding clears the fixed bottom nav + safe area.
+      className="h-full w-full overflow-y-auto p-4 md:p-6 pb-28 space-y-6 text-sm overscroll-contain"
       style={{ background: '#0d1117', color: '#c9d1d9' }}
     >
       {/* ── Header ── */}

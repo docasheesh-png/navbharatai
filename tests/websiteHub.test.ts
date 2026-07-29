@@ -18,10 +18,11 @@ describe('App Settings — Your Website hub', () => {
   it('App Settings group leads with the real-website essentials as tiles', () => {
     const start = src.indexOf("title: 'App Settings'");
     expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 1000);
+    const block = src.slice(start, start + 1100);
     expect(block).toContain("id: 'domain'");
     expect(block).toContain("id: 'hosting'");
     expect(block).toContain("id: 'database'");
+    expect(block).toContain("id: 'auth'");
     expect(block).toContain("id: 'storage'");
     expect(block).toContain("id: 'secrets'");
     // The section carries the honest one-line purpose.
@@ -60,6 +61,11 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain('<StorageSettings');
   });
 
+  it('the Authentication sub-screen mounts the real AuthSettings connection panel', () => {
+    expect(src).toContain("settingsScreen === 'auth'");
+    expect(src).toContain('<AuthSettings');
+  });
+
   it('Frontend & Backend get an honest info line, NOT a fake tile', () => {
     expect(src).toContain('Frontend &amp; Backend — built for you');
     // They are NOT clickable settings tiles (no settingsScreen ids for them).
@@ -90,6 +96,16 @@ describe('App Settings hub — KB awareness', () => {
     const d = kb('connect_domain');
     expect(d).toBeTruthy();
     expect(d!.path).toContain('Settings → App Settings → Domain');
+  });
+
+  it('settings_auth KB entry exists, names Clerk/Auth0, and is honest about DB-bundled auth', () => {
+    const a = kb('settings_auth');
+    expect(a).toBeTruthy();
+    expect(a!.path).toContain('Settings → App Settings → Authentication');
+    expect(a!.description).toMatch(/Clerk/);
+    expect(a!.description).toMatch(/Auth0/);
+    expect(a!.description).toMatch(/Database connection/);
+    expect(a!.description).not.toMatch(/\b(glm|kimi|claude|anthropic|sonnet|opus|grok)\b/i);
   });
 
   it('settings_storage KB entry exists, is honest about S3/Cloudinary, and names the real path', () => {

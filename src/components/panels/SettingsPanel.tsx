@@ -27,6 +27,7 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 const SecretManager    = _lz(() => import('../SecretManager'),             'SecretManager');
 const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'DatabaseSettings');
 const StorageSettings  = _lz(() => import('../settings/StorageSettings'),  'StorageSettings');
+const AuthSettings     = _lz(() => import('../settings/AuthSettings'),     'AuthSettings');
 // "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
 // App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
 const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
@@ -419,11 +420,12 @@ export function SettingsPanel({
                     desc: 'Everything your live website needs',
                     items: [
                       // The real-website essentials, in one hub. Domain covers DNS + SSL (auto). Database
-                      // also provides login + storage when you connect Firebase/Supabase; dedicated
-                      // Authentication + Storage tiles (Clerk/Auth0, S3/Cloudinary) ship in follow-up slices.
+                      // also provides login + storage when you connect Firebase/Supabase; the dedicated
+                      // Authentication (Clerk/Auth0) + Storage (S3/Cloudinary) tiles cover standalone providers.
                       { id: 'domain', label: 'Domain', icon: Globe },
                       { id: 'hosting', label: 'Hosting & Publish', icon: Rocket },
                       { id: 'database', label: 'Database', icon: Database },
+                      { id: 'auth', label: 'Authentication', icon: ShieldCheck },
                       { id: 'storage', label: 'Storage', icon: HardDrive },
                       { id: 'secrets', label: 'Secrets & API Keys', icon: Lock },
                     ],
@@ -841,6 +843,26 @@ export function SettingsPanel({
                   <Suspense fallback={null}><DatabaseSettings userId={user.uid} /></Suspense>
                 ) : (
                   <div className="p-6 text-white text-center">Please log in to configure your database</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Authentication (admin 2026-07-29): connect a login/signup provider (Clerk / Auth0 /
+                Supabase / Firebase). Credentials are encrypted in Secrets & Keys; the server's
+                userAuthContext tells the builder to wire that exact provider for all login/session.
+                Supabase/Firebase auth also comes with the Database connection. */}
+            {settingsScreen === 'auth' && (
+              <motion.div
+                key="auth"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                {user ? (
+                  <Suspense fallback={null}><AuthSettings userId={user.uid} /></Suspense>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to connect authentication</div>
                 )}
               </motion.div>
             )}

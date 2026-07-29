@@ -227,6 +227,7 @@ import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuator
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
+import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
@@ -6496,6 +6497,14 @@ export function registerAgentV3Routes(app: Express): void {
         const storageContext = userStorageContext(vaultSecrets);
         if (storageContext) architectSystem = `${storageContext}\n\n---\n\n${architectSystem}`;
       } catch { /* connected-storage context is best-effort — a failure leaves the prompt unchanged */ }
+      // Connected-auth context (admin 2026-07-29): if the user connected a dedicated auth provider in
+      // Settings → App Settings → Authentication (Clerk / Auth0 / Supabase / Firebase), tell the builder
+      // to USE it for all login/session and never roll its own. Additive + best-effort — '' when none is
+      // connected. Coherent with the DB context: it instructs "DB for data, this provider for auth".
+      try {
+        const authContext = userAuthContext(vaultSecrets);
+        if (authContext) architectSystem = `${authContext}\n\n---\n\n${architectSystem}`;
+      } catch { /* connected-auth context is best-effort — a failure leaves the prompt unchanged */ }
       // P-AI.3 — Dialogue phase: give the agent a posture for this turn's lifecycle stage (debugging /
       // requirements / planning / deploy). hasExistingFiles ≈ isEditMode (an established project).
       // Additive + best-effort: '' for the baseline build phase, so existing turns are unchanged.

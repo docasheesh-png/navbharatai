@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyVisualTextEdit } from './VisualEditPatcher';
+import { applyVisualTextEdit, applyVisualStyleEdit } from './VisualEditPatcher';
 
 describe('applyVisualTextEdit — real AST-based JSX text edits (Visual Editor, v1: single simple text child)', () => {
   it('replaces a single simple text child at its exact source position', async () => {
@@ -142,5 +142,78 @@ describe('applyVisualTextEdit — real AST-based JSX text edits (Visual Editor, 
       }
     });
     expect(rendered).toBe('cost: {100} < max');
+  });
+});
+
+describe('applyVisualStyleEdit — real AST inline-style edits (Visual Editor Phase 2: toolbar / resize / reposition)', () => {
+  // `<div>`/`<img` sit at line 2, column 10 in each source ("  return <" = 9 chars, '<' at col 10).
+  const wrap = (jsx: string) => `export default function App() {\n  return ${jsx};\n}\n`;
+
+  it('ADDS style={{…}} to an element that has none', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<div>Hi</div>'), line: 2, column: 10, styleUpdates: { color: '#ff0000', fontSize: '18px' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.newSource).toContain("style={{ color: '#ff0000', fontSize: '18px' }}");
+      expect(r.newSource).toContain('>Hi</div>');
+    }
+  });
+
+  it('MERGES into an existing style — updates a key, adds a new one, keeps the rest', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap("<div style={{ color: 'blue', padding: '4px' }}>Hi</div>"), line: 2, column: 10, styleUpdates: { color: '#ff0000', fontSize: '18px' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.newSource).toContain("color: '#ff0000'"); // updated
+      expect(r.newSource).toContain("padding: '4px'");    // kept
+      expect(r.newSource).toContain("fontSize: '18px'");  // added
+      expect(r.newSource).not.toContain("color: 'blue'"); // old value gone
+    }
+  });
+
+  it('REMOVES a property when its value is empty (a reset)', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap("<div style={{ color: 'blue', padding: '4px' }}>Hi</div>"), line: 2, column: 10, styleUpdates: { padding: '' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.newSource).not.toContain('padding');
+      expect(r.newSource).toContain("color: 'blue'");
+    }
+  });
+
+  it('powers RESIZE + REPOSITION (same primitive, different keys): width/height/marginLeft', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<div>Box</div>'), line: 2, column: 10, styleUpdates: { width: '200px', height: '100px', marginLeft: '8px' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.newSource).toContain("width: '200px', height: '100px', marginLeft: '8px'");
+  });
+
+  it('works on a SELF-CLOSING element (<img/>)', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<img src="a.png" />'), line: 2, column: 10, styleUpdates: { width: '120px' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.newSource).toContain("style={{ width: '120px' }}");
+  });
+
+  it('PRESERVES a spread inside the style object ({ ...base, color })', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap("<div style={{ ...base, color: 'blue' }}>Hi</div>"), line: 2, column: 10, styleUpdates: { color: '#00ff00' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.newSource).toContain('...base');
+      expect(r.newSource).toContain("color: '#00ff00'");
+    }
+  });
+
+  it('REFUSES a dynamic style (style={var}) instead of guessing', async () => {
+    const r = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<div style={styleVar}>Hi</div>'), line: 2, column: 10, styleUpdates: { color: '#ff0000' } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/dynamic|simple object/i);
+  });
+
+  it('REJECTS unsafe keys and values (injection guard)', async () => {
+    const bad1 = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<div>Hi</div>'), line: 2, column: 10, styleUpdates: { 'color; evil': 'red' } });
+    expect(bad1.ok).toBe(false);
+    const bad2 = await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<div>Hi</div>'), line: 2, column: 10, styleUpdates: { color: "red'; alert(1)" } });
+    expect(bad2.ok).toBe(false);
+  });
+
+  it('rejects a non-JSX file and empty updates', async () => {
+    expect((await applyVisualStyleEdit({ filePath: 'src/x.ts', source: 'export const x=1;', line: 1, column: 1, styleUpdates: { color: 'red' } })).ok).toBe(false);
+    expect((await applyVisualStyleEdit({ filePath: 'src/App.tsx', source: wrap('<div>Hi</div>'), line: 2, column: 10, styleUpdates: {} })).ok).toBe(false);
   });
 });

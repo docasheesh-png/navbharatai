@@ -266,7 +266,7 @@ import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnos
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
-import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
+import { applyVisualTextEdit, applyVisualStyleEdit } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -3822,8 +3822,14 @@ export function registerAgentV3Routes(app: Express): void {
     const line = Number(req.body?.line);
     const column = Number(req.body?.column);
     const newText = typeof req.body?.newText === 'string' ? req.body.newText : null;
-    if (!workspaceId || !filePath || newText === null) {
-      res.status(400).json({ error: 'workspaceId, file and newText are required.' });
+    // Phase 2 (admin 2026-07-29): the same endpoint also applies inline-STYLE edits (toolbar / resize /
+    // reposition) when the client sends a `styleUpdates` map (camelCase CSS → value; '' removes a key).
+    const styleUpdatesRaw = req.body?.styleUpdates;
+    const styleUpdates = styleUpdatesRaw && typeof styleUpdatesRaw === 'object' && !Array.isArray(styleUpdatesRaw)
+      ? (styleUpdatesRaw as Record<string, string>) : null;
+    const isStyleEdit = styleUpdates != null && Object.keys(styleUpdates).length > 0;
+    if (!workspaceId || !filePath || (newText === null && !isStyleEdit)) {
+      res.status(400).json({ error: 'workspaceId, file and either newText or styleUpdates are required.' });
       return;
     }
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { // T0-9: strict — visual-edit writes files
@@ -3838,7 +3844,9 @@ export function registerAgentV3Routes(app: Express): void {
         res.status(404).json({ error: `${filePath} was not found in this workspace's current files.` });
         return;
       }
-      const result = await applyVisualTextEdit({ filePath, source, line, column, newText });
+      const result = isStyleEdit
+        ? await applyVisualStyleEdit({ filePath, source, line, column, styleUpdates: styleUpdates as Record<string, string> })
+        : await applyVisualTextEdit({ filePath, source, line, column, newText: newText as string });
       if (!result.ok) {
         res.status(422).json({ error: result.error });
         return;

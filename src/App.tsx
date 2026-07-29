@@ -2581,6 +2581,7 @@ export default function App() {
               setSettingsScreen={setSettingsScreen}
               toggleTab={toggleTab}
               setActiveView={setActiveView}
+              generatedCode={generatedCode}
               deviceMode={deviceMode}
               setDeviceMode={setDeviceMode}
               preferredLanguage={preferredLanguage}

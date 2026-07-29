@@ -18,7 +18,7 @@ describe('App Settings — Your Website hub', () => {
   it('App Settings group leads with the real-website essentials as tiles', () => {
     const start = src.indexOf("title: 'App Settings'");
     expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 1400);
+    const block = src.slice(start, start + 1800);
     expect(block).toContain("id: 'domain'");
     expect(block).toContain("id: 'hosting'");
     expect(block).toContain("id: 'database'");
@@ -31,7 +31,7 @@ describe('App Settings — Your Website hub', () => {
 
   it('Terminal, Logs and General stay INSIDE App Settings (admin: do not remove them)', () => {
     const start = src.indexOf("title: 'App Settings'");
-    const block = src.slice(start, start + 1400);
+    const block = src.slice(start, start + 1800);
     expect(block).toContain("id: 'general'");
     expect(block).toContain("id: 'shell'"); // Terminal
     expect(block).toContain("id: 'logs'");
@@ -67,6 +67,15 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain('<AuthSettings');
   });
 
+  it('Multi-Cloud Deploy is an App Settings tile mounting the real component with the app code', () => {
+    const start = src.indexOf("title: 'App Settings'");
+    const block = src.slice(start, start + 1800);
+    expect(block).toContain("id: 'cloudeploy'");
+    expect(src).toContain("settingsScreen === 'cloudeploy'");
+    // Real deploy needs the app bundle — generatedCode is threaded through, not stubbed.
+    expect(src).toContain('<MultiCloudDeploy generatedCode={generatedCode} />');
+  });
+
   it('Frontend & Backend get an honest info line, NOT a fake tile', () => {
     expect(src).toContain('Frontend &amp; Backend — built for you');
     // They are NOT clickable settings tiles (no settingsScreen ids for them).
@@ -97,6 +106,17 @@ describe('App Settings hub — KB awareness', () => {
     const d = kb('connect_domain');
     expect(d).toBeTruthy();
     expect(d!.path).toContain('Settings → App Settings → Domain');
+  });
+
+  it('settings_multicloud KB entry exists, is honest about real-vs-CLI, and moved out of Other AI', () => {
+    const m = kb('settings_multicloud');
+    expect(m).toBeTruthy();
+    expect(m!.path).toContain('Settings → App Settings → Multi-Cloud Deploy');
+    expect(m!.description).toMatch(/NavBharat Hosting/);
+    expect(m!.description).toMatch(/Vercel/);
+    // Honest: some platforms are real in-app, others show CLI steps — nothing faked.
+    expect(m!.description.toLowerCase()).toContain('cli');
+    expect(m!.description.toLowerCase()).toContain('faked');
   });
 
   it('settings_auth KB entry exists, names Clerk/Auth0, and is honest about DB-bundled auth', () => {

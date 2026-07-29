@@ -28,6 +28,9 @@ const SecretManager    = _lz(() => import('../SecretManager'),             'Secr
 const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'DatabaseSettings');
 const StorageSettings  = _lz(() => import('../settings/StorageSettings'),  'StorageSettings');
 const AuthSettings     = _lz(() => import('../settings/AuthSettings'),     'AuthSettings');
+// Multi-Cloud Deploy — moved into App Settings (admin 2026-07-29). Deploy the built app to
+// NavBharat Hosting, Vercel, Netlify, Firebase, Cloud Run, Railway or Render.
+const MultiCloudDeploy = _lz(() => import('../ide/MultiCloudDeploy'),      'MultiCloudDeploy');
 // "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
 // App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
 const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
@@ -65,6 +68,10 @@ export interface SettingsPanelProps {
   setSettingsScreen: (s: SettingsScreen) => void;
   toggleTab: (view: ViewType) => void;
   setActiveView: (view: ViewType) => void;
+
+  // The current app's generated code — passed through to the Multi-Cloud Deploy sub-screen so a real
+  // deploy (NavBharat Hosting / Vercel-with-token) has the app bundle to publish (admin 2026-07-29).
+  generatedCode?: string;
 
   // settings state
   deviceMode: 'auto' | 'mobile' | 'tablet' | 'desktop';
@@ -267,6 +274,7 @@ export function SettingsPanel({
   setSettingsScreen,
   toggleTab,
   setActiveView,
+  generatedCode,
   deviceMode,
   setDeviceMode,
   preferredLanguage,
@@ -424,6 +432,7 @@ export function SettingsPanel({
                       // Authentication (Clerk/Auth0) + Storage (S3/Cloudinary) tiles cover standalone providers.
                       { id: 'domain', label: 'Domain', icon: Globe },
                       { id: 'hosting', label: 'Hosting & Publish', icon: Rocket },
+                      { id: 'cloudeploy', label: 'Multi-Cloud Deploy', icon: CloudUpload },
                       { id: 'database', label: 'Database', icon: Database },
                       { id: 'auth', label: 'Authentication', icon: ShieldCheck },
                       { id: 'storage', label: 'Storage', icon: HardDrive },
@@ -957,10 +966,42 @@ export function SettingsPanel({
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-white">More publish options</p>
-                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Android APK, multi-cloud deploy, CI/CD — Home → Other AI → Publish &amp; Deploy</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Android APK, CI/CD &amp; more — Home → Other AI → Publish &amp; Deploy</p>
                   </div>
                   <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
                 </button>
+
+                <button
+                  onClick={() => setSettingsScreen('cloudeploy')}
+                  className="w-full flex items-center gap-3 p-4 min-h-[56px] bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
+                >
+                  <div className="p-2 bg-cyan-500/10 rounded-lg shrink-0">
+                    <CloudUpload className="w-5 h-5 text-cyan-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">Multi-Cloud Deploy</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Publish to Vercel, Netlify, Firebase, Cloud Run, Railway, Render or NavBharat Hosting</p>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
+                </button>
+              </motion.div>
+            )}
+
+            {/* Multi-Cloud Deploy (admin 2026-07-29): MOVED here from Home → Other AI → Publish & Deploy.
+                The real deploy component — NavBharat Hosting & Vercel (with the user's token) publish for
+                real via /api/pwa/save and /api/pro/deploy; other platforms show honest CLI steps. It needs
+                the app's generatedCode to have a bundle to publish, threaded from App.tsx. */}
+            {settingsScreen === 'cloudeploy' && (
+              <motion.div
+                key="cloudeploy"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading deploy…</div>}>
+                  <MultiCloudDeploy generatedCode={generatedCode} />
+                </Suspense>
               </motion.div>
             )}
 

@@ -86,7 +86,7 @@ export type SettingsScreen =
   | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell'
   | 'git' | 'logs' | 'report' | 'metrics' | 'profile'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.
-  | 'domain' | 'hosting' | 'auth' | 'storage';
+  | 'domain' | 'hosting' | 'auth' | 'storage' | 'cloudeploy';
 
 export type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
 

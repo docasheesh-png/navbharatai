@@ -20,13 +20,17 @@ describe('App Settings — Your Website hub', () => {
     expect(start).toBeGreaterThan(-1);
     const block = src.slice(start, start + 1800);
     expect(block).toContain("id: 'domain'");
-    expect(block).toContain("id: 'hosting'");
+    expect(block).toContain("id: 'cloudeploy'"); // Hosting & Deploy (single publish surface)
     expect(block).toContain("id: 'database'");
     expect(block).toContain("id: 'auth'");
     expect(block).toContain("id: 'storage'");
     expect(block).toContain("id: 'secrets'");
     // The section carries the honest one-line purpose.
     expect(block).toContain('Everything your app needs');
+    // No duplicate publish surface: the old standalone "Hosting & Publish" tile/screen is gone,
+    // merged into Hosting & Deploy (admin 2026-07-29).
+    expect(block).not.toContain("id: 'hosting'");
+    expect(src).not.toContain("settingsScreen === 'hosting'");
   });
 
   it('Terminal, Logs and General stay INSIDE App Settings (admin: do not remove them)', () => {
@@ -46,15 +50,14 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain("onBack={() => setSettingsScreen('root')}");
   });
 
-  it('the Hosting sub-screen is honest — explains auto-hosting and links to Domain (no fake deploy)', () => {
-    const start = src.indexOf("settingsScreen === 'hosting'");
+  it('the Hosting & Deploy screen keeps the honest auto-hosting note (merged from the old screen)', () => {
+    const start = src.indexOf("settingsScreen === 'cloudeploy'");
     expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 2200);
-    expect(block).toContain('hosted automatically');
-    // Real navigation to the Domain flow — a working button, not a dead one.
-    expect(block).toContain("onClick={() => setSettingsScreen('domain')}");
-    // No fabricated deploy button / fake status.
-    expect(block).not.toMatch(/Deploy Now|Deployed successfully/i);
+    const block = src.slice(start, start + 1600);
+    // The honest "your app is already hosted" reassurance was folded in — not lost.
+    expect(block).toContain('already hosted');
+    // The real deploy component still renders below it with the app bundle.
+    expect(block).toContain('<MultiCloudDeploy generatedCode={generatedCode} />');
   });
 
   it('the Storage sub-screen mounts the real StorageSettings connection panel', () => {
@@ -111,7 +114,7 @@ describe('App Settings hub — KB awareness', () => {
   it('settings_multicloud KB entry exists, is honest about real-vs-CLI, and moved out of Other AI', () => {
     const m = kb('settings_multicloud');
     expect(m).toBeTruthy();
-    expect(m!.path).toContain('Settings → App Settings → Multi-Cloud Deploy');
+    expect(m!.path).toContain('Settings → App Settings → Hosting & Deploy');
     expect(m!.description).toMatch(/NavBharat Hosting/);
     expect(m!.description).toMatch(/Vercel/);
     // Honest: some platforms are real in-app, others show CLI steps — nothing faked.

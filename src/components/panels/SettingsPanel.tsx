@@ -403,12 +403,11 @@ export function SettingsPanel({
                   </p>
                 </div>
                 {/* Grouped settings sections.
-                    "App Settings" now leads with EVERYTHING a real, working website needs, brought into
-                    ONE place (admin 2026-07-29): Domain (+ DNS + SSL), Hosting & Publish, Database, and
-                    Secrets & API keys — plus Authentication + Storage as they ship. These were previously
-                    scattered (Domain lived only under Sidebar → More / Home → Other AI). "Build & Debug"
-                    keeps the developer tools (General, Terminal, Logs). Frontend + Backend CODE is built
-                    for the user by NavBharatAI Pro, so they are not settings — see the honest note below. */}
+                    "App Settings" holds EVERYTHING a real, working website needs, in ONE place
+                    (admin 2026-07-29): Domain (+ DNS + SSL), Hosting & Deploy (Multi-Cloud — the single
+                    publish surface), Database, Authentication, Storage, Secrets & API Keys, plus the
+                    developer tools General, Terminal and Logs. Frontend + Backend CODE is built for the
+                    user by NavBharatAI Pro, so they are not settings — see the honest note below. */}
                 {[
                   {
                     title: 'Account',
@@ -431,8 +430,7 @@ export function SettingsPanel({
                       // also provides login + storage when you connect Firebase/Supabase; the dedicated
                       // Authentication (Clerk/Auth0) + Storage (S3/Cloudinary) tiles cover standalone providers.
                       { id: 'domain', label: 'Domain', icon: Globe },
-                      { id: 'hosting', label: 'Hosting & Publish', icon: Rocket },
-                      { id: 'cloudeploy', label: 'Multi-Cloud Deploy', icon: CloudUpload },
+                      { id: 'cloudeploy', label: 'Hosting & Deploy', icon: CloudUpload },
                       { id: 'database', label: 'Database', icon: Database },
                       { id: 'auth', label: 'Authentication', icon: ShieldCheck },
                       { id: 'storage', label: 'Storage', icon: HardDrive },
@@ -912,85 +910,12 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {/* Hosting & Publish (admin 2026-07-29): an HONEST hosting screen — it explains the real
-                behaviour (every NavBharatAI build is auto-hosted with a live URL) and links to the real
-                next steps (connect a custom domain here; more publish targets under Home → Other AI →
-                Publish & Deploy). No fake "deploy" button or fake status (real-features rule). */}
-            {settingsScreen === 'hosting' && (
-              <motion.div
-                key="hosting"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-4"
-              >
-                <div className="px-1 pt-4">
-                  <h2 className="text-2xl font-black text-white tracking-tight">Hosting &amp; Publish</h2>
-                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Where your app goes live</p>
-                </div>
-
-                <div className="bg-[#161b22] border border-emerald-500/20 rounded-2xl p-5 flex items-start gap-3">
-                  <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
-                    <CloudUpload className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-white leading-relaxed">Your app is hosted automatically</p>
-                    <p className="text-[11px] text-[#8b949e] font-medium mt-1 leading-relaxed">
-                      Every app you build on NavBharatAI is hosted for you and gets a live, shareable URL — with
-                      HTTPS/SSL — the moment it builds. There&apos;s no server to set up and no deploy button to press.
-                      To put it on your <span className="text-white font-bold">own domain</span>, connect one below.
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setSettingsScreen('domain')}
-                  className="w-full flex items-center gap-3 p-4 min-h-[56px] bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
-                >
-                  <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0">
-                    <Globe className="w-5 h-5 text-indigo-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">Connect your own domain</p>
-                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Point mywebsite.com at your app — DNS + SSL included</p>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
-                </button>
-
-                <button
-                  onClick={() => toggleTab('home')}
-                  className="w-full flex items-center gap-3 p-4 min-h-[56px] bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
-                >
-                  <div className="p-2 bg-amber-500/10 rounded-lg shrink-0">
-                    <Rocket className="w-5 h-5 text-amber-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">More publish options</p>
-                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Android APK, CI/CD &amp; more — Home → Other AI → Publish &amp; Deploy</p>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
-                </button>
-
-                <button
-                  onClick={() => setSettingsScreen('cloudeploy')}
-                  className="w-full flex items-center gap-3 p-4 min-h-[56px] bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
-                >
-                  <div className="p-2 bg-cyan-500/10 rounded-lg shrink-0">
-                    <CloudUpload className="w-5 h-5 text-cyan-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">Multi-Cloud Deploy</p>
-                    <p className="text-[10px] text-[#586069] font-bold mt-0.5">Publish to Vercel, Netlify, Firebase, Cloud Run, Railway, Render or NavBharat Hosting</p>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors shrink-0" />
-                </button>
-              </motion.div>
-            )}
-
-            {/* Multi-Cloud Deploy (admin 2026-07-29): MOVED here from Home → Other AI → Publish & Deploy.
-                The real deploy component — NavBharat Hosting & Vercel (with the user's token) publish for
-                real via /api/pwa/save and /api/pro/deploy; other platforms show honest CLI steps. It needs
-                the app's generatedCode to have a bundle to publish, threaded from App.tsx. */}
+            {/* Hosting & Deploy (admin 2026-07-29): the ONE publish surface. The standalone "Hosting &
+                Publish" info-screen was a duplicate of this (admin: "koi option duplicate to nahi hai?")
+                — it only explained auto-hosting and linked here — so it was merged in. The honest
+                auto-hosting note now sits atop the real Multi-Cloud Deploy component (NavBharat Hosting &
+                Vercel deploy for real; other platforms show honest CLI steps). Needs the app's
+                generatedCode to have a bundle to publish, threaded from App.tsx. */}
             {settingsScreen === 'cloudeploy' && (
               <motion.div
                 key="cloudeploy"
@@ -999,6 +924,17 @@ export function SettingsPanel({
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-4"
               >
+                <div className="bg-[#161b22] border border-emerald-500/20 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
+                    <CloudUpload className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <p className="text-[11px] text-[#8b949e] font-medium leading-relaxed">
+                    <span className="text-white font-bold">Your app is already hosted.</span> Every app you build on
+                    NavBharatAI gets a live, shareable URL with HTTPS/SSL the moment it builds — no server to set up.
+                    Use the options below to deploy it elsewhere (Vercel, Netlify, Firebase…), or connect your own
+                    domain from the <span className="text-white font-bold">Domain</span> tile.
+                  </p>
+                </div>
                 <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading deploy…</div>}>
                   <MultiCloudDeploy generatedCode={generatedCode} />
                 </Suspense>

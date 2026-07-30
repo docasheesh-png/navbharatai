@@ -7,6 +7,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 import { signOutEverywhere } from '../../lib/firebase';
+import { NotificationBell } from '../NotificationBell';
 
 interface MenuItem {
   id: string;
@@ -194,6 +195,8 @@ export function TopNav({
             <Maximize2 className="w-4 h-4" />
           </button>
         )}
+        {/* Admin → user messages (admin 2026-07-30): renders null when signed out. */}
+        <NotificationBell user={user} />
         {!user ? (
           <button
             onClick={() => setShowAuth(true)}

@@ -13,6 +13,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
@@ -935,15 +936,25 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     res.json({ latestKeyVersion: getLatestKeyVersion() });
   });
 
-  // ── Announcement broadcast ────────────────────────────────────────────────
-  app.post('/api/admin/announcement', verifyAdminToken, (req: Request, res: Response) => {
-    const { message, target } = req.body;
-    if (!message) return res.status(400).json({ error: 'message required' });
-    const ann = { id: Date.now().toString(), message, createdAt: new Date().toISOString(), target: target || 'all' };
+  // ── Announcement / user notification ──────────────────────────────────────
+  // Admin 2026-07-30: this now DELIVERS to users for real. Besides the in-memory admin list (kept for
+  // the admin's own recent-announcements view), it persists a durable notification targeted at ALL
+  // users or a SPECIFIC user (by email/userId), which the user's app fetches via /api/notifications.
+  app.post('/api/admin/announcement', verifyAdminToken, async (req: Request, res: Response) => {
+    const { message, target, email, userId } = req.body ?? {};
+    if (!message || !String(message).trim()) return res.status(400).json({ error: 'message required' });
+    const normalizedTarget = normalizeTarget({ target, email, userId });
+    if (normalizedTarget.type === 'user' && !normalizedTarget.userId && !normalizedTarget.email) {
+      return res.status(400).json({ error: 'For a single-user message, provide the user’s email (or user id).' });
+    }
+    // Durable, user-delivered notification.
+    const note = await saveNotification({ message: String(message), target: normalizedTarget, createdBy: 'admin' });
+    // In-memory admin recent-list (unchanged behaviour for the admin's own view).
+    const ann = { id: note?.id ?? Date.now().toString(), message, createdAt: new Date().toISOString(), target: target || 'all' };
     serverStats.announcements.push(ann);
     if (serverStats.announcements.length > 50) serverStats.announcements.shift();
-    audit('ADMIN_ANNOUNCEMENT', { message, target, ip: req.ip });
-    res.json({ ok: true, announcement: ann });
+    audit('ADMIN_ANNOUNCEMENT', { message, target: normalizedTarget.type, ip: req.ip });
+    res.json({ ok: true, announcement: ann, delivered: normalizedTarget.type });
   });
 
   app.get('/api/admin/announcements', verifyAdminToken, (_req: Request, res: Response) => {

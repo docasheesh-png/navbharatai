@@ -76,9 +76,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [promoDiscount, setPromoDiscount] = useState('');
   const [promoMaxUses, setPromoMaxUses] = useState('1');
 
-  // Announcement
+  // Announcement / user notification
   const [annMsg, setAnnMsg] = useState('');
   const [annTarget, setAnnTarget] = useState('all');
+  const [annEmail, setAnnEmail] = useState('');
 
   // Token adjust
   const [tokenDelta, setTokenDelta] = useState('');
@@ -425,9 +426,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   };
 
   const handleAnnouncement = async () => {
-    if (!annMsg) return;
-    const r = await adminPost('/api/admin/announcement', { message: annMsg, target: annTarget });
-    if (r.ok) { toast('Announcement sent!'); setAnnMsg(''); }
+    if (!annMsg.trim()) return;
+    if (annTarget === 'user' && !annEmail.trim()) { toast('Enter the user’s email to message one user.'); return; }
+    const r = await adminPost('/api/admin/announcement', { message: annMsg, target: annTarget, email: annTarget === 'user' ? annEmail.trim() : undefined });
+    if (r.ok) { toast(annTarget === 'user' ? `Message sent to ${annEmail.trim()}` : 'Message sent to all users!'); setAnnMsg(''); setAnnEmail(''); }
     else toast('Error: ' + r.error);
   };
 
@@ -1380,23 +1382,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </button>
               </div>
 
-              {/* Announcement */}
+              {/* Send a message to users (admin 2026-07-30): delivers a real notification to ALL users
+                  or to ONE specific user (by email). Users see it via the notification bell in the app. */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Megaphone className="w-4 h-4 text-amber-400" /> Send Announcement
+                  <Megaphone className="w-4 h-4 text-amber-400" /> Message Users
                 </h3>
-                <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your announcement message..." rows={3}
+                <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your message to users..." rows={3}
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-[#8b949e] outline-none focus:border-indigo-500 resize-none" />
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <select value={annTarget} onChange={e => setAnnTarget(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-indigo-500">
                     <option value="all">All Users</option>
-                    <option value="pro">Pro Users</option>
-                    <option value="free">Free Users</option>
+                    <option value="user">A Specific User</option>
                   </select>
+                  {annTarget === 'user' && (
+                    <input
+                      type="email"
+                      value={annEmail}
+                      onChange={e => setAnnEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="flex-1 min-w-[200px] bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-[#8b949e] outline-none focus:border-indigo-500"
+                    />
+                  )}
                   <button onClick={handleAnnouncement} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-black transition-all active:scale-95">
-                    Send Announcement
+                    Send Message
                   </button>
                 </div>
+                <p className="text-[10px] text-[#8b949e] leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>
               </div>
 
               {/* Promo Codes */}

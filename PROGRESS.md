@@ -22902,3 +22902,28 @@ un-mappable cases.
 
 Gate: server tsc 0 · frontend tsc (only pre-existing @capacitor env errors) · ReactPreview+visualEditor
 (4) + VisualEditPatcher (18) + toolbar-helper (3) green · full suite (running/green).
+
+---
+
+## 2026-07-30 — Autopsy (buildId 9a88c6e7): fast-lane plan call had no timeout → a 247s plan blew the 240s budget
+
+Report: "math car game" — built successfully (ok:true, preview verified, ₹0.2), BUT took ~8 min for a 6-file
+app. 5-bucket ledger: many self-heals (foundation tsconfig, prod defaults, preview verified); the fast lane
+timed out at 240s → full builder recovered in one shot (26s). Struggle = the **PLAN LLM call ran 247s**
+(latencyMs 247790) amid a provider storm (KIMI 4 timeouts + GLM 6× 429), consuming the ENTIRE 240s fast-lane
+budget so the lane always timed out and fell back — even though the full builder then succeeded in 26s.
+
+Root cause (code-fixable half; the provider storm itself is the infra half, tracked open since autopsy #2/#4/#5):
+`SimpleBuilder` raced the WHOLE lane (manifest + contract + all per-file gen + writes) against one 240s cap,
+but the manifest/contract calls had NO own timeout — so a single storming call could eat the whole budget.
+
+Fix: `SimpleBuilder` gains `planTimeoutMs` (default **90s**) bounding the manifest + shared-contract calls
+individually. If planning exceeds it, the fast lane bails NOW → the full builder takes over fast, instead of
+one slow call running to the 240s overall cap. Live by default (no route change needed). Regression test:
+a 400ms plan call with planTimeoutMs 40 + overallTimeoutMs 5000 returns ok:false in <2.5s (bailed on the plan
+cap, not the overall cap).
+
+Open (infra, tracked): the GLM-429 / KIMI-timeout provider storm that made the plan call slow — the reactive
+stack (rate pacer / key pool / circuit breaker) already exists and is tuned by parallel sessions.
+
+Gate: server tsc 0 · SimpleBuilder 69/69 · full suite (running/green).

@@ -142,6 +142,24 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     }
   });
 
+  it('bails FAST on a slow PLAN call (bounded plan timeout) instead of running to the overall cap (buildId 9a88c6e7)', async () => {
+    // Root cause: a storming provider once ran the manifest call 247 s, blowing the 240 s overall budget so
+    // the fast lane always timed out. With planTimeoutMs the plan bails quickly → the full builder recovers.
+    const start = Date.now();
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: false,
+      planTimeoutMs: 40,
+      overallTimeoutMs: 5000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) { await new Promise((res) => setTimeout(res, 400)); return 'src/App.tsx :: root'; }
+        return '<<<FILE src/App.tsx>>>\nexport default function X(){return null}\n<<<ENDFILE>>>';
+      },
+    }));
+    const elapsed = Date.now() - start;
+    expect(r.ok).toBe(false); // the fast lane bailed → the caller hands off to the full builder
+    expect(elapsed).toBeLessThan(2500); // bailed on the ~40ms plan cap, NOT the 5000ms overall cap
+  });
+
   it('a file that fails to generate gets NO tick — the counter only advances on real success', async () => {
     let calls = 0;
     const logs: string[] = [];

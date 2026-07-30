@@ -264,6 +264,7 @@ import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
@@ -8243,9 +8244,45 @@ export function registerAgentV3Routes(app: Express): void {
       // real-browser verification below — conclude the delivered preview does NOT render even after
       // the bounded self-heal, that build is not a delivered app and must not be billed. Server-side
       // verdict only (a client-reported failure can never zero a bill — not spoofable).
+      // RENDER RESCUE (admin 2026-07-30, autopsy: "app ban gayi, preview chal raha hai, par chat me
+      // error, build health 0, aur bill 0 — mera API kharcha hua par user ka bill 0"). Root cause: a
+      // build can finish `ok:false` (the agent hit a late tool error, ran out of steps, or a false
+      // "replied-without-building") YET have actually WRITTEN the app AND the live preview genuinely
+      // renders. Everything downstream keys off `result.ok`, so that working app is reported three
+      // wrong ways at once: the chat shows a failure, build-health reads 0, and — worst — the bill is
+      // zeroed (`zeroBillForFailedBuild`), so NavBharatAI eats the real API cost while the user pays
+      // ₹0. v5.0's OWN real-browser eyes are already the trusted authority that DOWNGRADES a bill when
+      // the preview doesn't render; here we use the SAME authority to UPGRADE: if `ok:false` but files
+      // were written and the live preview renders cleanly (no actionable console errors), the app is
+      // real — mark the build `ok:true` so health, the bill and the chat verdict all tell the truth.
+      // Best-effort + abortable + flag-gated (kill switch AGENTV3_RENDER_RESCUE=off); on any doubt it
+      // leaves `ok:false` untouched (never a fake success). Recorded as RENDER_RESCUE so the admin can
+      // see how often the upstream ok-verdict was wrong and chase that cause too (rule 5, 50/50 law).
+      let renderRescued = false;
+      if (
+        process.env.AGENTV3_RENDER_RESCUE !== 'off'
+        && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
+        && lastPreviewUrl && actuator.browseUrl && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
+      ) {
+        try {
+          const html = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+          const verdict = analyzePreviewHtml(html);
+          let consoleErrs: string[] = [];
+          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
+          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length })) {
+            result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
+            renderRescued = true;
+            try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
+            buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
+            events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
+          }
+        } catch { /* rescue is best-effort — on any failure the build stays ok:false (never a fake success) */ }
+      }
+
       let previewVerifiedFailed = false;
       if (
-        process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && lastPreviewUrl && actuator.browseUrl
+        process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && !renderRescued && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
         // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)

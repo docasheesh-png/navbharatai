@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -10,16 +10,30 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'security' | 'settings';
+type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'overview',  label: 'Overview',    icon: Activity },
   { id: 'users',     label: 'Users',        icon: Users },
   { id: 'engines',   label: 'AI Engines',   icon: Cpu },
   { id: 'revenue',   label: 'Revenue',      icon: IndianRupee },
+  { id: 'reports',   label: 'Build Reports', icon: FileText },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
+
+interface AdminBuildReportRow {
+  id: string;
+  reportedAt: number;
+  userId: string | null;
+  email: string | null;
+  workspaceId: string | null;
+  buildId: string | null;
+  ok: boolean | null;
+  appLabel: string;
+  rootCause: string | null;
+  summary: string | null;
+}
 
 const statCard = (label: string, value: string | number, sub: string, color: string, Icon: React.ComponentType<any>) => (
   <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 relative overflow-hidden">
@@ -104,9 +118,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [mfaCode, setMfaCode] = useState('');
   const [mfaBusy, setMfaBusy] = useState(false);
 
+  // Build Reports inbox (admin 2026-07-29) — the reports users submit via the single "Report" button.
+  const [buildReports, setBuildReports] = useState<AdminBuildReportRow[]>([]);
+  const [buildReportsLoading, setBuildReportsLoading] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<{ meta: AdminBuildReportRow; report: any } | null>(null);
+  const [selectedReportLoading, setSelectedReportLoading] = useState(false);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
+
+  const fetchBuildReports = useCallback(async () => {
+    setBuildReportsLoading(true);
+    try {
+      const r = await fetch('/api/admin/build-reports', { headers });
+      const d = await r.json();
+      setBuildReports(Array.isArray(d?.reports) ? d.reports : []);
+    } catch (e) { console.error(e); setBuildReports([]); }
+    finally { setBuildReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const openBuildReport = useCallback(async (id: string) => {
+    setSelectedReportLoading(true);
+    try {
+      const r = await fetch(`/api/admin/build-reports/${encodeURIComponent(id)}`, { headers });
+      if (!r.ok) throw new Error('not found');
+      const d = await r.json();
+      setSelectedReport(d);
+    } catch (e) { console.error(e); toast('Could not open that report.'); }
+    finally { setSelectedReportLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const downloadSelectedReport = () => {
+    if (!selectedReport) return;
+    try {
+      const blob = new Blob([JSON.stringify(selectedReport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `build-report-${selectedReport.meta.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { console.error(e); toast('Download failed.'); }
+  };
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
@@ -251,6 +309,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
+  useEffect(() => { if (activeTab === 'reports') fetchBuildReports(); }, [activeTab, fetchBuildReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -1074,6 +1133,81 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── BUILD REPORTS TAB (admin 2026-07-29) — the reports users submit via "Report" ── */}
+          {activeTab === 'reports' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-white tracking-tight">Build Reports</h3>
+                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only.</p>
+                </div>
+                <button
+                  onClick={fetchBuildReports}
+                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
+                </button>
+              </div>
+
+              {buildReportsLoading ? (
+                <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading reports…</div>
+              ) : buildReports.length === 0 ? (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No build reports submitted yet.</div>
+              ) : (
+                <div className="grid gap-2">
+                  {buildReports.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => openBuildReport(r.id)}
+                      className="w-full text-left bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4 hover:border-indigo-500/40 hover:bg-white/5 transition-all flex items-start gap-3"
+                    >
+                      <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-bold text-white truncate">{r.appLabel}</span>
+                        <span className="block text-[11px] text-[#8b949e] mt-0.5 truncate">
+                          {r.email || r.userId || 'unknown user'} · {new Date(r.reportedAt).toLocaleString()}
+                        </span>
+                        {r.rootCause && <span className="block text-[11px] text-amber-400/80 mt-1 truncate">Root cause: {r.rootCause}</span>}
+                      </span>
+                      <Eye className="w-4 h-4 text-[#8b949e] shrink-0 mt-0.5" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Detail viewer for the selected report */}
+              {(selectedReport || selectedReportLoading) && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setSelectedReport(null)}>
+                  <div className="bg-[#0d1117] border border-white/15 rounded-[1.5rem] w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
+                        {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={downloadSelectedReport}
+                          disabled={!selectedReport}
+                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Download JSON
+                        </button>
+                        <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4">
+                      {selectedReportLoading ? (
+                        <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>
+                      ) : (
+                        <pre className="text-[11px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words font-mono">{JSON.stringify(selectedReport?.report ?? {}, null, 2)}</pre>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

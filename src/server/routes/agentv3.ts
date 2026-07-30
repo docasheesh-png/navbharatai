@@ -263,6 +263,7 @@ import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNar
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
@@ -2559,6 +2560,50 @@ export function registerAgentV3Routes(app: Express): void {
   // v5.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
   // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v5.0 panel's
   // "Download report" button reads this so the admin can hand the JSON to Claude for fixes.
+  // REPORT TO ADMIN (admin 2026-07-29): the user no longer downloads/copies their build report — a
+  // single "Report" button submits it to the admin inbox. The report is resolved SERVER-side (same
+  // sources as the diagnostics GET) and snapshotted into admin_build_reports; the user gets only an
+  // { ok } acknowledgement, never the content. Ownership is enforced from the VERIFIED token, never
+  // the request body, so a user can only report their OWN build (no IDOR). Honest: if there is no
+  // report yet, or the save genuinely fails, we say so — never a fake "sent".
+  app.post('/api/agentv3/report-to-admin', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { workspaceId?: string; buildId?: string; activeBuildId?: string; promptHash?: string };
+    const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+    const buildId = typeof body.buildId === 'string' && body.buildId ? body.buildId : '';
+    const verifiedUid = await verifyFirebaseToken(req);
+    // Ownership: a workspace-scoped report requires read access to that workspace (grants the
+    // unguessable anon-workspace capability case too, mirroring the diagnostics GET).
+    if (workspaceId && !verifiedWorkspaceReadOk(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'This build report belongs to another account.' });
+      return;
+    }
+    // Resolve the report from the same durable sources the download used.
+    let report: BuildDiagnosticsReport | null = null;
+    if (workspaceId && buildId) report = await getDiagnosticsHistoryItem(workspaceId, buildId).catch(() => null);
+    if (!report && workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
+    if (!report && verifiedUid) report = lastDiagnostics.get(verifiedUid) ?? null;
+    if (!report && verifiedUid) report = await loadLatestForUser(verifiedUid).catch(() => null);
+    if (!report) {
+      res.status(404).json({ error: 'No build report yet — build an app first, then send the report.' });
+      return;
+    }
+    const email = verifiedUid ? await resolveVerifiedEmail(verifiedUid).catch(() => null) : null;
+    const record = buildAdminReportRecord(report, {
+      userId: verifiedUid ?? null,
+      email,
+      workspaceId: workspaceId || report.workspaceId || null,
+      buildId: buildId || report.buildId || null,
+      reportedAt: Date.now(),
+    });
+    const saved = await saveAdminBuildReport(record);
+    if (!saved) {
+      res.status(502).json({ error: 'Could not send the report right now — please try again in a moment.' });
+      return;
+    }
+    try { audit('AGENTV3_REPORT_TO_ADMIN', { userId: verifiedUid ?? undefined, workspaceId: record.meta.workspaceId ?? undefined, ok: record.meta.ok ?? undefined }); } catch { /* never throws */ }
+    res.json({ ok: true });
+  });
+
   app.get('/api/agentv3/diagnostics', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;

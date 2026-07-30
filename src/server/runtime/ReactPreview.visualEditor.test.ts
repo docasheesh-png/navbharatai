@@ -83,4 +83,17 @@ describe('Visual Editor — reliable data-nbai-src mapping', () => {
     expect(html).toContain('selectEl');           // single click selects (double-click edits text)
     expect(html).toContain('dblclick');           // text edit is a deliberate double-click
   });
+
+  it('the preview HTML carries the Phase 2 resize + reposition mechanism (Slice D/E)', () => {
+    const app = {
+      'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' } }),
+      'src/main.tsx': "import App from './App';\nexport default function boot(){ return App; }",
+      'src/App.tsx': 'export default function App(){ return <div><h1>Hi</h1></div>; }',
+    };
+    const html = buildReactPreview(VirtualFileSystem.fromRecord(app));
+    expect(html).toContain('__nbaiStyleCommit');   // resize/move persist message
+    expect(html).toContain('onHandleDown');         // the resize grip drag
+    expect(html).toContain('translate(');           // layout-safe move via transform
+    expect(html).toContain('data-nbai-ui');          // the grip is marked so it never self-selects
+  });
 });

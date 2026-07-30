@@ -749,9 +749,19 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   function clearSelection() {
     if (selected) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
     selected = null; selectedSrc = null;
+    if (handle) handle.style.display = 'none';
   }
-  // Select an element (draw the selection box + tell the parent, which shows the toolbar). Does NOT edit
-  // text — that's a double-click (or the toolbar's "Edit text"), so a single click is safe to explore with.
+  function reportSelection() {
+    if (!selected || !selectedSrc) return;
+    try {
+      (window.parent || window.top).postMessage({
+        __nbaiSelect: true, file: selectedSrc.fileName, line: selectedSrc.lineNumber, column: selectedSrc.columnNumber,
+        tag: (selected.tagName || '').toLowerCase(), styles: readStyles(selected),
+      }, '*');
+    } catch (e) {}
+  }
+  // Select an element (draw the selection box + resize grip + tell the parent, which shows the toolbar).
+  // Does NOT edit text — that's a double-click (or the toolbar's "Edit text") — so a single click is safe.
   function selectEl(host, info) {
     clearHover();
     if (selected && selected !== host) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
@@ -759,15 +769,83 @@ const VISUAL_EDITOR_SCRIPT = `<script>
     selectedSrc = { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber };
     host.style.outline = '2px solid #10b981';
     host.style.outlineOffset = '1px';
+    ensureHandle();
+    positionHandle();
+    reportSelection();
+  }
+
+  // ---- Slice D (resize) + E (reposition): a bottom-right grip resizes width/height; dragging the selected
+  // element's body moves it via transform: translate(...) — a LAYOUT-SAFE move (transform never reflows
+  // siblings, so responsive layouts don't break). Both persist through the same applyVisualStyleEdit. ----
+  var handle = null;
+  var drag = null; // { kind:'resize'|'move', sx, sy, w, h, tx, ty, moved } while a drag is active
+  function isUi(el) { return !!(el && el.getAttribute && el.getAttribute('data-nbai-ui')); }
+  function ensureHandle() {
+    if (handle) return handle;
+    handle = document.createElement('div');
+    handle.setAttribute('data-nbai-ui', '1');
+    handle.style.cssText = 'position:fixed;width:14px;height:14px;background:#10b981;border:2px solid #fff;border-radius:3px;z-index:2147483647;cursor:nwse-resize;box-shadow:0 1px 4px rgba(0,0,0,.4);display:none';
+    handle.addEventListener('mousedown', onHandleDown, true);
+    document.body.appendChild(handle);
+    return handle;
+  }
+  function positionHandle() {
+    if (!handle) return;
+    if (!selected) { handle.style.display = 'none'; return; }
+    var r = selected.getBoundingClientRect();
+    handle.style.left = (r.right - 7) + 'px';
+    handle.style.top = (r.bottom - 7) + 'px';
+    handle.style.display = 'block';
+  }
+  function parseTranslate(el) {
+    var m = (el.style.transform || '').match(/translate\\(\\s*(-?[0-9.]+)px\\s*,\\s*(-?[0-9.]+)px\\s*\\)/);
+    return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]) } : { x: 0, y: 0 };
+  }
+  function commitStyle(updates) {
+    if (!selectedSrc) return;
     try {
       (window.parent || window.top).postMessage({
-        __nbaiSelect: true, file: info.fileName, line: info.lineNumber, column: info.columnNumber,
-        tag: (host.tagName || '').toLowerCase(), styles: readStyles(host),
+        __nbaiStyleCommit: true, file: selectedSrc.fileName, line: selectedSrc.lineNumber, column: selectedSrc.columnNumber, styleUpdates: updates,
       }, '*');
     } catch (e) {}
   }
+  function onHandleDown(e) {
+    if (!editMode || !selected) return;
+    e.preventDefault(); e.stopPropagation();
+    var r = selected.getBoundingClientRect();
+    drag = { kind: 'resize', sx: e.clientX, sy: e.clientY, w: r.width, h: r.height };
+  }
+  function onBodyDown(e) {
+    if (!editMode || editing || isUi(e.target)) return;
+    var info = srcFor(e.target);
+    // A MOVE drag only starts on the ALREADY-selected element (first click just selects, via onClick).
+    if (info && selected === info.host) {
+      var tr = parseTranslate(selected);
+      drag = { kind: 'move', sx: e.clientX, sy: e.clientY, tx: tr.x, ty: tr.y, moved: false };
+    }
+  }
+  function onMove(e) {
+    if (!drag) return;
+    var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (drag.kind === 'resize') {
+      selected.style.width = Math.max(8, Math.round(drag.w + dx)) + 'px';
+      selected.style.height = Math.max(8, Math.round(drag.h + dy)) + 'px';
+      drag.moved = true;
+      positionHandle();
+    } else {
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      if (drag.moved) { selected.style.transform = 'translate(' + Math.round(drag.tx + dx) + 'px, ' + Math.round(drag.ty + dy) + 'px)'; positionHandle(); }
+    }
+  }
+  function onUp() {
+    if (!drag) return;
+    var d = drag; drag = null;
+    if (!d.moved) return;
+    if (d.kind === 'resize') { commitStyle({ width: selected.style.width, height: selected.style.height }); reportSelection(); }
+    else { commitStyle({ transform: selected.style.transform }); }
+  }
   function onMouseOver(e) {
-    if (!editMode || editing) return;
+    if (!editMode || editing || isUi(e.target)) return;
     var info = srcFor(e.target);
     var host = info ? info.host : e.target;
     if (hovered && hovered !== host) clearHover();
@@ -794,7 +872,7 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   // A single click SELECTS (safe to explore); the parent shows the toolbar. Text editing is a deliberate
   // double-click (or the toolbar's "Edit text"), so clicking to inspect/style never traps you in a caret.
   function onClick(e) {
-    if (!editMode || editing) return;
+    if (!editMode || editing || isUi(e.target)) return;
     var info = srcFor(e.target);
     if (!info) { flashNotEditable(e.target); return; }
     e.preventDefault();
@@ -855,6 +933,11 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   document.addEventListener('mouseover', onMouseOver, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('dblclick', onDblClick, true);
+  document.addEventListener('mousedown', onBodyDown, true);
+  document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('mouseup', onUp, true);
+  window.addEventListener('scroll', positionHandle, true);
+  window.addEventListener('resize', positionHandle);
   document.addEventListener('blur', onBlur, true);
   document.addEventListener('keydown', onKeyDown, true);
 })();

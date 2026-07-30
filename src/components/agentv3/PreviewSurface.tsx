@@ -480,34 +480,45 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // real source via the visual-edit endpoint (styleUpdates → applyVisualStyleEdit). No reload — the live DOM
   // already reflects it and the source is saved, so rapid tweaks (bold, size±) stay smooth. On a server
   // error the message shows honestly.
-  const applyStyle = useCallback((sel: VisualSelection, styleUpdates: Record<string, string>) => {
-    if (!workspaceId) return;
-    postToIframe({ __nbaiApplyStyle: styleUpdates });
+  // Persist a style change to the real source (no live re-apply — the iframe already reflects it, either
+  // from applyStyle's postMessage or from a resize/move drag the iframe applied itself).
+  const persistStyle = useCallback((loc: { file: string; line: number; column: number }, styleUpdates: Record<string, string>) => {
+    if (!workspaceId || !loc.file) return;
     setSavingEdit(true); setEditError('');
     void (async () => {
       try {
         const res = await fetch('/api/agentv3/visual-edit', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          body: JSON.stringify({ workspaceId, userId, email, file: sel.file, line: sel.line, column: sel.column, styleUpdates }),
+          body: JSON.stringify({ workspaceId, userId, email, file: loc.file, line: loc.line, column: loc.column, styleUpdates }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
-        onFileEdited?.(sel.file, typeof data.content === 'string' ? data.content : '');
+        onFileEdited?.(loc.file, typeof data.content === 'string' ? data.content : '');
       } catch (err) {
         setEditError(err instanceof Error ? err.message : String(err));
       } finally {
         setSavingEdit(false);
       }
     })();
-  }, [workspaceId, userId, email, onFileEdited, postToIframe]);
+  }, [workspaceId, userId, email, onFileEdited]);
+  // Toolbar edit: live-apply in the iframe (instant), then persist. No reload → rapid tweaks stay smooth.
+  const applyStyle = useCallback((sel: VisualSelection, styleUpdates: Record<string, string>) => {
+    postToIframe({ __nbaiApplyStyle: styleUpdates });
+    persistStyle(sel, styleUpdates);
+  }, [postToIframe, persistStyle]);
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string> } | null;
+      const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; __nbaiStyleCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string>; styleUpdates?: Record<string, string> } | null;
       if (!d || typeof d !== 'object') return;
       // The iframe reports which element the user picked (+ its current styles) → show the toolbar.
       if (d.__nbaiSelect === true && typeof d.file === 'string') {
         setSelection({ file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0, tag: typeof d.tag === 'string' ? d.tag : '', styles: d.styles && typeof d.styles === 'object' ? d.styles : {} });
+        return;
+      }
+      // A resize/move drag finished in the iframe → persist the final width/height/transform (no re-apply).
+      if (d.__nbaiStyleCommit === true && workspaceId && typeof d.file === 'string' && d.styleUpdates && typeof d.styleUpdates === 'object') {
+        persistStyle({ file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0 }, d.styleUpdates);
         return;
       }
       if (d.__nbaiVisualEditCommit !== true || !workspaceId || typeof d.file !== 'string') return;
@@ -535,7 +546,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, userId, email, onFileEdited]);
+  }, [workspaceId, userId, email, onFileEdited, persistStyle]);
   // Turn edit mode off whenever we leave in-browser mode or the preview reloads with fresh content —
   // the iframe itself is a NEW document after a reload, so any prior postMessage toggle is gone anyway;
   // this just keeps the button's own displayed state honest.
@@ -707,6 +718,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 className={`w-6 h-6 rounded border text-[10px] font-semibold uppercase ${selection.styles.textAlign === a ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title={`Align ${a}`}>{a[0]}</button>
             ))}
           </div>
+          <span className="text-zinc-600 hidden sm:inline">drag = move · corner = resize</span>
           <div className="flex-1" />
           <button onClick={() => postToIframe({ __nbaiEditText: true })} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Edit this element's text (or double-click it)">Edit text</button>
           <button onClick={() => { setSelection(null); postToIframe({ __nbaiDeselect: true }); }} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Deselect">Done</button>

@@ -22869,3 +22869,36 @@ Next: Slice D (resize handles → width/height) and Slice E (layout-safe reposit
 
 Gate: server tsc 0 · frontend tsc (only pre-existing @capacitor env errors) · ReactPreview+visualEditor +
 toolbar-helper tests green · full suite (running/green).
+
+---
+
+## 2026-07-29 — Visual Editor Phase 2 Slice D + E: resize + layout-safe reposition (COMPLETES "pura banao")
+
+Finishes the Visual Editor. Both reuse Slice C's selection + the Slice A `applyVisualStyleEdit` primitive.
+
+**Slice D — Resize (`ReactPreview.ts` inspector):** the selected element gets a bottom-right grip (a
+`position:fixed` handle in the iframe document, so it aligns with the element and follows scroll/resize).
+Dragging it live-sets `width`/`height` (min 8px); on release it posts `__nbaiStyleCommit { width, height }`
+which the parent persists via the same endpoint. The grip is tagged `data-nbai-ui` so it never self-selects,
+and `onClick`/`onMouseOver`/`onBodyDown` all skip UI elements.
+
+**Slice E — Reposition (layout-safe):** dragging the ALREADY-selected element's body moves it via
+`transform: translate(dx, dy)` — chosen deliberately because transforms DON'T reflow siblings, so a free
+move never breaks the responsive layout (the honest, non-breaking reposition I promised over free absolute
+drag). A 3px threshold distinguishes a move-drag from a click-select; on release it persists
+`{ transform: 'translate(Xpx, Ypx)' }`. Both `width/height` and `translate(...)` pass the style patcher's
+safe-value charset, so they round-trip into source cleanly.
+
+**Parent (`PreviewSurface.tsx`):** `applyStyle` was split into `persistStyle` (endpoint only) + `applyStyle`
+(live postMessage + persist); the new `__nbaiStyleCommit` message routes drag results to `persistStyle` (no
+re-apply — the iframe already shows it). Toolbar shows a "drag = move · corner = resize" hint.
+
+Tests: inspector HTML carries `__nbaiStyleCommit` / `onHandleDown` / `translate(` / `data-nbai-ui`.
+
+**Visual Editor COMPLETE (Ph1 → Ph2 C/D/E):** click to select → toolbar (text via double-click, bold, font
+size, colour, align) → drag corner to resize → drag body to move — all landing in the REAL source via AST,
+reliable on every element (data-nbai-src) and every React version. Kill-nothing, honest-refusal on
+un-mappable cases.
+
+Gate: server tsc 0 · frontend tsc (only pre-existing @capacitor env errors) · ReactPreview+visualEditor
+(4) + VisualEditPatcher (18) + toolbar-helper (3) green · full suite (running/green).

@@ -22810,3 +22810,30 @@ add a selection toolbar (font size / color / bold / align / padding) + safe resi
 boxes). Free-drag reposition breaks responsive layouts, so a layout-safe nudge/move will be offered instead.
 
 Gate: server tsc 0 · ReactPreview 8/8 + visualEditor 2/2 · full suite (running/green).
+
+---
+
+## 2026-07-29 — Visual Editor Phase 2 (admin: "pura banao — text + resize + reposition + style") — Slice A+B (server)
+
+On Phase 1's reliable `data-nbai-src` mapping, Phase 2 adds real STYLE editing. Slice A+B is the server half.
+
+**`applyVisualStyleEdit` (`VisualEditPatcher.ts`) — the ONE primitive behind toolbar + resize + reposition**
+(all are inline-style edits). Given (filePath, source, line, column, styleUpdates: camelCase CSS → value),
+it merges onto the JSX element's `style={{…}}` via ts-morph (real AST, never a string hack):
+- Adds `style={{…}}` when absent; merges/updates keys when present; removes a key on empty value ('' = reset).
+- PRESERVES a spread inside the object (`{ ...base, color }`) — so apps that spread a base style still work.
+- Refuses HONESTLY when the style is dynamic (`style={x}` or a spread attribute) instead of guessing.
+- Injection-guarded: safe key regex (camelCase identifier) + conservative CSS-value charset (blocks quotes/
+  semicolons/braces/backslash), so values embed in a string literal with zero injection risk.
+- 10 tests (add / merge / remove / resize+reposition keys / self-closing `<img>` / preserve-spread /
+  refuse-dynamic / reject-unsafe key+value / non-JSX+empty).
+
+**Endpoint:** `/api/agentv3/visual-edit` now routes to `applyVisualStyleEdit` when the client sends
+`styleUpdates` (else the existing text edit) — same strict ownership check + dual write-through (live actuator
++ durable merge) as text edits. One endpoint, both edit kinds.
+
+Slice C (next, UI): inspector SELECTION (report the clicked element + its box + current styles to the parent)
++ a floating TOOLBAR in PreviewSurface (font size / color / bold / align / padding) that calls this endpoint
+with live preview. Then Slice D (resize handles) and Slice E (layout-safe reposition).
+
+Gate: server tsc 0 · VisualEditPatcher 18/18 · full suite (running/green).

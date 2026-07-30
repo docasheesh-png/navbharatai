@@ -359,8 +359,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="none"
-            className="w-full h-full bg-[#1e1e1e] text-[#d4d4d4] font-mono text-[13px] leading-relaxed p-4 resize-none outline-none border-none"
-            style={{ fontFamily: "'Courier New', monospace", caretColor: '#569cd6' }}
+            className="w-full h-full font-mono text-[13px] leading-relaxed p-4 resize-none outline-none border-none"
+            // THEME-AWARE (light-theme readability fix 2026-07-22): the mobile textarea editor was hardcoded
+            // to a DARK palette (bg #1e1e1e / text #d4d4d4). The compat layer remapped the BACKGROUND to the
+            // theme surface (white in Light), but #d4d4d4 was never mapped, so the code text stayed light grey
+            // on white — invisible in the Light theme. Drive both colours from the semantic theme variables
+            // (defined per html[data-theme] for all 5 themes), falling back to the original dark values when
+            // no theme attribute is set — so every theme (Light included) renders readable code.
+            style={{
+              fontFamily: "'Courier New', monospace",
+              caretColor: '#569cd6',
+              background: 'var(--surface-card, #1e1e1e)',
+              color: 'var(--text-body, #d4d4d4)',
+            }}
           />
         ) : (
         <MonacoEditor

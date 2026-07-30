@@ -22927,3 +22927,22 @@ Open (infra, tracked): the GLM-429 / KIMI-timeout provider storm that made the p
 stack (rate pacer / key pool / circuit breaker) already exists and is tuned by parallel sessions.
 
 Gate: server tsc 0 · SimpleBuilder 69/69 · full suite (running/green).
+
+---
+
+## 2026-07-22 — Light-theme editor readability: mobile code text was invisible (hardcoded dark palette)
+
+**Report (admin, screenshot):** in the LIGHT theme the Code Studio editor showed code as faint grey on white —
+unreadable. (5 app themes: light / dark / dim / comfort / contrast.)
+
+**Root cause:** on mobile the editor uses a plain `<textarea>` fallback (Monaco is skipped for memory), and it
+was hardcoded to a DARK palette: `bg-[#1e1e1e] text-[#d4d4d4]`. The theme-compat layer remapped the
+BACKGROUND literal (`#1e1e1e` → `--surface-card`, i.e. white in Light) but `#d4d4d4` was never in the compat
+map, so the code text stayed light grey `#d4d4d4` on a white background → invisible in Light.
+
+**Fix:** (a) `Editor.tsx` — the textarea now drives both colours from the semantic theme variables
+(`background: var(--surface-card)`, `color: var(--text-body)`) with the original dark values as fallbacks, so
+it renders readable code in ALL 5 themes (Light → dark `#1e293b` text on white). (b) Sibling sweep (rule 3):
+the editor chrome greys `#969696` (tab labels) and `#858585` (status bar), also unmapped, added to the
+theme-compat `--text-muted` group so they're readable on the light-remapped surfaces too. Frontend tsc: no new
+errors (only pre-existing capacitor-native module stubs). Pure styling change.

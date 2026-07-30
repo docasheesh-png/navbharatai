@@ -105,6 +105,22 @@ function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; ch
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
+// Visual-editor toolbar helpers (pure — read the selected element's reported styles into control state).
+export function veIsBold(styles: Record<string, string>): boolean {
+  const w = styles.fontWeight || '';
+  return w === 'bold' || parseInt(w, 10) >= 600;
+}
+export function veFontPx(styles: Record<string, string>): number {
+  const n = parseFloat(styles.fontSize || '');
+  return Number.isFinite(n) && n > 0 ? n : 16;
+}
+export function veRgbToHex(color: string): string {
+  const m = (color || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!m) return '#000000';
+  const h = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+  return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
+}
+
 export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
@@ -449,13 +465,52 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [editMode, setEditMode] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
-  const setIframeEditMode = useCallback((on: boolean) => {
-    try { inBrowserIframeRef.current?.contentWindow?.postMessage({ __nbaiSetEditMode: on }, '*'); } catch { /* best-effort */ }
+  // Phase 2 (admin 2026-07-29): the element picked in edit mode + its current styles, so the toolbar (font
+  // size / color / bold / align) opens showing real values and edits the RIGHT element.
+  type VisualSelection = { file: string; line: number; column: number; tag: string; styles: Record<string, string> };
+  const [selection, setSelection] = useState<VisualSelection | null>(null);
+  const postToIframe = useCallback((msg: Record<string, unknown>) => {
+    try { inBrowserIframeRef.current?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
   }, []);
+  const setIframeEditMode = useCallback((on: boolean) => {
+    postToIframe({ __nbaiSetEditMode: on });
+    if (!on) setSelection(null);
+  }, [postToIframe]);
+  // Apply an inline-style change to the selected element: LIVE in the iframe (instant), then PERSIST to the
+  // real source via the visual-edit endpoint (styleUpdates → applyVisualStyleEdit). No reload — the live DOM
+  // already reflects it and the source is saved, so rapid tweaks (bold, size±) stay smooth. On a server
+  // error the message shows honestly.
+  const applyStyle = useCallback((sel: VisualSelection, styleUpdates: Record<string, string>) => {
+    if (!workspaceId) return;
+    postToIframe({ __nbaiApplyStyle: styleUpdates });
+    setSavingEdit(true); setEditError('');
+    void (async () => {
+      try {
+        const res = await fetch('/api/agentv3/visual-edit', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId, userId, email, file: sel.file, line: sel.line, column: sel.column, styleUpdates }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+        onFileEdited?.(sel.file, typeof data.content === 'string' ? data.content : '');
+      } catch (err) {
+        setEditError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingEdit(false);
+      }
+    })();
+  }, [workspaceId, userId, email, onFileEdited, postToIframe]);
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      const d = e.data as { __nbaiVisualEditCommit?: boolean; file?: string; line?: number; column?: number; newText?: string } | null;
-      if (!d || d.__nbaiVisualEditCommit !== true || !workspaceId || typeof d.file !== 'string') return;
+      const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string> } | null;
+      if (!d || typeof d !== 'object') return;
+      // The iframe reports which element the user picked (+ its current styles) → show the toolbar.
+      if (d.__nbaiSelect === true && typeof d.file === 'string') {
+        setSelection({ file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0, tag: typeof d.tag === 'string' ? d.tag : '', styles: d.styles && typeof d.styles === 'object' ? d.styles : {} });
+        return;
+      }
+      if (d.__nbaiVisualEditCommit !== true || !workspaceId || typeof d.file !== 'string') return;
       setSavingEdit(true);
       setEditError('');
       void (async () => {
@@ -468,6 +523,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
           onFileEdited?.(d.file as string, typeof data.content === 'string' ? data.content : '');
+          setSelection(null); // the reload builds a new document — drop the stale selection
           await loadInBrowser(); // reload from the freshly-saved source so the preview reflects the real edit
         } catch (err) {
           setEditError(err instanceof Error ? err.message : String(err));
@@ -621,7 +677,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             onClick={() => { const next = !editMode; setEditMode(next); setIframeEditMode(next); }}
             disabled={savingEdit}
             className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
-            title={editMode ? 'Exit visual editing — click a text element to edit it directly' : 'Visual Editor — click text in the preview to edit it directly (v1: simple text content)'}
+            title={editMode ? 'Exit visual editing' : 'Visual Editor — click any element to select it (toolbar: text size, colour, bold, align); double-click to edit its text'}
           >
             {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
             {editMode ? 'Editing…' : 'Edit'}
@@ -631,6 +687,31 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
+      {editMode && selection && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
+          <span className="font-mono text-zinc-500">&lt;{selection.tag || 'el'}&gt;</span>
+          <button onClick={() => applyStyle(selection, { fontWeight: veIsBold(selection.styles) ? 'normal' : 'bold' })}
+            className={`w-6 h-6 rounded border font-bold ${veIsBold(selection.styles) ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title="Bold">B</button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => applyStyle(selection, { fontSize: `${Math.max(8, Math.round(veFontPx(selection.styles)) - 2)}px` })} className="w-6 h-6 rounded border border-zinc-700 hover:text-white" title="Smaller text">A−</button>
+            <span className="w-9 text-center tabular-nums text-zinc-400">{Math.round(veFontPx(selection.styles))}px</span>
+            <button onClick={() => applyStyle(selection, { fontSize: `${Math.min(200, Math.round(veFontPx(selection.styles)) + 2)}px` })} className="w-6 h-6 rounded border border-zinc-700 hover:text-white" title="Bigger text">A+</button>
+          </div>
+          <label className="flex items-center gap-1 cursor-pointer" title="Text color">
+            <span className="text-zinc-500">Color</span>
+            <input type="color" value={veRgbToHex(selection.styles.color)} onChange={(e) => applyStyle(selection, { color: e.target.value })} className="w-6 h-6 rounded border border-zinc-700 bg-transparent cursor-pointer p-0" />
+          </label>
+          <div className="flex items-center gap-0.5">
+            {(['left', 'center', 'right'] as const).map((a) => (
+              <button key={a} onClick={() => applyStyle(selection, { textAlign: a })}
+                className={`w-6 h-6 rounded border text-[10px] font-semibold uppercase ${selection.styles.textAlign === a ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title={`Align ${a}`}>{a[0]}</button>
+            ))}
+          </div>
+          <div className="flex-1" />
+          <button onClick={() => postToIframe({ __nbaiEditText: true })} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Edit this element's text (or double-click it)">Edit text</button>
+          <button onClick={() => { setSelection(null); postToIframe({ __nbaiDeselect: true }); }} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Deselect">Done</button>
+        </div>
+      )}
       {editError && (
         <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
       )}

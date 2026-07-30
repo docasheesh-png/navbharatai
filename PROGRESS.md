@@ -22837,3 +22837,35 @@ Slice C (next, UI): inspector SELECTION (report the clicked element + its box + 
 with live preview. Then Slice D (resize handles) and Slice E (layout-safe reposition).
 
 Gate: server tsc 0 · VisualEditPatcher 18/18 · full suite (running/green).
+
+---
+
+## 2026-07-29 — Visual Editor Phase 2 Slice C (UI): selection + styling toolbar (user-facing)
+
+Makes Phase 2 real for the user. On Phase 1's reliable mapping + Slice A/B's style AST primitive, the preview
+now has a **select → style** interaction.
+
+**Inspector (`ReactPreview.ts`), select-first model:**
+- A single click now SELECTS the resolved host element (green outline) and reports it to the parent
+  (`__nbaiSelect` with file/line/col + the element's current computed styles) — safe to click around and
+  inspect without being trapped in a text caret.
+- A DOUBLE-click (or the toolbar's "Edit text") enters the existing text-edit flow (`beginTextEdit`).
+- New messages: `__nbaiApplyStyle` live-applies a style change to the selected element's DOM (instant
+  preview; re-reports styles so the toolbar stays in sync); `__nbaiEditText`; `__nbaiDeselect`. Leaving edit
+  mode clears the selection.
+
+**Toolbar (`PreviewSurface.tsx`):** a fixed strip appears when an element is selected in edit mode (robust —
+no fragile float-positioning): the tag name, **Bold**, font size **A− / A+**, a **colour** picker, and
+**align L/C/R**, plus **Edit text** and **Done**. Each control live-applies to the iframe AND persists to the
+real source via `/api/agentv3/visual-edit` with `styleUpdates` (→ `applyVisualStyleEdit`) — no reload, so
+rapid tweaks stay smooth; a server error surfaces honestly. Pure helpers `veIsBold`/`veFontPx`/`veRgbToHex`
+open the controls on the element's real values.
+
+Tests: inspector HTML carries `__nbaiSelect`/`__nbaiApplyStyle`/`__nbaiEditText`/`selectEl`/`dblclick`;
+toolbar helpers (bold weight / font px parse / rgb→hex).
+
+Next: Slice D (resize handles → width/height) and Slice E (layout-safe reposition) — both reuse this selection
++ the same `applyVisualStyleEdit` primitive.
+
+Gate: server tsc 0 · frontend tsc (only pre-existing @capacitor env errors) · ReactPreview+visualEditor +
+toolbar-helper tests green · full suite (running/green).

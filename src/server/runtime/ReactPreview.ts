@@ -695,6 +695,8 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   var editMode = false;
   var hovered = null;
   var editing = null;
+  var selected = null;      // the element picked in edit mode (Phase 2 — toolbar/resize/reposition target)
+  var selectedSrc = null;   // { fileName, lineNumber, columnNumber } for the selected element
 
   function fiberOf(el) {
     var key = Object.keys(el).find(function (k) { return k.indexOf('__reactFiber$') === 0; });
@@ -735,6 +737,35 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   function clearHover() {
     if (hovered) { hovered.style.outline = ''; hovered.style.cursor = ''; hovered = null; }
   }
+  // The current styles of an element the toolbar cares about (so the controls open showing real values).
+  function readStyles(el) {
+    var cs = window.getComputedStyle(el);
+    return {
+      fontSize: cs.fontSize, color: cs.color, fontWeight: cs.fontWeight,
+      textAlign: cs.textAlign, padding: cs.padding,
+      width: el.style && el.style.width || '', height: el.style && el.style.height || ''
+    };
+  }
+  function clearSelection() {
+    if (selected) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
+    selected = null; selectedSrc = null;
+  }
+  // Select an element (draw the selection box + tell the parent, which shows the toolbar). Does NOT edit
+  // text — that's a double-click (or the toolbar's "Edit text"), so a single click is safe to explore with.
+  function selectEl(host, info) {
+    clearHover();
+    if (selected && selected !== host) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
+    selected = host;
+    selectedSrc = { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber };
+    host.style.outline = '2px solid #10b981';
+    host.style.outlineOffset = '1px';
+    try {
+      (window.parent || window.top).postMessage({
+        __nbaiSelect: true, file: info.fileName, line: info.lineNumber, column: info.columnNumber,
+        tag: (host.tagName || '').toLowerCase(), styles: readStyles(host),
+      }, '*');
+    } catch (e) {}
+  }
   function onMouseOver(e) {
     if (!editMode || editing) return;
     var info = srcFor(e.target);
@@ -760,15 +791,20 @@ const VISUAL_EDITOR_SCRIPT = `<script>
       } catch (e) {}
     }
   }
+  // A single click SELECTS (safe to explore); the parent shows the toolbar. Text editing is a deliberate
+  // double-click (or the toolbar's "Edit text"), so clicking to inspect/style never traps you in a caret.
   function onClick(e) {
     if (!editMode || editing) return;
     var info = srcFor(e.target);
     if (!info) { flashNotEditable(e.target); return; }
     e.preventDefault();
     e.stopPropagation();
-    clearHover();
-    editing = info.host;
-    editing.__nbaiSrc = { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber };
+    selectEl(info.host, info);
+  }
+  function beginTextEdit(host, src) {
+    editing = host;
+    editing.__nbaiSrc = src;
+    if (selected === host) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
     editing.contentEditable = 'true';
     editing.style.outline = '2px solid #10b981';
     editing.focus();
@@ -778,6 +814,14 @@ const VISUAL_EDITOR_SCRIPT = `<script>
     sel.removeAllRanges();
     sel.addRange(range);
   }
+  function onDblClick(e) {
+    if (!editMode || editing) return;
+    var info = srcFor(e.target);
+    if (!info) { flashNotEditable(e.target); return; }
+    e.preventDefault();
+    e.stopPropagation();
+    beginTextEdit(info.host, { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber });
+  }
   function onBlur(e) { if (editing === e.target) stopEditing(true); }
   function onKeyDown(e) {
     if (!editing) return;
@@ -785,14 +829,32 @@ const VISUAL_EDITOR_SCRIPT = `<script>
     if (e.key === 'Escape') { e.preventDefault(); stopEditing(false); }
   }
   window.addEventListener('message', function (e) {
-    if (!e.data || typeof e.data !== 'object') return;
-    if (e.data.__nbaiSetEditMode === undefined) return;
-    editMode = !!e.data.__nbaiSetEditMode;
-    if (!editMode) { clearHover(); stopEditing(false); }
-    document.body.style.cursor = editMode ? 'crosshair' : '';
+    var d = e.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.__nbaiSetEditMode !== undefined) {
+      editMode = !!d.__nbaiSetEditMode;
+      if (!editMode) { clearHover(); stopEditing(false); clearSelection(); }
+      document.body.style.cursor = editMode ? 'crosshair' : '';
+      return;
+    }
+    // Live-apply a style change to the SELECTED element (instant preview; the parent also persists it to
+    // source via the visual-edit endpoint). camelCase CSS keys; '' removes the inline value.
+    if (d.__nbaiApplyStyle && typeof d.__nbaiApplyStyle === 'object' && selected) {
+      for (var k in d.__nbaiApplyStyle) {
+        if (Object.prototype.hasOwnProperty.call(d.__nbaiApplyStyle, k)) {
+          try { selected.style[k] = d.__nbaiApplyStyle[k]; } catch (err) {}
+        }
+      }
+      try { (window.parent || window.top).postMessage({ __nbaiSelect: true, file: selectedSrc.fileName, line: selectedSrc.lineNumber, column: selectedSrc.columnNumber, tag: (selected.tagName || '').toLowerCase(), styles: readStyles(selected) }, '*'); } catch (e2) {}
+      return;
+    }
+    // Toolbar asked to edit the selected element's text.
+    if (d.__nbaiEditText && selected && selectedSrc) { beginTextEdit(selected, selectedSrc); return; }
+    if (d.__nbaiDeselect) { clearSelection(); return; }
   });
   document.addEventListener('mouseover', onMouseOver, true);
   document.addEventListener('click', onClick, true);
+  document.addEventListener('dblclick', onDblClick, true);
   document.addEventListener('blur', onBlur, true);
   document.addEventListener('keydown', onKeyDown, true);
 })();

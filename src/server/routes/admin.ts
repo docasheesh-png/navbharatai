@@ -12,6 +12,7 @@ import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
+import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
@@ -495,6 +496,28 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ totalLossBuilds, totalLossRealCostUsd, perDay });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read AgentV3 losses.' });
+    }
+  });
+
+  // Build Reports inbox (admin 2026-07-29): the reports users submit via the single "Report" button.
+  // Admin-only — the user never sees report content; this is where the admin reads/downloads it.
+  app.get('/api/admin/build-reports', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+      const reports = await listAdminBuildReports(limit);
+      res.json({ reports });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load build reports.' });
+    }
+  });
+
+  app.get('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const record = await getAdminBuildReport(String(req.params.id));
+      if (!record) { res.status(404).json({ error: 'Build report not found.' }); return; }
+      res.json(record);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load the build report.' });
     }
   });
 

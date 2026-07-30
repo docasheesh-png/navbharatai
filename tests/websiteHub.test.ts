@@ -87,11 +87,12 @@ describe('App Settings — Your Website hub', () => {
   });
 
   it('SettingsScreen type carries the new hub screens', () => {
+    // 'hosting' was merged into 'cloudeploy' (Hosting & Deploy) — no longer a SettingsScreen member.
     const domain: SettingsScreen = 'domain';
-    const hosting: SettingsScreen = 'hosting';
+    const cloudeploy: SettingsScreen = 'cloudeploy';
     const auth: SettingsScreen = 'auth';
     const storage: SettingsScreen = 'storage';
-    expect([domain, hosting, auth, storage]).toEqual(['domain', 'hosting', 'auth', 'storage']);
+    expect([domain, cloudeploy, auth, storage]).toEqual(['domain', 'cloudeploy', 'auth', 'storage']);
   });
 });
 

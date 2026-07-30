@@ -22946,3 +22946,40 @@ it renders readable code in ALL 5 themes (Light → dark `#1e293b` text on white
 the editor chrome greys `#969696` (tab labels) and `#858585` (status bar), also unmapped, added to the
 theme-compat `--text-muted` group so they're readable on the light-remapped surfaces too. Frontend tsc: no new
 errors (only pre-existing capacitor-native module stubs). Pure styling change.
+
+---
+
+## 2026-07-30 — Autopsy: import+survey of a 2508-file repo stalled ~10 min (build 77bd487b) — OPEN ROOT CAUSE
+
+**Report (rule 5 forensic autopsy).** Prompt: *"Import this app from my GitHub repository and give me a short
+survey of what it is and how it is structured. Do not change any files yet."* Target = the navbharatai repo
+itself (2508 files). Model claude-sonnet-4-6, cheap-floor active.
+
+**5-bucket ledger:** ✅ self-heal ×1 (5 files missing from the ephemeral sandbox → restored from durable store,
+minute 10). 🔀 ×0, ⏭️ ×0. ❌ report is **truncated** — cuts off at minute 10 with NO preview, NO survey
+delivered, NO top-level `ok`. 🥵 **struggle = the whole build**: a read-only "just survey, don't change files"
+request ran 10+ min, with **8 min fully silent** (minute 2→10: identical heartbeat, zero progress).
+
+**Confirmed in code (not guessed):** (1) instant-connect (`agentv3.ts` ~5818) fetches the tree + package.json/
+README in ~2s and builds `importSurvey` — enough to answer immediately. (2) zipball land
+(`landImportedProject`, 2508 files → durable + sandbox) took 104s, done at minute 2 (IMPORT_DIAGNOSTIC
+elapsed=104005ms). (3) minutes 2→10 logged **zero LLM calls, zero tool calls, zero commands** — `BuildDiagnostics.heartbeat()`
+only shows `last: <lastActivity>` when nothing is in-flight, so the 8 silent minutes were a **non-instrumented
+heavy op** (durable-store persistence / sandbox sync of ~2476 files; the reconcile at minute 10 is its tail).
+The architect had not begun surveying.
+
+**Missing subsystem (the lever):** a **read-only "survey/understand this repo" mode** — deliver the survey from
+the instant-connect tree in ~10s and materialize the sandbox in the BACKGROUND (with live progress), instead of
+dragging a "don't change anything" request through the full 2508-file materialization. And EVERY long phase must
+emit honest progress so nothing is ever silent for minutes.
+
+**Status = OPEN ROOT CAUSE (rule 6, safeguard #3).** The report is truncated (no completion, and NO logged
+command during the 8-min gap), so the EXACT operation that ate those 8 minutes cannot be pinned from this
+evidence alone. Deliberately NOT blind-patching the 2508-file import hot path from a partial report. Admin chose
+"send the full untruncated report" so the true root can be fixed from real evidence — awaiting that report.
+
+**Related sibling (also open, from build 29006bab, same day):** the full-builder per-provider-call timeout is
+120s (`GeminiToolRunner`/providers default), so one storming KIMI call hung ~124s before failover — a silent
+multi-minute stall of the same CLASS. A cheap-floor-only shorter timeout is the candidate fix but carries
+"cut off a legit slow call" risk, so it is NOT shipped blind; proposed, pending admin confirmation. (The
+fast-lane sibling was already bounded in PR #1946 — SimpleBuilder `planTimeoutMs`.)

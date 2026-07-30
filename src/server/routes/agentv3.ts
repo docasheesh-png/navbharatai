@@ -872,6 +872,30 @@ export function lintGateEnabled(): boolean {
 }
 
 /**
+ * Whether the post-build completeness REVIEWER (a 30-90s+, multi-call pass) should run after a build.
+ * Pure + exported so the exact gate is regression-tested (`agentv3.test.ts`).
+ *
+ * ROOT-CAUSE (autopsy 2026-07-30, build 77bd487b): the reviewer is meant to verify what was BUILT, so an
+ * import/survey turn ("give me a survey, do NOT change any files") must get NO reviewer — every other
+ * post-build gate (readiness/lint/reviewer-autofix) already checks `!isImportTurn`. This one previously
+ * gated only on `wroteFiles`, and INFRA writes on a survey turn (the `.env` that loads the user's saved
+ * keys, foundational scaffolding) push that above zero — so the reviewer ran for ~16 min AND its heal
+ * edited the imported project (added imports + 12 package.json deps), a direct "do not change" violation.
+ * `isImportTurn` is the real signal: on an import/survey turn the reviewer never runs.
+ */
+export function reviewerShouldRun(opts: {
+  wroteFiles: boolean;
+  isImportTurn: boolean;
+  fastLaneGated: boolean;
+  reviewFastlaneForced: boolean;
+  startTierSonnet: boolean;
+}): boolean {
+  return opts.wroteFiles
+    && !opts.isImportTurn
+    && (!opts.fastLaneGated || opts.reviewFastlaneForced || opts.startTierSonnet);
+}
+
+/**
  * Requirement-aware build (admin-approved option A, 2026-07-20). Default OFF — when 'on', a fresh build of an
  * ambiguous DOMAIN prompt gets a bounded guidance block telling the builder to proactively INCLUDE the
  * features that domain almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital, …),
@@ -8715,8 +8739,22 @@ export function registerAgentV3Routes(app: Express): void {
       // free-explored the whole template until its transcript hit 2.2M tokens and every provider
       // rejected it. Big projects live in GitHub + the durable store + the preview WITHOUT any model
       // reading them; the AI touches files only when the user asks for an edit (surgical, grounded).
-      const reviewerAllowed = writtenFiles.size > 0
-        && (!fastLaneGated || process.env.AGENTV3_REVIEW_FASTLANE === 'on' || analysis?.startTier === 'sonnet');
+      // ROOT-CAUSE GATE (autopsy 2026-07-30, build 77bd487b — a "give me a survey, do not change any files"
+      // import of a 2508-file repo ran the reviewer for ~16 min AND its heal edited the project: "🔧 Added 4
+      // missing imports" + "🔧 Added 12 missing dependencies to package.json"). The design (comment above, and
+      // every OTHER post-build gate — readiness/lint/reviewer-autofix all check `!isImportTurn`) is that an
+      // import/survey turn gets NO reviewer. But this ONE gate used `writtenFiles.size > 0` as the proxy for
+      // "we built something to review" — and that proxy is DEFEATED by INFRA writes on a survey turn (the `.env`
+      // that loads the user's saved keys, foundational scaffolding), which push the count above 0 even though
+      // ZERO user code was written. Gate on `!isImportTurn` too (the real signal, in scope here and used at
+      // 8558/8564) so a "do not change" survey can never trigger the reviewer or its file-modifying heal.
+      const reviewerAllowed = reviewerShouldRun({
+        wroteFiles: writtenFiles.size > 0,
+        isImportTurn,
+        fastLaneGated,
+        reviewFastlaneForced: process.env.AGENTV3_REVIEW_FASTLANE === 'on',
+        startTierSonnet: analysis?.startTier === 'sonnet',
+      });
       if (result.ok && reviewHeadroomOk && reviewerAllowed) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);

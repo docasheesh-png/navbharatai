@@ -23043,3 +23043,41 @@ clean.
 DEEPER lever is the PROMPT/CONTRACT so the model never emits an unused import at all (a later slice); this
 deterministic sweep is the safe, shippable-today floor. The recurring GLM 429 storm remains the biggest
 open quality ceiling (self-heals via Kimi, so it's debt not a break — but it caps the default experience).
+## 2026-07-30 — FIX: import+survey "do not change files" turn ran a 16-min reviewer that EDITED the project (build 77bd487b full report)
+
+**Full untruncated report (rule 5 autopsy).** The read-only *"import this repo + give me a survey, do not
+change any files"* build actually COMPLETED (`ok:true`, survey delivered) — but ran **~31 minutes**
+(`startedAt`→`endedAt` = 1875s) and, worse, **violated the user's explicit "do not change any files"**:
+- `🔧 Added 4 missing import(s)` and `🔧 Added 12 missing dependencies to package.json (dotenv, helmet,
+  axios, firebase, lucide-react, …)` fired on a turn the user said not to touch.
+- The post-build completeness reviewer's `evaluate` ran **600s** and still timed out
+  (`Post-build review timed out after 210000ms on 503 files`) — ~16 of the 31 min, on a survey.
+
+**ROOT CAUSE (pinned from the full report).** Every post-build gate (readiness / lint / reviewer-autofix at
+`agentv3.ts:8558/8564`) already checks `!isImportTurn`, and the design comment (8480) states import/survey
+turns get NO reviewer. But the reviewer-INVOCATION gate keyed off `writtenFiles.size > 0` as the proxy for
+"we built something to review". On a survey turn that proxy is DEFEATED by INFRA writes — the `.env` that
+loads the user's saved keys (`manifest.fileHashes` shows `.env`; "🔐 Loaded 3 of your saved keys") and
+foundational scaffolding push the count above zero even though ZERO user code was written → the reviewer ran,
+and its heal edited the imported project.
+
+**FIX.** Extracted the gate to an exported pure predicate `reviewerShouldRun({wroteFiles, isImportTurn,
+fastLaneGated, reviewFastlaneForced, startTierSonnet})` that gates on `!isImportTurn` (the real signal used
+by every sibling gate), not just `wroteFiles`. An import/survey turn now NEVER runs the reviewer or its
+file-modifying heal — restoring the documented design intent. Regression-locked in `agentv3.test.ts`
+(5 cases incl. the exact 77bd487b failure: `wroteFiles:true, isImportTurn:true → false`). Server tsc clean;
+agentv3.test.ts 272/272.
+
+**Still OPEN (recorded honestly, rule 6) — separate root causes from the same report, NOT fixed here:**
+- The ~11-min silent sandbox-sync gap (min 2→13) persisting 2476 files, and the sandbox materializing only
+  ~26 of 2476 files (`ls src/` showed just `index.ts`) → the architect's `read_file` on `server.ts`/`App.tsx`
+  failed and the survey was hedged/inaccurate. This is the large-repo import materialization path — needs its
+  own careful fix (deliver the survey from the instant-connect tree + background/verify the sandbox sync);
+  not blind-patched.
+- ANALYZER FALSE-POSITIVE (verified this session): `COMPLIANCE_LOG_LEAK_FOUND` flagged 7 console logs across
+  6 files as "printing a credential/token" — but inspection shows every one logs an ERROR object, not a
+  secret (`console.error('[OTP SEND ERROR]', err)`, `[ROTATE] secret re-encrypt failed: err`,
+  `[OTP PROTECTION SECURITY ERROR] err`, `[CASHFREE WEBHOOK] Fulfillment failed for order ${orderId}`, …).
+  The detector matched on LABEL keywords ("secret"/"OTP"/"SECURITY"/"CASHFREE"), not an actual secret value.
+  No real leak. Separate small hardening (make the detector match the logged VALUE, not the label) — noted,
+  not fixed here.

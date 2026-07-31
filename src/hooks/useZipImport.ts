@@ -85,9 +85,15 @@ export function useZipImport(deps: ZipImportDeps) {
               fileList.push(evt.path);
               fileCount++;
 
-              // Throttle React state updates — flushing per-file would mean thousands of
-              // re-renders for a big app (jank/crash). Show first few instantly, then batch.
-              if (fileCount <= 8 || fileCount % 20 === 0) {
+              // BULK, NOT ONE-BY-ONE (admin 2026-07-31: a 2500-file zip appeared file-by-file over ~23 min).
+              // The files ALREADY exist — there is nothing to "rebuild", so they must land in ONE bulk
+              // update, not drip in. Root cause of the slow trickle: this used to spread the ENTIRE growing
+              // map every 20 files — for N files that is O(N²) full re-renders of the file tree/editor (a
+              // 2500-file import ≈ 125 spreads of up-to-2500 keys). We now show ONLY the first few instantly
+              // (so a tiny app still feels live) and let the SINGLE bulk `setFiles(loadedFiles)` at the end
+              // (below) commit everything at once — O(N), a few seconds instead of tens of minutes. The cheap
+              // progress counter (setProBuildProgress, further down) keeps the user informed meanwhile.
+              if (fileCount <= 8) {
                 setFiles({ ...loadedFiles } as any);
               }
 

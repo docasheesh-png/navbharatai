@@ -978,7 +978,7 @@ export function userCostBreakdown(
 }
 
 /** Minimal shape of the per-provider ledger the billing decision needs (structural — no import cycle). */
-interface BillingLedgerView {
+export interface BillingLedgerView {
   entries: () => Array<{ provider: string; model?: string; usage: { inputTokens: number; outputTokens: number } }>;
   byProvider: () => Record<string, { inputTokens: number; outputTokens: number }>;
   total: () => { inputTokens: number; outputTokens: number };
@@ -993,7 +993,7 @@ interface BillingLedgerView {
  * per-provider recording, so a build that overran its cap silently bypassed Fix 65). Pure w.r.t. its
  * inputs (reads only env + the shared routing predicate); the zero-bill guards are applied by callers.
  */
-function decideBuildBilledUsd(
+export function decideBuildBilledUsd(
   providerLedger: BillingLedgerView,
   sinkTotal: { inputTokens: number; outputTokens: number },
   powerLevel: BillingPowerLevel | boolean,

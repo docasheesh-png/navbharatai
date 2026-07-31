@@ -33,3 +33,27 @@ describe('Mobile action toolbar (no Ctrl key on a phone)', () => {
     expect(editor.slice(i, i + 1400)).toContain('onRun');
   });
 });
+
+describe('Phone bottom-tab IDE', () => {
+  it('has a bottom tab bar with Code / Files / Preview / AI / More (essentials, not the dev ActivityBar)', () => {
+    const studioSrc = readFileSync(join(__dirname, '../src/components/ide/CodeStudio.tsx'), 'utf8');
+    const i = studioSrc.indexOf('PHONE BOTTOM-TAB IDE');
+    expect(i).toBeGreaterThan(-1);
+    const block = studioSrc.slice(i, i + 3800);
+    for (const label of ["label: 'Code'", "label: 'Files'", "label: 'Preview'", "label: 'AI'", "label: 'More'"]) {
+      expect(block).toContain(label);
+    }
+    // Reuses proven transitions, not new plumbing.
+    expect(block).toContain("setActiveScreen('preview')");
+    expect(block).toContain('setIsSidebarOpen(false)');
+  });
+
+  it('the More sheet keeps the secondary dev tools reachable', () => {
+    const studioSrc = readFileSync(join(__dirname, '../src/components/ide/CodeStudio.tsx'), 'utf8');
+    const i = studioSrc.indexOf('PHONE BOTTOM-TAB IDE');
+    const block = studioSrc.slice(i, i + 3800);
+    for (const label of ["label: 'Search'", "label: 'Source Control'", "label: 'Terminal'", "label: 'Security'", "label: 'Shortcuts'"]) {
+      expect(block).toContain(label);
+    }
+  });
+});

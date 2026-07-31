@@ -437,11 +437,28 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         case 'workbench.action.toggleMaximizedPanel':
           setIsPanelOpen(prev => !prev);
           break;
-        case 'workbench.action.files.saveAll':
-          console.log('Save All Files Triggered');
+        case 'workbench.action.files.saveAll': {
+          // REAL save-all (was a console.log stub): apply the same trim/final-newline/format-on-save
+          // rules base.action.save uses, to EVERY dirty tab, in one files update.
+          if (dirtyTabs.size > 0) {
+            const next = { ...files };
+            dirtyTabs.forEach((path) => {
+              let content = next[path] ?? '';
+              if (editorTrimWhitespace) content = content.replace(/[^\S\n]+$/gm, '');
+              if (editorFinalNewline && content.length > 0 && !content.endsWith('\n')) content += '\n';
+              next[path] = content;
+              savedFilesRef.current[path] = content;
+            });
+            onFilesChange(next);
+            if (next[activeFile] !== undefined) editorInstance?.setValue(next[activeFile]);
+            if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
+            setDirtyTabs(new Set());
+          }
           break;
+        }
         case 'markdown.showPreview':
-          console.log('Markdown Preview Triggered');
+          // REAL: open the live Preview surface (was a console.log stub).
+          setActiveScreen('preview');
           break;
         case 'workbench.action.quickOpen':
           setIsCommandPaletteOpen(true);
@@ -473,10 +490,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           setIsPanelOpen(true);
           break;
         case 'workbench.action.debug.start':
-          console.log('Debug Started');
+          // REAL: open the Debug panel (was a console.log stub).
+          setIsDebugPanelOpen(true);
           break;
         case 'workbench.action.debug.stop':
-          console.log('Debug Stopped');
+          setIsDebugPanelOpen(false);
           break;
         case 'workbench.action.navigateBack':
           window.history.back();
@@ -492,8 +510,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             document.documentElement.requestFullscreen();
           }
           break;
+        case 'explorer.newFile': {
+          // REAL New File (Ctrl+N was advertised but had no handler → did nothing).
+          const name = (window.prompt('New file name (e.g. index.html)') || '').trim();
+          if (name) handleCreateFile(name);
+          break;
+        }
         case 'workbench.action.splitEditor':
-          console.log('Split Editor Triggered');
+          // Split view (two editor panes) is not supported yet — do NOT fake it. The shortcut is a
+          // no-op rather than a console.log that pretends it worked (honesty rule).
           break;
         case 'workbench.action.focusFirstEditorGroup':
           if (editorInstance) editorInstance.focus();
@@ -522,23 +547,53 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       }
     }
 
-    // Map keys to specific IDE actions if needed (fallback/manual)
-    const shortcutStr = keys.join('+').toLowerCase();
-    
-    if (shortcutStr.includes('ctrl+shift+p')) {
-      setIsCommandPaletteOpen(true);
-    } else if (shortcutStr.includes('ctrl+b')) {
-      setIsSidebarOpen(prev => !prev);
-    } else if (shortcutStr.includes('ctrl+j')) {
-      setIsPanelOpen(prev => !prev);
-    } else if (shortcutStr.includes('ctrl+g')) {
-      // A15: Go to Line
-      editorInstance?.getAction('editor.action.gotoLine')?.run();
-    } else if (shortcutStr.includes('ctrl+d')) {
-      // A18: Select next occurrence (adds cursor to next match)
-      editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run();
+    // Keys-based fallback — ONLY when no command was handled above. ROOT-CAUSE FIX (admin 2026-07-31):
+    // this block used to run UNCONDITIONALLY, so a tap that ALSO passed a command (every VirtualKeyboard
+    // shortcut does) fired twice — e.g. "Toggle Sidebar" (Ctrl+B) toggled on THEN off = a dead no-op,
+    // and "Select Next" (Ctrl+D) selected twice. Gating on `!command` makes each shortcut fire exactly
+    // once, whether it comes from a tap (command given) or the global key listener (keys only).
+    if (!command) {
+      const shortcutStr = keys.join('+').toLowerCase();
+      if (shortcutStr.includes('ctrl+shift+p')) {
+        setIsCommandPaletteOpen(true);
+      } else if (shortcutStr.includes('ctrl+b')) {
+        setIsSidebarOpen(prev => !prev);
+      } else if (shortcutStr.includes('ctrl+j')) {
+        setIsPanelOpen(prev => !prev);
+      } else if (shortcutStr.includes('ctrl+g')) {
+        // A15: Go to Line
+        editorInstance?.getAction('editor.action.gotoLine')?.run();
+      } else if (shortcutStr.includes('ctrl+d')) {
+        // A18: Select next occurrence (adds cursor to next match)
+        editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run();
+      }
     }
   };
+
+  // GLOBAL KEYBOARD SHORTCUTS (admin 2026-07-31): CodeStudio had NO physical-keyboard listener, so the
+  // workbench shortcuts (Ctrl+S / Ctrl+Shift+S / Ctrl+B / Ctrl+J / Ctrl+P / Ctrl+Shift+P) never fired —
+  // the shortcuts looked dead. This wires them for real. We deliberately do NOT intercept the
+  // editor-native combos (Ctrl+F find, Ctrl+G go-to-line, Ctrl+D add-selection) — Monaco already
+  // handles those when the editor is focused (and the toolbar buttons cover them otherwise), so
+  // intercepting here would double-fire. A ref keeps the listener pinned once while always calling the
+  // latest handleShortcut closure (fresh files/activeFile/editor state).
+  const shortcutHandlerRef = React.useRef(handleShortcut);
+  shortcutHandlerRef.current = handleShortcut;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const call = (keys: string[], command?: string) => { e.preventDefault(); shortcutHandlerRef.current(keys, command); };
+      switch (e.key.toLowerCase()) {
+        case 'p': e.shiftKey ? call(['ctrl', 'shift', 'p']) : call(['ctrl', 'p'], 'workbench.action.quickOpen'); break;
+        case 's': e.shiftKey ? call(['ctrl', 'shift', 's'], 'workbench.action.files.saveAll') : call(['ctrl', 's'], 'base.action.save'); break;
+        case 'b': call(['ctrl', 'b']); break;
+        case 'j': call(['ctrl', 'j']); break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleCommandAction = (id: string) => {
     // Map palette command ids onto the existing shortcut/screen handlers.

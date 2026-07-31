@@ -23151,3 +23151,30 @@ no new errors.
 a real dev server (npm install + dev) WITHOUT any LLM/regeneration — needs the direct dev-server-boot path
 (the earlier engine-trigger auto-boot was reverted precisely because it could regenerate). Tracked as the next
 zip task.
+
+---
+
+## 2026-07-31 — FIX (zip import, part 2): framework-app import auto-boots the preview from EXISTING files (no LLM/rebuild)
+
+Follow-up to part 1 (bulk file-load). Admin: after a .zip import the preview must run on its own, and the
+files must NOT be regenerated ("wapas se banane ki need hi kaha hai").
+
+**Approach — reuse the existing boot-only machinery, NOT the LLM.** `PreviewSurface` already has a real
+dev-server boot path: `runDiagnose()` → `POST /api/agentv3/preview-diagnose` (pre-kill port → `npm install`
+→ start dev server → poll), and an auto-resume effect (C1) that runs it automatically when the Live preview
+is shown for a workspace with no live URL. This is install+run of the EXISTING files — no model call, no file
+regeneration. (The earlier engine-trigger auto-boot was reverted precisely because going through `handleSend`
+could regenerate.)
+
+**FIX (part 2).** For a framework-app zip import, `useZipImport` now navigates to the **Preview** tab
+(`toggleTab('preview')`) instead of Code Studio, so `PreviewSurface` mounts and its auto-resume boots the
+dev server on the imported files. Message updated to "Opening the live preview — installing dependencies &
+starting the dev server for your EXISTING files (no rebuild)… if it doesn't appear, tap Diagnose." Static /
+simple-React apps unchanged (inline in-browser preview). Frontend tsc: no new errors.
+
+**HONEST BOUNDARY.** This leans on the existing auto-resume, which requires the sandbox to report
+`livePreviewAvailable` (E2B configured). On a brand-new import the sandbox may need a moment; if the auto-boot
+doesn't fire immediately, the **Diagnose** button in the Preview does the identical one-tap boot (same
+endpoint). Not yet verified end-to-end on a live fresh import that the auto-resume ALWAYS fires on the first
+mount — if a real report shows it needs a manual Diagnose, the next step is to explicitly kick `preview-diagnose`
+right after a framework import rather than rely on the mount-time effect. Recorded honestly (rule 6).

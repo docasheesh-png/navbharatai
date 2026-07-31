@@ -23250,3 +23250,42 @@ drift class fails CI if it ever returns.
 *capability* descriptions (right-docked canvas, "16k Opus budget", Firestore-only memory). All navigation is
 correct; those prose refreshes are the next, lower-priority pass — they never misdirect a user, they just
 read slightly out-of-date.
+
+---
+
+## 2026-07-31 — CONTAMINATION autopsy (report b8c22c26): workspace held NavBharatAI's OWN 2576-file source
+
+**Full 5-bucket ledger (251 issues, KIMI-only 64 turns, ok:NULL, 31 minutes):**
+- ✅ Self-healed: the 2576-file sandbox restore from the durable store; a missing `ProviderUsageLedger.ts`
+  created; deps reinstalled; server eventually booted on 8080.
+- 🔀 Worked-around: repeated `rm -rf node_modules/… && npm install --force` — brute-forcing dependency
+  corruption instead of a real fix.
+- ⏭️ Skipped: 0.
+- ❌ **Still-broken: ok:NULL — the build NEVER converged in 31 minutes.** Core cause: the workspace's
+  durable store held **NavBharatAI's OWN platform source (2576 files: `src/server/AgentV3/…`,
+  `routes/agentv3.ts`, the internal design doc)**, so the prompt "make this app" made the engine try to
+  BUILD AND RUN OUR OWN PLATFORM as the user's app — a nonsensical, never-converging target.
+- 🥵 Struggle: 31-min marathon — `npm run dev` ×6 (113s/135s/83s…), `tsx server.ts` boot attempts, node_modules
+  corruption fixes. The wall-clock cap (1800s/30 min, working as designed) only stopped it at the wall.
+
+**Missing subsystem → FIX (shipped): SELF-SOURCE GUARD.** New pure `PlatformSourceGuard.ts` +
+`looksLikePlatformSource(paths)` — false-positive-proof (fires only when ≥2 highly-specific internal
+platform paths are present). Wired as a pre-flight in `routes/agentv3.ts` right after the build-diagnostics
+are created: if the workspace is the platform's own source, the engine now REFUSES HONESTLY up front
+(`PLATFORM_SOURCE_WORKSPACE`, ok:false, a clear user message + a fresh-workspace hint) instead of grinding
+31 minutes to nothing. Free (no build runs), never bills. 7 guard tests + the full agentv3 route suite (285)
+green; server tsc clean.
+
+**OPEN ROOT CAUSE (rule 6 — origin out of code reach):** HOW the platform source got into that workspace's
+durable store is NOT reproducible from code — the E2B sandbox root is a clean `/home/user/workspace`
+(template = a bare vite-react scaffold) and NO code path copies the platform's own source into a workspace.
+The durable store already held the 2576 files before this build, so it happened in a prior event specific to
+this workspace (a manual import/push of the repo, or a one-off historical mixup). Investigating the origin
+needs the workspace's build history + the GitHub repo `docasheesh-png/overall-layout-structure-…` contents
+(admin-side). The guard makes the damage harmless regardless of the origin.
+
+**Step-6 proactive (world-best):** (1) PREVENT — a build should never grind 30 min to nothing; the guard
+kills this class up front, and the general "huge/non-converging repo" case deserves an earlier no-progress
+stop (next slice). (2) TRUST/SAFETY — a user workspace containing platform source is a real isolation
+concern worth an infra audit. (3) The recurring GLM/cheap flail didn't appear here (KIMI-only), but the
+30-min-marathon-with-no-result is itself a top experience ceiling.

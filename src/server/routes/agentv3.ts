@@ -269,6 +269,7 @@ import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
+import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { applyVisualTextEdit, applyVisualStyleEdit } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -5599,6 +5600,25 @@ export function registerAgentV3Routes(app: Express): void {
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+
+      // SELF-SOURCE GUARD (contamination autopsy 2026-07-31): a real workspace's durable store held
+      // NavBharatAI's OWN 2576-file platform source, so "make this app" spent 31 minutes trying to boot our
+      // server (ok:null) instead of building anything. Building the platform itself as a user app is never
+      // valid — refuse HONESTLY up front instead of grinding to the wall-clock wall, and record it so the
+      // storage/isolation contamination can be investigated. False-positive-proof (needs ≥2 internal paths).
+      if (looksLikePlatformSource(durableFilePaths)) {
+        buildDiag.record({
+          phase: 'build', severity: 'error', code: 'PLATFORM_SOURCE_WORKSPACE',
+          message: 'Refused: the workspace contains NavBharatAI\'s own platform source (not a user app).',
+          detail: `${durableFilePaths.length} durable file(s); ≥2 internal platform-signature paths present.`,
+          autoResolved: false,
+        });
+        emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${PLATFORM_SOURCE_REFUSAL}` });
+        buildDiag.finish(false, PLATFORM_SOURCE_REFUSAL);
+        events.emit({ type: 'done', ok: false, summary: PLATFORM_SOURCE_REFUSAL, ts: Date.now() });
+        emit({ type: 'result', ok: false, summary: PLATFORM_SOURCE_REFUSAL, steps: 0, billedUsd: 0, billedInr: 0 });
+        return;
+      }
 
       // Requirement-gap analysis (T1.4 → engine slice): auto-run the existing analyzer at build start and
       // record the detected domain, the features that domain usually needs but the prompt left implicit, and

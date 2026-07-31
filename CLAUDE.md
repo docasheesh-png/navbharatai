@@ -207,6 +207,39 @@ An autopsy that only patches the reported symptom (the first 50%) and leaves the
 was a heal needed / why was a workaround possible" half undone is an INCOMPLETE autopsy — it guarantees
 the sibling failure returns. Both halves, every time.
 
+**Step 6 — THE WORLD-BEST PROACTIVE LAYER: every report ALSO gets Claude's own forward-looking suggestions,
+not only the reactive fix (admin-mandated 2026-07-31).** Steps 1–5 are REACTIVE — they mine what already
+broke. That is necessary hygiene, but ALONE it is a treadmill (mopping the floor while the tap runs) that
+never reaches THE AIM (the world's best AI app builder). So with EVERY build report — ON TOP of the full
+5-bucket autopsy — Claude must ALSO step back and give the admin its OWN proactive, senior-engineer
+suggestions toward world-best, in simple language (the admin is non-technical and wants Claude's judgement,
+not a checklist). Every report reply carries BOTH: the OLD autopsy tally AND this proactive layer. Every time:
+
+- **PREVENT, don't heal — the single biggest lever.** For every ❌ / 🥵 AND every ✅ self-heal, ask the
+  harder question: *how do we make the FIRST build correct so this never needs fixing?* Propose the UPSTREAM
+  change (prompt / scaffold / shared contract / plan) that stops the whole class from being generated at
+  all. A build that never creates the bug beats a build that heals it — this is where world-best is actually
+  won (most "continue / fix the error" builds are the engine cleaning up its OWN mistakes; kill them at the
+  source).
+- **Name the big systemic ceiling HONESTLY (rule 3, no sycophancy).** If a recurring pattern is capping the
+  DEFAULT quality — e.g. the GLM / cheap-tier 429 storm and weak-model flailing — say it plainly to the
+  admin even though it "self-heals", instead of hiding a ceiling behind a green checkmark. A self-heal that
+  fires on every build IS the ceiling. Propose the real fix, or record it as a STRATEGIC open item (rule 6).
+- **Guard the EXPERIENCE the user actually feels.** Flag anything a world-best builder would never ship —
+  an unreliable preview, a slow build, a first-try app that looks or works poorly — and propose the
+  improvement. Trust is the product; the user judges by what they SEE, not by our internal metrics.
+- **Lean into the real MOAT, don't clone.** Where relevant, suggest deepening what the competitors
+  (Lovable / Bolt / v0 / Cursor / Replit) do NOT do — NavBharatAI's India-first edge (Hindi, Cashfree,
+  domain recipes, the App Store, mobile-first). Copying makes a follower; the moat makes a leader.
+- **DRIVE it — decide, don't wait.** The admin is non-technical and explicitly wants Claude to CHOOSE what
+  matters most. So Claude PROPOSES and PRIORITIZES these proactively (best-for-the-app default + the
+  60-second rule), announces the ONE highest-value lever, and pursues it — it does not wait to be asked.
+  Reserve real questions for the genuinely consequential fork.
+
+An autopsy that ends at "fixed the reported bug" WITHOUT this forward-looking layer is INCOMPLETE toward THE
+AIM. The reactive five steps keep the app from breaking; this sixth, proactive step is how it becomes the
+best. Both layers — reactive autopsy AND proactive world-best suggestions — with every single report.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every

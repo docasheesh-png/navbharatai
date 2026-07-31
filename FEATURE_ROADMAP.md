@@ -42,7 +42,7 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 
 ### NavBharatAI Pro v5.0 — App Builder (14)
 - ⬜ **NavBharatAI Pro v5.0 (beta)** — `Sidebar → "App Builder v5.0"  OR  the floating "v5.0" button (bottom-right when enabled for your account).`
-- ⬜ **Export project (.zip) — your code, no lock-in** — `NavBharatAI Pro v5.0 → header tab row → "Export .zip" button`
+- ✅ **Export project (.zip) — your code, no lock-in** — `Files tab → "ZIP"` — real download + honest failure; KB path corrected (was a stale header path); test-locked (#polish-1).
 - ⬜ **Import an existing app (.zip) into v5.0** — `NavBharatAI Pro v5.0 → chat composer → 📎 attach → pick your app's .zip → send`
 - ⬜ **Import an existing app from GitHub into v5.0** — `NavBharatAI Pro v5.0 → chat composer → options (⚙) → "GitHub / URL" → pick a repo from your list (1 click) or paste a URL`
 - ⬜ **Plan & Advise modes + the build queue (3-role workflow)** — `NavBharatAI Pro v5.0 → mode selector at the message box (bottom-left, next to the settings button) — a small "🔨 Build" dropdown that opens upward with Build · Plan · Advise (+ the Queue chip)`
@@ -52,7 +52,7 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ⬜ **Restore all files (bring your whole project back)** — `NavBharatAI Pro v5.0 → header → History tab (or Files tab when empty) → "Restore all files" button`
 - ⬜ **Report a build to NavBharatAI (admin-only report)** — `NavBharatAI Pro v5.0 → header tab row → "Report" button`
 - ⬜ **Files — one Files view, two gates (v5.0 tab + sidebar)** — `NavBharatAI Pro v5.0 → header → Files tab  —OR—  sidebar menu → Files (both open the SAME Files view)`
-- ⬜ **Deploy to a live URL (one click)** — `NavBharatAI Pro v5.0 → header tab row → "Deploy" button (the live link then shows as "Live site")`
+- ✅ **Publish to a live URL (one click)** — `header action row → "Publish"` — real deploy via the Hosting chooser; KB corrected (button is "Publish", not "Deploy"); test-locked (#polish-1).
 - ⬜ **Preview (dual: Live server + In-browser)** — `NavBharatAI Pro v5.0 → header → Preview tab → "Live server" / "In-browser" switch`
 - ⬜ **Save apps to your own GitHub (git-native)** — `Sign in with GitHub → build in NavBharatAI Pro v5.0 → your project is committed to a private repo in YOUR GitHub account`
 

@@ -26,7 +26,8 @@ import {
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
   BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle,
+  Files as FilesIcon, GitBranch, Terminal as TerminalIcon
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -177,6 +178,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [isCursorPopupOpen, setIsCursorPopupOpen] = useState(false);
   const [editorInstance, setEditorInstance] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
+  // Phone bottom-tab bar (admin 2026-07-31): the "More" sheet holding the secondary dev tools.
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [replaceQuery, setReplaceQuery] = useState('');
   // A2-A5: Editor display settings (persisted to localStorage)
@@ -1265,14 +1268,60 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       </div>
 
       {/* Activity Bar (Mobile Position) */}
+      {/* PHONE BOTTOM-TAB IDE (admin 2026-07-31): a native-app-style bottom bar with the essentials —
+          Code · Files · Preview · AI · More — instead of the shrunk desktop ActivityBar. Each tab reuses
+          the same proven state transitions the desktop uses; "More" holds the secondary dev tools so
+          nothing is lost. Hidden while the AI overlay is open (its own X returns), matching prior
+          behaviour so the chat input is never covered. Desktop is unaffected. */}
       {isMobile && activeScreen !== 'ai' && (
-         <ActivityBar 
-            isMobile
-            activeScreen={activeScreen}
-            onScreenChange={handleScreenChange}
-            isShortcutsOpen={isShortcutsOpen}
-            isCursorPopupOpen={isCursorPopupOpen}
-         />
+         <>
+           {mobileMoreOpen && (
+             <>
+               <div className="fixed inset-0 z-[55]" onClick={() => setMobileMoreOpen(false)} aria-hidden="true" />
+               <div className="absolute right-2 bottom-[68px] z-[56] w-56 rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl py-1.5">
+                 {([
+                   { label: 'Search', Icon: Search, onTap: () => handleScreenChange('search') },
+                   { label: 'Source Control', Icon: GitBranch, onTap: () => handleScreenChange('git') },
+                   { label: 'Terminal', Icon: TerminalIcon, onTap: () => setIsPanelOpen(true) },
+                   { label: 'Security', Icon: ShieldCheck, onTap: () => handleScreenChange('security') },
+                   { label: 'Shortcuts', Icon: Keyboard, onTap: () => setIsShortcutsOpen(true) },
+                 ]).map(({ label, Icon, onTap }) => (
+                   <button
+                     key={label}
+                     onClick={() => { setMobileMoreOpen(false); onTap(); }}
+                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[#c9d1d9] hover:bg-white/5 active:bg-white/10"
+                   >
+                     <Icon className="w-4 h-4 text-[#8b949e]" />
+                     <span className="font-medium">{label}</span>
+                   </button>
+                 ))}
+               </div>
+             </>
+           )}
+           <div className="flex border-t border-[var(--theme-border)] bg-[var(--theme-card)] h-16 shrink-0 relative z-[57] select-none">
+             {([
+               { id: 'code', label: 'Code', Icon: Code2, active: !isSidebarOpen && activeScreen !== 'preview', onTap: () => { setMobileMoreOpen(false); if (activeScreen === 'preview') setActiveScreen('files'); setIsSidebarOpen(false); } },
+               { id: 'files', label: 'Files', Icon: FilesIcon, active: isSidebarOpen && activeScreen === 'files', onTap: () => { setMobileMoreOpen(false); setActiveScreen('files'); setIsSidebarOpen(true); } },
+               { id: 'preview', label: 'Preview', Icon: Monitor, active: activeScreen === 'preview', onTap: () => { setMobileMoreOpen(false); setActiveScreen('preview'); setIsSidebarOpen(false); } },
+               { id: 'ai', label: 'AI', Icon: Bot, active: false, onTap: () => { setMobileMoreOpen(false); setActiveScreen('ai'); setIsSidebarOpen(true); } },
+               { id: 'more', label: 'More', Icon: MenuIcon, active: mobileMoreOpen, onTap: () => setMobileMoreOpen(v => !v) },
+             ]).map(({ id, label, Icon, active, onTap }) => (
+               <button
+                 key={id}
+                 onClick={onTap}
+                 aria-label={label}
+                 className={cn(
+                   'flex-1 flex flex-col items-center justify-center gap-1 transition-all relative min-h-[44px]',
+                   active ? 'text-indigo-400' : 'text-[#484f58] active:text-[#8b949e]'
+                 )}
+               >
+                 <Icon className="w-5 h-5" />
+                 <span className="text-[9px] font-black uppercase tracking-tight">{label}</span>
+                 {active && <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full" />}
+               </button>
+             ))}
+           </div>
+         </>
       )}
 
     </div>

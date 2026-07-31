@@ -1073,6 +1073,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   tabSize: editorTabSize,
                   stickyScroll: { enabled: true },
                   trimAutoWhitespace: editorTrimWhitespace,
+                  // PHONE-FIRST editor (admin 2026-07-31): on a narrow screen a desktop editor is
+                  // unusable — the minimap + sticky-scroll eat width/height, lines run off-screen, and
+                  // the thin scrollbars are impossible to grab. These overrides make Monaco genuinely
+                  // touch-friendly: no minimap, no sticky scroll, always word-wrap, a bigger font, and
+                  // fat (14px) touch scrollbars. Desktop is untouched.
+                  ...(isMobile ? {
+                    minimap: { enabled: false },
+                    stickyScroll: { enabled: false },
+                    wordWrap: 'on' as const,
+                    fontSize: Math.max(15, editorFontSize),
+                    lineNumbersMinChars: 3,
+                    lineDecorationsWidth: 6,
+                    overviewRulerLanes: 0,
+                    folding: true,
+                    padding: { top: 8, bottom: 8 },
+                    scrollbar: { verticalScrollbarSize: 14, horizontalScrollbarSize: 14, useShadows: false },
+                  } : {}),
                 }}
                 onRevealInExplorer={(path) => {
                   setIsSidebarOpen(true);

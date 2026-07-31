@@ -169,7 +169,7 @@ export function useZipImport(deps: ZipImportDeps) {
       let importMessage: string;
       if (isFrameworkApp) {
         // Honest: framework apps need npm install + dev server — tell user exactly what to do.
-        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n⚠️ **This app needs a build step** (it uses ${hasBuildTool ? 'Vite/webpack/etc.' : 'npm'}).\nIn-browser preview won't work for it — you need a real dev server.\n\n👉 Type **"run this app"** and I will install dependencies and launch a live preview for you.`;
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n🚀 **Opening the live preview** — installing dependencies & starting the dev server for your EXISTING files (no rebuild). This takes a moment. If it doesn't appear automatically, tap **Diagnose** in the Preview.`;
       } else if (isSimpleReact) {
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n✅ Preview is live in-browser via Babel transpilation. Tell me what you want to change!`;
       } else if (isStaticApp) {
@@ -185,8 +185,13 @@ export function useZipImport(deps: ZipImportDeps) {
       }]);
       // Framework apps: open Code Studio so user can see the imported files immediately.
       // Static/simple apps stay in Pro Chat where the inline preview is already showing.
+      // Framework app: land on the PREVIEW (admin 2026-07-31 — "preview chal hi chale"). PreviewSurface's
+      // existing auto-resume (runDiagnose → /api/agentv3/preview-diagnose) then installs deps + starts the
+      // dev server on the EXISTING files — NO LLM, NO regeneration, so the imported app just RUNS. If the
+      // auto-boot's sandbox conditions aren't ready on a fresh import, the "Diagnose" button in the Preview
+      // does the identical one-tap boot. (Static/simple apps already show their in-browser preview inline.)
       if (isFrameworkApp) {
-        setTimeout(() => toggleTab('studio'), 400);
+        setTimeout(() => toggleTab('preview'), 400);
       }
     } catch (err: any) {
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });

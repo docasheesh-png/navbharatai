@@ -1553,14 +1553,14 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',
-    name: 'NavBharatAI Pro Chat',
-    path: 'Home → Pro Chat button  OR  Header → Pro Chat tab',
-    description: `The Pro app-maker chat with three modes:
-• CONVERSATION mode — discuss ideas, plan features, ask questions. The AI answers but does NOT build yet.
-• BUILD mode — describe an app, click Build, and it generates a complete working HTML/CSS/JS app in seconds, shown live on the canvas.
-• CANVAS EDIT mode — when an app is already on the canvas, ask to change it and the AI patches the code precisely, preserving everything you didn't ask to change.
-Also supports: file attachments (text, code), image analysis (vision), and PDF reading.`,
-    howToUse: 'From Home, click Pro Chat. Type your app idea and click Build to generate the app. Once it appears on the canvas, ask follow-up changes directly.',
+    name: 'NavBharatAI Pro (App Builder chat)',
+    path: 'Home → "NavBharatAI Pro" card → "Open Pro Builder"  OR  Sidebar menu → "App Builder v5.0"',
+    description: `NavBharatAI Pro is the agentic app-builder chat (now NavBharatAI Pro v5.0). You:
+• CONVERSATION — discuss ideas, plan features, ask questions (use the Plan/Advise modes for read-only planning).
+• BUILD — describe an app and it plans, codes, previews and ships a complete real project (not just a single HTML canvas).
+• EDIT — once an app exists, ask to change it and it patches precisely, preserving everything you didn't ask to change.
+Also supports: file attachments (text, code, .zip project import), image analysis (vision), and PDF reading.`,
+    howToUse: 'From Home, open the "NavBharatAI Pro" card and tap "Open Pro Builder" (or pick "App Builder v5.0" from the sidebar menu). Type your app idea and send to build; once it appears, ask follow-up changes directly.',
     relatedFeatures: ['free_chat', 'ide', 'engineer_ai'],
     aiSurface: 'pro_chat',
     keywords: ['pro chat', 'pro', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
@@ -1588,10 +1588,10 @@ On mobile the chat stays full-width and Preview/Code remain separate tabs (via t
   },
   {
     id: 'pro_chat_file_upload',
-    name: 'Pro Chat — File & Image Upload',
-    path: 'Pro Chat → paperclip / attachment icon in the chat input',
-    description: 'Upload files to Pro Chat for AI analysis. Supported: images (PNG, JPG, WebP — visual analysis and description), PDFs (full text extraction and Q&A), text/code files (review, explain, modify).',
-    howToUse: 'Click the attachment icon in Pro Chat, select a file, then type your question about it.',
+    name: 'NavBharatAI Pro — File & Image Upload',
+    path: 'NavBharatAI Pro v5.0 → paperclip / attachment (📎) icon in the chat input',
+    description: 'Upload files to NavBharatAI Pro v5.0 for AI analysis. Supported: images (PNG, JPG, WebP — visual analysis and description), PDFs (full text extraction and Q&A), text/code files (review, explain, modify), and .zip project import.',
+    howToUse: 'Click the attachment (📎) icon in NavBharatAI Pro v5.0, select a file, then type your question about it.',
     relatedFeatures: ['pro_chat', 'free_chat_file_analysis'],
     aiSurface: 'pro_chat',
     keywords: ['upload file', 'attach file', 'pdf', 'image upload', 'file attachment', 'vision', 'analyze image', 'read pdf'],
@@ -1601,29 +1601,29 @@ On mobile the chat stays full-width and Preview/Code remain separate tabs (via t
   {
     id: 'free_chat',
     name: 'Free Chat (NavBharatAI)',
-    path: 'Sidebar → Reports  OR  Header → Reports tab',
+    path: 'Home → "Start Free Chat"  OR  Sidebar menu → "NavBharatAI FREE"',
     description: `General-purpose AI chat. Capabilities:
 • Answers questions on any topic — science, history, coding, finance, law, etc.
 • Explains concepts in any language (Hindi, English, Hinglish, Tamil, Telugu, Bengali, Marathi, Punjabi, and more).
 • Analyzes documents (PDF/text files), describes images, reviews code.
 • Remembers conversation context within a session.
 • Responds in the SAME language and tone the user writes in — Hindi reply for Hindi input, English for English, etc.
-NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
-    howToUse: 'Open Reports from the sidebar and type your question in any language.',
+NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
+    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language.',
     relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis'],
     aiSurface: 'nbi_chat',
     keywords: [
-      'free chat', 'reports', 'general chat', 'ask question', 'chat', 'conversation',
+      'free chat', 'navbharatai free', 'start free chat', 'general chat', 'ask question', 'chat', 'conversation',
       'question answer', 'help', 'explain', 'kya hai', 'bataiye', 'samjhao',
-      'hindi chat', 'language', 'translate',
+      'hindi chat', 'language', 'translate', 'muft chat', 'free ai',
     ],
   },
   {
     id: 'free_chat_file_analysis',
     name: 'Free Chat — File, Image & PDF Analysis',
-    path: 'Sidebar → Reports → attachment icon in the chat input',
+    path: 'Sidebar menu → "NavBharatAI FREE" → attachment (📎) icon in the chat input',
     description: 'Attach files to the free chat for analysis. Images: visual description, object recognition, text extraction (OCR). PDFs: full text reading, summarization, Q&A. Code/text files: explanation, review, debugging help.',
-    howToUse: 'In the Free Chat (Reports), click the attachment icon, select your file, then ask your question about it.',
+    howToUse: 'In the Free Chat ("NavBharatAI FREE"), click the attachment (📎) icon, select your file, then ask your question about it.',
     relatedFeatures: ['free_chat', 'pro_chat_file_upload'],
     aiSurface: 'nbi_chat',
     keywords: ['pdf analysis', 'image analysis', 'file upload', 'attach', 'ocr', 'document', 'photo upload', 'analyze pdf', 'analyze image'],
@@ -2225,8 +2225,8 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
 
   {
     id: 'pro_chat_extended_thinking',
-    name: 'Pro Chat — Extended Thinking (Complex Tasks)',
-    path: 'Pro Chat → just describe a complex task (auto-detected)',
+    name: 'NavBharatAI Pro — Extended Thinking (Complex Tasks)',
+    path: 'NavBharatAI Pro v5.0 → just describe a complex task (auto-detected)',
     description: `Pro Chat automatically detects complex tasks (full-stack apps, multi-system architecture, OAuth, real-time features, enterprise scale) and activates Claude Opus extended reasoning (16k token thinking budget). No setting needed — the AI decides when deep reasoning is required. You will see a "🧠 Complex task detected — using extended reasoning…" status message when active.`,
     howToUse: 'Describe a complex app (e.g. "Build a full-stack SaaS with OAuth and Stripe payments") and Pro will automatically use extended thinking for deeper architectural reasoning.',
     relatedFeatures: ['pro_chat', 'pro_chat_planner'],
@@ -2235,8 +2235,8 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   },
   {
     id: 'pro_chat_planner',
-    name: 'Pro Chat — Build Planner (Step-by-Step Progress)',
-    path: 'Pro Chat → submit a build request → see step progress bar',
+    name: 'NavBharatAI Pro — Build Planner (Step-by-Step Progress)',
+    path: 'NavBharatAI Pro v5.0 → submit a build request → see the step progress / plan checklist',
     description: `For large builds, Pro Chat shows a live step-by-step progress bar. The AI plans the build first (e.g. "Scaffold files → Install deps → Build UI → Add auth → Integrate DB"), then works through each step. Each step shows: name, current status (pending/working/done), and a reasoning snippet from the AI's chain-of-thought. The reasoning shows WHY the AI is taking the next action.`,
     howToUse: 'Submit a multi-component build request. The progress panel shows each step as the AI works. Reasoning snippets appear under each running step to show the AI\'s thought process.',
     relatedFeatures: ['pro_chat', 'pro_chat_extended_thinking'],
@@ -2245,8 +2245,8 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   },
   {
     id: 'pro_chat_session_memory',
-    name: 'Pro Chat — Cross-Session Memory',
-    path: 'Pro Chat → automatic (no user action needed)',
+    name: 'NavBharatAI Pro — Cross-Session Memory',
+    path: 'NavBharatAI Pro v5.0 → automatic (no user action needed)',
     description: `Pro Chat remembers your project across sessions — even after closing the browser or switching devices. It stores: rolling build summary, edit log (what changed in each turn), architectural decisions, and user preferences in Firestore. On the next session with the same project, Pro already knows the stack, past decisions, and recent changes. It will NOT undo things you already built.`,
     howToUse: 'Just continue building. Pro automatically loads previous session memory at the start of each build request. No setup needed — works as long as you use the same Pro session.',
     relatedFeatures: ['pro_chat', 'pro_chat_planner', 'history'],
@@ -2255,10 +2255,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   },
   {
     id: 'pro_chat_design_to_code',
-    name: 'Pro Chat — Design-to-Code (Image → UI)',
-    path: 'Pro Chat → attach a design image → describe the app',
+    name: 'NavBharatAI Pro — Design-to-Code (Image → UI)',
+    path: 'NavBharatAI Pro v5.0 → attach a design image → describe the app',
     description: `Upload a Figma export, screenshot, or UI mockup alongside your build request. Claude Opus vision analyzes the design image and generates React/CSS code that matches the visual layout, colors, and component structure. Supports up to 4 design images per request.`,
-    howToUse: 'In Pro Chat, attach a design image (Figma screenshot, UI mockup, wireframe) using the attachment icon, then type your build prompt (e.g. "Build this design as a React app"). Pro will generate matching code.',
+    howToUse: 'In NavBharatAI Pro v5.0, attach a design image (Figma screenshot, UI mockup, wireframe) using the attachment (📎) icon, then type your build prompt (e.g. "Build this design as a React app"). It generates matching code.',
     relatedFeatures: ['pro_chat', 'pro_chat_file_upload'],
     aiSurface: 'pro_chat',
     keywords: ['design to code', 'figma to code', 'image to code', 'ui from design', 'mockup', 'wireframe', 'screenshot to code', 'visual design', 'design convert'],

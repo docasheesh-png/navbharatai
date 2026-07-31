@@ -29,16 +29,18 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 ## Feature inventory (203) — polish status
 
 ### Core AI Chat (10)
-- ⬜ **Offline AI (on-device chat)** — `Sidebar menu → Offline AI`
-- ⬜ **Freelancing & Online-Income AI** — `Sidebar → Professionals → Freelancing & Online-Income`
-- ⬜ **NavBharatAI Pro Chat** — `Home → Pro Chat button  OR  Header → Pro Chat tab`
-- ⬜ **Pro Chat — File & Image Upload** — `Pro Chat → paperclip / attachment icon in the chat input`
-- ⬜ **Free Chat (NavBharatAI)** — `Sidebar → Reports  OR  Header → Reports tab`
-- ⬜ **Free Chat — File, Image & PDF Analysis** — `Sidebar → Reports → attachment icon in the chat input`
-- ⬜ **Pro Chat — Extended Thinking (Complex Tasks)** — `Pro Chat → just describe a complex task (auto-detected)`
-- ⬜ **Pro Chat — Build Planner (Step-by-Step Progress)** — `Pro Chat → submit a build request → see step progress bar`
-- ⬜ **Pro Chat — Cross-Session Memory** — `Pro Chat → automatic (no user action needed)`
-- ⬜ **Pro Chat — Design-to-Code (Image → UI)** — `Pro Chat → attach a design image → describe the app`
+- ✅ **Offline AI (on-device chat)** — `Sidebar menu → Offline AI` — path verified real; test-locked (#polish-3).
+- ✅ **Freelancing & Online-Income AI** — `Sidebar → Professionals → Freelancing & Online-Income` — path verified real; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro (App Builder chat)** — `Home → "NavBharatAI Pro" card → "Open Pro Builder"  OR  Sidebar → "App Builder v5.0"` — KB corrected: the retired v2.0 "Pro Chat button/tab" path was replaced with the real NavBharatAI Pro v5.0 gate; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — File & Image Upload** — `NavBharatAI Pro v5.0 → 📎 attachment icon` — surface name corrected off the retired "Pro Chat"; test-locked (#polish-3).
+- ✅ **Free Chat (NavBharatAI)** — `Home → "Start Free Chat"  OR  Sidebar → "NavBharatAI FREE"` — KB corrected: the stale "Reports" tab path was replaced with the real Free Chat gate; test-locked (#polish-3).
+- ✅ **Free Chat — File, Image & PDF Analysis** — `Sidebar → "NavBharatAI FREE" → 📎 icon` — stale "Reports" path corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Extended Thinking (Complex Tasks)** — `NavBharatAI Pro v5.0 → describe a complex task (auto-detected)` — surface name corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Build Planner (Step-by-Step Progress)** — `NavBharatAI Pro v5.0 → submit a build → plan checklist` — surface name corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Cross-Session Memory** — `NavBharatAI Pro v5.0 → automatic` — surface name corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Design-to-Code (Image → UI)** — `NavBharatAI Pro v5.0 → attach a design image → describe the app` — surface name corrected; test-locked (#polish-3).
+
+> **Open follow-up (honest, rule 6):** Beyond these 10, a wider *legacy* documentation layer (~8 more entries such as `unified-workspace`, `pro_chat_multi_deploy`, the Quick-Start gallery, PocketBase/Convex seed, etc.) still carries v2.0-era *capability prose* (right-docked canvas, "16k Opus budget", Firestore-only memory). Their navigation is not user-breaking, but the descriptions should be refreshed to v5.0 reality in a dedicated pass. The `pro_chat` KnowledgeDocs group + backend surface (`chat.ts`) are LIVE and tested, so these entries are corrected in place, never deleted.
 
 ### NavBharatAI Pro v5.0 — App Builder (14)
 - ✅ **NavBharatAI Pro v5.0 (beta)** — `Sidebar → "App Builder v5.0"  OR  Professionals → "NavBharatAI Pro v5.0" card` — KB corrected: removed the STALE floating-button path (the launcher was deleted in App.tsx); named the two real gates; test-locked (#polish-2).

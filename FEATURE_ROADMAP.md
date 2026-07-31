@@ -171,28 +171,28 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ✅ **Insights & Integrations** — `Home → Other AI → Insights & Webhooks` — verified real tile; test-locked (#polish-5).
 
 ### Collaboration (4)
-- ⬜ **Team Collaboration (Invite Members)** — `Home → Other AI → Team`
-- ⬜ **Share for Review (Client / Stakeholder Portal)** — `Deploy panel → Deploy tab → "Share for review"`
-- ⬜ **Team @Mentions (delivered to an inbox)** — `Team Collaboration → the bell icon (top-right) shows your mentions`
-- ⬜ **Team Library (shared prompts / templates / components)** — `Team Collaboration panel → Team Library`
+- ✅ **Team Collaboration (Invite Members)** — `Home → Other AI → Team` — verified real tile; test-locked (#polish-7).
+- ✅ **Share for Review (Client / Stakeholder Portal)** — `Settings → App Settings → Hosting & Deploy → "Share for review" card` — KB corrected off the stale "Deploy panel → Deploy tab"; test-locked (#polish-7).
+- ✅ **Team @Mentions (delivered to an inbox)** — `Team Collaboration → the bell icon (top-right)` — verified real (MentionInbox bell); test-locked (#polish-7).
+- ✅ **Team Library (shared prompts / templates / components)** — `Team Collaboration panel → Team Library` — verified real (TeamLibraryPanel); test-locked (#polish-7).
 
 ### Settings & Connections (16)
-- ⬜ **Connect my website (custom domain)** — `Settings → App Settings → Domain  (also: Sidebar → More menu → "Connect my website", or Home → Other AI → Publish & Deploy → "Custom Domain" — all the same real flow)`
-- ⬜ **Settings** — `Sidebar → Settings  OR  Header → Settings tab`
-- ⬜ **Motion Preference (Animations)** — `Settings → App Settings → General → Accessibility → "Motion"`
-- ⬜ **Text Size (Font Scaling / Zoom)** — `Settings → App Settings → General → Accessibility → "Text Size"`
-- ⬜ **Database Settings (Bring Your Own Database)** — `Settings → App Settings → Database`
-- ⬜ **Notifications (messages from NavBharatAI)** — `Top bar → bell icon (next to your profile)`
-- ⬜ **Hosting & Deploy (Multi-Cloud)** — `Settings → App Settings → Hosting & Deploy`
-- ⬜ **Authentication Settings (Bring Your Own Login)** — `Settings → App Settings → Authentication`
-- ⬜ **Storage Settings (Bring Your Own File Storage)** — `Settings → App Settings → Storage`
-- ⬜ **Secrets & Keys** — `Settings → App Settings → Secrets & Keys`
-- ⬜ **General Settings** — `Settings → App Settings → General`
-- ⬜ **"Made by NavBharatAI" Signature** — `Settings → App Settings → General → "Made by NavBharatAI" Signature`
-- ⬜ **Brain Engine / Modules (AI Provider Keys)** — `Settings → Modules`
-- ⬜ **Git / DevOps Panel** — `Sidebar → Git`
-- ⬜ **Terminal (Settings)** — `Settings → App Settings → Terminal  (also Code Studio → Terminal tab)`
-- ⬜ **Logs (Settings)** — `Settings → App Settings → Logs`
+- ✅ **Connect my website (custom domain)** — `Settings → App Settings → Domain` — verified real (built this session); test-locked (#polish-7).
+- ✅ **Settings** — `Sidebar → Settings  OR  Header → Settings tab` — verified real; test-locked (#polish-7).
+- ✅ **Motion Preference (Animations)** — `Settings → App Settings → General → Accessibility → "Motion"` — verified real.
+- ✅ **Text Size (Font Scaling / Zoom)** — `Settings → App Settings → General → Accessibility → "Text Size"` — verified real.
+- ✅ **Database Settings (Bring Your Own Database)** — `Settings → App Settings → Database` — verified real tile; test-locked (#polish-7).
+- ✅ **Notifications (messages from NavBharatAI)** — `Top bar → bell icon` — verified real (NotificationBell, built this session); test-locked (#polish-7).
+- ✅ **Hosting & Deploy (Multi-Cloud)** — `Settings → App Settings → Hosting & Deploy` — verified real tile; test-locked (#polish-7).
+- ✅ **Authentication Settings (Bring Your Own Login)** — `Settings → App Settings → Authentication` — verified real tile; test-locked (#polish-7).
+- ✅ **Storage Settings (Bring Your Own File Storage)** — `Settings → App Settings → Storage` — verified real tile; test-locked (#polish-7).
+- ✅ **Secrets & API Keys** — `Settings → App Settings → Secrets & API Keys` — KB label normalized to the real tile (was "Secrets & Keys" in 13 places); test-locked (#polish-7).
+- ✅ **General Settings** — `Settings → App Settings → General` — verified real tile; test-locked (#polish-7).
+- ✅ **"Made by NavBharatAI" Signature** — `Settings → App Settings → General → "Made by NavBharatAI" Signature` — verified real.
+- ✅ **Brain Engine / Modules (AI Provider Keys)** — `Settings → Modules` — verified real (Brain Engine card).
+- ✅ **Git / DevOps Panel** — `Sidebar → Git` — verified real.
+- ✅ **Terminal (Settings)** — `Settings → App Settings → Terminal` — verified real tile; test-locked (#polish-7).
+- ✅ **Logs (Settings)** — `Settings → App Settings → Logs` — verified real tile; test-locked (#polish-7).
 
 ### Admin & Ops (6)
 - ⬜ **Live Metrics Dashboard** — `Settings → App Settings → Live Metrics (admin only)`

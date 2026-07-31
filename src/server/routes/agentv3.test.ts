@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -233,6 +233,33 @@ describe('chatWorkspaceContextLine — v5.0 always knows its real file count, ev
   it('scales with whatever the real count is (not a fixed/guessed number)', () => {
     expect(chatWorkspaceContextLine(1)).toContain('1 file(s)');
     expect(chatWorkspaceContextLine(200)).toContain('200 file(s)');
+  });
+});
+
+describe('reviewerShouldRun — a "do not change any files" import/survey turn gets NO post-build reviewer', () => {
+  // ROOT-CAUSE lock (autopsy build 77bd487b): a read-only survey import ran the reviewer ~16 min AND its
+  // heal edited the imported project (added imports + 12 package.json deps) — because the gate keyed off
+  // `wroteFiles`, which INFRA writes (the .env that loads the user's keys) push above zero on a survey turn.
+  it('is FALSE on an import turn even when infra files were written (the exact 77bd487b failure)', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: true, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: true })).toBe(false);
+  });
+  it('is FALSE when nothing was written (nothing to review)', () => {
+    expect(reviewerShouldRun({ wroteFiles: false, isImportTurn: false, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: true })).toBe(false);
+  });
+  it('RUNS on a real agentic build that wrote files (not fast-lane-gated, not an import turn)', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: false })).toBe(true);
+  });
+  it('is skipped for a fast-lane build unless forced or a Sonnet-tier prompt', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: false, startTierSonnet: false })).toBe(false);
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: true, startTierSonnet: false })).toBe(true);
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: false, startTierSonnet: true })).toBe(true);
+  });
+  it('an import turn is NEVER reviewed, whatever the other flags say', () => {
+    for (const fastLaneGated of [true, false]) {
+      for (const startTierSonnet of [true, false]) {
+        expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: true, fastLaneGated, reviewFastlaneForced: true, startTierSonnet })).toBe(false);
+      }
+    }
   });
 });
 
@@ -2057,10 +2084,16 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     expect(count).toBe(9);
   });
 
-  it('the reviewer still keys off writtenFiles.size (the guard the rogue writes defeated)', () => {
-    // If this ever stops being the gate, the "no reviewer on an analysis-only turn" guarantee — and
-    // the fake "Build Review (88/100)" over a user's own app — needs re-deriving from scratch.
-    expect(SRC).toContain('const reviewerAllowed = writtenFiles.size > 0');
+  it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {
+    // The size-only guard was DEFEATED in practice (build 77bd487b): infra writes on a read-only survey
+    // turn — the `.env` that loads the user's saved keys, foundational scaffolding — pushed
+    // writtenFiles.size above zero, so the reviewer RAN and its heal edited a "do not change any files"
+    // import (Added 4 imports + 12 package.json deps). The gate now ALSO requires !isImportTurn via the
+    // exported `reviewerShouldRun` predicate, so an analysis-only turn is NEVER reviewed regardless of
+    // infra writes (this stacks on top of the writtenFiles.set write-site audit above — defense in depth).
+    // If this stops being the gate, the "no reviewer on an analysis-only turn" guarantee needs re-deriving.
+    expect(SRC).toContain('const reviewerAllowed = reviewerShouldRun(');
+    expect(SRC).toContain('!opts.isImportTurn'); // reviewerShouldRun itself gates on the import turn
   });
 
   it('the build summary still reports honestly from writtenFiles.size', () => {

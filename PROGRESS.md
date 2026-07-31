@@ -23081,3 +23081,31 @@ agentv3.test.ts 272/272.
   The detector matched on LABEL keywords ("secret"/"OTP"/"SECURITY"/"CASHFREE"), not an actual secret value.
   No real leak. Separate small hardening (make the detector match the logged VALUE, not the label) — noted,
   not fixed here.
+
+---
+
+## 2026-07-30 — FIX: credentials in a `.env` file no longer FAIL the build (false-positive → 1740s timeout, build 6478f94d)
+
+**Autopsy (rule 5).** A `continue` turn finished `ok:false` and timed out at the 1740s wall-clock cap. Chain:
+static `scanSecurity` flagged `connection-string-credentials @ .env:2` (a `DATABASE_URL=postgres://user:pass@host`
+— the CORRECT place for it) as **high** → `READINESS_BLOCKER` → reviewer echoed it as `[CRITICAL]` → the
+auto-fix had NO valid action ("move to an env var" is circular; `.env` IS the env file) → looped → `BUILD_TIMEOUT`
+→ `ok:false`. A working app reported as broken. (Same infra `.env` NavBharatAI writes to load the user's keys.)
+
+**ROOT CAUSE.** `scanSecurity` downgrades credential-VALUE findings (`demoDowngrade` rules) to `low` only in
+FIXTURE files; a `.env` file was treated like real source, so a credential that BELONGS in `.env` stayed a
+build-blocking `high`.
+
+**FIX.** New pure `isEnvSecretsFile(file)` (`.env`/`.env.local`/`.env.production`/… but NOT the committed
+`.env.example`/`.sample`/`.template`). `credsBelongHere = isFixtureFile || isEnvSecretsFile` downgrades the
+`demoDowngrade` rules to `low` there — still REPORTED, never build-blocking. Real source keeps blocking
+(`postgres://…` in a `.ts` stays high); a client-exposed `NEXT_PUBLIC_*` secret in `.env` stays high (not a
+demoDowngrade rule). Regression-locked in `SecurityAnalysis.test.ts`. Server tsc clean; SecurityAnalysis 64/64.
+
+**NOTE (session continuity):** this fix + the reviewer-gate census reconcile were first done, then LOST when
+the container was reclaimed before push (only the reviewer-gate commit had been pushed). Both were recovered
+and re-pushed. Lesson: push each green sub-step immediately (safeguard #4).
+
+**Related open (noted, not fixed here):** the reviewer LLM may still phrase "credentials in .env" as a
+`[CRITICAL]` on its own (the static downgrade removes the READINESS_BLOCKER that seeds it); and the auto-fix
+should not LOOP on an un-actionable finding to the wall-clock cap — separate hardenings.

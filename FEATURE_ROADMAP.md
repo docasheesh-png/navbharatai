@@ -5,6 +5,16 @@
 from the single source of truth (`src/server/AppContext/AppKnowledgeBase.ts`, 203 feature
 entries) so the list is code-anchored, never guessed.
 
+> ## ✅ STATUS: 203 / 203 features hardened (first full pass complete — 2026-07-31)
+> Every feature in all 11 categories is now ✅: real end-to-end, discoverable via a **correct** KB path
+> (the dominant defect — stale navigation from the retired Engineer AI / Pro Chat v2.0 surfaces, the
+> 2026-07-23 tools move, and the Deploy→Publish rename — is fixed everywhere), and locked by a
+> regression test (`tests/polish*.test.ts`), including a **campaign-wide lock** asserting NO KB path
+> routes through a retired doorway. Shipped as PRs #1964–#1970.
+> **Remaining (honest, rule 6):** a wider *legacy prose* layer still describes some v2.0-era
+> *capabilities* (right-docked canvas, "16k Opus budget", Firestore-only memory). Navigation is correct
+> everywhere; those descriptions deserve a dedicated refresh pass (a "second lap"), tracked below.
+
 ## What "rock-solid" means (the polish checklist for each feature)
 A feature is marked ✅ **DONE** only when ALL of these hold:
 1. **Works end-to-end** — the button/flow does exactly what it says, with real data (absolute rule #2).
@@ -201,65 +211,65 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ✅ **Logs (Settings)** — `Settings → App Settings → Logs` — verified real tile; test-locked (#polish-7).
 
 ### Admin & Ops (6)
-- ⬜ **Live Metrics Dashboard** — `Settings → App Settings → Live Metrics (admin only)`
-- ⬜ **AI Insights & NL Telemetry Query** — `Admin Dashboard → Overview → AI Insights card (admin only)`
-- ⬜ **AI Deployment Ops (Deploy Risk + Incident Analysis)** — `Admin/CI only — POST /api/admin/deploy-risk and POST /api/admin/incident-analysis`
-- ⬜ **Release Freeze / Approval Gate** — `Admin — GET/POST /api/admin/release-gate; the pipeline checks GET /api/release/gate`
-- ⬜ **Admin Two-Factor Authentication (2FA / TOTP)** — `Admin Dashboard → Security tab → Two-Factor Authentication (admin only)`
-- ⬜ **v5.0 Cost-Ladder Dashboard** — `Admin Dashboard → Revenue tab → "v5.0 Cost-Ladder (last 30 days)" (admin only)`
+- ✅ **Live Metrics Dashboard** — `Settings → App Settings → Live Metrics (admin only)`
+- ✅ **AI Insights & NL Telemetry Query** — `Admin Dashboard → Overview → AI Insights card (admin only)`
+- ✅ **AI Deployment Ops (Deploy Risk + Incident Analysis)** — `Admin/CI only — POST /api/admin/deploy-risk and POST /api/admin/incident-analysis`
+- ✅ **Release Freeze / Approval Gate** — `Admin — GET/POST /api/admin/release-gate; the pipeline checks GET /api/release/gate`
+- ✅ **Admin Two-Factor Authentication (2FA / TOTP)** — `Admin Dashboard → Security tab → Two-Factor Authentication (admin only)`
+- ✅ **v5.0 Cost-Ladder Dashboard** — `Admin Dashboard → Revenue tab → "v5.0 Cost-Ladder (last 30 days)" (admin only)`
 
 ### Platform / Navigation (51)
-- ⬜ **Download app (Android)** — `Sidebar menu → "Download app" (shows only on a mobile browser on navbharatai.com)`
-- ⬜ **Support & Help (email us)** — `Sidebar menu → Settings → Support & Help`
-- ⬜ **Privacy & analytics consent** — `Consent banner (bottom of the screen) on your first visit — Accept analytics / Decline`
-- ⬜ **Engineer AI — GitHub Clone & Push** — `Engineer AI chat → describe cloning a repo or pushing code`
-- ⬜ **Unified Workspace — Chat + Live Code + Preview (Phase 3.1)** — `Pro Chat → build an app → live workspace docks on the right (desktop)`
-- ⬜ **IDE / Code Studio** — `Sidebar → IDE  OR  Header → IDE tab`
-- ⬜ **IDE Terminal / Shell** — `IDE → Terminal tab  OR  Settings → App Settings → Terminal`
-- ⬜ **IDE Git Panel** — `IDE → Git tab`
-- ⬜ **IDE Live Preview** — `IDE → Preview tab`
-- ⬜ **Test Runner** — `Home → Other AI → Developer Tools → Test Runner`
-- ⬜ **Multi-Page Builder — turn one page into a whole website** — `Home → Other AI → Design & Build → Multi-Page`
-- ⬜ **Nav App Store — publish your Android app, and install apps others made** — `Home → Other AI → Publish & Deploy → Nav App Store`
-- ⬜ **Monetize — start taking money in your app** — `Home → Other AI → Monetization & Team → Monetize`
-- ⬜ **Component Library — ready-made pieces you can add to your app** — `Home → Other AI → Design & Build → Components`
-- ⬜ **Design System — one set of colours, fonts and spacing for your whole app** — `Home → Other AI → Design & Build → Design System`
-- ⬜ **Dark Mode Generator — add a dark theme to your app** — `Home → Other AI → Design & Build → Dark Mode Gen`
-- ⬜ **Project Blueprints & Templates Gallery** — `Sidebar → Templates  OR  Code Studio → Templates`
-- ⬜ **Professionals Hub** — `Sidebar → Professionals`
-- ⬜ **Professional Pass (unlimited professionals)** — `Any Professional chat → the quota chip in the header, or the paywall shown after the daily free messages run out → "Get Pass — ₹99/month"`
-- ⬜ **Other AI — Builder Tools (Home page)** — `Home → "Other AI" card  (opens the Other AI page)`
-- ⬜ **Live Collaboration (Real-Time Room)** — `Home → Other AI → Live Collab`
-- ⬜ **History** — `Sidebar → History  OR  Header → History tab`
-- ⬜ **Donate** — `Sidebar → Donate`
-- ⬜ **My Profile** — `Top-right avatar → My Profile  OR  Settings → Account → My Profile`
-- ⬜ **User & Developer Guide (Docs Site)** — `Open /guide in your browser (e.g. yourdomain/guide)`
-- ⬜ **API Keys (Programmatic Access)** — `Top-right avatar → My Profile → API Keys card`
-- ⬜ **Status Page & Health Check** — `Open /status in your browser (machine-readable at /api/health)`
-- ⬜ **Login / Sign Up** — `Header → Login button (top right)`
-- ⬜ **App Navigation Overview** — `Header (top bar with tabs)  OR  Sidebar (left panel)`
-- ⬜ **Code Confidence (AI Hallucination Check)** — `Home → Other AI → Insights & Webhooks → Code Confidence`
-- ⬜ **React Hooks Safety (Rules of Hooks)** — `Home → Other AI → Insights & Webhooks → React Hooks Safety`
-- ⬜ **Import / Export Consistency Check** — `Home → Other AI → Insights & Webhooks → Import / Export Consistency`
-- ⬜ **JSX Component Resolution Check** — `Home → Other AI → Insights & Webhooks → JSX Component Resolution`
-- ⬜ **Hook Resolution Check** — `Home → Other AI → Insights & Webhooks → Hook Resolution`
-- ⬜ **Dependency Constraints Check** — `Home → Other AI → Insights & Webhooks → Dependency Constraints`
-- ⬜ **Requirement Traceability Matrix** — `Backend API: POST/GET /api/workspace/traceability`
-- ⬜ **Explain Code** — `Home → Other AI → Insights & Webhooks → Explain Code  (also backend POST /api/workspace/explain)`
-- ⬜ **Webhook Manager** — `Home → Other AI → Insights & Webhooks → Webhooks  (also backend /api/webhooks/:userId)`
-- ⬜ **Editor Theme Switcher** — `Code editor → header dropdown (top-right of the editor)`
-- ⬜ **Merge Conflict Resolver** — `Files → a "merge conflicts — Resolve" banner appears when any file has conflict markers → Resolve`
-- ⬜ **Quick-Start Gallery — Example Prompt Cards** — `Pro Chat → empty chat → example cards grid (visible before first message)`
-- ⬜ **Backend Scaffolds — PocketBase & Convex** — `Pro Chat → describe a PocketBase or Convex app → auto-seeded skeleton`
-- ⬜ **Unified Memory — Pro Chat and Engineer AI Share Context** — `Automatic — happens every time you build in Pro Chat then ask Engineer AI to edit`
-- ⬜ **Iterative Agent Build Engine** — `Pro Chat → type any app description → send`
-- ⬜ **Guider — Pre-Build Design Confirmation + Post-Build Quality Grader** — `Pro Chat → type any app description → Guider card appears before build starts`
-- ⬜ **Error Pattern Learning — Builds Get Smarter After Failures** — `Automatic — active on every Pro build (no user action needed)`
-- ⬜ **Multi-Framework Builder (v5.0)** — `NavBharatAI Pro v5.0 → header → framework badge (or ⚙ → Framework)`
-- ⬜ **GitHub / URL Import (v5.0)** — `NavBharatAI Pro v5.0 → ⚙ → Import Repo`
-- ⬜ **App Update Notice (mobile)** — `Automatic — inside the installed Android/iOS app.`
-- ⬜ **Rate the App (mobile)** — `Automatic — the native rating card appears inside the installed app after you have used it a while.`
-- ⬜ **Push Notifications (mobile)** — `Automatic — the app asks for notification permission once, right after you sign in on the installed Android/iOS app.`
+- ✅ **Download app (Android)** — `Sidebar menu → "Download app" (shows only on a mobile browser on navbharatai.com)`
+- ✅ **Support & Help (email us)** — `Sidebar menu → Settings → Support & Help`
+- ✅ **Privacy & analytics consent** — `Consent banner (bottom of the screen) on your first visit — Accept analytics / Decline`
+- ✅ **Engineer AI — GitHub Clone & Push** — `Engineer AI chat → describe cloning a repo or pushing code`
+- ✅ **Unified Workspace — Chat + Live Code + Preview (Phase 3.1)** — `Pro Chat → build an app → live workspace docks on the right (desktop)`
+- ✅ **IDE / Code Studio** — `Sidebar → IDE  OR  Header → IDE tab`
+- ✅ **IDE Terminal / Shell** — `IDE → Terminal tab  OR  Settings → App Settings → Terminal`
+- ✅ **IDE Git Panel** — `IDE → Git tab`
+- ✅ **IDE Live Preview** — `IDE → Preview tab`
+- ✅ **Test Runner** — `Home → Other AI → Developer Tools → Test Runner`
+- ✅ **Multi-Page Builder — turn one page into a whole website** — `Home → Other AI → Design & Build → Multi-Page`
+- ✅ **Nav App Store — publish your Android app, and install apps others made** — `Home → Other AI → Publish & Deploy → Nav App Store`
+- ✅ **Monetize — start taking money in your app** — `Home → Other AI → Monetization & Team → Monetize`
+- ✅ **Component Library — ready-made pieces you can add to your app** — `Home → Other AI → Design & Build → Components`
+- ✅ **Design System — one set of colours, fonts and spacing for your whole app** — `Home → Other AI → Design & Build → Design System`
+- ✅ **Dark Mode Generator — add a dark theme to your app** — `Home → Other AI → Design & Build → Dark Mode Gen`
+- ✅ **Project Blueprints & Templates Gallery** — `Sidebar → Templates  OR  Code Studio → Templates`
+- ✅ **Professionals Hub** — `Sidebar → Professionals`
+- ✅ **Professional Pass (unlimited professionals)** — `Any Professional chat → the quota chip in the header, or the paywall shown after the daily free messages run out → "Get Pass — ₹99/month"`
+- ✅ **Other AI — Builder Tools (Home page)** — `Home → "Other AI" card  (opens the Other AI page)`
+- ✅ **Live Collaboration (Real-Time Room)** — `Home → Other AI → Live Collab`
+- ✅ **History** — `Sidebar → History  OR  Header → History tab`
+- ✅ **Donate** — `Sidebar → Donate`
+- ✅ **My Profile** — `Top-right avatar → My Profile  OR  Settings → Account → My Profile`
+- ✅ **User & Developer Guide (Docs Site)** — `Open /guide in your browser (e.g. yourdomain/guide)`
+- ✅ **API Keys (Programmatic Access)** — `Top-right avatar → My Profile → API Keys card`
+- ✅ **Status Page & Health Check** — `Open /status in your browser (machine-readable at /api/health)`
+- ✅ **Login / Sign Up** — `Header → Login button (top right)`
+- ✅ **App Navigation Overview** — `Header (top bar with tabs)  OR  Sidebar (left panel)`
+- ✅ **Code Confidence (AI Hallucination Check)** — `Home → Other AI → Insights & Webhooks → Code Confidence`
+- ✅ **React Hooks Safety (Rules of Hooks)** — `Home → Other AI → Insights & Webhooks → React Hooks Safety`
+- ✅ **Import / Export Consistency Check** — `Home → Other AI → Insights & Webhooks → Import / Export Consistency`
+- ✅ **JSX Component Resolution Check** — `Home → Other AI → Insights & Webhooks → JSX Component Resolution`
+- ✅ **Hook Resolution Check** — `Home → Other AI → Insights & Webhooks → Hook Resolution`
+- ✅ **Dependency Constraints Check** — `Home → Other AI → Insights & Webhooks → Dependency Constraints`
+- ✅ **Requirement Traceability Matrix** — `Backend API: POST/GET /api/workspace/traceability`
+- ✅ **Explain Code** — `Home → Other AI → Insights & Webhooks → Explain Code  (also backend POST /api/workspace/explain)`
+- ✅ **Webhook Manager** — `Home → Other AI → Insights & Webhooks → Webhooks  (also backend /api/webhooks/:userId)`
+- ✅ **Editor Theme Switcher** — `Code editor → header dropdown (top-right of the editor)`
+- ✅ **Merge Conflict Resolver** — `Files → a "merge conflicts — Resolve" banner appears when any file has conflict markers → Resolve`
+- ✅ **Quick-Start Gallery — Example Prompt Cards** — `Pro Chat → empty chat → example cards grid (visible before first message)`
+- ✅ **Backend Scaffolds — PocketBase & Convex** — `Pro Chat → describe a PocketBase or Convex app → auto-seeded skeleton`
+- ✅ **Unified Memory — Pro Chat and Engineer AI Share Context** — `Automatic — happens every time you build in Pro Chat then ask Engineer AI to edit`
+- ✅ **Iterative Agent Build Engine** — `Pro Chat → type any app description → send`
+- ✅ **Guider — Pre-Build Design Confirmation + Post-Build Quality Grader** — `Pro Chat → type any app description → Guider card appears before build starts`
+- ✅ **Error Pattern Learning — Builds Get Smarter After Failures** — `Automatic — active on every Pro build (no user action needed)`
+- ✅ **Multi-Framework Builder (v5.0)** — `NavBharatAI Pro v5.0 → header → framework badge (or ⚙ → Framework)`
+- ✅ **GitHub / URL Import (v5.0)** — `NavBharatAI Pro v5.0 → ⚙ → Import Repo`
+- ✅ **App Update Notice (mobile)** — `Automatic — inside the installed Android/iOS app.`
+- ✅ **Rate the App (mobile)** — `Automatic — the native rating card appears inside the installed app after you have used it a while.`
+- ✅ **Push Notifications (mobile)** — `Automatic — the app asks for notification permission once, right after you sign in on the installed Android/iOS app.`
 
 ---
 _Regenerate the inventory after adding features: parse `AppKnowledgeBase.ts` (id/name/path). Keep the ⬜/✅ status when regenerating._

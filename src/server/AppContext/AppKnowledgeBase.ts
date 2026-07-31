@@ -639,10 +639,10 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
   },
   {
     id: 'engineer_ai_github',
-    name: 'Engineer AI — GitHub Clone & Push',
-    path: 'Engineer AI chat → describe cloning a repo or pushing code',
-    description: 'Engineer AI can clone any GitHub repository into the sandbox and push code back. Uses GITHUB_TOKEN from Settings → Secrets & API Keys for private repos. Supports: clone_repo (import an existing codebase) and git_push (commit + push all changes to the repo).',
-    howToUse: 'Tell Engineer AI "clone my repo at github.com/..." or "push the code to GitHub". Store your GITHUB_TOKEN in Settings → Secrets & API Keys first.',
+    name: 'GitHub Clone & Push (NavBharatAI Pro v5.0)',
+    path: 'NavBharatAI Pro v5.0 → gear "Build options" → "Import Repo" (clone) / the "Push" toggle (push back) / "Ship to main"',
+    description: 'Clone any GitHub repository into your workspace and push code back — now handled by NavBharatAI Pro v5.0 (Engineer AI is retired). Import a repo from the "Import Repo" dialog; publish your current app to a repo via the same dialog\'s Push toggle; and, for a repo you own, edit and "Ship to main" (CI-gated merge). Private repos use your connected GitHub or a GITHUB_TOKEN from Settings → App Settings → Secrets & API Keys.',
+    howToUse: 'In NavBharatAI Pro v5.0, open the gear "Build options" → "Import Repo" to clone, use the Import/Push toggle to publish to a repo, or "Ship to main" to merge your own repo. Connect GitHub once, or store a GITHUB_TOKEN in Settings → App Settings → Secrets & API Keys for private repos.',
     relatedFeatures: ['engineer_ai', 'settings_secrets'],
     aiSurface: 'engineer_ai',
     keywords: ['github', 'clone', 'git push', 'repo', 'repository', 'version control', 'push code', 'github token'],
@@ -1567,8 +1567,8 @@ Also supports: file attachments (text, code, .zip project import), image analysi
   },
   {
     id: 'unified-workspace',
-    name: 'Unified Workspace — Chat + Live Code + Preview (Phase 3.1)',
-    path: 'Pro Chat → build an app → live workspace docks on the right (desktop)',
+    name: 'Unified Workspace — Chat + Live Code + Preview',
+    path: 'NavBharatAI Pro v5.0 → build an app → the workspace tabs (Preview / Files / Diff) open beside the chat',
     description: `World-class "Chat IS the IDE" surface, like Cursor / Bolt / v0 / Lovable. Once an app exists, a live workspace panel docks to the RIGHT of the Pro Chat conversation so you never switch tabs while building:
 • PREVIEW tab — the running app, live, updating as the AI edits files.
 • CODE tab — a file list + full Monaco editor; edit any file directly, changes sync instantly.
@@ -1576,7 +1576,7 @@ Also supports: file attachments (text, code, .zip project import), image analysi
 • DEPLOY button — one-click deploy straight from the workspace.
 • "Hide app" / "Show app" toggle in the chat header collapses or restores the workspace.
 On mobile the chat stays full-width and Preview/Code remain separate tabs (via the Preview-ready banner). The workspace appears automatically after the first successful build.`,
-    howToUse: 'Open Pro Chat and build any app. On desktop, the live workspace appears on the right automatically. Switch between Preview and Code tabs at the top of that panel. Edit files directly in the Code tab. Use "Hide app" in the chat header to focus on the conversation, "Show app" to bring it back.',
+    howToUse: 'Open NavBharatAI Pro v5.0 and build any app. The workspace tabs (Preview / Files / Diff) open beside the chat — tap one to open that surface, tap again (or ✕) to collapse back to full-width chat. Open a file to edit it in Code Studio.',
     relatedFeatures: ['pro_chat', 'ide', 'auto-test-generation', 'build-version-history'],
     aiSurface: 'pro_chat',
     keywords: [
@@ -2577,9 +2577,9 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'quick-start-gallery',
     name: 'Quick-Start Gallery — Example Prompt Cards',
-    path: 'Pro Chat → empty chat → example cards grid (visible before first message)',
+    path: 'NavBharatAI Pro v5.0 → empty chat → example cards grid (visible before first message)',
     description: `G9: When Pro Chat has no messages yet, a grid of example prompt cards is shown. Cards cover common app types AND Bharat-first templates: Analytics Dashboard, E-commerce Page, Portfolio Site, Admin Dashboard, UPI Payment App (Razorpay integration), Hindi Language App (bilingual Devanagari), GST Invoice Generator, Startup Registration Tracker. Clicking any card fills the Pro Chat input with a detailed prompt. The Bharat-first templates (UPI, Hindi, GST, Startup) generate real, working Indian-context apps.`,
-    howToUse: 'Open Pro Chat with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. For Bharat-first templates: UPI Payment needs RAZORPAY_KEY_ID, Hindi app is fully self-contained, GST Invoice needs no API key, Startup Tracker stores data in localStorage.',
+    howToUse: 'Open NavBharatAI Pro v5.0 with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. For Bharat-first templates: UPI Payment needs RAZORPAY_KEY_ID, Hindi app is fully self-contained, GST Invoice needs no API key, Startup Tracker stores data in localStorage.',
     relatedFeatures: ['pro_chat'],
     aiSurface: 'pro_chat',
     keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas', 'upi', 'payment', 'hindi', 'gst', 'invoice', 'startup', 'bharat', 'india', 'razorpay', 'devanagari', 'rupee', 'msme', 'registration'],
@@ -2587,7 +2587,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'backend-scaffolds',
     name: 'Backend Scaffolds — PocketBase & Convex',
-    path: 'Pro Chat → describe a PocketBase or Convex app → auto-seeded skeleton',
+    path: 'NavBharatAI Pro v5.0 → describe a PocketBase or Convex app → auto-seeded skeleton',
     description: `Phase 6.5: Two backend-as-a-service scaffolds are now supported alongside React/Vue/Svelte:
 
 PocketBase (vite-pocketbase):
@@ -2618,10 +2618,10 @@ Both scaffolds produce real, correctly wired code. The backend services (PocketB
   },
   {
     id: 'unified-memory',
-    name: 'Unified Memory — Pro Chat and Engineer AI Share Context',
-    path: 'Automatic — happens every time you build in Pro Chat then ask Engineer AI to edit',
+    name: 'Unified Memory — your project context carries across builds',
+    path: 'NavBharatAI Pro v5.0 → automatic (no user action needed)',
     description: `Phase 2.3: Pro Chat maintains a rolling memory of what was built (project summary + last 10 edits). When Engineer AI runs on the same workspace, it now receives this context at the start of every step — so the agent knows what Pro Chat already built, which decisions were made, and what the project contains. This eliminates the "fresh-start" problem where Engineer AI would re-reason decisions already established by Pro Chat. The memory is stored in Firestore (pro_memories collection) and loaded automatically by ProEngineRunner at the start of each agentic run.`,
-    howToUse: 'Automatic — no user action needed. Build in Pro Chat → the memory is saved. Then ask Engineer AI to edit → it picks up the context. Context includes: project summary, tech stack, last 10 edits.',
+    howToUse: 'Automatic — no user action needed. Keep building in NavBharatAI Pro v5.0; it remembers your project across builds (project summary, tech stack, recent edits) and applies that context to the next build automatically.',
     relatedFeatures: ['pro_chat', 'build-version-history', 'iterative-agent-build'],
     aiSurface: 'engineer_ai',
     keywords: ['memory', 'context', 'remember', 'remember project', 'forget', 'fresh start', 'context lost', 'yaad', 'bhool gaya', 'pichla kaam', 'previous build', 'project context', 'session memory', 'unified memory'],
@@ -2644,7 +2644,7 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
   {
     id: 'iterative-agent-build',
     name: 'Iterative Agent Build Engine',
-    path: 'Pro Chat → type any app description → send',
+    path: 'NavBharatAI Pro v5.0 → type any app description → send',
     description: `G10: Pro Chat uses a multi-step agentic build engine (not a single AI call). How it works:
 • PLANS first: breaks the app into 3–8 named steps shown as a live progress list (scaffold → install → implement → verify).
 • BUILDS step-by-step: each step runs the ReAct loop (reason → act → verify → self-heal), building on the previous.
@@ -2653,7 +2653,7 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
 • RETRY FIX: if a build fails, say "try again" — Pro Chat automatically restores the original prompt so the agent knows what to rebuild (no context loss).
 • PARTIAL BUILDS: if the time limit is reached, partial work is saved and auto-continued in the next round.
 • TIERS: runs in-memory (VFS, always available), server container (Docker), or cloud VM (E2B, with user's API key).`,
-    howToUse: 'Open Pro Chat and type a detailed app description (e.g. "Build a photo editing app with filters, crop, and brightness controls"). Send. Watch the step-by-step progress. If build fails, type "try again" — the full original prompt is restored automatically.',
+    howToUse: 'Open NavBharatAI Pro v5.0 and type a detailed app description (e.g. "Build a photo editing app with filters, crop, and brightness controls"). Send. Watch the step-by-step progress. If build fails, type "try again" — the full original prompt is restored automatically.',
     relatedFeatures: ['pro_chat', 'one-click-deploy', 'quick-start-gallery'],
     aiSurface: 'pro_chat',
     keywords: ['iterative build', 'step by step', 'agent build', 'build failed try again', 'try again', 'retry build', 'complex app', 'multi step', 'pro chat build', 'app build', 'build engine', 'photo editing app', 'phir se bana', 'dobara bana', 'memory', 'context', 'remember'],
@@ -2661,7 +2661,7 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
   {
     id: 'guider-plan-confirm',
     name: 'Guider — Pre-Build Design Confirmation + Post-Build Quality Grader',
-    path: 'Pro Chat → type any app description → Guider card appears before build starts',
+    path: 'NavBharatAI Pro v5.0 → type any app description → Guider card appears before build starts',
     description: `Guider is the Pro Chat quality layer that wraps every build with two checks:
 
 PRE-BUILD (Plan Confirmation):
@@ -2675,7 +2675,7 @@ POST-BUILD (Grade + Auto-Refine):
 • If score < threshold and gaps are found, Guider auto-refines up to 2 rounds without any user action.
 • Each refine round targets only the specific gaps (e.g. "missing dark mode toggle", "no error handling in login") without removing working features.
 • Final score + pass/fail shown in chat message.`,
-    howToUse: 'Open Pro Chat and describe an app. A Guider design card will appear — review and click Approve (or edit it). Build starts. After it completes, watch for the Guider grade message — it will auto-fix gaps.',
+    howToUse: 'Open NavBharatAI Pro v5.0 and describe an app. A Guider design card will appear — review and click Approve (or edit it). Build starts. After it completes, watch for the Guider grade message — it will auto-fix gaps.',
     relatedFeatures: ['iterative-agent-build', 'pro_chat', 'auto-code-review'],
     aiSurface: 'pro_chat',
     keywords: ['guider', 'design plan', 'plan confirmation', 'approve plan', 'build spec', 'quality check', 'grade', 'refine', 'auto refine', 'gaps', 'requirements', 'spec', 'confirmation card', 'before build', 'pre build', 'post build', 'quality score', 'plan approve karo', 'design confirm'],
@@ -2693,7 +2693,7 @@ POST-BUILD (Grade + Auto-Refine):
 Returns a 0-100 score + prioritized findings with file:line + fix suggestion.
 Non-blocking: review never delays or fails the build (12s timeout, best-effort).
 Also available on-demand via Settings → Pro → Code Review button.`,
-    howToUse: 'Build any app in Pro Chat — code review score and top issues appear in the build summary message automatically. For on-demand review without rebuilding, use Settings → Pro → Code Review.',
+    howToUse: 'Build any app in NavBharatAI Pro v5.0 — the code-review score and top issues appear in the build summary message automatically. For an on-demand review without rebuilding, use Home → Other AI → AI Tools → Code Review.',
     relatedFeatures: ['pro_chat', 'engineer_ai', 'admin-metrics'],
     aiSurface: 'pro_chat',
     keywords: ['code review', 'security', 'quality', 'owasp', 'xss', 'injection', 'tech debt', 'accessibility', 'score', 'findings', 'auto review', 'code quality', 'security scan'],

@@ -53,3 +53,22 @@ describe('ReactPreview — non-Tailwind apps are byte-for-byte unaffected', () =
     expect(html).not.toContain(SHADCN_CSS_VARS);
   });
 });
+
+// Preview boot-watchdog timeout (autopsy 2026-07-31): a large SaaS-dashboard build (600 KB+ bundle) loading
+// deps from the esm.sh CDN on a slow mobile network hit the OLD 25s in-browser watchdog and false-failed
+// with "did not start within 25 seconds", even though the production build succeeded. Bumped to 45s (the
+// server-side preview already allows 90s). Lock the more generous ceiling so a tighten can't re-break it.
+describe('ReactPreview — in-browser boot watchdog is generous enough for a large app', () => {
+  const html = buildReactPreview(VirtualFileSystem.fromRecord({
+    'package.json': JSON.stringify({ name: 'app', dependencies: { react: '^18.0.0', 'react-dom': '^18.0.0' } }),
+    'src/main.jsx': "import App from './App';\nexport default function boot(){ return App; }",
+    'src/App.jsx': "export default function App(){ return <div>Hi</div>; }",
+  }));
+
+  it('waits 45s (not the old 25s) before declaring a boot failure', () => {
+    expect(html).toContain('}, 45000);');
+    expect(html).toContain('did not start within 45 seconds');
+    expect(html).not.toContain('}, 25000);');
+    expect(html).not.toContain('did not start within 25 seconds');
+  });
+});

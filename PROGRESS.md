@@ -22983,3 +22983,35 @@ evidence alone. Deliberately NOT blind-patching the 2508-file import hot path fr
 multi-minute stall of the same CLASS. A cheap-floor-only shorter timeout is the candidate fix but carries
 "cut off a legit slow call" risk, so it is NOT shipped blind; proposed, pending admin confirmation. (The
 fast-lane sibling was already bounded in PR #1946 — SimpleBuilder `planTimeoutMs`.)
+
+---
+
+## 2026-07-31 — SaaS-dashboard "continue" autopsy (e37e7221): in-browser preview 25s watchdog too tight
+
+**Full 5-bucket ledger (94 issues, ok:true, weak/free tier, KIMI-built):**
+- ✅ Self-healed (~85): production build SUCCEEDED (`tsc` + `vite build`, dist generated, 616 KB bundle); 1
+  DATA_LOSS (1 file restored from the durable store); the unused-import fixes (the task); 2 tests scaffolded;
+  SEO/PWA production defaults added.
+- 🔀 Worked-around (8): **GLM 429 storm** — `glm-4.7-flash` failed 8× (429 "temporarily overloaded") and fell
+  back to Kimi every time. Deferred debt already covered by the pacer / circuit-breaker / key-pool stack.
+- ⏭️ Skipped (0).
+- ❌ Still-broken (1, the 1 unresolved): **in-browser PREVIEW_ERROR — "did not start within 25 seconds"**.
+  The app BUILT fine (production build passed); the in-browser preview timed out. Opened ~17 min after the
+  build settled, so the report's rootCause ("success", computed at settle) predates it — a minor staleness,
+  not a build failure.
+- 🥵 Struggle: the GLM 429 storm; the reviewer spent ~3 min (many read/grep/glob); one self-corrected wrong
+  import ("I added a wrong import, let me fix").
+
+**Missing subsystem / root cause of the ❌:** the in-browser boot watchdog was a fixed **25s**. A large app
+(a SaaS dashboard's 600 KB+ bundle) loading React + many deps from the esm.sh CDN and compiling in-browser on
+a slow MOBILE network legitimately needs longer — and the SERVER-side preview start already allows 90s, so
+25s was inconsistently tight and false-failed a real, still-loading preview.
+
+**Fix:** bump the in-browser boot watchdog `25s → 45s` (`src/server/runtime/ReactPreview.ts`, message + timer),
+a balanced ceiling (generous for a large app on mobile, still surfaces a genuine hang; the reload button is
+always available). Regression test in `ReactPreview.tailwind.test.ts` locks the 45s watchdog so a tighten
+can't re-break it. Server tsc clean; runtime suite green.
+
+**Honest note:** the GLM 429 storm keeps recurring across reports — it self-heals via the Kimi fallback (app
+still built), so it's debt, not a break; the existing pacer/circuit/key-pool stack is the mitigation. No new
+code fix warranted from this report beyond the preview-timeout.

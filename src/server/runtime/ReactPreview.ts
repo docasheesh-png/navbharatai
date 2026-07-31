@@ -377,7 +377,11 @@ ${babelTag}
   var IMG_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
   // Boot-overlay lifecycle: hidden the moment the app REALLY paints (first child in #root) or an
-  // error takes over; a 25s watchdog turns a silent hang into an explicit, named failure.
+  // error takes over; a 45s watchdog turns a silent hang into an explicit, named failure. 45s (not 25s):
+  // a large app (a SaaS dashboard's 600 KB+ bundle) loading React + many deps from the esm.sh CDN and
+  // compiling in-browser on a slow mobile network legitimately needs longer, and the server-side preview
+  // start already allows 90s — the old 25s ceiling false-failed real, still-loading previews (autopsy
+  // 2026-07-31). The reload button is always available, so a genuine hang is never trapped by the wait.
   var bootEl = document.getElementById('__nbai_boot');
   var bootStart = Date.now();
   var bootTick = setInterval(function () {
@@ -387,7 +391,7 @@ ${babelTag}
   var bootWatchdog = setTimeout(function () {
     if (!bootEl) return; // already mounted or errored
     var failed = Object.keys(bareLoadErrors);
-    var reason = 'The preview did not start within 25 seconds.\\n\\n';
+    var reason = 'The preview did not start within 45 seconds.\\n\\n';
     if (failed.length) {
       reason += 'These npm packages FAILED to load from the CDN:\\n'
         + failed.map(function (s) { return '  • ' + s + ' — ' + bareLoadErrors[s]; }).join('\\n')
@@ -398,7 +402,7 @@ ${babelTag}
       reason += 'npm packages are still downloading (a slow network), or a module hung while loading. Tap the reload (↻) button to retry.';
     }
     showError(reason);
-  }, 25000);
+  }, 45000);
   function hideBoot() {
     if (!bootEl) return;
     bootEl.style.display = 'none';

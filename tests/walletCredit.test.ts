@@ -87,21 +87,28 @@ describe('inrToWalletTokens — the ONE ₹→token conversion every surface sha
   });
 });
 
-describe('inrToDebitTokens — the DEBIT conversion rounds UP (margin protection, Phase 3)', () => {
-  it('a whole-token amount is unchanged (ceil == value)', () => {
+describe('inrToDebitTokens — the DEBIT conversion is EXACT, not rounded up', () => {
+  // It used to ceil, for margin protection. Two problems. The user was charged up to ₹0.01 more than
+  // the build really cost, on every build — and the ceil went into `tokenBalance` while
+  // `remaining_balance` moved by the paisa-rounded ₹, so the wallet's two views of one balance drifted
+  // apart a little further each time. The remainder is now CARRIED to the next charge
+  // (computeDebitedWallet), so no margin is given away — it is only deferred by at most ₹0.01.
+  it('a whole-token amount is unchanged', () => {
     expect(inrToDebitTokens(25)).toBe(2500);
     expect(inrToDebitTokens(1)).toBe(TOKENS_PER_RUPEE);
   });
 
-  it('a FRACTIONAL token always rounds UP, never down (unlike round)', () => {
-    expect(inrToDebitTokens(0.301)).toBe(31);   // 30.1 → 31 (round would give 30)
-    expect(inrToDebitTokens(0.304)).toBe(31);   // 30.4 → 31 (round would give 30)
-    expect(inrToDebitTokens(0.305)).toBe(31);   // 30.5 → 31 (round also 31, but ceil is unconditional)
-    expect(inrToDebitTokens(0.0001)).toBe(1);   // any positive fraction costs at least 1 token
+  it('keeps the fraction instead of inventing a whole token out of it', () => {
+    expect(inrToDebitTokens(0.301)).toBe(30.1);
+    expect(inrToDebitTokens(0.304)).toBe(30.4);
+    expect(inrToDebitTokens(0.305)).toBe(30.5);
+    // The case that mattered most: a per-message charge. Ceiling this to a whole token would have
+    // billed ₹0.01 for ₹0.002 of real cost — five times over, on one wallet spent everywhere.
+    expect(inrToDebitTokens(0.002)).toBe(0.2);
   });
 
-  it('scrubs IEEE-754 float noise BEFORE the ceil so a clean ₹ never inflates a whole token', () => {
-    // 0.3 * 100 === 30.000000000000004 in IEEE-754 — a naive ceil would return 31.
+  it('scrubs IEEE-754 float noise so a clean ₹ stays clean', () => {
+    // 0.3 * 100 === 30.000000000000004 in IEEE-754.
     expect(inrToDebitTokens(0.1 + 0.2)).toBe(30);
     expect(inrToDebitTokens(0.3)).toBe(30);
   });

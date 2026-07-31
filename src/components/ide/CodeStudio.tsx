@@ -967,9 +967,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          <div className="flex items-center gap-2">
             <button
               id="ide-social-chat-trigger"
-              onClick={() => { handleScreenChange('ai'); setIsSidebarOpen(true); }}
+              // Admin 2026-07-31: this must open the FULL NavBharatAI Pro v5.0 (the main nbi_pro_chat
+              // surface — same workspace + memory, 100% synced), not the in-IDE mini panel. Wired via
+              // onSocialChatTrigger; the internal mini stays only as a fallback if the parent doesn't wire it.
+              onClick={() => { if (onSocialChatTrigger) onSocialChatTrigger(); else { handleScreenChange('ai'); setIsSidebarOpen(true); } }}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="AI Chat — NavBharatAI Pro v5.0"
+              title="Open NavBharatAI Pro v5.0 (full)"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>

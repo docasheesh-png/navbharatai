@@ -194,6 +194,9 @@ export function ViewPanels({
             onModeChange={setMode}
             isAppBuilt={isAppBuilt}
             onPreviewClick={() => toggleTab('preview')}
+            // IDE top-bar "AI" button → open the FULL NavBharatAI Pro v5.0 (same session/workspace/memory,
+            // so it is 100% in sync with what's open in the IDE), not the in-IDE mini chat (admin 2026-07-31).
+            onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}
             theme={theme}
             onThemeChange={setTheme}
             pendingGHEdit={pendingGHEdit}

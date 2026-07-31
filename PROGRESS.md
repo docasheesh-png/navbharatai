@@ -23109,3 +23109,21 @@ and re-pushed. Lesson: push each green sub-step immediately (safeguard #4).
 **Related open (noted, not fixed here):** the reviewer LLM may still phrase "credentials in .env" as a
 `[CRITICAL]` on its own (the static downgrade removes the READINESS_BLOCKER that seeds it); and the auto-fix
 should not LOOP on an un-actionable finding to the wall-clock cap — separate hardenings.
+
+---
+
+## 2026-07-31 — FIX: IDE top-bar "AI" button now opens the FULL NavBharatAI Pro v5.0 (not the in-IDE mini)
+
+**Admin report.** In Code Studio (IDE), the top-right "AI" button opened a small in-IDE mini chat
+(`AgentV3MiniChat`); the admin wants it to open the FULL Pro v5.0, 100% memory-synced with the IDE.
+
+**Root cause.** The button (`id="ide-social-chat-trigger"`) was MEANT to fire the `onSocialChatTrigger` prop,
+but that prop was declared + destructured in `CodeStudio` yet NEVER passed by `ViewPanels`, so the onClick
+silently fell back to the internal `handleScreenChange('ai')` (the mini panel).
+
+**FIX.** `ViewPanels` now passes `onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}` (the FULL Pro v5.0
+surface — same session/workspace/memory the IDE uses, so it's 100% in sync by construction, exactly like the
+existing `onGoToMain`). The button's onClick calls `onSocialChatTrigger` when provided (internal mini kept only
+as a fallback if a parent doesn't wire it). Frontend tsc: no new errors (only pre-existing @capacitor stubs).
+Sync was already guaranteed — `AgentV3MiniChat`/the Pro v5 panel target the same `getAgentV3WorkspaceId` session
+("a second window onto the same brain") — so opening the full panel inherits the same files + conversation.

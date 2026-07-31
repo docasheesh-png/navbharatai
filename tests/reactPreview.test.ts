@@ -260,11 +260,11 @@ describe('buildReactPreview — imported-app loader resilience (Fix 33)', () => 
     expect(html).toContain('IMG_PLACEHOLDER');
     expect(html).toContain('data:image/gif;base64');
   });
-  it('ships the Ashok Chakra boot overlay + the 25s stuck watchdog (Fix 29 lock)', () => {
+  it('ships the Ashok Chakra boot overlay + the 45s stuck watchdog (bumped from 25s for large apps 2026-07-31)', () => {
     const html = buildReactPreview(reactVfs());
     expect(html).toContain('__nbai_boot');
     expect(html).toContain('__nbai_spin');
-    expect(html).toContain('did not start within 25 seconds');
+    expect(html).toContain('did not start within 45 seconds');
   });
 });
 

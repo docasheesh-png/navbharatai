@@ -23109,29 +23109,3 @@ and re-pushed. Lesson: push each green sub-step immediately (safeguard #4).
 **Related open (noted, not fixed here):** the reviewer LLM may still phrase "credentials in .env" as a
 `[CRITICAL]` on its own (the static downgrade removes the READINESS_BLOCKER that seeds it); and the auto-fix
 should not LOOP on an un-actionable finding to the wall-clock cap — separate hardenings.
-
----
-
-## 2026-07-31 — FEATURE: .zip project import now AUTO-BOOTS the preview (admin request — "preview chal hi chale")
-
-**Report (admin).** In NavBharatAI Pro, attach → Import project (.zip) → upload: the files showed in chat but
-the **build/preview never started** — the user had to manually type "run this app". Root: `useZipImport`
-classified the app and, for a FRAMEWORK app (Vite/Next/React + package.json — the most common real project),
-only POSTED "type run this app" (in-browser Babel can't resolve npm packages, so it needs a real dev server).
-The GitHub-import path already auto-boots (it calls `handleSend` with a trigger message); the .zip path did not.
-
-**FIX.** New pure `src/lib/importedAppPlan.ts` (`planImportedApp(files)` → kind + `autoRun` + a canonical
-`RUN_IMPORTED_APP_MESSAGE`). `useZipImport` gains an optional `triggerBuild` dep; for a framework app it now
-posts "🚀 Booting your app now…" and auto-calls `triggerBuild(RUN_IMPORTED_APP_MESSAGE)` after the import
-settles — the SAME engine handler a typed prompt uses (App.tsx `handleSend`), so it installs deps + starts the
-dev server + previews, one-shot like the GitHub import. Static / simple-React apps are UNCHANGED (they already
-preview free in-browser — no build turn spent). Regression-locked in `importedAppPlan.test.ts` (7 cases incl.
-the exact framework-auto-run case + the "don't auto-run static/simple/other" counters). Frontend tsc: no new
-errors (only the pre-existing @capacitor native-module stubs).
-
-**HONEST NOTE (reverses a prior admin note).** This supersedes the 2026-07-28 KB note "import does NOT start a
-build / does not spend tokens": auto-booting a framework app runs the real dev server, so it DOES spend a little
-build credit — that is the unavoidable cost of an actual running preview (the free in-browser static/simple
-cases still cost nothing). Done at the admin's explicit 2026-07-31 request ("preview chal hi chale"). AppKB
-line 165 updated to state this accurately (it now matches the long-standing "preview boots automatically" claim
-in the agentv3_zip_import entry, which the code previously did NOT honour for framework apps).

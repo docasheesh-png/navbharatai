@@ -6,7 +6,6 @@
 // identifier back, so every file-drop / conflict-resolve caller is unchanged.
 
 import { saveAllFiles } from '../lib/storage';
-import { planImportedApp, RUN_IMPORTED_APP_MESSAGE } from '../lib/importedAppPlan';
 
 export interface ZipImportDeps {
   setFiles: (v: any) => void;
@@ -20,16 +19,12 @@ export interface ZipImportDeps {
   updatePreview: (files: any) => void;
   toggleTab: (view: any, pushToHistory?: boolean) => void;
   addToast: (message: string, type?: any) => void;
-  /** Auto-trigger the engine (same handler a typed prompt uses) so a framework-app import BOOTS its
-   *  live preview without the user having to type "run this app" (admin request 2026-07-31). Optional
-   *  so existing callers/tests that don't pass it simply fall back to the old "type run this app" hint. */
-  triggerBuild?: (message: string) => void;
 }
 
 export function useZipImport(deps: ZipImportDeps) {
   const {
     setFiles, setHasGeneratedCode, setIsAppBuilt, setIsProLoading, setProBuildProgress, setProInput,
-    setProMessages, syncFilesToV3, updatePreview, toggleTab, addToast, triggerBuild,
+    setProMessages, syncFilesToV3, updatePreview, toggleTab, addToast,
   } = deps;
 
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {
@@ -138,17 +133,20 @@ export function useZipImport(deps: ZipImportDeps) {
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 
-      // Classify the imported app (pure, unit-tested) and decide whether to AUTO-RUN it.
+      // Classify the imported app to give an honest status message.
       const pkg = loadedFiles['package.json'] || '';
       const hasBuildTool = /["'](vite|webpack|rollup|parcel|next|nuxt|gatsby|create-react-app|@vitejs)\s*["']/.test(pkg);
-      const plan = planImportedApp(loadedFiles);
-      const isFrameworkApp = plan.kind === 'framework';
-      const isSimpleReact = plan.kind === 'simple-react';
-      const isStaticApp = plan.kind === 'static';
-      // Whether we will auto-boot the preview for a framework app (needs triggerBuild wired in).
-      const willAutoRun = plan.autoRun && typeof triggerBuild === 'function';
+      const hasJsxEntry = Object.keys(loadedFiles).some(k => /\.(tsx|jsx)$/i.test(k));
+      const hasPackageJson = !!pkg;
+      // Framework app = needs a real build step (npm install + npm run dev) — in-browser Babel
+      // cannot resolve npm packages, so the preview would silently fail.
+      const isFrameworkApp = hasBuildTool && hasPackageJson;
+      // Simple React = JSX/TSX without a bundler config — Babel can transpile these in-browser.
+      const isSimpleReact = hasJsxEntry && !hasBuildTool;
+      // Static app = plain HTML/CSS/JS — preview works immediately.
+      const isStaticApp = !hasPackageJson && Object.keys(loadedFiles).some(k => k === 'index.html' || k.endsWith('.html'));
 
-      // Only attempt the in-browser live preview for static and simple-React apps; framework apps need a
+      // Only attempt live preview for static and simple-React apps; framework apps need a
       // real dev server (npm install + npm run dev) which only E2B/Engineer AI can provide.
       if (!isFrameworkApp) {
         setTimeout(() => updatePreview(loadedFiles as any), 100);
@@ -163,13 +161,8 @@ export function useZipImport(deps: ZipImportDeps) {
       const moreText = fileList.length > 10 ? `\n• ... and ${fileList.length - 10} more` : '';
 
       let importMessage: string;
-      if (isFrameworkApp && willAutoRun) {
-        // Auto-run (admin request 2026-07-31): a framework app needs a real dev server, so instead of
-        // asking the user to type "run this app", we BOOT it for them right away — the same one-shot
-        // experience the GitHub-import path already gives. The auto-trigger fires just below.
-        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n🚀 **Booting your app now** — installing dependencies and starting the dev server for a live preview. This takes a moment…`;
-      } else if (isFrameworkApp) {
-        // Fallback (no auto-trigger wired): framework apps need npm install + dev server — tell the user.
+      if (isFrameworkApp) {
+        // Honest: framework apps need npm install + dev server — tell user exactly what to do.
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n⚠️ **This app needs a build step** (it uses ${hasBuildTool ? 'Vite/webpack/etc.' : 'npm'}).\nIn-browser preview won't work for it — you need a real dev server.\n\n👉 Type **"run this app"** and I will install dependencies and launch a live preview for you.`;
       } else if (isSimpleReact) {
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n✅ Preview is live in-browser via Babel transpilation. Tell me what you want to change!`;
@@ -188,13 +181,6 @@ export function useZipImport(deps: ZipImportDeps) {
       // Static/simple apps stay in Pro Chat where the inline preview is already showing.
       if (isFrameworkApp) {
         setTimeout(() => toggleTab('studio'), 400);
-      }
-      // AUTO-RUN (admin request 2026-07-31): boot the framework app's live preview without a manual
-      // "run this app". Fires AFTER this import fully settles (the finally below flips isProLoading off
-      // first) so the engine turn owns its own loading state cleanly. triggerBuild is the same handler a
-      // typed prompt uses (App.tsx handleSend), so it installs deps + starts the dev server + previews.
-      if (willAutoRun && triggerBuild) {
-        setTimeout(() => { try { triggerBuild(RUN_IMPORTED_APP_MESSAGE); } catch { /* engine turn manages its own errors */ } }, 700);
       }
     } catch (err: any) {
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });

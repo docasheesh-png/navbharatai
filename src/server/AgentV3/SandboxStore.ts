@@ -25,6 +25,8 @@ export interface SandboxRecord {
   userId: string;
   sandboxId: string;
   updatedAt: number;
+  /** Epoch ms the orphan reaper paused this sandbox, if it ever did. See sandboxReaper.ts. */
+  pausedAt?: number;
 }
 
 class SandboxStore {
@@ -67,6 +69,62 @@ class SandboxStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Refresh `updatedAt` for a workspace whose sandbox is being used RIGHT NOW, without touching the
+   * rest of the record. This is what makes the timestamp mean "last activity" rather than "last build
+   * finished" — the orphan reaper reads it to tell a running build apart from an abandoned VM. The
+   * caller throttles (shouldTouchDurable), so this is roughly one write per build per few minutes.
+   */
+  async touch(workspaceId: string, sandboxId: string): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !sandboxId) return;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
+        { workspaceId, sandboxId, updatedAt: Date.now() },
+        { merge: true },
+      );
+    } catch { /* best-effort — never block a build */ }
+  }
+
+  /**
+   * The sandboxes whose last activity predates `cutoffMs` — candidates for the orphan reaper.
+   *
+   * Reads the DURABLE record rather than any one instance's memory, which is the entire point: a
+   * sandbox created by a Cloud Run instance that has since been recycled is invisible to that
+   * instance's idle sweep, but it is still right here. Bounded by `limit` so one sweep can never turn
+   * into an unbounded read.
+   */
+  async listStale(cutoffMs: number, limit = 50): Promise<SandboxRecord[]> {
+    const db = this.getDb();
+    if (!db || !Number.isFinite(cutoffMs)) return [];
+    try {
+      const snap = await db.collection('agentv3_sandboxes')
+        .where('updatedAt', '<', cutoffMs)
+        .orderBy('updatedAt', 'asc')
+        .limit(Math.max(1, Math.min(500, limit)))
+        .get();
+      return snap.docs.map((d) => d.data() as SandboxRecord).filter((r) => r && r.sandboxId);
+    } catch {
+      return []; // a missing index or a Firestore blip must never break the sweep
+    }
+  }
+
+  /**
+   * Note that the reaper paused this sandbox. The record is KEPT, not deleted — the sandbox still
+   * exists and a returning user resumes it by id; only the compute is stopped. The stamp is what
+   * keeps the next sweep from trying to pause it again every two minutes forever.
+   */
+  async markPaused(workspaceId: string): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
+        { pausedAt: Date.now() },
+        { merge: true },
+      );
+    } catch { /* best-effort */ }
   }
 
   /** Forget a workspace's sandbox (e.g. after a connect that failed because it was reaped). Best-effort. */

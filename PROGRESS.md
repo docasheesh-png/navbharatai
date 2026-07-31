@@ -23127,3 +23127,27 @@ existing `onGoToMain`). The button's onClick calls `onSocialChatTrigger` when pr
 as a fallback if a parent doesn't wire it). Frontend tsc: no new errors (only pre-existing @capacitor stubs).
 Sync was already guaranteed — `AgentV3MiniChat`/the Pro v5 panel target the same `getAgentV3WorkspaceId` session
 ("a second window onto the same brain") — so opening the full panel inherits the same files + conversation.
+
+---
+
+## 2026-07-31 — FIX (zip import, part 1): bulk file-load, no more one-by-one trickle
+
+**Admin report.** A 2500-file `.zip` import (📎 → Import project) showed files appearing ONE-BY-ONE over
+~23 min (~300 files done in 23 min ≈ 4.6s/file), as if being "rebuilt". The files already exist — there is
+NO need to regenerate them; they must sync in BULK.
+
+**ROOT CAUSE (client).** `useZipImport` streamed files from `/api/extract-zip` (SSE) and called
+`setFiles({ ...loadedFiles })` — spreading the ENTIRE growing map — every 20 files. For N files that is
+O(N²) full re-renders of the file tree/editor (2500 files ≈ 125 spreads of up-to-2500 keys), which is the
+visible one-by-one trickle. (The server extraction itself has no artificial delay; the 6s reveal-pacer is
+build-only and never touched imports.)
+
+**FIX (part 1).** Drop the per-batch drip: show only the first ≤8 files instantly (so a tiny app still feels
+live), then let the SINGLE bulk `setFiles(loadedFiles)` at the end commit everything at once — O(N), a few
+seconds instead of tens of minutes. The cheap progress counter still shows "Loading N files…". Frontend tsc:
+no new errors.
+
+**STILL PENDING (part 2, separate).** Boot-only preview for a framework-app import: run the EXISTING files on
+a real dev server (npm install + dev) WITHOUT any LLM/regeneration — needs the direct dev-server-boot path
+(the earlier engine-trigger auto-boot was reverted precisely because it could regenerate). Tracked as the next
+zip task.

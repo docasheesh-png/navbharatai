@@ -23225,3 +23225,28 @@ the live component/route, so a future edit that re-introduces a retired path fai
 (right-docked canvas, "16k Opus budget", Firestore-only memory) — navigation is now correct everywhere, but
 those descriptions deserve a dedicated refresh pass. Remaining roadmap clusters: Professional AIs (75),
 Collaboration (4), Settings/Connections (16), Admin/Ops (6), Platform/Navigation (51) — same conveyor.
+
+### 2026-07-31 — Rock-solid polish campaign: FIRST FULL PASS COMPLETE (203/203)
+
+All 11 roadmap categories are now ✅ (App Builder 14, Core AI Chat 10, Builder Tools 11, Professional AIs 75,
+Deploy 5, Reliability 9, Billing 2, Collaboration 4, Settings 16, Admin 6, Platform 51). Shipped as PRs
+#1964–#1970 (each: branch → gate → CI green → squash-merge).
+
+**The systemic root cause (fixed everywhere):** the features work; the pervasive bug was **stale KB
+navigation** left by three migrations the KB was never fully swept for — Engineer AI retired (→ v5.0),
+Pro Chat v2.0 retired (→ v5.0), the 2026-07-23 builder-tools move (Settings → Home "Other AI"), and the
+Deploy→"Publish" rename. Every NavBharatAI AI reads the KB `path` to answer "where is X?", so a stale path
+silently misdirected real users. Fixed in place (never deleted — the pro_chat/engineer_ai KnowledgeDocs
+groups + backend surfaces stay live and tested).
+
+**The durable guarantee:** a **campaign-wide regression lock** (`tests/polishAdminPlatform.test.ts`) now
+asserts that NO KB entry's `path` — across all 203 — routes through any retired doorway ("Engineer AI chat",
+"Pro Chat →", "Deploy panel → Deploy tab", "Settings → Billing", "→ Reports tab", "Settings → AI Tools →
+Voice", the deleted floating "v5.0" button, or the bare "Secrets & Keys" label). Plus each cluster has its
+own `tests/polish*.test.ts` anchoring the corrected path to a real component/route string. So the whole
+drift class fails CI if it ever returns.
+
+**Open follow-up (rule 6, the "second lap"):** a wider *legacy prose* layer still carries v2.0-era
+*capability* descriptions (right-docked canvas, "16k Opus budget", Firestore-only memory). All navigation is
+correct; those prose refreshes are the next, lower-priority pass — they never misdirect a user, they just
+read slightly out-of-date.

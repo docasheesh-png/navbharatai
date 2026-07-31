@@ -29,32 +29,34 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 ## Feature inventory (203) — polish status
 
 ### Core AI Chat (10)
-- ⬜ **Offline AI (on-device chat)** — `Sidebar menu → Offline AI`
-- ⬜ **Freelancing & Online-Income AI** — `Sidebar → Professionals → Freelancing & Online-Income`
-- ⬜ **NavBharatAI Pro Chat** — `Home → Pro Chat button  OR  Header → Pro Chat tab`
-- ⬜ **Pro Chat — File & Image Upload** — `Pro Chat → paperclip / attachment icon in the chat input`
-- ⬜ **Free Chat (NavBharatAI)** — `Sidebar → Reports  OR  Header → Reports tab`
-- ⬜ **Free Chat — File, Image & PDF Analysis** — `Sidebar → Reports → attachment icon in the chat input`
-- ⬜ **Pro Chat — Extended Thinking (Complex Tasks)** — `Pro Chat → just describe a complex task (auto-detected)`
-- ⬜ **Pro Chat — Build Planner (Step-by-Step Progress)** — `Pro Chat → submit a build request → see step progress bar`
-- ⬜ **Pro Chat — Cross-Session Memory** — `Pro Chat → automatic (no user action needed)`
-- ⬜ **Pro Chat — Design-to-Code (Image → UI)** — `Pro Chat → attach a design image → describe the app`
+- ✅ **Offline AI (on-device chat)** — `Sidebar menu → Offline AI` — path verified real; test-locked (#polish-3).
+- ✅ **Freelancing & Online-Income AI** — `Sidebar → Professionals → Freelancing & Online-Income` — path verified real; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro (App Builder chat)** — `Home → "NavBharatAI Pro" card → "Open Pro Builder"  OR  Sidebar → "App Builder v5.0"` — KB corrected: the retired v2.0 "Pro Chat button/tab" path was replaced with the real NavBharatAI Pro v5.0 gate; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — File & Image Upload** — `NavBharatAI Pro v5.0 → 📎 attachment icon` — surface name corrected off the retired "Pro Chat"; test-locked (#polish-3).
+- ✅ **Free Chat (NavBharatAI)** — `Home → "Start Free Chat"  OR  Sidebar → "NavBharatAI FREE"` — KB corrected: the stale "Reports" tab path was replaced with the real Free Chat gate; test-locked (#polish-3).
+- ✅ **Free Chat — File, Image & PDF Analysis** — `Sidebar → "NavBharatAI FREE" → 📎 icon` — stale "Reports" path corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Extended Thinking (Complex Tasks)** — `NavBharatAI Pro v5.0 → describe a complex task (auto-detected)` — surface name corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Build Planner (Step-by-Step Progress)** — `NavBharatAI Pro v5.0 → submit a build → plan checklist` — surface name corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Cross-Session Memory** — `NavBharatAI Pro v5.0 → automatic` — surface name corrected; test-locked (#polish-3).
+- ✅ **NavBharatAI Pro — Design-to-Code (Image → UI)** — `NavBharatAI Pro v5.0 → attach a design image → describe the app` — surface name corrected; test-locked (#polish-3).
+
+> **Open follow-up (honest, rule 6):** Beyond these 10, a wider *legacy* documentation layer (~8 more entries such as `unified-workspace`, `pro_chat_multi_deploy`, the Quick-Start gallery, PocketBase/Convex seed, etc.) still carries v2.0-era *capability prose* (right-docked canvas, "16k Opus budget", Firestore-only memory). Their navigation is not user-breaking, but the descriptions should be refreshed to v5.0 reality in a dedicated pass. The `pro_chat` KnowledgeDocs group + backend surface (`chat.ts`) are LIVE and tested, so these entries are corrected in place, never deleted.
 
 ### NavBharatAI Pro v5.0 — App Builder (14)
-- ⬜ **NavBharatAI Pro v5.0 (beta)** — `Sidebar → "App Builder v5.0"  OR  the floating "v5.0" button (bottom-right when enabled for your account).`
-- ⬜ **Export project (.zip) — your code, no lock-in** — `NavBharatAI Pro v5.0 → header tab row → "Export .zip" button`
-- ⬜ **Import an existing app (.zip) into v5.0** — `NavBharatAI Pro v5.0 → chat composer → 📎 attach → pick your app's .zip → send`
-- ⬜ **Import an existing app from GitHub into v5.0** — `NavBharatAI Pro v5.0 → chat composer → options (⚙) → "GitHub / URL" → pick a repo from your list (1 click) or paste a URL`
-- ⬜ **Plan & Advise modes + the build queue (3-role workflow)** — `NavBharatAI Pro v5.0 → mode selector at the message box (bottom-left, next to the settings button) — a small "🔨 Build" dropdown that opens upward with Build · Plan · Advise (+ the Queue chip)`
-- ⬜ **Edit your own GitHub repo & ship to main (own-repo mode)** — `NavBharatAI Pro v5.0 → import YOUR OWN GitHub repo → edit → "Ship to main" button above the chat box`
-- ⬜ **Software Project Mode — build very large software (hundreds of files) module by module** — `NavBharatAI Pro v5.0 → chat — automatic for large software requests (a full ERP/CRM/management system, an explicit "200+ screens" scale, or a spec listing many features)`
-- ⬜ **Build survives reload & tab switch (no lost work)** — `NavBharatAI Pro v5.0 — automatic; the build keeps running and re-attaches on its own`
-- ⬜ **Restore all files (bring your whole project back)** — `NavBharatAI Pro v5.0 → header → History tab (or Files tab when empty) → "Restore all files" button`
-- ⬜ **Report a build to NavBharatAI (admin-only report)** — `NavBharatAI Pro v5.0 → header tab row → "Report" button`
-- ⬜ **Files — one Files view, two gates (v5.0 tab + sidebar)** — `NavBharatAI Pro v5.0 → header → Files tab  —OR—  sidebar menu → Files (both open the SAME Files view)`
-- ⬜ **Deploy to a live URL (one click)** — `NavBharatAI Pro v5.0 → header tab row → "Deploy" button (the live link then shows as "Live site")`
-- ⬜ **Preview (dual: Live server + In-browser)** — `NavBharatAI Pro v5.0 → header → Preview tab → "Live server" / "In-browser" switch`
-- ⬜ **Save apps to your own GitHub (git-native)** — `Sign in with GitHub → build in NavBharatAI Pro v5.0 → your project is committed to a private repo in YOUR GitHub account`
+- ✅ **NavBharatAI Pro v5.0 (beta)** — `Sidebar → "App Builder v5.0"  OR  Professionals → "NavBharatAI Pro v5.0" card` — KB corrected: removed the STALE floating-button path (the launcher was deleted in App.tsx); named the two real gates; test-locked (#polish-2).
+- ✅ **Export project (.zip) — your code, no lock-in** — `Files tab → "ZIP"` — real download + honest failure; KB path corrected (was a stale header path); test-locked (#polish-1).
+- ✅ **Import an existing app (.zip) into v5.0** — `📎 attach menu → "Import project (.zip)"` — KB path corrected to the real attach-menu option (imports immediately, not a send-a-zip flow); test-locked (#polish-2).
+- ✅ **Import an existing app from GitHub into v5.0** — `gear "Build options" (⚙) → "Import Repo"` — KB path corrected to the real menu label (was "GitHub / URL" only); test-locked (#polish-2).
+- ✅ **Plan & Advise modes + the build queue (3-role workflow)** — `composer mode selector → Build · Plan · Advise` — verified against the real 🔨/🧠/🔍 mode dropdown; test-locked (#polish-2).
+- ✅ **Edit your own GitHub repo & ship to main (own-repo mode)** — `"Ship to <main>" + "Revert last" above the chat box` — verified real, CI-gated ship + non-destructive revert; test-locked (#polish-2).
+- ✅ **Software Project Mode — build very large software (hundreds of files) module by module** — `automatic for large software requests; flag-gated AGENTV3_PROJECT_MODE` — verified real module-decomposition path; test-locked (#polish-2).
+- ✅ **Build survives reload & tab switch (no lost work)** — `automatic; the build re-attaches on its own (subscribeLive)` — verified real live re-attach; test-locked (#polish-2).
+- ✅ **Restore all files (bring your whole project back)** — `History tab (or Files tab when empty) → "Restore all files"` — verified real restore button + handler; test-locked (#polish-2).
+- ✅ **Report a build to NavBharatAI (admin-only report)** — `header tab row → "Report"` — verified single admin-only submit (no user download/copy); test-locked (#polish-2).
+- ✅ **Files — one Files view, two gates (v5.0 tab + sidebar)** — `header → Files tab  —OR—  sidebar → Files (same FilesPanel)` — verified both gates render the same component; test-locked (#polish-2).
+- ✅ **Publish to a live URL (one click)** — `header action row → "Publish"` — real deploy via the Hosting chooser; KB corrected (button is "Publish", not "Deploy"); test-locked (#polish-1).
+- ✅ **Preview (dual: Live server + In-browser)** — `Preview tab → "Live server" / "In-browser" + Diagnose` — verified real dual toggle + Diagnose reboot; test-locked (#polish-2).
+- ✅ **Save apps to your own GitHub (git-native)** — `Sign in with GitHub → each build commits to a private repo in YOUR GitHub` — verified real, admin-gated git-native storage; test-locked (#polish-2).
 
 ### Builder Tools (Other AI) (11)
 - ⬜ **NavBharatAI Voice (inside a Professional)** — `Sidebar → Professionals → open any professional (Doctor, Lawyer, Teacher, …) → tap the 🎙️ microphone button next to the Send box. Signed-in users only, when voice is enabled.`

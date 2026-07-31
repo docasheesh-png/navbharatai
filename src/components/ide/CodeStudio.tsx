@@ -813,7 +813,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       {/* IDE Top Helper Bar (Quick Access) */}
       <div className="h-9 bg-[var(--theme-card)] flex items-center justify-between px-3 shrink-0 border-b border-black/10 select-none">
          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 cursor-pointer hover:bg-white/5 px-2 py-1 rounded transition-colors" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            {/* IDE menu (☰ NavBharat IDE): opens the IDE's FILE EXPLORER sidebar — NOT the AI chat (admin
+                2026-07-31). It used to only toggle isSidebarOpen, so if activeScreen was left on 'ai' the
+                menu showed the AI panel. Force the 'files' screen; a second tap while already on files closes it. */}
+            <div className="flex items-center gap-1.5 cursor-pointer hover:bg-white/5 px-2 py-1 rounded transition-colors" onClick={() => { if (isSidebarOpen && activeScreen === 'files') { setIsSidebarOpen(false); } else { setActiveScreen('files'); setIsSidebarOpen(true); } }}>
                <MenuIcon className="w-4 h-4 text-white/70" />
                <span className="text-[11px] text-white/80 font-medium">NavBharat IDE</span>
             </div>

@@ -156,15 +156,15 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ✅ **One-Click Publish Button** — `NavBharatAI Pro v5.0 → header action row → "Publish"` — KB corrected (was "Pro Chat → Deploy button"); test-locked (#polish-5).
 
 ### Reliability / Quality Engine (9)
-- ⬜ **Auto Dependency Sync** — `Pro Chat → Build any app → automatic (no user action needed)`
-- ⬜ **App SBOM + License Check** — `Backend capability — POST /api/workspace/sbom (returns a Software Bill of Materials for your built app)`
-- ⬜ **Build Health — Will this app work?** — `Home → Other AI → Insights & Webhooks → Build Health (top card) → Run All Checks`
-- ⬜ **Build Performance Analytics** — `Analytics view → Build Performance card`
-- ⬜ **AI Build Optimizer** — `Analytics view → Build Optimizer card`
-- ⬜ **Build Reliability (MTTD / MTTR)** — `Analytics view → Build Reliability card`
-- ⬜ **Auto Test Generation (Phase 17)** — `Pro Chat → Build any app → automatic (no user action needed)`
-- ⬜ **Build Version History — Go Back to Any Previous Version** — `Pro Chat → sidebar → Files → History tab`
-- ⬜ **Auto Code Review** — `Pro Chat → Build any app → review appears in build summary`
+- ✅ **Auto Dependency Sync** — `NavBharatAI Pro v5.0 → build any app → automatic` — surface name corrected off retired Pro Chat; test-locked (#polish-6).
+- ✅ **App SBOM + License Check** — `Backend — POST /api/workspace/sbom` — verified real endpoint; test-locked (#polish-6).
+- ✅ **Build Health — Will this app work?** — `Home → Other AI → Insights & Webhooks → Build Health → Run All Checks` — verified real card; test-locked (#polish-6).
+- ✅ **Build Performance Analytics** — `Home → Other AI → Analytics → Build Performance card` — path made discoverable (named the Analytics doorway); test-locked (#polish-6).
+- ✅ **AI Build Optimizer** — `Home → Other AI → Analytics → Build Optimizer card` — path made discoverable; test-locked (#polish-6).
+- ✅ **Build Reliability (MTTD / MTTR)** — `Home → Other AI → Analytics → Build Reliability card` — path made discoverable; test-locked (#polish-6).
+- ✅ **Auto Test Generation (Phase 17)** — `NavBharatAI Pro v5.0 → build any app → automatic` — surface name corrected; test-locked (#polish-6).
+- ✅ **Build Version History — Go Back to Any Previous Version** — `NavBharatAI Pro v5.0 → Files tab → History` — surface name corrected; test-locked (#polish-6).
+- ✅ **Auto Code Review** — `NavBharatAI Pro v5.0 → build any app → review in the build summary` — surface name corrected; test-locked (#polish-6).
 
 ### Monetization & Billing (2)
 - ✅ **Billing & Plan** — `Sidebar → "Wallet & Billing"  OR  the token chip in the v5.0 header` — KB corrected (was a non-existent "Settings → Billing"); test-locked (#polish-5).

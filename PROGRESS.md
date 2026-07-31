@@ -23178,3 +23178,50 @@ doesn't fire immediately, the **Diagnose** button in the Preview does the identi
 endpoint). Not yet verified end-to-end on a live fresh import that the auto-resume ALWAYS fires on the first
 mount — if a real report shows it needs a manual Diagnose, the next step is to explicitly kick `preview-diagnose`
 right after a framework import rather than rely on the mount-time effect. Recorded honestly (rule 6).
+
+---
+
+## 2026-07-31 — Rock-solid polish campaign (admin: "sabhi feature ko roadmap bana kar polish karo, rocksolid banao … auto")
+
+Generated `FEATURE_ROADMAP.md` (code-anchored inventory of all 203 KB features, 11 categories, a
+6-point "rock-solid" checklist) and began driving it cluster-by-cluster, autonomously (branch → gate →
+PR → CI green → merge), starting from the App Builder as the admin asked.
+
+**Systemic finding (the dominant defect class):** the features themselves are real and work end-to-end —
+the pervasive bug is **stale `AppKnowledgeBase` navigation** left by two big surface migrations that the KB
+was never fully swept for: **Engineer AI is retired** (→ NavBharatAI Pro v5.0) and the **old Pro Chat v2.0
+is retired** (→ Pro v5.0), plus the **2026-07-23 "builder tools moved from Settings → Home Other AI"** move
+and the **Deploy→"Publish"** rename. Every NavBharatAI AI (Free/Pro/Offline/Doctor) reads the KB to answer
+"where is X?", so a stale path silently misdirects real users. Fix = point every entry at the control that
+actually exists, corrected IN PLACE (never delete — the `pro_chat`/`engineer_ai` KnowledgeDocs groups +
+backend `chat.ts` surfaces are live and tested), each locked with a source-anchored regression test.
+
+**Clusters shipped rock-solid (merged to main):**
+- **App Builder / NavBharatAI Pro v5.0 (14/14)** — PR #1964. Fixed: removed the deleted floating-"v5.0"-
+  button path (named the 2 real gates), Export → "Files tab → ZIP", Publish (not "Deploy"), Import .zip →
+  attach-menu "Import project (.zip)", GitHub import → "Build options → Import Repo". Verified real + locked:
+  Plan/Advise+queue, Ship-to-main+Revert, Restore all files, dual Preview+Diagnose, admin-only Report,
+  Files (one FilesPanel/two gates), Software Project Mode, build continuity, git-native storage.
+- **Core AI Chat (10/10)** — PR #1964. Free Chat "Reports" → "NavBharatAI FREE"; retired-Pro-Chat entries
+  repointed to NavBharatAI Pro v5.0; offline/freelancing verified.
+- **Builder Tools / Other AI (11/11)** — PR #1965. Voice to App: stale "Settings → AI Tools → Voice to App"
+  → the real inline 🎙️ mic in the Pro v5.0 composer (the aiToolsReal.test.ts assertion carried the same
+  stale path — the 2026-07-23 sweep fixed ai_debugger but missed voice_to_app; corrected both). Respected
+  the deliberate no-group "Home → Other AI → <tile>" doorways (did NOT add the group — test-locked decision).
+- **Deploy / Hosting (5/5) + Billing (2/2)** — PR #1966 (Tier-1). engineer_ai_deploy / pro_chat_multi_deploy
+  / one-click-deploy repointed off retired Engineer AI + "Pro Chat Deploy button" → NavBharatAI Pro v5.0
+  "Publish" (Hosting chooser). billing: "Settings → Billing" (no such tab) → "Wallet & Billing" + the Pro
+  header token chip.
+- **Reliability / Quality (9/9)** — this PR. "Pro Chat → Build any app" → "NavBharatAI Pro v5.0" on Auto
+  Dependency Sync / Auto Test Generation / Auto Code Review / Build Version History; the 3 Analytics cards
+  got the discoverable "Home → Other AI → Analytics → …" doorway; App SBOM (`/api/workspace/sbom`) + Build
+  Health (Insights panel "Run All Checks") verified real.
+
+Each cluster ships a `tests/polish<Cluster>.test.ts` that anchors the corrected KB path to a real string in
+the live component/route, so a future edit that re-introduces a retired path fails CI. Gate every push:
+`tsc --noEmit` + `tsc -p tsconfig.server.json` + full `vitest run` (10002 tests green as of this PR).
+
+**Open follow-up (honest, rule 6):** a wider legacy prose layer still describes some v2.0-era *capabilities*
+(right-docked canvas, "16k Opus budget", Firestore-only memory) — navigation is now correct everywhere, but
+those descriptions deserve a dedicated refresh pass. Remaining roadmap clusters: Professional AIs (75),
+Collaboration (4), Settings/Connections (16), Admin/Ops (6), Platform/Navigation (51) — same conveyor.

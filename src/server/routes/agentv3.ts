@@ -268,6 +268,7 @@ import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/re
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
+import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { applyVisualTextEdit, applyVisualStyleEdit } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -9383,6 +9384,33 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
+      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
+      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
+      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
+      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
+      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
+          const src: Record<string, string> = {};
+          for (const [p, c] of writtenFiles) {
+            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
+          }
+          const cleaned = sweepUnusedImports(src);
+          const savedSweep: Record<string, string> = {};
+          for (const [p, c] of Object.entries(cleaned)) {
+            try {
+              await actuator.writeFile(workspaceId, p, c);
+              writtenFiles.set(p, c);
+              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
+              savedSweep[p] = c;
+            } catch { /* one write failing must not block the rest */ }
+          }
+          if (Object.keys(savedSweep).length > 0) {
+            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
+            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
+          }
+        }
+      } catch { /* the import sweep is best-effort — never affects the build result */ }
       // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
       // deterministically ensure SEO/OG meta, viewport, html lang, theme-color, a web manifest + a real
       // installable icon, robots.txt, and an offline-first service worker (+ its registration) — the same

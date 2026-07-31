@@ -23015,3 +23015,31 @@ can't re-break it. Server tsc clean; runtime suite green.
 **Honest note:** the GLM 429 storm keeps recurring across reports — it self-heals via the Kimi fallback (app
 still built), so it's debt, not a break; the existing pacer/circuit/key-pool stack is the mitigation. No new
 code fix warranted from this report beyond the preview-timeout.
+
+---
+
+## 2026-07-31 — FIRST-BUILD-CORRECT slice 1 (prevent-not-heal): auto-strip the engine's own unused imports
+
+**Why (the biggest world-best lever, admin-directed):** across many reports the engine burned a whole
+"continue / fix the error" ROUND removing its OWN unused named imports (`Suspense`, `useAuth`, `useEffect`,
+`User` from lucide-react …) after the reviewer flagged them. The app worked the whole time — pure wasted
+effort on cosmetics. Best builders don't create the problem in the first place; the next-best deterministic
+thing is to clean it before it costs a round.
+
+**Fix:** new pure module `UnusedImportSweep.ts` — a FINAL-PASS sweep that removes provably-dead NAMED import
+specifiers, wired into the post-build best-effort polish phase (`routes/agentv3.ts`, alongside auto-tests +
+production defaults). SAFE BY CONSTRUCTION (rule 1): removes a named specifier ONLY when its local binding
+appears NOWHERE ELSE in the file (word-boundary), keep-on-ANY-doubt. NEVER touches side-effect imports
+(`import './x.css'`), namespace imports (`import * as X`), or default imports (`import React`). A USED import
+can never be removed; worst case it leaves a dead import (today's status quo). Additive/best-effort, only
+sweeps the files the model WROTE this build; kill switch `AGENTV3_IMPORT_SWEEP=off`.
+
+**Tests:** 13 cases in `UnusedImportSweep.test.ts` — the exact report cases (drop Suspense/useAuth/useEffect/
+User, keep the used ones, keep a default while dropping a dead named part, alias-by-local-name) PLUS the
+safety invariants (side-effect / namespace / JSX-used / type-only-used / all-used all UNTOUCHED). Server tsc
+clean.
+
+**Proactive world-best note (CLAUDE.md Step 6):** this is slice 1 of "make the first build correct." The
+DEEPER lever is the PROMPT/CONTRACT so the model never emits an unused import at all (a later slice); this
+deterministic sweep is the safe, shippable-today floor. The recurring GLM 429 storm remains the biggest
+open quality ceiling (self-heals via Kimi, so it's debt not a break — but it caps the default experience).

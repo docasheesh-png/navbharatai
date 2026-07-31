@@ -270,6 +270,7 @@ import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
+import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
 import { applyVisualTextEdit, applyVisualStyleEdit } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -9469,6 +9470,27 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* the import sweep is best-effort — never affects the build result */ }
+      // U-4 — FIRST-BUILD-CORRECT: a Vite app must ALWAYS have its config (missing-config autopsy 2026-07-31).
+      // A real "continue" build FAILED (ok:false) because the app had `vite` in its deps but NO vite.config
+      // at all — the reviewer's "Missing vite.config.ts — the build will fail." Materialize a minimal,
+      // correct config when it's missing, persisted to the durable store + GitHub so THIS app and every
+      // future continue can build. Runs even on a NOT-ok build (this IS the fix for it); loads the FULL file
+      // set (not just this turn's writes) to judge presence; never clobbers an existing config; best-effort.
+      try {
+        if (expectsArtifacts) {
+          const full = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const cfg = ensureViteConfig(full);
+          if (cfg && full[cfg.path] === undefined) {
+            try {
+              await actuator.writeFile(workspaceId, cfg.path, cfg.content);
+              writtenFiles.set(cfg.path, cfg.content);
+              try { getWorkspaceMemory(workspaceId).indexFile(cfg.path, cfg.content); } catch { /* index best-effort */ }
+              await saveWorkspaceFiles(workspaceId, { [cfg.path]: cfg.content }).catch(() => {});
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added the missing ${cfg.path} — a Vite app needs it to build.`, ts: Date.now() });
+            } catch { /* best-effort — a write failure must never affect the build result */ }
+          }
+        }
+      } catch { /* the vite-config ensure is best-effort — never affects the build result */ }
       // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
       // deterministically ensure SEO/OG meta, viewport, html lang, theme-color, a web manifest + a real
       // installable icon, robots.txt, and an offline-first service worker (+ its registration) — the same

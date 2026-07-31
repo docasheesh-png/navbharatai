@@ -23289,3 +23289,35 @@ kills this class up front, and the general "huge/non-converging repo" case deser
 stop (next slice). (2) TRUST/SAFETY — a user workspace containing platform source is a real isolation
 concern worth an infra audit. (3) The recurring GLM/cheap flail didn't appear here (KIMI-only), but the
 30-min-marathon-with-no-result is itself a top experience ceiling.
+
+---
+
+## 2026-07-31 — FAILED-build autopsy (report 52c601a3): missing vite.config.ts + honest NOT-READY
+
+**Full 5-bucket ledger (112 issues, ok:FALSE — honestly reported, 62/100 NOT READY, 7.3 min):**
+- ✅ Self-healed: 1-file durable restore; GLM→Kimi fallbacks (2); a RENDER_RESCUE; 33 tool-done.
+- 🔀 Worked-around: **GLM 429 storm** — 8 failures → Kimi.
+- ⏭️ Skipped: 0.
+- ❌ **Still-broken (build FAILED, correctly ok:false):** (1) **rootCause: missing `vite.config.ts`** — the
+  app had `vite` in deps but NO vite config → "the build will fail"; (2) preview error "import.meta is only
+  valid inside modules" (in-browser render); (3) READINESS_BLOCKER: 2 fake/placeholder/not-implemented code
+  issues; (4) 2 unresolved TOOL_ERROR exit-1.
+- 🥵 Struggle: the GLM 429 storm again.
+
+**HONESTY WIN:** the engine reported this build ok:FALSE / "NOT READY 62/100" instead of a fake success —
+the #1810 / readiness-gate honesty work is holding. That is the correct behaviour for a broken app.
+
+**FIX (prevent-not-heal): a Vite app ALWAYS has its config.** Added `ensureViteConfig(files)` to
+`ViteConfigGuard.ts` — materializes a minimal, correct vite config (`.ts` for a TS app, React/SWC plugin
+only when it's a dependency, the scaffold's known-good host/port/allowedHosts block) ONLY when `vite` is a
+dependency AND no config of any extension exists; NEVER overwrites one. Wired as post-build pass **U-4** in
+`routes/agentv3.ts` — gated on `expectsArtifacts` (never a survey turn) but intentionally NOT on `result.ok`,
+because a missing vite.config is the fix for a FAILED build: it loads the FULL file set, adds the config, and
+persists it to the durable store + GitHub so this app and every future "continue" can build. Best-effort;
+census tripwire updated (9 → 10 writers, considered ✓). 5 new tests; server tsc + route suite (285) + vite
+guard suite (19) green.
+
+**Open / noted (rule 6):** (a) the preview "import.meta is only valid inside modules" error survives the
+existing `import.meta` regex transform for at least one file class — a preview-fidelity follow-up. (b) the 2
+fake/placeholder code issues are a model-quality problem (the deeper prevent lever is the prompt/contract).
+(c) the GLM 429 storm remains the standing quality ceiling (self-heals via Kimi; debt, not a break).

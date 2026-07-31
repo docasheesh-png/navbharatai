@@ -2371,9 +2371,9 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'auto-dependency-sync',
     name: 'Auto Dependency Sync',
-    path: 'Pro Chat → Build any app → automatic (no user action needed)',
+    path: 'NavBharatAI Pro v5.0 → build any app → automatic (no user action needed)',
     description: `G6 execution-hardening: after every Pro build, NavBharatAI automatically detects every package imported in the generated source code and ensures it is declared in package.json. This prevents the #1 "app generated but won't run" failure where the AI writes \`import axios from 'axios'\` but forgets to add axios to package.json, causing npm install to miss the dependency and the app to crash at runtime. Curated pinned versions are used for 30+ common packages (react-router-dom, zustand, axios, framer-motion, lucide-react, zod, @tanstack/react-query, recharts, etc.); unknown packages default to 'latest'. Non-blocking: never delays or fails the build.`,
-    howToUse: 'Automatic — no action needed. Build any app in Pro Chat. If the generated code imports packages not yet in package.json, they are silently added with pinned versions before the build completes. A status message shows which packages were declared.',
+    howToUse: 'Automatic — no action needed. Build any app in NavBharatAI Pro v5.0. If the generated code imports packages not yet in package.json, they are silently added with pinned versions before the build completes. A status message shows which packages were declared.',
     relatedFeatures: ['pro_chat', 'auto-code-review'],
     aiSurface: 'pro_chat',
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
@@ -2528,34 +2528,34 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'build-performance-analytics',
     name: 'Build Performance Analytics',
-    path: 'Analytics view → Build Performance card',
+    path: 'Home → Other AI → Analytics → Build Performance card',
     description: `Real build-pipeline health computed from your recent build jobs (not faked): success rate %, failure rate %, average build duration, p95 (slowest-5%) duration, and the top failure types (the most common build-error signatures). Helps you see if builds are getting slower or failing more often, and what's breaking most. Backed by GET /api/analytics/builds, which aggregates the last 100 jobs from the build-job store; shows honest zeros until builds have run.`,
-    howToUse: 'Open the Analytics view. The "Build Performance" card appears once at least one build has run, showing success/failure rate, avg + p95 duration, and the top failure types. Use Refresh to recompute.',
+    howToUse: 'Open Analytics (Home → Other AI → Analytics). The "Build Performance" card appears once at least one build has run, showing success/failure rate, avg + p95 duration, and the top failure types. Use Refresh to recompute.',
     relatedFeatures: ['pro_chat', 'admin-metrics', 'build-reliability-metrics', 'build-optimizer'],
     keywords: ['build performance', 'build analytics', 'success rate', 'failure rate', 'build duration', 'p95', 'slow build', 'build health', 'failure types', 'pipeline', 'build stats'],
   },
   {
     id: 'build-optimizer',
     name: 'AI Build Optimizer',
-    path: 'Analytics view → Build Optimizer card',
+    path: 'Home → Other AI → Analytics → Build Optimizer card',
     description: `Prioritized, actionable suggestions to make your builds faster and more reliable, computed from your REAL build history (not faked): flags a high failure rate, a DOMINANT failure signature ("80% of failures share one cause — fix this one class"), a slow average build, and a slow tail (p95 much larger than the average). Each suggestion is severity-ranked (critical/warning/info) with a concrete recommendation. Deterministic analysis of the last 100 build jobs — it stays empty until at least 10 builds have run, so it never over-fits a tiny sample. Backed by GET /api/analytics/build-optimizer.`,
-    howToUse: 'Open the Analytics view. The "Build Optimizer" card appears once you have 10+ builds and there is something worth improving; each row shows the issue and a recommended fix.',
+    howToUse: 'Open Analytics (Home → Other AI → Analytics). The "Build Optimizer" card appears once you have 10+ builds and there is something worth improving; each row shows the issue and a recommended fix.',
     relatedFeatures: ['build-performance-analytics', 'build-reliability-metrics', 'admin-metrics'],
     keywords: ['build optimizer', 'optimize build', 'build suggestions', 'faster builds', 'reduce failures', 'build recommendations', 'why builds fail', 'build slow', 'improve builds', 'failure pattern'],
   },
   {
     id: 'build-reliability-metrics',
     name: 'Build Reliability (MTTD / MTTR)',
-    path: 'Analytics view → Build Reliability card',
+    path: 'Home → Other AI → Analytics → Build Reliability card',
     description: `Real failure-recovery reliability computed from your recent build jobs (not faked): MTTD (Mean Time To Detect — how long a build runs before its failure surfaces), MTTR (Mean Time To Repair — time from a build failing to the next successful build of the SAME app), the recovery rate (% of failures that were later fixed), and the count of still-unresolved failures. A failure with no later success is honestly counted as unresolved and never given an invented repair time. Backed by GET /api/analytics/reliability, which correlates the last 100 jobs by workspace; shows honest zeros until failures have occurred.`,
-    howToUse: 'Open the Analytics view. The "Build Reliability" card appears once at least one build has failed, showing MTTD, MTTR, recovery rate, and unresolved-failure count. Use Refresh to recompute.',
+    howToUse: 'Open Analytics (Home → Other AI → Analytics). The "Build Reliability" card appears once at least one build has failed, showing MTTD, MTTR, recovery rate, and unresolved-failure count. Use Refresh to recompute.',
     relatedFeatures: ['build-performance-analytics', 'pro_chat', 'admin-metrics'],
     keywords: ['reliability', 'mttd', 'mttr', 'mean time to detect', 'mean time to repair', 'recovery rate', 'unresolved failures', 'failure recovery', 'build reliability', 'time to fix', 'incident metrics'],
   },
   {
     id: 'auto-test-generation',
     name: 'Auto Test Generation (Phase 17)',
-    path: 'Pro Chat → Build any app → automatic (no user action needed)',
+    path: 'NavBharatAI Pro v5.0 → build any app → automatic (no user action needed)',
     description: `Phase 17 — NavBharatAI Pro v2.0 feature. After every Pro build, NavBharatAI automatically generates Vitest test files for the most important parts of the generated app — exactly like Claude Code does for apps it builds. Key capabilities:
 • ANALYZES generated files by type: components, hooks, services, utilities, stores, pages, contexts — each gets a tailored test prompt.
 • SELECTS highest-value files to test first (hooks > services > stores > components > pages).
@@ -2563,7 +2563,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
 • WRITES category-specific tests: component tests use @testing-library/react, hook tests use renderHook, service tests mock fetch/axios, utility tests cover edge cases.
 • UPDATES the validation report: the 'Automated Tests' gate changes from PENDING to PASS, showing which test files were generated.
 • TEST FILES are included in the downloaded app zip so users can run them locally with: npx vitest run.`,
-    howToUse: 'Automatic — no action needed. Build any app in Pro Chat. Test files (e.g. src/App.test.tsx, src/hooks/useAuth.test.ts) are automatically included in the result. Download the app and run: npm install && npx vitest run',
+    howToUse: 'Automatic — no action needed. Build any app in NavBharatAI Pro v5.0. Test files (e.g. src/App.test.tsx, src/hooks/useAuth.test.ts) are automatically included in the result. Download the app and run: npm install && npx vitest run',
     relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'auto-code-review'],
     aiSurface: 'pro_chat',
     keywords: [
@@ -2609,9 +2609,9 @@ Both scaffolds produce real, correctly wired code. The backend services (PocketB
   {
     id: 'build-version-history',
     name: 'Build Version History — Go Back to Any Previous Version',
-    path: 'Pro Chat → sidebar → Files → History tab',
+    path: 'NavBharatAI Pro v5.0 → Files tab → History',
     description: `Phase 2.1: Every successful Pro build automatically creates a version checkpoint in Firestore. The History tab in the Files panel shows all past builds for the current session, newest first, each labeled with an auto-generated commit message (e.g. "feat: build \\"todo app\\" — 12 files, vfs tier"). Users can restore any previous version with one click — the workspace reverts to that exact file snapshot and the Code Studio switches to show the restored files. Versions are retained for up to 50 builds per session. Each entry shows: commit message, relative time, file count, build tier, and version number (v1, v2, v3...).`,
-    howToUse: 'Build any app in Pro Chat. Open the Files view (sidebar → Files). Click the "History" tab in the panel header. All past builds appear as version entries. Click "Restore" next to any entry to revert the workspace to that version.',
+    howToUse: 'Build any app in NavBharatAI Pro v5.0. Open the Files tab, then click the "History" tab in the panel header. All past builds appear as version entries. Click "Restore" next to any entry to revert the workspace to that version.',
     relatedFeatures: ['pro_chat', 'files-panel', 'auto-dependency-sync'],
     aiSurface: 'pro_chat',
     keywords: ['version history', 'go back', 'restore', 'undo build', 'previous version', 'revert', 'old version', 'build history', 'checkpoint', 'purana version', 'version 3 pe wapas', 'rollback', 'undo changes', 'history', 'past builds'],
@@ -2683,7 +2683,7 @@ POST-BUILD (Grade + Auto-Refine):
   {
     id: 'auto-code-review',
     name: 'Auto Code Review',
-    path: 'Pro Chat → Build any app → review appears in build summary',
+    path: 'NavBharatAI Pro v5.0 → build any app → review appears in the build summary',
     description: `G5 quality gate: after every new Pro build, an AI-powered code review runs automatically:
 • Security: OWASP Top 10 checks (injection, XSS, hardcoded credentials, CSRF)
 • Quality: unused imports, dead code, functions >50 lines, deep nesting

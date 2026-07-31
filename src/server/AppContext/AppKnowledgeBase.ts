@@ -629,10 +629,10 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
   },
   {
     id: 'engineer_ai_deploy',
-    name: 'Engineer AI — Deploy to Firebase Hosting',
-    path: 'Engineer AI chat → type "deploy" or the agent calls deploy automatically',
-    description: 'Deploys the built app to a permanent public Firebase Hosting URL. Works for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Returns a live URL that survives sandbox restarts. For Node/Python backends, Engineer AI exposes the live dev-server URL directly (no separate deploy needed).',
-    howToUse: 'Say "deploy" in the Engineer AI chat after the app is built, or Engineer AI will call deploy automatically when the task is complete.',
+    name: 'Deploy to Firebase Hosting (NavBharatAI Pro v5.0)',
+    path: 'NavBharatAI Pro v5.0 → "Publish" → host on NavBharatAI (Firebase Hosting)',
+    description: 'Deploys the built app to a permanent public Firebase Hosting URL. (Engineer AI is retired — app building + deploy is now NavBharatAI Pro v5.0.) Works for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Returns a live URL that survives sandbox restarts. For Node/Python backends, the live server preview is exposed directly.',
+    howToUse: 'Build an app in NavBharatAI Pro v5.0, then tap "Publish" in the action row and choose "host on NavBharatAI" (Firebase Hosting) — it builds and returns a permanent live URL.',
     relatedFeatures: ['engineer_ai', 'settings_database'],
     aiSurface: 'engineer_ai',
     keywords: ['deploy', 'deployment', 'firebase hosting', 'live url', 'publish', 'hosting', 'public url', 'permanent link'],
@@ -2143,9 +2143,9 @@ NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
   {
     id: 'billing',
     name: 'Billing & Plan',
-    path: 'Settings → Billing  OR  Header → user area',
+    path: 'Sidebar menu → "Wallet & Billing"  OR  tap the token-balance chip in the NavBharatAI Pro v5.0 header',
     description: 'View your current subscription plan (Free / Pro / VIP), usage statistics, payment options, and This Month\'s AI Cost — a running total of estimated AI spend across all Pro builds in the current calendar month. Wallet tokens are REAL: every finished v5.0 Pro build deducts its cost from your token balance automatically (₹1 = 100 tokens, the same rate recharges use), the deduction appears in the build result footer ("−N wallet tokens · M left") and in your wallet ledger, and when the balance runs out new paid builds are blocked until you recharge. TOKENS ARE THE PRIMARY UNIT everywhere: the Pro header chip shows your live token balance (₹ equivalent in its tooltip), the Billing panel leads with tokens, and the "add credits" screen shows your balance and the build estimate in tokens. NEW USERS (still on the welcome bonus, before any purchase) build on our fast economy engine; if an app needs the strongest engine to finish cleanly, you are invited to add credits to complete it — nothing you have done is lost.',
-    howToUse: 'Open Billing to check your plan, view remaining credits, see monthly AI cost, or upgrade. After each Pro build, the tokens deducted and your remaining balance are shown right under the build result; the full deduction history is in your wallet ledger.',
+    howToUse: 'Open "Wallet & Billing" from the sidebar menu (or tap the token-balance chip in the NavBharatAI Pro v5.0 header) to check your plan, view remaining tokens, see this month\'s AI cost, or add credits. After each Pro build, the tokens deducted and your remaining balance are shown right under the build result; the full deduction history is in your wallet ledger.',
     relatedFeatures: ['settings_root', 'donate'],
     keywords: ['billing', 'plan', 'subscription', 'usage', 'payment', 'pricing', 'upgrade', 'credits', 'pro plan', 'free plan', 'monthly cost', 'ai cost', 'monthly ai cost', 'build cost', 'how much spent', 'token deduction', 'tokens deducted', 'wallet tokens', 'token balance', 'balance kata', 'tokens kam hue', 'paise kate', 'kitne token bache'],
   },
@@ -2265,16 +2265,16 @@ NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
   },
   {
     id: 'pro_chat_multi_deploy',
-    name: 'Pro Chat — Multi-Provider Deployment',
-    path: 'Engineer AI can deploy to Vercel/Netlify/GitHub Pages (via agentic loop)',
-    description: `Pro Chat can deploy your app to multiple platforms beyond Firebase Hosting:
+    name: 'NavBharatAI Pro — Multi-Provider Deployment',
+    path: 'NavBharatAI Pro v5.0 → "Publish" → choose a provider (Firebase / Vercel / Netlify / Cloudflare Pages)',
+    description: `NavBharatAI Pro v5.0 can deploy your app to multiple platforms beyond Firebase Hosting:
 • Vercel — React, Next.js, Vue apps → *.vercel.app URL
 • Netlify — static sites → *.netlify.app URL
 • GitHub Pages — static sites → username.github.io/repo/ URL
 • Custom domains — map your own domain (Vercel)
 Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will use the platform's REST API directly — no CLI tools needed.`,
-    howToUse: 'In your Pro Chat or Engineer AI session, provide your deploy token (Vercel, Netlify, or GitHub PAT) via Settings → Secrets & Keys, then ask to deploy.',
-    relatedFeatures: ['pro_chat', 'engineer_ai_deploy', 'settings_secrets'],
+    howToUse: 'In NavBharatAI Pro v5.0, add your provider token (Vercel, Netlify, Cloudflare) via Settings → App Settings → Secrets & API Keys, then tap "Publish" and pick that provider — or host free on NavBharatAI (no token needed).',
+    relatedFeatures: ['pro_chat', 'agentv3_deploy', 'engineer_ai_deploy', 'settings_secrets'],
     aiSurface: 'pro_chat',
     keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
   },
@@ -2628,15 +2628,15 @@ Both scaffolds produce real, correctly wired code. The backend services (PocketB
   },
   {
     id: 'one-click-deploy',
-    name: 'One-Click Deploy Button',
-    path: 'Pro Chat → header bar → Deploy button (visible after app is built)',
-    description: `A "Deploy" button appears in the Pro Chat header bar after any app is successfully built. Clicking it opens a deploy panel with four platform options:
+    name: 'One-Click Publish Button',
+    path: 'NavBharatAI Pro v5.0 → header action row → "Publish" (visible after an app is built)',
+    description: `A "Publish" button appears in the NavBharatAI Pro v5.0 action row after any app is successfully built. Tapping it opens the Hosting chooser — host free on NavBharatAI, or bring your own provider:
 • Vercel — enter token + project name → deploys to *.vercel.app
 • Netlify — enter token + optional site ID → deploys to *.netlify.app
 • Cloudflare Pages — enter API token + account ID + project name → deploys to {name}.pages.dev
 • GitHub Pages — enter token + owner + repo → deploys to username.github.io/repo/
 On success: navigates to the "App is Live!" screen with the live URL. No commands needed — pure GUI.`,
-    howToUse: 'Build an app in Pro Chat. When build completes, a green "Deploy" button appears in the top-right of the chat header. Click it, choose a platform, enter your API token, and click "Deploy Now". For Cloudflare, you also need your Account ID (found at dashboard.cloudflare.com → top-right).',
+    howToUse: 'Build an app in NavBharatAI Pro v5.0. When the build completes, tap "Publish" in the action row, then either host free on NavBharatAI or pick a provider and enter its API token. For Cloudflare, you also need your Account ID (found at dashboard.cloudflare.com → top-right).',
     relatedFeatures: ['pro_chat', 'pro_chat_multi_deploy'],
     aiSurface: 'pro_chat',
     keywords: ['deploy button', 'one click deploy', 'deploy', 'vercel', 'netlify', 'cloudflare', 'cloudflare pages', 'github pages', 'publish', 'launch', 'go live', 'deploy karo', 'live karo', 'publish app', 'deploy app', 'pages.dev'],

@@ -149,11 +149,11 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ⬜ **GitHub Repo Analyst & Improver AI** — `Sidebar → Professionals → GitHub Repo Analyst & Improver`
 
 ### Deploy / Publish / Hosting (5)
-- ⬜ **Engineer AI — Deploy to Firebase Hosting** — `Engineer AI chat → type "deploy" or the agent calls deploy automatically`
-- ⬜ **APK Builder — turn your app into a real Android app you can download** — `Home → Other AI → Publish & Deploy → APK Builder`
-- ⬜ **CI/CD Pipeline — make your app test and deploy itself on every push** — `Home → Other AI → Publish & Deploy → CI/CD Pipeline`
-- ⬜ **Pro Chat — Multi-Provider Deployment** — `Engineer AI can deploy to Vercel/Netlify/GitHub Pages (via agentic loop)`
-- ⬜ **One-Click Deploy Button** — `Pro Chat → header bar → Deploy button (visible after app is built)`
+- ✅ **Deploy to Firebase Hosting (via v5.0 Publish)** — `NavBharatAI Pro v5.0 → "Publish" → host on NavBharatAI` — KB corrected off retired Engineer AI to the real v5.0 Publish; test-locked (#polish-5).
+- ✅ **APK Builder — turn your app into a real Android app** — `Home → Other AI → Publish & Deploy → APK Builder` — verified real tile; test-locked (#polish-5).
+- ✅ **CI/CD Pipeline — test & deploy on every push** — `Home → Other AI → Publish & Deploy → CI/CD Pipeline` — verified real tile; test-locked (#polish-5).
+- ✅ **Multi-Provider Deployment** — `NavBharatAI Pro v5.0 → "Publish" → Firebase / Vercel / Netlify / Cloudflare` — KB corrected off retired Engineer AI to the real Publish chooser; test-locked (#polish-5).
+- ✅ **One-Click Publish Button** — `NavBharatAI Pro v5.0 → header action row → "Publish"` — KB corrected (was "Pro Chat → Deploy button"); test-locked (#polish-5).
 
 ### Reliability / Quality Engine (9)
 - ⬜ **Auto Dependency Sync** — `Pro Chat → Build any app → automatic (no user action needed)`
@@ -167,8 +167,8 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ⬜ **Auto Code Review** — `Pro Chat → Build any app → review appears in build summary`
 
 ### Monetization & Billing (2)
-- ⬜ **Billing & Plan** — `Settings → Billing  OR  Header → user area`
-- ⬜ **Insights & Integrations** — `Home → Other AI → Insights & Webhooks`
+- ✅ **Billing & Plan** — `Sidebar → "Wallet & Billing"  OR  the token chip in the v5.0 header` — KB corrected (was a non-existent "Settings → Billing"); test-locked (#polish-5).
+- ✅ **Insights & Integrations** — `Home → Other AI → Insights & Webhooks` — verified real tile; test-locked (#polish-5).
 
 ### Collaboration (4)
 - ⬜ **Team Collaboration (Invite Members)** — `Home → Other AI → Team`

@@ -1863,6 +1863,9 @@ export default function App() {
   const { handleZipImport } = useZipImport({
     setFiles, setHasGeneratedCode, setIsAppBuilt, setIsProLoading, setProBuildProgress, setProInput,
     setProMessages, syncFilesToV3, updatePreview, toggleTab, addToast,
+    // Auto-boot a framework-app .zip import (admin request 2026-07-31): reuse the SAME engine handler a
+    // typed prompt uses, so the imported app's live preview starts on its own — no manual "run this app".
+    triggerBuild: (message: string) => { void handleSend(message); },
   });
 
 

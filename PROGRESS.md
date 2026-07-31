@@ -23109,3 +23109,72 @@ and re-pushed. Lesson: push each green sub-step immediately (safeguard #4).
 **Related open (noted, not fixed here):** the reviewer LLM may still phrase "credentials in .env" as a
 `[CRITICAL]` on its own (the static downgrade removes the READINESS_BLOCKER that seeds it); and the auto-fix
 should not LOOP on an un-actionable finding to the wall-clock cap — separate hardenings.
+
+---
+
+## 2026-07-31 — FIX: IDE top-bar "AI" button now opens the FULL NavBharatAI Pro v5.0 (not the in-IDE mini)
+
+**Admin report.** In Code Studio (IDE), the top-right "AI" button opened a small in-IDE mini chat
+(`AgentV3MiniChat`); the admin wants it to open the FULL Pro v5.0, 100% memory-synced with the IDE.
+
+**Root cause.** The button (`id="ide-social-chat-trigger"`) was MEANT to fire the `onSocialChatTrigger` prop,
+but that prop was declared + destructured in `CodeStudio` yet NEVER passed by `ViewPanels`, so the onClick
+silently fell back to the internal `handleScreenChange('ai')` (the mini panel).
+
+**FIX.** `ViewPanels` now passes `onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}` (the FULL Pro v5.0
+surface — same session/workspace/memory the IDE uses, so it's 100% in sync by construction, exactly like the
+existing `onGoToMain`). The button's onClick calls `onSocialChatTrigger` when provided (internal mini kept only
+as a fallback if a parent doesn't wire it). Frontend tsc: no new errors (only pre-existing @capacitor stubs).
+Sync was already guaranteed — `AgentV3MiniChat`/the Pro v5 panel target the same `getAgentV3WorkspaceId` session
+("a second window onto the same brain") — so opening the full panel inherits the same files + conversation.
+
+---
+
+## 2026-07-31 — FIX (zip import, part 1): bulk file-load, no more one-by-one trickle
+
+**Admin report.** A 2500-file `.zip` import (📎 → Import project) showed files appearing ONE-BY-ONE over
+~23 min (~300 files done in 23 min ≈ 4.6s/file), as if being "rebuilt". The files already exist — there is
+NO need to regenerate them; they must sync in BULK.
+
+**ROOT CAUSE (client).** `useZipImport` streamed files from `/api/extract-zip` (SSE) and called
+`setFiles({ ...loadedFiles })` — spreading the ENTIRE growing map — every 20 files. For N files that is
+O(N²) full re-renders of the file tree/editor (2500 files ≈ 125 spreads of up-to-2500 keys), which is the
+visible one-by-one trickle. (The server extraction itself has no artificial delay; the 6s reveal-pacer is
+build-only and never touched imports.)
+
+**FIX (part 1).** Drop the per-batch drip: show only the first ≤8 files instantly (so a tiny app still feels
+live), then let the SINGLE bulk `setFiles(loadedFiles)` at the end commit everything at once — O(N), a few
+seconds instead of tens of minutes. The cheap progress counter still shows "Loading N files…". Frontend tsc:
+no new errors.
+
+**STILL PENDING (part 2, separate).** Boot-only preview for a framework-app import: run the EXISTING files on
+a real dev server (npm install + dev) WITHOUT any LLM/regeneration — needs the direct dev-server-boot path
+(the earlier engine-trigger auto-boot was reverted precisely because it could regenerate). Tracked as the next
+zip task.
+
+---
+
+## 2026-07-31 — FIX (zip import, part 2): framework-app import auto-boots the preview from EXISTING files (no LLM/rebuild)
+
+Follow-up to part 1 (bulk file-load). Admin: after a .zip import the preview must run on its own, and the
+files must NOT be regenerated ("wapas se banane ki need hi kaha hai").
+
+**Approach — reuse the existing boot-only machinery, NOT the LLM.** `PreviewSurface` already has a real
+dev-server boot path: `runDiagnose()` → `POST /api/agentv3/preview-diagnose` (pre-kill port → `npm install`
+→ start dev server → poll), and an auto-resume effect (C1) that runs it automatically when the Live preview
+is shown for a workspace with no live URL. This is install+run of the EXISTING files — no model call, no file
+regeneration. (The earlier engine-trigger auto-boot was reverted precisely because going through `handleSend`
+could regenerate.)
+
+**FIX (part 2).** For a framework-app zip import, `useZipImport` now navigates to the **Preview** tab
+(`toggleTab('preview')`) instead of Code Studio, so `PreviewSurface` mounts and its auto-resume boots the
+dev server on the imported files. Message updated to "Opening the live preview — installing dependencies &
+starting the dev server for your EXISTING files (no rebuild)… if it doesn't appear, tap Diagnose." Static /
+simple-React apps unchanged (inline in-browser preview). Frontend tsc: no new errors.
+
+**HONEST BOUNDARY.** This leans on the existing auto-resume, which requires the sandbox to report
+`livePreviewAvailable` (E2B configured). On a brand-new import the sandbox may need a moment; if the auto-boot
+doesn't fire immediately, the **Diagnose** button in the Preview does the identical one-tap boot (same
+endpoint). Not yet verified end-to-end on a live fresh import that the auto-resume ALWAYS fires on the first
+mount — if a real report shows it needs a manual Diagnose, the next step is to explicitly kick `preview-diagnose`
+right after a framework import rather than rely on the mount-time effect. Recorded honestly (rule 6).

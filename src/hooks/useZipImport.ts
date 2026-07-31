@@ -85,9 +85,15 @@ export function useZipImport(deps: ZipImportDeps) {
               fileList.push(evt.path);
               fileCount++;
 
-              // Throttle React state updates — flushing per-file would mean thousands of
-              // re-renders for a big app (jank/crash). Show first few instantly, then batch.
-              if (fileCount <= 8 || fileCount % 20 === 0) {
+              // BULK, NOT ONE-BY-ONE (admin 2026-07-31: a 2500-file zip appeared file-by-file over ~23 min).
+              // The files ALREADY exist — there is nothing to "rebuild", so they must land in ONE bulk
+              // update, not drip in. Root cause of the slow trickle: this used to spread the ENTIRE growing
+              // map every 20 files — for N files that is O(N²) full re-renders of the file tree/editor (a
+              // 2500-file import ≈ 125 spreads of up-to-2500 keys). We now show ONLY the first few instantly
+              // (so a tiny app still feels live) and let the SINGLE bulk `setFiles(loadedFiles)` at the end
+              // (below) commit everything at once — O(N), a few seconds instead of tens of minutes. The cheap
+              // progress counter (setProBuildProgress, further down) keeps the user informed meanwhile.
+              if (fileCount <= 8) {
                 setFiles({ ...loadedFiles } as any);
               }
 
@@ -163,7 +169,7 @@ export function useZipImport(deps: ZipImportDeps) {
       let importMessage: string;
       if (isFrameworkApp) {
         // Honest: framework apps need npm install + dev server — tell user exactly what to do.
-        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n⚠️ **This app needs a build step** (it uses ${hasBuildTool ? 'Vite/webpack/etc.' : 'npm'}).\nIn-browser preview won't work for it — you need a real dev server.\n\n👉 Type **"run this app"** and I will install dependencies and launch a live preview for you.`;
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n🚀 **Opening the live preview** — installing dependencies & starting the dev server for your EXISTING files (no rebuild). This takes a moment. If it doesn't appear automatically, tap **Diagnose** in the Preview.`;
       } else if (isSimpleReact) {
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n✅ Preview is live in-browser via Babel transpilation. Tell me what you want to change!`;
       } else if (isStaticApp) {
@@ -179,8 +185,13 @@ export function useZipImport(deps: ZipImportDeps) {
       }]);
       // Framework apps: open Code Studio so user can see the imported files immediately.
       // Static/simple apps stay in Pro Chat where the inline preview is already showing.
+      // Framework app: land on the PREVIEW (admin 2026-07-31 — "preview chal hi chale"). PreviewSurface's
+      // existing auto-resume (runDiagnose → /api/agentv3/preview-diagnose) then installs deps + starts the
+      // dev server on the EXISTING files — NO LLM, NO regeneration, so the imported app just RUNS. If the
+      // auto-boot's sandbox conditions aren't ready on a fresh import, the "Diagnose" button in the Preview
+      // does the identical one-tap boot. (Static/simple apps already show their in-browser preview inline.)
       if (isFrameworkApp) {
-        setTimeout(() => toggleTab('studio'), 400);
+        setTimeout(() => toggleTab('preview'), 400);
       }
     } catch (err: any) {
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });

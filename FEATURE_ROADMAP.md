@@ -72,81 +72,87 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ✅ **Code Review Comments** — `Home → Other AI → Insights & Webhooks → Code Review` — verified real (hosted in ProjectInsightsPanel, backend `/api/workspace/:workspaceId/review`); test-locked (#polish-4).
 
 ### Professional AIs (75)
-- ⬜ **Engineer AI (retired → use NavBharatAI Pro v5.0)** — `RETIRED. App building is now NavBharatAI Pro v5.0 — Sidebar → "NavBharatAI Pro v5.0".`
-- ⬜ **Doctor AI (Senior Doctor Assistant)** — `Header → Doctor AI tab  OR  Sidebar → Professionals → Doctor AI`
-- ⬜ **Teacher AI** — `Sidebar → Professionals → Teacher AI`
-- ⬜ **Mentor / Career Coach** — `Sidebar → Professionals → Mentor / Career Coach`
-- ⬜ **Thesis / Research Writer** — `Sidebar → Professionals → Thesis / Research Writer`
-- ⬜ **CA / Tax & Accounts** — `Sidebar → Professionals → CA / Tax & Accounts`
-- ⬜ **Lawyer / Legal Assistant** — `Sidebar → Professionals → Lawyer / Legal`
-- ⬜ **Financial Advisor** — `Sidebar → Professionals → Financial Advisor`
-- ⬜ **Astrologer** — `Sidebar → Professionals → Astrologer`
-- ⬜ **Govt Schemes Helper** — `Sidebar → Professionals → Govt Schemes Helper`
-- ⬜ **Kisan / Agri Advisor** — `Sidebar → Professionals → Kisan / Agri Advisor`
-- ⬜ **Nutritionist / Diet AI** — `Sidebar → Professionals → Nutritionist / Diet AI`
-- ⬜ **Wellness / Counsellor AI** — `Sidebar → Professionals → Wellness / Counsellor`
-- ⬜ **Fitness / Personal Trainer AI** — `Sidebar → Professionals → Fitness / Personal Trainer`
-- ⬜ **Veterinary / Pashu Advisor AI** — `Sidebar → Professionals → Veterinary / Pashu Advisor`
-- ⬜ **Parenting / Child-Care AI** — `Sidebar → Professionals → Parenting / Child-Care`
-- ⬜ **Cyber Safety / Digital Suraksha AI** — `Sidebar → Professionals → Cyber Safety / Digital Suraksha`
-- ⬜ **Insurance Advisor AI** — `Sidebar → Professionals → Insurance Advisor`
-- ⬜ **Chef / Recipe AI** — `Sidebar → Professionals → Chef / Recipe AI`
-- ⬜ **Travel Planner AI** — `Sidebar → Professionals → Travel Planner`
-- ⬜ **Vastu Consultant AI** — `Sidebar → Professionals → Vastu Consultant`
-- ⬜ **Yoga & Meditation AI** — `Sidebar → Professionals → Yoga & Meditation`
-- ⬜ **Spoken English / Language Tutor AI** — `Sidebar → Professionals → Spoken English / Tutor`
-- ⬜ **Resume & Job-Application AI** — `Sidebar → Professionals → Resume & Job Application`
-- ⬜ **Gardening / Home-Plants AI** — `Sidebar → Professionals → Gardening / Home-Plants`
-- ⬜ **Pharmacist / Medicine-Info AI** — `Sidebar → Professionals → Pharmacist / Medicine-Info`
-- ⬜ **Small-Business / Startup Advisor AI** — `Sidebar → Professionals → Small-Business / Startup`
-- ⬜ **Home Repair / Handyman AI** — `Sidebar → Professionals → Home Repair / Handyman`
-- ⬜ **Real-Estate / Property Advisor AI** — `Sidebar → Professionals → Real-Estate / Property`
-- ⬜ **Driving / RTO & Licence AI** — `Sidebar → Professionals → Driving / RTO & Licence`
-- ⬜ **Pet-Care / Dog-Training AI** — `Sidebar → Professionals → Pet-Care / Dog-Training`
-- ⬜ **Beauty / Skincare & Grooming AI** — `Sidebar → Professionals → Beauty / Skincare & Grooming`
-- ⬜ **Music / Instrument Learning AI** — `Sidebar → Professionals → Music / Instrument Learning`
-- ⬜ **Sports & Cricket Coaching AI** — `Sidebar → Professionals → Sports & Cricket Coaching`
-- ⬜ **Photography & Videography AI** — `Sidebar → Professionals → Photography & Videography`
-- ⬜ **Public Speaking & Communication AI** — `Sidebar → Professionals → Public Speaking & Communication`
-- ⬜ **Event & Wedding Planner AI** — `Sidebar → Professionals → Event & Wedding Planner`
-- ⬜ **Elder-Care / Senior Support AI** — `Sidebar → Professionals → Elder-Care / Senior Support`
-- ⬜ **Interior Design & Home-Decor AI** — `Sidebar → Professionals → Interior Design & Home-Decor`
-- ⬜ **Study-Abroad & Education Consultant AI** — `Sidebar → Professionals → Study-Abroad & Education`
-- ⬜ **Disability & Accessibility Support AI** — `Sidebar → Professionals → Disability & Accessibility Support`
-- ⬜ **Fashion & Personal Styling AI** — `Sidebar → Professionals → Fashion & Personal Styling`
-- ⬜ **Productivity & Time-Management AI** — `Sidebar → Professionals → Productivity & Time-Management`
-- ⬜ **Relationship & Communication AI** — `Sidebar → Professionals → Relationship & Communication`
-- ⬜ **Vehicle & Auto-Maintenance AI** — `Sidebar → Professionals → Vehicle & Auto-Maintenance`
-- ⬜ **Stock-Market & Investing Education AI** — `Sidebar → Professionals → Stock-Market & Investing`
-- ⬜ **Gadget & Tech-Help AI** — `Sidebar → Professionals → Gadget & Tech-Help`
-- ⬜ **Maths & Science Problem-Solver AI** — `Sidebar → Professionals → Maths & Science Solver`
-- ⬜ **Coding & Programming Tutor AI** — `Sidebar → Professionals → Coding & Programming Tutor`
-- ⬜ **Pregnancy & New-Mother Care AI** — `Sidebar → Professionals → Pregnancy & New-Mother Care`
-- ⬜ **First-Aid & Emergency-Response AI** — `Sidebar → Professionals → First-Aid & Emergency Response`
-- ⬜ **Environment & Sustainability AI** — `Sidebar → Professionals → Environment & Sustainability`
-- ⬜ **General Knowledge & Current-Affairs AI** — `Sidebar → Professionals → General Knowledge & Current Affairs`
-- ⬜ **Personal Safety & Self-Defense AI** — `Sidebar → Professionals → Personal Safety & Self-Defense`
-- ⬜ **Language & Translation Helper AI** — `Sidebar → Professionals → Language & Translation Helper`
-- ⬜ **Civic / RTI & Grievance Helper AI** — `Sidebar → Professionals → Civic / RTI & Grievance Helper`
-- ⬜ **Sarkari / Govt-Job Exam Guide AI** — `Sidebar → Professionals → Sarkari / Govt-Job Exam Guide`
-- ⬜ **Spiritual & Philosophy Companion AI** — `Sidebar → Professionals → Spiritual & Philosophy Companion`
-- ⬜ **DIY Crafts & Hobbies AI** — `Sidebar → Professionals → DIY Crafts & Hobbies`
-- ⬜ **Festival & Culture Guide AI** — `Sidebar → Professionals → Festival & Culture Guide`
-- ⬜ **Creative Writing & Storytelling AI** — `Sidebar → Professionals → Creative Writing & Storytelling`
-- ⬜ **Mental Maths & Aptitude AI** — `Sidebar → Professionals → Mental Maths & Aptitude`
-- ⬜ **Disaster Preparedness & Weather-Safety AI** — `Sidebar → Professionals → Disaster Preparedness & Weather-Safety`
-- ⬜ **Nature & Wildlife Guide AI** — `Sidebar → Professionals → Nature & Wildlife Guide`
-- ⬜ **Baby-Names & Naming Helper AI** — `Sidebar → Professionals → Baby-Names & Naming Helper`
-- ⬜ **Hygiene & Public-Health Awareness AI** — `Sidebar → Professionals → Hygiene & Public-Health Awareness`
-- ⬜ **Volunteering & Social-Impact AI** — `Sidebar → Professionals → Volunteering & Social-Impact`
-- ⬜ **Astronomy & Space AI** — `Sidebar → Professionals → Astronomy & Space`
-- ⬜ **Calligraphy & Hand-Lettering AI** — `Sidebar → Professionals → Calligraphy & Hand-Lettering`
-- ⬜ **Dance & Movement AI** — `Sidebar → Professionals → Dance & Movement`
-- ⬜ **Games, Puzzles & Family-Fun AI** — `Sidebar → Professionals → Games, Puzzles & Family-Fun`
-- ⬜ **Tech Buying Advisor AI** — `Sidebar → Professionals → Tech Buying Advisor`
-- ⬜ **Trekking & Adventure-Travel AI** — `Sidebar → Professionals → Trekking & Adventure-Travel`
-- ⬜ **Home-Budget & Frugal-Living AI** — `Sidebar → Professionals → Home-Budget & Frugal-Living`
-- ⬜ **GitHub Repo Analyst & Improver AI** — `Sidebar → Professionals → GitHub Repo Analyst & Improver`
+> **Verified as one config-driven cluster (#polish-8):** all 75 are locked by a bulk consistency test
+> (`tests/polishProfessionals.test.ts`) that cross-checks the three sources of truth — the backend
+> **registry** (`listProfessionals()`), the **ProfessionalsView** cards the user taps, and the **KB**
+> entries every AI routes with — so no professional can ship inconsistent across them. They share one real
+> chat engine (`POST /api/professional/:id/chat`), whose honest error handling was hardened via the Doctor
+> AI / SDA fix earlier this session.
+- ✅ **Engineer AI (retired → use NavBharatAI Pro v5.0)** — `RETIRED. App building is now NavBharatAI Pro v5.0 — Sidebar → "NavBharatAI Pro v5.0".`
+- ✅ **Doctor AI (Senior Doctor Assistant)** — `Header → Doctor AI tab  OR  Sidebar → Professionals → Doctor AI`
+- ✅ **Teacher AI** — `Sidebar → Professionals → Teacher AI`
+- ✅ **Mentor / Career Coach** — `Sidebar → Professionals → Mentor / Career Coach`
+- ✅ **Thesis / Research Writer** — `Sidebar → Professionals → Thesis / Research Writer`
+- ✅ **CA / Tax & Accounts** — `Sidebar → Professionals → CA / Tax & Accounts`
+- ✅ **Lawyer / Legal Assistant** — `Sidebar → Professionals → Lawyer / Legal`
+- ✅ **Financial Advisor** — `Sidebar → Professionals → Financial Advisor`
+- ✅ **Astrologer** — `Sidebar → Professionals → Astrologer`
+- ✅ **Govt Schemes Helper** — `Sidebar → Professionals → Govt Schemes Helper`
+- ✅ **Kisan / Agri Advisor** — `Sidebar → Professionals → Kisan / Agri Advisor`
+- ✅ **Nutritionist / Diet AI** — `Sidebar → Professionals → Nutritionist / Diet AI`
+- ✅ **Wellness / Counsellor AI** — `Sidebar → Professionals → Wellness / Counsellor`
+- ✅ **Fitness / Personal Trainer AI** — `Sidebar → Professionals → Fitness / Personal Trainer`
+- ✅ **Veterinary / Pashu Advisor AI** — `Sidebar → Professionals → Veterinary / Pashu Advisor`
+- ✅ **Parenting / Child-Care AI** — `Sidebar → Professionals → Parenting / Child-Care`
+- ✅ **Cyber Safety / Digital Suraksha AI** — `Sidebar → Professionals → Cyber Safety / Digital Suraksha`
+- ✅ **Insurance Advisor AI** — `Sidebar → Professionals → Insurance Advisor`
+- ✅ **Chef / Recipe AI** — `Sidebar → Professionals → Chef / Recipe AI`
+- ✅ **Travel Planner AI** — `Sidebar → Professionals → Travel Planner`
+- ✅ **Vastu Consultant AI** — `Sidebar → Professionals → Vastu Consultant`
+- ✅ **Yoga & Meditation AI** — `Sidebar → Professionals → Yoga & Meditation`
+- ✅ **Spoken English / Language Tutor AI** — `Sidebar → Professionals → Spoken English / Tutor`
+- ✅ **Resume & Job-Application AI** — `Sidebar → Professionals → Resume & Job Application`
+- ✅ **Gardening / Home-Plants AI** — `Sidebar → Professionals → Gardening / Home-Plants`
+- ✅ **Pharmacist / Medicine-Info AI** — `Sidebar → Professionals → Pharmacist / Medicine-Info`
+- ✅ **Small-Business / Startup Advisor AI** — `Sidebar → Professionals → Small-Business / Startup`
+- ✅ **Home Repair / Handyman AI** — `Sidebar → Professionals → Home Repair / Handyman`
+- ✅ **Real-Estate / Property Advisor AI** — `Sidebar → Professionals → Real-Estate / Property`
+- ✅ **Driving / RTO & Licence AI** — `Sidebar → Professionals → Driving / RTO & Licence`
+- ✅ **Pet-Care / Dog-Training AI** — `Sidebar → Professionals → Pet-Care / Dog-Training`
+- ✅ **Beauty / Skincare & Grooming AI** — `Sidebar → Professionals → Beauty / Skincare & Grooming`
+- ✅ **Music / Instrument Learning AI** — `Sidebar → Professionals → Music / Instrument Learning`
+- ✅ **Sports & Cricket Coaching AI** — `Sidebar → Professionals → Sports & Cricket Coaching`
+- ✅ **Photography & Videography AI** — `Sidebar → Professionals → Photography & Videography`
+- ✅ **Public Speaking & Communication AI** — `Sidebar → Professionals → Public Speaking & Communication`
+- ✅ **Event & Wedding Planner AI** — `Sidebar → Professionals → Event & Wedding Planner`
+- ✅ **Elder-Care / Senior Support AI** — `Sidebar → Professionals → Elder-Care / Senior Support`
+- ✅ **Interior Design & Home-Decor AI** — `Sidebar → Professionals → Interior Design & Home-Decor`
+- ✅ **Study-Abroad & Education Consultant AI** — `Sidebar → Professionals → Study-Abroad & Education`
+- ✅ **Disability & Accessibility Support AI** — `Sidebar → Professionals → Disability & Accessibility Support`
+- ✅ **Fashion & Personal Styling AI** — `Sidebar → Professionals → Fashion & Personal Styling`
+- ✅ **Productivity & Time-Management AI** — `Sidebar → Professionals → Productivity & Time-Management`
+- ✅ **Relationship & Communication AI** — `Sidebar → Professionals → Relationship & Communication`
+- ✅ **Vehicle & Auto-Maintenance AI** — `Sidebar → Professionals → Vehicle & Auto-Maintenance`
+- ✅ **Stock-Market & Investing Education AI** — `Sidebar → Professionals → Stock-Market & Investing`
+- ✅ **Gadget & Tech-Help AI** — `Sidebar → Professionals → Gadget & Tech-Help`
+- ✅ **Maths & Science Problem-Solver AI** — `Sidebar → Professionals → Maths & Science Solver`
+- ✅ **Coding & Programming Tutor AI** — `Sidebar → Professionals → Coding & Programming Tutor`
+- ✅ **Pregnancy & New-Mother Care AI** — `Sidebar → Professionals → Pregnancy & New-Mother Care`
+- ✅ **First-Aid & Emergency-Response AI** — `Sidebar → Professionals → First-Aid & Emergency Response`
+- ✅ **Environment & Sustainability AI** — `Sidebar → Professionals → Environment & Sustainability`
+- ✅ **General Knowledge & Current-Affairs AI** — `Sidebar → Professionals → General Knowledge & Current Affairs`
+- ✅ **Personal Safety & Self-Defense AI** — `Sidebar → Professionals → Personal Safety & Self-Defense`
+- ✅ **Language & Translation Helper AI** — `Sidebar → Professionals → Language & Translation Helper`
+- ✅ **Civic / RTI & Grievance Helper AI** — `Sidebar → Professionals → Civic / RTI & Grievance Helper`
+- ✅ **Sarkari / Govt-Job Exam Guide AI** — `Sidebar → Professionals → Sarkari / Govt-Job Exam Guide`
+- ✅ **Spiritual & Philosophy Companion AI** — `Sidebar → Professionals → Spiritual & Philosophy Companion`
+- ✅ **DIY Crafts & Hobbies AI** — `Sidebar → Professionals → DIY Crafts & Hobbies`
+- ✅ **Festival & Culture Guide AI** — `Sidebar → Professionals → Festival & Culture Guide`
+- ✅ **Creative Writing & Storytelling AI** — `Sidebar → Professionals → Creative Writing & Storytelling`
+- ✅ **Mental Maths & Aptitude AI** — `Sidebar → Professionals → Mental Maths & Aptitude`
+- ✅ **Disaster Preparedness & Weather-Safety AI** — `Sidebar → Professionals → Disaster Preparedness & Weather-Safety`
+- ✅ **Nature & Wildlife Guide AI** — `Sidebar → Professionals → Nature & Wildlife Guide`
+- ✅ **Baby-Names & Naming Helper AI** — `Sidebar → Professionals → Baby-Names & Naming Helper`
+- ✅ **Hygiene & Public-Health Awareness AI** — `Sidebar → Professionals → Hygiene & Public-Health Awareness`
+- ✅ **Volunteering & Social-Impact AI** — `Sidebar → Professionals → Volunteering & Social-Impact`
+- ✅ **Astronomy & Space AI** — `Sidebar → Professionals → Astronomy & Space`
+- ✅ **Calligraphy & Hand-Lettering AI** — `Sidebar → Professionals → Calligraphy & Hand-Lettering`
+- ✅ **Dance & Movement AI** — `Sidebar → Professionals → Dance & Movement`
+- ✅ **Games, Puzzles & Family-Fun AI** — `Sidebar → Professionals → Games, Puzzles & Family-Fun`
+- ✅ **Tech Buying Advisor AI** — `Sidebar → Professionals → Tech Buying Advisor`
+- ✅ **Trekking & Adventure-Travel AI** — `Sidebar → Professionals → Trekking & Adventure-Travel`
+- ✅ **Home-Budget & Frugal-Living AI** — `Sidebar → Professionals → Home-Budget & Frugal-Living`
+- ✅ **GitHub Repo Analyst & Improver AI** — `Sidebar → Professionals → GitHub Repo Analyst & Improver`
 
 ### Deploy / Publish / Hosting (5)
 - ✅ **Deploy to Firebase Hosting (via v5.0 Publish)** — `NavBharatAI Pro v5.0 → "Publish" → host on NavBharatAI` — KB corrected off retired Engineer AI to the real v5.0 Publish; test-locked (#polish-5).

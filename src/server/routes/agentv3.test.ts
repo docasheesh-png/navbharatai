@@ -2051,7 +2051,10 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //   3× integrity passes (import-normalize / css-guard / cred-log) — gated by this change.
     //   3× post-build artifact passes (tests / index.html / scaffold) — gated on `expectsArtifacts`,
     //      which is false on every import turn.
-    expect(count).toBe(8);
+    //   1× the unused-import sweep (first-build-correct, 2026-07-31) — gated on `result.ok &&
+    //      expectsArtifacts && writtenFiles.size > 0`, so it NEVER writes on a read-only import/survey
+    //      turn (same discipline as the artifact passes above). Considered ✓.
+    expect(count).toBe(9);
   });
 
   it('the reviewer still keys off writtenFiles.size (the guard the rogue writes defeated)', () => {

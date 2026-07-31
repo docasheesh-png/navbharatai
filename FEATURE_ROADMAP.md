@@ -59,17 +59,17 @@ A feature is marked ✅ **DONE** only when ALL of these hold:
 - ✅ **Save apps to your own GitHub (git-native)** — `Sign in with GitHub → each build commits to a private repo in YOUR GitHub` — verified real, admin-gated git-native storage; test-locked (#polish-2).
 
 ### Builder Tools (Other AI) (11)
-- ⬜ **NavBharatAI Voice (inside a Professional)** — `Sidebar → Professionals → open any professional (Doctor, Lawyer, Teacher, …) → tap the 🎙️ microphone button next to the Send box. Signed-in users only, when voice is enabled.`
-- ⬜ **API Tester** — `Home → Other AI → Developer Tools → API Tester`
-- ⬜ **Code Versioning — Undo / Restore** — `Home → Other AI → Developer Tools → Versioning`
-- ⬜ **Code Minifier & Optimizer — make your app smaller and faster** — `Home → Other AI → Developer Tools → Minifier`
-- ⬜ **Figma Import — turn a Figma design into a real page** — `Home → Other AI → Design & Build → Figma Import`
-- ⬜ **Voice to App** — `Settings → AI Tools → Voice to App`
-- ⬜ **AI Debugger** — `Home → Other AI → AI Debugger`
-- ⬜ **AI Image Gen** — `Home → Other AI → AI Image Gen`
-- ⬜ **Bot Builder** — `Home → Other AI → Bot Builder`
-- ⬜ **AI Code Review** — `Home → Other AI → AI Tools → Code Review`
-- ⬜ **Code Review Comments** — `Home → Other AI → Insights & Webhooks → Code Review  (also backend /api/workspace/:workspaceId/review)`
+- ✅ **NavBharatAI Voice (inside a Professional)** — `Professionals → any professional → 🎙️ mic next to Send` — path verified real (signed-in + voice-enabled gate); test-locked (#polish-4).
+- ✅ **API Tester** — `Home → Other AI → Developer Tools → API Tester` — verified against the real tile; test-locked (#polish-4).
+- ✅ **Code Versioning — Undo / Restore** — `Home → Other AI → Developer Tools → Versioning` — verified real tile; test-locked (#polish-4).
+- ✅ **Code Minifier & Optimizer** — `Home → Other AI → Developer Tools → Minifier` — verified real tile; test-locked (#polish-4).
+- ✅ **Figma Import — turn a Figma design into a real page** — `Home → Other AI → Design & Build → Figma Import` — verified real tile; test-locked (#polish-4).
+- ✅ **Voice to App (speak your app idea)** — `NavBharatAI Pro v5.0 → 🎙️ mic in the chat composer` — KB corrected: the stale "Settings → AI Tools → Voice to App" (no such entry) → the real inline dictation mic in the Pro composer; test-locked (#polish-4).
+- ✅ **AI Debugger** — `Home → Other AI → AI Debugger` — path verified real (deliberate no-group doorway, 2026-07-23); test-locked (#polish-4).
+- ✅ **AI Image Gen** — `Home → Other AI → AI Image Gen` — path verified real; test-locked (#polish-4).
+- ✅ **Bot Builder** — `Home → Other AI → Bot Builder` — path verified real; test-locked (#polish-4).
+- ✅ **AI Code Review** — `Home → Other AI → AI Tools → Code Review` — verified real tile; test-locked (#polish-4).
+- ✅ **Code Review Comments** — `Home → Other AI → Insights & Webhooks → Code Review` — verified real (hosted in ProjectInsightsPanel, backend `/api/workspace/:workspaceId/review`); test-locked (#polish-4).
 
 ### Professional AIs (75)
 - ⬜ **Engineer AI (retired → use NavBharatAI Pro v5.0)** — `RETIRED. App building is now NavBharatAI Pro v5.0 — Sidebar → "NavBharatAI Pro v5.0".`

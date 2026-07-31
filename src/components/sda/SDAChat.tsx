@@ -547,7 +547,23 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         }),
       });
 
-      if (!res.ok) throw new Error('Service error');
+      // Surface the server's REAL reason instead of a blanket "unavailable" (which made a sign-in
+      // prompt, a free-limit paywall, or a keys/busy error all look identically like "not responding").
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({} as { error?: string; code?: string }));
+        const honest = errData?.error
+          || (res.status === 401 ? 'Please sign in to use Doctor AI — new users get free messages every day.'
+            : res.status === 402 ? 'You have used your free messages for today. Get the Professional Pass for unlimited access.'
+            : res.status === 429 ? 'Doctor AI is busy right now — please try again in a few seconds.'
+            : 'Doctor AI could not respond right now. Please try again in a moment.');
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: `⚠️ ${honest}`,
+          sender: 'sda',
+          timestamp: new Date(),
+        }]);
+        return;
+      }
       const data = await res.json();
 
       const sdaMsg: SDAMessage = {

@@ -96,6 +96,23 @@ describe('ViteReactProvider — ships a wired global stylesheet by default', () 
     expect(css).toContain('--accent');
   });
 
+  // Colour-by-default (design autopsy 2026-08-01, "b/w app bani hai, koi colour nahi"): the starter must
+  // not just DEFINE an accent — it must USE it as a real fill, so an app the generator barely styles is
+  // still colourful, not black-and-white. Lock: a saturated (non-grey) accent + a FILLED primary button
+  // (accent background) + coloured links + semantic status colours.
+  it('actually USES colour: filled primary button, coloured links, semantic colours (not just a defined accent)', () => {
+    const css = files['src/index.css'];
+    // The accent is a real saturated hue (indigo), never grey/black.
+    expect(css).toMatch(/--accent:\s*#4f46e5/i);
+    // A primary/submit button is FILLED with the accent (white text) — not a grey outlined button.
+    expect(css).toMatch(/button\[type="submit"\][\s\S]*background:\s*var\(--accent\)/);
+    expect(css).toContain('--accent-fg');
+    // Links carry the accent colour.
+    expect(css).toMatch(/a\s*\{[^}]*color:\s*var\(--accent\)/);
+    // Semantic status colours exist for badges/alerts.
+    for (const v of ['--success', '--danger', '--warning']) expect(css).toContain(v);
+  });
+
   it('main.tsx imports it (so an app is styled even if the generator forgets the import)', () => {
     expect(files['src/main.tsx']).toContain("import './index.css'");
   });

@@ -23321,3 +23321,24 @@ guard suite (19) green.
 existing `import.meta` regex transform for at least one file class — a preview-fidelity follow-up. (b) the 2
 fake/placeholder code issues are a model-quality problem (the deeper prevent lever is the prompt/contract).
 (c) the GLM 429 storm remains the standing quality ceiling (self-heals via Kimi; debt, not a break).
+
+---
+
+## 2026-07-31 — FEATURE (backend-deploy, slice 1): separate-backend deploy-config generator (BYO account/token)
+
+Admin: "user ko frontend aur backend alag-alag rakhna ho to?" — the gap was that NavBharatAI deploys a
+FRONTEND one-click but had NO target for a standalone always-on backend. Building it in slices, per user
+("user ke anusar alag-alag; confusion ho to user se pucho") and BYO-token (CLAUDE.md: user apps deploy to the
+USER's own accounts, never NavBharatAI's).
+
+**Slice 1 (this PR) — pure config generator.** New `src/lib/backendDeployConfig.ts`: given a host
+(cloud-run / render / railway) + app info, produces the REAL, correct config file(s) that make the backend
+deploy cleanly on THAT host — `Dockerfile` + `.dockerignore` (Cloud Run), `render.yaml` (Render),
+`railway.json` (Railway) — plus the BYO token env name and honest, ordered "push to GitHub → connect YOUR
+account" steps. Every path deploys to the user's OWN account; nothing is faked. Pure + deterministic;
+8 regression tests. Frontend tsc: no new errors.
+
+**Next slices (planned, one by one):** (2) wire it into the deploy/Git panel with a host-picker + the
+ask-when-unchosen flow; (3) BYO-token capture per host (Settings → Secrets) with honest "set TOKEN" states;
+(4) a real server-side deploy provider per host (token present → real deploy → separate backend URL). Until
+slice 4, the honest path is config-gen + GitHub-push + user connects their host (real, no fake success).

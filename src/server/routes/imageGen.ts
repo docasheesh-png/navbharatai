@@ -7,6 +7,7 @@ import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
 } from '../lib/imageGen';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
 /**
  * AI Image Gen — the REAL /api/image/generate route (admin autopsy 2026-07-20).
@@ -80,6 +81,10 @@ export function registerImageGenRoutes(app: Express): void {
       // declined a real brand / public figure / copyrighted character — e.g. "spiderman") must tell the
       // user to change the prompt, NOT "try again in a minute" (a transient message they'd retry forever).
       let sawRefusal = false;
+      // The exact per-rung failure (model id + reason) — surfaced to an ADMIN/free-list caller ONLY, so we
+      // can diagnose a live outage (bad model id / billing / quota / region) WITHOUT Cloud Run log access.
+      // Provider/model names to an admin are allowed (White-Label §3); a normal user never sees this.
+      const diag: string[] = [];
       for (const model of imageGenModels()) {
         try {
           const result: any = await timeout(ai.models.generateContent({
@@ -99,10 +104,13 @@ export function registerImageGenRoutes(app: Express): void {
             // The model's own reason stays in server logs only (white-label — never shown to the user).
             console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
           } else {
+            diag.push(`${model}: no image part (${extractResponseText(result)?.slice(0, 120) || 'empty response'})`);
             console.warn(`[IMAGE_GEN] ${model} returned no image part — trying the next rung.`);
           }
         } catch (err) {
-          console.warn(`[IMAGE_GEN] ${model} failed: ${err instanceof Error ? err.message : String(err)}`);
+          const msg = err instanceof Error ? err.message : String(err);
+          diag.push(`${model}: ${msg.slice(0, 160)}`);
+          console.warn(`[IMAGE_GEN] ${model} failed: ${msg}`);
         }
       }
       if (sawRefusal) {
@@ -111,7 +119,12 @@ export function registerImageGenRoutes(app: Express): void {
         return;
       }
       // Every rung threw (a genuine outage / model error) — honest transient error (model ids stay in logs).
-      res.status(502).json({ error: 'NavBharatAI could not generate the image right now — please try again in a minute.' });
+      // For an admin/free-list caller, attach the real per-rung diagnostic so the true cause is visible.
+      const isAdminCaller = isAgentV3FreeUser(account.uid, account.email);
+      const baseMsg = 'NavBharatAI could not generate the image right now — please try again in a minute.';
+      res.status(502).json({
+        error: isAdminCaller && diag.length ? `${baseMsg}\n\n[admin diagnostic] ${diag.join(' | ')}` : baseMsg,
+      });
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s image engine is briefly busy — please try again.' });
     }

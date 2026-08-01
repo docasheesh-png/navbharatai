@@ -44,6 +44,22 @@ describe('parseReviewOutput — no phantom criticals (66ec5c1e)', () => {
     }
   });
 
+  it('CONFIDENCE GATE (M4-S4.1): an explicitly low/medium-confidence critical is downgraded to a warning', () => {
+    const low = parseReviewOutput('[CRITICAL] (confidence: low) The list may not sort correctly in some edge case.');
+    expect(low.filter((i) => i.severity === 'critical')).toHaveLength(0);
+    expect(low.some((i) => i.severity === 'warning' && /list may not sort/i.test(i.message))).toBe(true);
+
+    const med = parseReviewOutput('[CRITICAL] Auth might be missing — medium confidence, could not verify.');
+    expect(med.filter((i) => i.severity === 'critical')).toHaveLength(0);
+  });
+
+  it('an UN-TAGGED critical stays critical (backward-safe — a reviewer that ignores the format is not weakened)', () => {
+    const untagged = parseReviewOutput('[CRITICAL] The checkout endpoint 500s on every order.');
+    expect(untagged.filter((i) => i.severity === 'critical')).toHaveLength(1);
+    const high = parseReviewOutput('[CRITICAL] (confidence: high) Login is completely broken.');
+    expect(high.filter((i) => i.severity === 'critical')).toHaveLength(1);
+  });
+
   it('a GENUINE critical is still counted (self-dismissal guard is conservative)', () => {
     const parsed = parseReviewOutput('[CRITICAL] The checkout API is completely broken — every order 500s. Score: 20');
     expect(parsed.filter((i) => i.severity === 'critical')).toHaveLength(1);

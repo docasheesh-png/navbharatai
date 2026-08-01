@@ -52,6 +52,17 @@ const SELF_DISMISSED_RE =
   /\bfalse[\s-]?positive\b|\bnot (a |an )?(real|actual|genuine|true|valid) (issue|problem|bug|concern|error|violation|vulnerability)\b/i;
 
 /**
+ * EXPLICIT LOW CONFIDENCE on a finding (M4-S4.1): the reviewer is instructed to tag each [CRITICAL] with
+ * its confidence — "(confidence: high|medium|low)". A weak/cheap reviewer that is UNSURE a thing is
+ * really broken must NOT fail the whole build on a guess (a working app reported broken is the worst
+ * outcome — the finance-app phantom-critical class). Only an EXPLICIT medium/low tag downgrades a
+ * critical to a warning (surfaced, non-blocking); an un-tagged critical is treated as high-confidence and
+ * still fails, so a reviewer that ignores the format keeps today's stricter behaviour (backward-safe).
+ * Matches the tag OR a bare hedge like "(low confidence)" / "confidence: medium".
+ */
+const LOW_CONFIDENCE_RE = /\bconfidence\s*[:=]?\s*(low|medium)\b|\b(low|medium)[- ]confidence\b/i;
+
+/**
  * Strip ALL leading finding-list noise — markdown heading (#), blockquote (>), the severity emoji,
  * bullets, list numbers and whitespace — ORDER-INDEPENDENTLY, so a heading is recognised whether the
  * reviewer wrote "### Issues", "🚨 ### Issues", or "- 🚨 Issues". Real report 8a6e4585 exposed the gap:
@@ -95,8 +106,12 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
       // A markdown SECTION HEADER ("### [CRITICAL] Issues", "🚨 ### Issues") is not a finding — never count it.
       if (SECTION_LABEL_RE.test(message)) continue;
       // The reviewer discharged its own finding as a false positive → demote so it can't fail the build.
-      const effective: ReviewIssue['severity'] =
+      let effective: ReviewIssue['severity'] =
         severity !== 'suggestion' && SELF_DISMISSED_RE.test(line) ? 'suggestion' : severity;
+      // CONFIDENCE GATE (M4-S4.1): an EXPLICITLY low/medium-confidence critical is a reviewer guess —
+      // downgrade it to a warning so it is surfaced but never fails a working build. Un-tagged criticals
+      // stay critical (backward-safe). Never UPGRADES anything.
+      if (effective === 'critical' && LOW_CONFIDENCE_RE.test(line)) effective = 'warning';
       issues.push({ severity: effective, message });
     }
   }
@@ -199,6 +214,9 @@ export async function reviewBuild(opts: {
     '  • If you inspect a tool-reported problem and conclude it is a false positive, or the app builds and',
     '    runs fine despite it, do NOT tag it [CRITICAL] — omit it, or use [SUGGESTION]. Never label a finding',
     '    [CRITICAL] and then explain in the same finding that it is a false positive.',
+    '  • Add your CONFIDENCE to every [CRITICAL] like "[CRITICAL] (confidence: high)". Use high ONLY when',
+    '    you are certain it is really broken; use medium/low when you are unsure — an unsure critical will',
+    '    be treated as a warning, not a build failure, so do NOT block a working app on a guess.',
     '',
     'End with: "Score: N/100" (where N = your quality assessment).',
     'If everything looks good, just write: [PASS] App looks complete. Score: 90',

@@ -262,4 +262,54 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   padding: 16px;
   box-shadow: var(--shadow);
 }
+
+/* PREMIUM DEFAULTS (M2-S2.1 design system): a small, tasteful component kit so every app looks
+   designed out of the box — a floor, not a ceiling (generators override freely). Theme-aware. */
+
+/* Typographic scale — clear hierarchy instead of raw browser <h1..h6>/<p> sizing. */
+h1 { font-size: 2rem;    line-height: 1.2;  font-weight: 800; letter-spacing: -0.02em; margin: 0 0 0.5em; }
+h2 { font-size: 1.5rem;  line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 0.5em; }
+h3 { font-size: 1.25rem; line-height: 1.3;  font-weight: 700; margin: 0 0 0.4em; }
+h4 { font-size: 1.05rem; line-height: 1.35; font-weight: 600; margin: 0 0 0.4em; }
+p  { margin: 0 0 1em; }
+small, .muted { color: var(--muted); }
+
+/* Ghost button — a third, quieter action next to the primary/secondary. */
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+}
+.btn-ghost:hover { background: var(--accent-soft); border-color: transparent; }
+
+/* Badges — small status pills using the semantic colours. */
+.badge {
+  display: inline-flex; align-items: center; gap: 0.35em;
+  font-size: 0.75rem; font-weight: 700; line-height: 1;
+  padding: 0.3em 0.6em; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.badge-success { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.badge-danger  { background: color-mix(in srgb, var(--danger) 15%, transparent);  color: var(--danger); }
+.badge-warning { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
+
+/* Alerts — a tinted, bordered message block for info/success/error/warning states. */
+.alert {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--card);
+}
+.alert-success { border-color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--card)); }
+.alert-danger  { border-color: var(--danger);  background: color-mix(in srgb, var(--danger) 8%, var(--card)); }
+.alert-warning { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--card)); }
+
+/* Layout helpers — a centred page container and tiny flex utilities so structure is easy and consistent. */
+.container { width: 100%; max-width: 1080px; margin-inline: auto; padding-inline: 16px; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row   { display: flex; align-items: center; gap: 12px; }
+
+/* Labelled field — vertical label + input spacing so forms read cleanly. */
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field > label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
 `;

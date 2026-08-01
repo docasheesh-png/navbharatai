@@ -113,6 +113,16 @@ describe('ViteReactProvider — ships a wired global stylesheet by default', () 
     for (const v of ['--success', '--danger', '--warning']) expect(css).toContain(v);
   });
 
+  // M2-S2.1 (design system): the scaffold ships a small premium component kit so every app looks
+  // designed out of the box — a typographic scale plus badge/alert/container/field/ghost-button classes.
+  it('ships the component kit (typography + .badge/.alert/.container/.field/.btn-ghost)', () => {
+    const css = files['src/index.css'];
+    expect(css).toMatch(/h1\s*\{[^}]*font-size/); // a real heading scale
+    for (const cls of ['.btn-ghost', '.badge', '.badge-success', '.alert', '.alert-danger', '.container', '.stack', '.row', '.field']) {
+      expect(css, cls).toContain(cls);
+    }
+  });
+
   it('main.tsx imports it (so an app is styled even if the generator forgets the import)', () => {
     expect(files['src/main.tsx']).toContain("import './index.css'");
   });

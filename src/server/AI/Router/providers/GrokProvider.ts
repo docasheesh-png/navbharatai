@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { AIProvider, AIProviderResponse } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { grokVisionModels } from '../../../lib/visionModels';
 
 export class GrokProvider implements AIProvider {
@@ -58,6 +58,7 @@ export class GrokProvider implements AIProvider {
       latencyMs: Date.now() - startTime,
       provider: 'GROK',
       model,
+      usage: readProviderUsage(response.usage),
     };
   }
 

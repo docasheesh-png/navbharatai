@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { AIProvider, AIProviderResponse } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 
 /**
  * GLM (Z.AI) provider — used as a FREE, fast top-of-chain option for Free Chat.
@@ -77,6 +77,7 @@ export class GlmProvider implements AIProvider {
       latencyMs: Date.now() - startTime,
       provider: 'GLM',
       model,
+      usage: readProviderUsage(response.usage),
     };
   }
 

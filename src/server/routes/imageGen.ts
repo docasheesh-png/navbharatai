@@ -7,7 +7,7 @@ import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, pollinationsImageUrl,
+  pollinationsEnabled, fetchPollinationsImage,
 } from '../lib/imageGen';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
@@ -102,21 +102,11 @@ export function registerImageGenRoutes(app: Express): void {
       // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
       // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
       if (pollinationsEnabled()) {
-        try {
-          const r = await timeout(fetch(pollinationsImageUrl(prompt, req.body.size)));
-          const ct = r.headers.get('content-type') || '';
-          if (r.ok && ct.startsWith('image/')) {
-            const buf = Buffer.from(await r.arrayBuffer());
-            if (buf.length > 0) { deliver({ mimeType: ct, base64: buf.toString('base64') }); return; }
-            diag.push('pollinations: empty image body');
-          } else {
-            diag.push(`pollinations: ${r.ok ? `non-image (${ct || 'unknown'})` : `HTTP ${r.status}`}`);
-            console.warn(`[IMAGE_GEN] pollinations returned ${r.ok ? `non-image ${ct}` : `HTTP ${r.status}`} — trying paid fallbacks.`);
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          diag.push(`pollinations: ${msg.slice(0, 160)}`);
-          console.warn(`[IMAGE_GEN] pollinations failed: ${msg}`);
+        const pr = await fetchPollinationsImage(prompt, req.body.size, { timeoutMs: ROUTE_TIMEOUT_MS });
+        if (pr.image) { deliver(pr.image); return; }
+        if (pr.error) {
+          diag.push(`pollinations: ${pr.error}`);
+          console.warn(`[IMAGE_GEN] pollinations failed: ${pr.error} — trying paid fallbacks.`);
         }
       }
 

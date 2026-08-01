@@ -1605,16 +1605,18 @@ Tap a tab to open that surface (it takes over the screen on mobile); tap it agai
 • Answers questions on any topic — science, history, coding, finance, law, etc.
 • Explains concepts in any language (Hindi, English, Hinglish, Tamil, Telugu, Bengali, Marathi, Punjabi, and more).
 • Analyzes documents (PDF/text files), describes images, reviews code.
+• GENERATES images for FREE — just ask in plain text ("generate an image of a mountain sunrise", "ek logo banao", "draw a red car") and the image appears right in the chat. No separate tool needed.
 • Remembers conversation context within a session.
 • Responds in the SAME language and tone the user writes in — Hindi reply for Hindi input, English for English, etc.
 NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
-    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language.',
-    relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis'],
+    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language. To get a picture, just ask for one in plain text (e.g. "generate an image of…", "ek image banao…") — it is generated free and shown inline.',
+    relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis', 'ai_image_gen'],
     aiSurface: 'nbi_chat',
     keywords: [
       'free chat', 'navbharatai free', 'start free chat', 'general chat', 'ask question', 'chat', 'conversation',
       'question answer', 'help', 'explain', 'kya hai', 'bataiye', 'samjhao',
       'hindi chat', 'language', 'translate', 'muft chat', 'free ai',
+      'generate image in chat', 'image banao', 'photo banao', 'make an image', 'draw', 'picture in chat', 'free image',
     ],
   },
   {

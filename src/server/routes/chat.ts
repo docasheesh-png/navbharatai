@@ -9,6 +9,8 @@ import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import { detectImageIntent } from '../lib/imageIntent';
+import { fetchPollinationsImage, imageMarkdown } from '../lib/imageGen';
 
 /**
  * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
@@ -318,6 +320,41 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         res.json({ reply: replyText });
       }
       return;
+    }
+
+    // FREE-CHAT INLINE IMAGE GENERATION (admin 2026-08-01: "navbharatai free bhi free me Pollinations se
+    // image generate kar de"). If a FREE-tier plain-text message asks to CREATE an image, generate one for
+    // free (Pollinations) and return it inline as a markdown data-URL image — no separate tool trip. Scoped
+    // to the Free tier and to a NO-attachment message (an attached image is a vision request, handled above).
+    if (isFree && attachments.length === 0) {
+      const imgIntent = detectImageIntent(message);
+      if (imgIntent.wants) {
+        const streamOut = req.body.stream === true;
+        const send = (reply: string) => {
+          if (streamOut) {
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.flushHeaders();
+            }
+            if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
+            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          } else {
+            res.json({ reply });
+          }
+        };
+        console.log(`[CHAT/IMAGE] tier=${tier} free image intent — prompt="${imgIntent.prompt.slice(0, 80)}"`);
+        const pr = await fetchPollinationsImage(imgIntent.prompt, 'square');
+        if (pr.image) {
+          send(`Ye rahi aapki image 🎨\n\n${imageMarkdown(pr.image, imgIntent.prompt.slice(0, 60))}\n\nKuch aur banwana ho to bas bata dein — bilkul free!`);
+        } else {
+          // Honest failure — never a fake/placeholder image; let the user retry.
+          send('Abhi image nahi ban paayi 😔 — thodi der me dubara try karein, ya prompt thoda change karke dekhein.');
+        }
+        return;
+      }
     }
 
     // LIVE WEB GROUNDING (admin 2026-07-12): for a message that needs current facts (sports/news/

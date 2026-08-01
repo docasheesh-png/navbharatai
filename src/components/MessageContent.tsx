@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+
+// Allow inline generated images (Free-chat image generation returns a `data:image/...;base64,...` markdown
+// image). react-markdown's default urlTransform strips every non-http(s) protocol — including data: — for
+// XSS safety, which would blank the generated image. We re-allow ONLY `data:image/` (an image payload is
+// inert — it cannot execute), and defer everything else to the safe default.
+const allowInlineImages = (url: string, key: string, node: unknown): string =>
+  /^data:image\//i.test(url) ? url : defaultUrlTransform(url, key, node as never);
 import { ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Flag, X, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
@@ -145,7 +152,18 @@ export const MessageContent = ({ text, sender, user }: { text: string; sender: '
 
   const content = (
     <div className="markdown-body">
-      <ReactMarkdown>{text}</ReactMarkdown>
+      <ReactMarkdown
+        urlTransform={allowInlineImages}
+        components={{
+          // Constrain a generated (or any) inline image so it fits the chat bubble neatly.
+          img: ({ node, ...props }) => (
+            // eslint-disable-next-line jsx-a11y/alt-text
+            <img {...props} style={{ maxWidth: '100%', height: 'auto', borderRadius: 12, marginTop: 8 }} loading="lazy" />
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 

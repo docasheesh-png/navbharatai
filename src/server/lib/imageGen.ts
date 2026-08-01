@@ -226,6 +226,42 @@ export function grokImageModel(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * Generate one image via the FREE Pollinations provider, server-side, returning it as raw base64 (never a
+ * placeholder — null-ish result on any failure). SINGLE source of the Pollinations fetch so the /api/image
+ * route and the Free-chat inline path can never drift (rule 2/3). `fetchImpl` is injectable for tests.
+ * Result: { image } on success | { error } on a real failure | { disabled: true } when the provider is off.
+ */
+export async function fetchPollinationsImage(
+  prompt: string,
+  size?: string,
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ image?: GeneratedImage; error?: string; disabled?: boolean }> {
+  const env = opts.env ?? process.env;
+  if (!pollinationsEnabled(env)) return { disabled: true };
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45_000);
+  try {
+    const r = await fetchImpl(pollinationsImageUrl(prompt, size, env), { signal: ctl.signal });
+    const ct = r.headers.get('content-type') || '';
+    if (!r.ok) return { error: `HTTP ${r.status}` };
+    if (!ct.startsWith('image/')) return { error: `non-image (${ct || 'unknown'})` };
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length === 0) return { error: 'empty image body' };
+    return { image: { mimeType: ct, base64: buf.toString('base64') } };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message.slice(0, 160) : String(err).slice(0, 160) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A ready-to-embed markdown image for a generated image data URL (renders inline in chat). */
+export function imageMarkdown(img: GeneratedImage, alt = 'generated image'): string {
+  return `![${alt}](data:${img.mimeType};base64,${img.base64})`;
+}
+
+/**
  * Parse the first base64 image out of an xAI /v1/images/generations response. xAI returns
  * `{ data: [{ b64_json: "<...>" }] }` (OpenAI-compatible). Returns null when there is no image
  * (an honest "no image" — the caller reports failure, never a placeholder). Pure.

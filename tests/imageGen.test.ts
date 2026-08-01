@@ -5,6 +5,7 @@ import {
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
   pollinationsEnabled, pollinationsImageUrl, IMAGE_SIZE_PIXELS,
+  fetchPollinationsImage, imageMarkdown,
 } from '../src/server/lib/imageGen';
 
 /**
@@ -120,6 +121,46 @@ describe('Pollinations free provider (admin: "free wala chalu karo")', () => {
     const url = pollinationsImageUrl('x', 'nope', { IMAGE_GEN_POLLINATIONS_MODEL: 'turbo' } as unknown as NodeJS.ProcessEnv);
     expect(url).toContain(`width=${IMAGE_SIZE_PIXELS.square.w}`);
     expect(url).toContain('model=turbo');
+  });
+});
+
+describe('fetchPollinationsImage (shared generator — route + Free-chat use the SAME path)', () => {
+  const okEnv = {} as NodeJS.ProcessEnv; // Pollinations on by default
+  const imgResp = (bytes = 3) => ({
+    ok: true,
+    headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? 'image/jpeg' : null) },
+    arrayBuffer: async () => new Uint8Array(bytes).buffer,
+  }) as unknown as Response;
+
+  it('returns the decoded base64 image on a real image response', async () => {
+    const r = await fetchPollinationsImage('a cat', 'square', { env: okEnv, fetchImpl: (async () => imgResp(4)) as unknown as typeof fetch });
+    expect(r.image?.mimeType).toBe('image/jpeg');
+    expect(typeof r.image?.base64).toBe('string');
+    expect(r.image!.base64.length).toBeGreaterThan(0);
+  });
+  it('reports an honest error on an HTTP failure — never a placeholder', async () => {
+    const bad = { ok: false, status: 502, headers: { get: () => null } } as unknown as Response;
+    const r = await fetchPollinationsImage('x', 'square', { env: okEnv, fetchImpl: (async () => bad) as unknown as typeof fetch });
+    expect(r.image).toBeUndefined();
+    expect(r.error).toContain('502');
+  });
+  it('reports an error on a non-image (HTML) response', async () => {
+    const html = { ok: true, headers: { get: () => 'text/html' }, arrayBuffer: async () => new ArrayBuffer(0) } as unknown as Response;
+    const r = await fetchPollinationsImage('x', 'square', { env: okEnv, fetchImpl: (async () => html) as unknown as typeof fetch });
+    expect(r.error).toMatch(/non-image/);
+  });
+  it('is disabled (no fetch) when the free provider is off', async () => {
+    let called = false;
+    const r = await fetchPollinationsImage('x', 'square', {
+      env: { IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv,
+      fetchImpl: (async () => { called = true; return imgResp(); }) as unknown as typeof fetch,
+    });
+    expect(r.disabled).toBe(true);
+    expect(called).toBe(false);
+  });
+  it('imageMarkdown builds an inline data-URL image', () => {
+    const md = imageMarkdown({ mimeType: 'image/png', base64: 'AAAA' }, 'a cat');
+    expect(md).toBe('![a cat](data:image/png;base64,AAAA)');
   });
 });
 

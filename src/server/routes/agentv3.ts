@@ -8316,12 +8316,22 @@ export function registerAgentV3Routes(app: Express): void {
           const verdict = analyzePreviewHtml(html);
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
-          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length })) {
+          // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
+          // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
+          // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
+          // admin actually saw, yet the rescue upgraded to success). The full-workspace readiness result
+          // that found it is already on the diagnostics timeline — no re-analysis.
+          const runtimeCrashBlocker = buildDiag.hasRuntimeCrashBlocker();
+          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker })) {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
+          } else if (runtimeCrashBlocker && verdict.rendered) {
+            // Honest admin trail: the preview PAINTED but a deterministic runtime-crash proof stands, so
+            // the rescue stood down and the build stays not-ok (free for the user) instead of a fake success.
+            buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE_BLOCKED', message: 'Live preview painted on load, but a deterministic runtime-crash defect (e.g. a Rules-of-Hooks violation) will crash it on re-render — NOT upgraded to success: a one-shot render cannot clear a latent runtime crash.', autoResolved: false });
           }
         } catch { /* rescue is best-effort — on any failure the build stays ok:false (never a fake success) */ }
       }

@@ -220,6 +220,32 @@ describe('BuildDiagnostics', () => {
   });
 });
 
+describe('hasRuntimeCrashBlocker — the render-rescue veto (real report 8a6e4585)', () => {
+  const mk = () => new BuildDiagnostics({ now: (() => { let t = 0; return () => (t += 10); })() });
+
+  it('true for an unresolved Rules-of-Hooks READINESS_BLOCKER ("crash at runtime")', () => {
+    const d = mk();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '1 React Rules-of-Hooks violation(s) (crash at runtime): useMemo@src/hooks/useChartData.ts:86', autoResolved: false });
+    expect(d.hasRuntimeCrashBlocker()).toBe(true);
+  });
+
+  it('true for undefined-JSX-component / undefined-hook crash blockers too', () => {
+    const d = mk();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '2 undefined JSX component(s) — used but never imported/defined (crash at runtime): <Foo>', autoResolved: false });
+    expect(d.hasRuntimeCrashBlocker()).toBe(true);
+  });
+
+  it('false for a non-crash readiness blocker (unresolved imports, low score)', () => {
+    const d = mk();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '3 unresolved import(s) — the build will fail: ./x', autoResolved: false });
+    expect(d.hasRuntimeCrashBlocker()).toBe(false);
+  });
+
+  it('false when there is no readiness blocker at all', () => {
+    expect(mk().hasRuntimeCrashBlocker()).toBe(false);
+  });
+});
+
 describe('dedup (P-REPORT.1 — repeated identical entries collapse instead of bloating the timeline)', () => {
   it('collapses back-to-back identical tool calls into one entry with a repeatCount', () => {
     const d = fresh();

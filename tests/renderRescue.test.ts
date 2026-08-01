@@ -37,4 +37,16 @@ describe('renderRescueConfirmsSuccess — only upgrade when the app genuinely re
   it('does NOT upgrade a rendered preview that still has runtime console errors', () => {
     expect(renderRescueConfirmsSuccess({ rendered: true, consoleErrorCount: 3 })).toBe(false);
   });
+
+  // Real report 8a6e4585: a Rules-of-Hooks violation renders fine on first paint (rendered:true, zero
+  // console errors at the snapshot) yet crashes on re-render — the admin saw the crash while the rescue
+  // upgraded to "success". A deterministic runtime-crash proof must veto the rescue.
+  it('does NOT upgrade when a deterministic runtime-crash blocker is present, even if it painted clean', () => {
+    expect(renderRescueConfirmsSuccess({ rendered: true, consoleErrorCount: 0, runtimeCrashBlocker: true })).toBe(false);
+  });
+
+  it('still upgrades a clean render when there is no runtime-crash blocker (flag absent or false)', () => {
+    expect(renderRescueConfirmsSuccess({ rendered: true, consoleErrorCount: 0, runtimeCrashBlocker: false })).toBe(true);
+    expect(renderRescueConfirmsSuccess({ rendered: true, consoleErrorCount: 0 })).toBe(true);
+  });
 });

@@ -407,8 +407,19 @@ export default function App() {
   const readAdminRoute = (): boolean => {
     try { return typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/admin'; } catch { return false; }
   };
+  // Nav App Store deep-link (admin 2026-08-01): navbharatai.com/?view=appstore (or /store) opens the
+  // Nav App Store panel straight away, so a shareable link can drop someone directly on the store's
+  // Browse tab (public, no login needed) instead of them hunting through Other AI → Publish & Deploy.
+  // It reuses the existing 'appstore' view — no duplicate wiring. A trailing slash on /store is tolerated.
+  const readStoreRoute = (): boolean => {
+    try {
+      if (typeof window === 'undefined') return false;
+      if (window.location.pathname.replace(/\/+$/, '') === '/store') return true;
+      return new URLSearchParams(window.location.search).get('view') === 'appstore';
+    } catch { return false; }
+  };
   const [activeView, setActiveView] = useState<ViewType>(() =>
-    readAdminRoute() ? 'admin' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home'),
+    readAdminRoute() ? 'admin' : (readStoreRoute() ? 'appstore' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home')),
   );
   // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
   // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.

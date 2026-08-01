@@ -16,6 +16,8 @@ export interface RequirementGaps {
   mentioned: string[];
   likelyMissing: string[];
   nonFunctional: { scale: boolean; offline: boolean; security: boolean; i18n: boolean };
+  /** True when the prompt is clearly for the Indian market (₹ / GST / UPI / Hindi / Aadhaar / …). */
+  india: boolean;
   clarifyingQuestions: string[];
 }
 
@@ -216,6 +218,36 @@ const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [
   { label: 'admin panel', re: /admin|dashboard|manage|backend/i },
 ];
 
+// M7-S7.1 (India moat) — a prompt clearly for the Indian market. US-centric builders default to $/Stripe/
+// English; NavBharatAI's edge is India-first defaults (₹, UPI/Cashfree, GST, Hindi, Aadhaar/PAN).
+const INDIA_CONTEXT_RE =
+  /\b(india|indian|bharat|desi|hindi|hinglish|marathi|tamil|telugu|bengali|gujarati|kannada|punjabi|odia|malayalam)\b|₹|\brs\.?\b|\binr\b|\bgst\b|\bgstin\b|\bupi\b|aadhaar|aadhar|\bpan\s?card\b|cashfree|razorpay|paytm|phonepe|\blakh\b|\bcrore\b|pincode|\bpin\s?code\b/i;
+
+/** True when the prompt is clearly for the Indian market. Pure. */
+export function detectIndiaContext(prompt: string): boolean {
+  return INDIA_CONTEXT_RE.test(String(prompt || ''));
+}
+
+/**
+ * India-first defaults a world-best Indian app builder bakes in by default — the moat US-centric builders
+ * (Stripe / USD / English) ignore. Domain tunes which extras apply (GST for commerce, Aadhaar for fintech).
+ * Pure.
+ */
+export function indiaFirstGuidance(domain: string): string {
+  const lines = [
+    'Use ₹ (INR) with Indian digit grouping (e.g. ₹1,00,000) and DD/MM/YYYY dates — never $ / USD by default.',
+    'For payments, default to India-first rails — UPI, and a gateway like Cashfree or Razorpay — not Stripe/PayPal.',
+    'Offer a Hindi (or the stated regional language) option for the main UI text where practical.',
+  ];
+  if (/ecommerce|restaurant|saas|logistics|fintech|real-estate|events|fitness|booking|jobs/.test(domain)) {
+    lines.push('Where money changes hands, produce a GST-compliant invoice (GSTIN + tax breakup).');
+  }
+  if (domain === 'fintech') {
+    lines.push('For identity, use Aadhaar / PAN-based KYC (Indian norms) — never SSN.');
+  }
+  return ['[INDIA-FIRST — build this for the Indian market by default]', ...lines.map((l) => `- ${l}`)].join('\n');
+}
+
 /** How specifically a domain fits the prompt: the count of its FEATURE signals present in the text. Used to
  *  pick the BEST-fitting domain rather than merely the FIRST in array order — so a generic domain (ecommerce's
  *  broad "order"/"inventory") can no longer STEAL a more-specific one. Pure. */
@@ -268,6 +300,7 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     mentioned,
     likelyMissing,
     nonFunctional,
+    india: detectIndiaContext(text),
     clarifyingQuestions: clarifyingQuestions.slice(0, 6),
   };
 }
@@ -284,14 +317,22 @@ export function shouldSurfaceRequirementGaps(g: RequirementGaps): boolean {
  *  with NO clarifying round-trip (friction-free requirement awareness). Returns '' when there is nothing
  *  worth adding (no domain, or nothing missing), so a clear/generic prompt is left exactly as-is. Pure. */
 export function buildRequirementGuidance(g: RequirementGaps): string {
-  if (!shouldSurfaceRequirementGaps(g)) return '';
-  const feats = g.likelyMissing.slice(0, 6);
-  if (feats.length === 0) return '';
-  return [
-    `[REQUIREMENT AWARENESS — this looks like a ${g.domain} app]`,
-    `A production ${g.domain} app almost always needs the following, which the request left implicit. INCLUDE them by default (real, wired — never stubbed) unless one is clearly out of scope for what the user asked; if it genuinely does not fit, skip it silently rather than asking:`,
-    ...feats.map((f) => `- ${f}`),
-  ].join('\n');
+  const parts: string[] = [];
+  // Domain feature guidance (unchanged) — only when a real domain has genuinely-missing features.
+  if (shouldSurfaceRequirementGaps(g)) {
+    const feats = g.likelyMissing.slice(0, 6);
+    if (feats.length > 0) {
+      parts.push([
+        `[REQUIREMENT AWARENESS — this looks like a ${g.domain} app]`,
+        `A production ${g.domain} app almost always needs the following, which the request left implicit. INCLUDE them by default (real, wired — never stubbed) unless one is clearly out of scope for what the user asked; if it genuinely does not fit, skip it silently rather than asking:`,
+        ...feats.map((f) => `- ${f}`),
+      ].join('\n'));
+    }
+  }
+  // M7-S7.1 (India moat): India-first defaults whenever the market is clearly Indian — even for a
+  // general-domain prompt, so ₹/UPI/GST/Hindi is the default, not a US-centric $/Stripe/English app.
+  if (g.india) parts.push(indiaFirstGuidance(g.domain));
+  return parts.join('\n\n');
 }
 
 /** Render the gaps as a compact, human-readable block the planner/agent can act on. Pure. */

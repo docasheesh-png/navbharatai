@@ -749,18 +749,25 @@ export class AgentRunner {
         if (turn.truncated || turn.stopReason === 'max_tokens') {
           try {
             const written: Record<string, string> = {};
+            // A write_file whose arguments were sliced mid-`content` at the token limit: the adapter
+            // salvaged the `path` but there is no `content`, so nothing was written. Name it so the guard
+            // steers a rewrite (the "Unterminated string in JSON" case that previously lost the file's
+            // identity entirely and produced a blind retry).
+            const truncatedToolPaths: string[] = [];
             for (const tu of turn.toolUses) {
               // Cover write_file AND write_files_batch — a batch write is just as truncatable, and the
               // old guard only looked at write_file (so a batch's cut-off tail slipped through).
               if (tu.name === 'write_file') {
                 const inp = tu.input as { path?: unknown; content?: unknown };
                 if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+                else if (typeof inp?.path === 'string' && inp?.content === undefined) truncatedToolPaths.push(inp.path);
               } else if (tu.name === 'write_files_batch') {
                 const b = tu.input as { files?: unknown };
                 if (Array.isArray(b?.files)) {
                   for (const f of b.files) {
                     const ff = f as { path?: unknown; content?: unknown };
                     if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
+                    else if (typeof ff?.path === 'string' && ff?.content === undefined) truncatedToolPaths.push(ff.path);
                   }
                 }
               }
@@ -772,9 +779,10 @@ export class AgentRunner {
             // JS parse-failures. (A path also written via a tool call is not "lost", so exclude it.)
             const writtenPaths = new Set(Object.keys(written));
             const textLost = textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p));
-            truncationSteer = truncationRecoverySteer({ brokenJs: broken, textMarkerPaths: textLost });
+            const truncatedLost = truncatedToolPaths.filter((p) => !writtenPaths.has(p));
+            truncationSteer = truncationRecoverySteer({ brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost });
             if (truncationSteer) {
-              events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length), ts: Date.now() });
+              events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length + truncatedLost.length), ts: Date.now() });
             }
           } catch { /* the guard is best-effort — it must never break a build */ }
         }

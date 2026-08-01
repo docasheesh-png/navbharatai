@@ -3,6 +3,9 @@ import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured,
   isValidImageGenRequest, IMAGE_STYLE_ENHANCERS, IMAGE_SIZE_RATIOS,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
+  geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
+  pollinationsEnabled, pollinationsImageUrl, IMAGE_SIZE_PIXELS,
+  fetchPollinationsImage, imageMarkdown,
 } from '../src/server/lib/imageGen';
 
 /**
@@ -87,10 +90,97 @@ describe('imageGenModels', () => {
 });
 
 describe('imageGenConfigured', () => {
-  it('is true only when an image key env is present', () => {
-    expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(false);
-    expect(imageGenConfigured({ GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
-    expect(imageGenConfigured({ GOOGLE_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  it('is always true while the free Pollinations provider is on (no key needed)', () => {
+    expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  });
+  it('is true when a Gemini OR Grok/xAI key is present, even with Pollinations off', () => {
+    const off = { IMAGE_GEN_POLLINATIONS: 'off' };
+    expect(imageGenConfigured({ ...off, GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ ...off, GROK_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ ...off, XAI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
+
+describe('Pollinations free provider (admin: "free wala chalu karo")', () => {
+  it('is enabled by default, off only via the explicit kill switch', () => {
+    expect(pollinationsEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(pollinationsEnabled({ IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+    expect(pollinationsEnabled({ IMAGE_GEN_POLLINATIONS: 'on' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  });
+  it('builds a URL with the prompt, the size pixels, no-logo, and a model', () => {
+    const url = pollinationsImageUrl('a blue robot', 'wide', {} as NodeJS.ProcessEnv);
+    expect(url.startsWith('https://image.pollinations.ai/prompt/')).toBe(true);
+    expect(url).toContain(encodeURIComponent('a blue robot'));
+    expect(url).toContain(`width=${IMAGE_SIZE_PIXELS.wide.w}`);
+    expect(url).toContain(`height=${IMAGE_SIZE_PIXELS.wide.h}`);
+    expect(url).toContain('nologo=true');
+    expect(url).toContain('model=flux');
+  });
+  it('defaults to square pixels for an unknown size and honours a model override', () => {
+    const url = pollinationsImageUrl('x', 'nope', { IMAGE_GEN_POLLINATIONS_MODEL: 'turbo' } as unknown as NodeJS.ProcessEnv);
+    expect(url).toContain(`width=${IMAGE_SIZE_PIXELS.square.w}`);
+    expect(url).toContain('model=turbo');
+  });
+});
+
+describe('fetchPollinationsImage (shared generator — route + Free-chat use the SAME path)', () => {
+  const okEnv = {} as NodeJS.ProcessEnv; // Pollinations on by default
+  const imgResp = (bytes = 3) => ({
+    ok: true,
+    headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? 'image/jpeg' : null) },
+    arrayBuffer: async () => new Uint8Array(bytes).buffer,
+  }) as unknown as Response;
+
+  it('returns the decoded base64 image on a real image response', async () => {
+    const r = await fetchPollinationsImage('a cat', 'square', { env: okEnv, fetchImpl: (async () => imgResp(4)) as unknown as typeof fetch });
+    expect(r.image?.mimeType).toBe('image/jpeg');
+    expect(typeof r.image?.base64).toBe('string');
+    expect(r.image!.base64.length).toBeGreaterThan(0);
+  });
+  it('reports an honest error on an HTTP failure — never a placeholder', async () => {
+    const bad = { ok: false, status: 502, headers: { get: () => null } } as unknown as Response;
+    const r = await fetchPollinationsImage('x', 'square', { env: okEnv, fetchImpl: (async () => bad) as unknown as typeof fetch });
+    expect(r.image).toBeUndefined();
+    expect(r.error).toContain('502');
+  });
+  it('reports an error on a non-image (HTML) response', async () => {
+    const html = { ok: true, headers: { get: () => 'text/html' }, arrayBuffer: async () => new ArrayBuffer(0) } as unknown as Response;
+    const r = await fetchPollinationsImage('x', 'square', { env: okEnv, fetchImpl: (async () => html) as unknown as typeof fetch });
+    expect(r.error).toMatch(/non-image/);
+  });
+  it('is disabled (no fetch) when the free provider is off', async () => {
+    let called = false;
+    const r = await fetchPollinationsImage('x', 'square', {
+      env: { IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv,
+      fetchImpl: (async () => { called = true; return imgResp(); }) as unknown as typeof fetch,
+    });
+    expect(r.disabled).toBe(true);
+    expect(called).toBe(false);
+  });
+  it('imageMarkdown builds an inline data-URL image', () => {
+    const md = imageMarkdown({ mimeType: 'image/png', base64: 'AAAA' }, 'a cat');
+    expect(md).toBe('![a cat](data:image/png;base64,AAAA)');
+  });
+});
+
+describe('Grok image fallback (keeps the feature alive when Gemini is access-denied)', () => {
+  it('geminiImageConfigured is true ONLY for a Gemini key, not a Grok key', () => {
+    expect(geminiImageConfigured({ GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(geminiImageConfigured({ GROK_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  });
+  it('grokImageKey accepts either env name; grokImageModel is env-tunable with a default', () => {
+    expect(grokImageKey({ GROK_API_KEY: 'a' } as unknown as NodeJS.ProcessEnv)).toBe('a');
+    expect(grokImageKey({ XAI_API_KEY: 'b' } as unknown as NodeJS.ProcessEnv)).toBe('b');
+    expect(grokImageKey({} as NodeJS.ProcessEnv)).toBeNull();
+    expect(grokImageModel({} as NodeJS.ProcessEnv)).toBe('grok-2-image');
+    expect(grokImageModel({ IMAGE_GEN_GROK_MODEL: 'grok-3-image' } as unknown as NodeJS.ProcessEnv)).toBe('grok-3-image');
+  });
+  it('parseGrokImageResponse extracts the b64_json image, null when absent (never a placeholder)', () => {
+    expect(parseGrokImageResponse({ data: [{ b64_json: 'ZZZZ' }] })).toEqual({ mimeType: 'image/png', base64: 'ZZZZ' });
+    expect(parseGrokImageResponse({ data: [{ url: 'http://x' }] })).toBeNull();
+    expect(parseGrokImageResponse({ data: [] })).toBeNull();
+    expect(parseGrokImageResponse(null)).toBeNull();
   });
 });
 

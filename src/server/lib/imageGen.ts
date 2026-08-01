@@ -41,6 +41,32 @@ export const IMAGE_SIZE_RATIOS: Record<string, string> = {
   icon: '1:1',
 };
 
+/** Size id → concrete pixel dimensions (for providers that take width/height, e.g. Pollinations). */
+export const IMAGE_SIZE_PIXELS: Record<string, { w: number; h: number }> = {
+  square: { w: 1024, h: 1024 },
+  wide: { w: 1280, h: 720 },
+  portrait: { w: 768, h: 1024 },
+  icon: { w: 512, h: 512 },
+};
+
+/** Whether the FREE image provider (Pollinations) is enabled — default ON; kill switch IMAGE_GEN_POLLINATIONS=off. */
+export function pollinationsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.IMAGE_GEN_POLLINATIONS || '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Build the Pollinations image URL (the FREE provider — no key, no per-image cost). Server-proxied by the
+ * route (the bytes are fetched and re-served as a data URL), so — unlike the old raw client hot-link — the
+ * user never talks to a third party and the result is branded NavBharatAI. `nologo=true` strips the
+ * provider watermark. Pure + bounded. Model is env-tunable via IMAGE_GEN_POLLINATIONS_MODEL (default flux).
+ */
+export function pollinationsImageUrl(prompt: string, size?: string, env: NodeJS.ProcessEnv = process.env): string {
+  const px = IMAGE_SIZE_PIXELS[size || ''] || IMAGE_SIZE_PIXELS.square;
+  const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
+  const p = encodeURIComponent(String(prompt || '').slice(0, MAX_PROMPT_CHARS));
+  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&model=${encodeURIComponent(model)}`;
+}
+
 /**
  * The model ladder for image generation, newest→older, env-tunable via IMAGE_GEN_MODEL (comma
  * list) without a deploy — same discipline as the other model ladders (Decision "A").
@@ -175,7 +201,77 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   return true;
 }
 
-/** True when an image-generation key is configured (same env chain the vision path uses). */
+/** True when ANY image provider is available — the free Pollinations provider (no key), OR a Gemini key,
+ *  OR an xAI/Grok key. With Pollinations on (the default), image generation is always configured. */
 export function imageGenConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return pollinationsEnabled(env) || Boolean(
+    env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY
+    || env.GROK_API_KEY || env.XAI_API_KEY,
+  );
+}
+
+/** True when only the Gemini key chain is present (used to pick which provider(s) to try). */
+export function geminiImageConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY);
+}
+
+/** The xAI/Grok API key (either accepted env name), or null. Grok is the image FALLBACK provider. */
+export function grokImageKey(env: NodeJS.ProcessEnv = process.env): string | null {
+  return env.GROK_API_KEY || env.XAI_API_KEY || null;
+}
+
+/** The Grok image model id, env-tunable via IMAGE_GEN_GROK_MODEL (default the current text-to-image model). */
+export function grokImageModel(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.IMAGE_GEN_GROK_MODEL || '').trim() || 'grok-2-image';
+}
+
+/**
+ * Generate one image via the FREE Pollinations provider, server-side, returning it as raw base64 (never a
+ * placeholder — null-ish result on any failure). SINGLE source of the Pollinations fetch so the /api/image
+ * route and the Free-chat inline path can never drift (rule 2/3). `fetchImpl` is injectable for tests.
+ * Result: { image } on success | { error } on a real failure | { disabled: true } when the provider is off.
+ */
+export async function fetchPollinationsImage(
+  prompt: string,
+  size?: string,
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ image?: GeneratedImage; error?: string; disabled?: boolean }> {
+  const env = opts.env ?? process.env;
+  if (!pollinationsEnabled(env)) return { disabled: true };
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45_000);
+  try {
+    const r = await fetchImpl(pollinationsImageUrl(prompt, size, env), { signal: ctl.signal });
+    const ct = r.headers.get('content-type') || '';
+    if (!r.ok) return { error: `HTTP ${r.status}` };
+    if (!ct.startsWith('image/')) return { error: `non-image (${ct || 'unknown'})` };
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length === 0) return { error: 'empty image body' };
+    return { image: { mimeType: ct, base64: buf.toString('base64') } };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message.slice(0, 160) : String(err).slice(0, 160) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A ready-to-embed markdown image for a generated image data URL (renders inline in chat). */
+export function imageMarkdown(img: GeneratedImage, alt = 'generated image'): string {
+  return `![${alt}](data:${img.mimeType};base64,${img.base64})`;
+}
+
+/**
+ * Parse the first base64 image out of an xAI /v1/images/generations response. xAI returns
+ * `{ data: [{ b64_json: "<...>" }] }` (OpenAI-compatible). Returns null when there is no image
+ * (an honest "no image" — the caller reports failure, never a placeholder). Pure.
+ */
+export function parseGrokImageResponse(resp: unknown): GeneratedImage | null {
+  const data = (resp as any)?.data;
+  if (!Array.isArray(data)) return null;
+  for (const d of data) {
+    const b64 = d?.b64_json;
+    if (typeof b64 === 'string' && b64.length > 0) return { mimeType: 'image/png', base64: b64 };
+  }
+  return null;
 }

@@ -823,7 +823,7 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 | **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
 | Plan phase | Grok | Grok/Sonnet | **Opus** |
 | Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
-| Heal gates (integrity / preview / C9 / runtime) | **`glm-4.7`/`kimi-k2.5` — NEVER Claude/flash/flagship** | Claude/Sonnet | Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02: "weak me last me GLM/Kimi ke top module"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` reverts to the old cheap-coder heal.** | Claude/Sonnet | Opus |
 
 ### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
 - Free ladder (LIVE, Slice 3): flash-first — `AGENTV3_FREE_GLM_MODEL` (default `glm-4.7-flash,glm-4.7,glm-5.2`),

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -365,11 +365,41 @@ describe('resolveJudgeKind — mode-aware judge selection', () => {
 // Model Routing Policy (admin 2026-07-12): a FREE build must NEVER touch Claude — the post-build heal
 // gates (integrity/preview/C9/runtime) + the no-files retry go cheap-only on a free build.
 describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/power stays Claude-first', () => {
-  it('FREE build → cheapOnly, never Claude-first (closes the leak)', () => {
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+  const prev = process.env.AGENTV3_WEAK_FLAGSHIP_HEAL;
+  afterEach(() => { if (prev === undefined) delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; else process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = prev; });
+
+  it('FREE build → cheapOnly + FLAGSHIP floor (admin 2026-08-02: weak repair uses the top GLM/Kimi), never Claude-first', () => {
+    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default on
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
   });
-  it('PAID / POWER build → Claude-first, not cheap-only (unchanged)', () => {
+  it('FREE build with the kill switch OFF → reverts to plain cheap-only (no flagship floor)', () => {
+    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+    expect(weakFlagshipHealEnabled()).toBe(false);
+  });
+  it('PAID / POWER build → Claude-first, not cheap-only (UNCHANGED — flagship weak-heal never touches paid)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });
+  });
+});
+
+describe('cheapBuildFloorRunners flagshipOnly — weak-fail repair runs on the TOP GLM/Kimi rung only', () => {
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'KIMI_API_KEY', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE'];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); process.env.AGENTV3_FLOOR_BALANCE = 'off'; });
+  afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('free + flagshipOnly keeps ONLY the last (flagship) rung of each free ladder — no cheap flash/coder rungs', () => {
+    process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
+    // free default ladders: GLM [flash,4.7,5.2] · KIMI [k2.5,k2.6,k2.7-code] → flagshipOnly → 1 GLM + 1 KIMI
+    const runners = cheapBuildFloorRunners({ free: true, flagshipOnly: true });
+    expect(runners.filter((r) => r.name === 'GLM').length).toBe(1);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(1);
+  });
+  it('free WITHOUT flagshipOnly keeps the full cheapest-first ladder (3 GLM + 3 KIMI rungs)', () => {
+    process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
+    const runners = cheapBuildFloorRunners({ free: true });
+    expect(runners.filter((r) => r.name === 'GLM').length).toBe(3);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(3);
   });
 });
 

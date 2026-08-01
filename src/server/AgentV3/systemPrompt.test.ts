@@ -62,6 +62,16 @@ describe('Node-only backend libs in frontend guidance (deep-test App #12 — jso
   });
 });
 
+describe('React Rules-of-Hooks guidance (M1-S1.3 — prevent the #1 runtime crash upstream)', () => {
+  it('tells the architect to call hooks unconditionally at the top level, not after an early return', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('RULES OF HOOKS');
+    expect(p).toMatch(/top level/i);
+    expect(p).toMatch(/early return/i);
+    expect(p).toMatch(/useMemo|useEffect|useState/);
+  });
+});
+
 describe('summarizeFileTree (edit at scale — bound the injected tree)', () => {
   it('lists every path in full for a SMALL project (unchanged behaviour)', () => {
     const out = summarizeFileTree(['src/App.tsx', 'package.json', 'src/lib/util.ts']);

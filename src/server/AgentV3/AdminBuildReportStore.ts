@@ -36,10 +36,15 @@ function getDb(): admin.firestore.Firestore | null {
 export interface AdminBuildReportContext {
   userId: string | null;
   email: string | null;
+  /** The reporter's account display name (Firebase displayName), resolved server-side. */
+  name?: string | null;
   workspaceId: string | null;
   buildId?: string | null;
   reportedAt: number;
 }
+
+/** A simplified paid/free classification of the build's billing tier, for admin filtering. */
+export type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 
 /** Lightweight row for the admin list (no full payload, so listing stays cheap). */
 export interface AdminBuildReportMeta {
@@ -47,13 +52,39 @@ export interface AdminBuildReportMeta {
   reportedAt: number;
   userId: string | null;
   email: string | null;
+  /** The reporter's account display name (may be null if the account has none). */
+  name: string | null;
   workspaceId: string | null;
   buildId: string | null;
   ok: boolean | null;
   /** A short, human label for the app — the first line of the build prompt. */
   appLabel: string;
+  /** The raw billing tier string from the build (admin-only detail). */
+  userTier: string | null;
+  /** Simplified paid/free/admin classification, derived from userTier — the admin "free/paid" column. */
+  tier: ReportTier;
+  /** How much the user was actually charged for this build, in ₹ (0 for a free/failed build; null if unknown). */
+  billedInr: number | null;
+  /** The same charge in USD (admin-only cross-check). */
+  billedUsd: number | null;
   rootCause: string | null;
   summary: string | null;
+}
+
+/**
+ * Classify a build's raw billing-tier string into paid / free / admin / unknown for the admin list's
+ * "free or paid user" column. PURE + exported so the exact mapping is unit-tested. The raw strings come
+ * from the billing record (`isAgentV3FreeUser` → 'free-list (admin/tester)', welcome-bonus → 'free …',
+ * a real paying user → 'paid', billing disabled → 'billing-off …').
+ */
+export function classifyReportTier(userTier: string | null | undefined): ReportTier {
+  const t = String(userTier ?? '').toLowerCase().trim();
+  if (!t) return 'unknown';
+  if (t.includes('free-list') || t.includes('admin') || t.includes('tester')) return 'admin';
+  if (t.startsWith('paid') || t.includes('opus') || t.includes('billed')) return 'paid';
+  if (t.includes('free')) return 'free';
+  if (t.includes('billing-off') || t.includes('no charge')) return 'free';
+  return 'unknown';
 }
 
 /** The full stored record: metadata + the trimmed report snapshot. */
@@ -84,16 +115,22 @@ export function appLabelFromPrompt(prompt: string | undefined | null): string {
 export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: AdminBuildReportContext): AdminBuildReportRecord {
   const trimmed = trimReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
+  const userTier = cap(trimmed.billing?.userTier, 80);
   return {
     meta: {
       id,
       reportedAt: ctx.reportedAt,
       userId: ctx.userId ?? null,
       email: ctx.email ?? null,
+      name: cap(ctx.name, 80),
       workspaceId: ctx.workspaceId ?? null,
       buildId: ctx.buildId ?? trimmed.buildId ?? null,
       ok: typeof trimmed.ok === 'boolean' ? trimmed.ok : null,
       appLabel: appLabelFromPrompt(trimmed.prompt),
+      userTier,
+      tier: classifyReportTier(userTier),
+      billedInr: typeof trimmed.billing?.billedInr === 'number' ? trimmed.billing.billedInr : null,
+      billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
       rootCause: cap(trimmed.rootCause, 400),
       summary: cap(trimmed.summary, 400),
     },

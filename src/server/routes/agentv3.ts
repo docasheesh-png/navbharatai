@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
@@ -2616,9 +2616,11 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const email = verifiedUid ? await resolveVerifiedEmail(verifiedUid).catch(() => null) : null;
+    const name = verifiedUid ? await resolveVerifiedName(verifiedUid).catch(() => null) : null;
     const record = buildAdminReportRecord(report, {
       userId: verifiedUid ?? null,
       email,
+      name,
       workspaceId: workspaceId || report.workspaceId || null,
       buildId: buildId || report.buildId || null,
       reportedAt: Date.now(),

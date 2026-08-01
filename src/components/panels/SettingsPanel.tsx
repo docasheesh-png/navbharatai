@@ -783,6 +783,24 @@ export function SettingsPanel({
                   </div>
                 </div>
 
+                {/* Git & Deployment — moved here from the sidebar (admin 2026-08-01). Opens the real Git /
+                    DevOps engine view (GitHub connect, commit/push, ZIP export, deploy targets). */}
+                <button
+                  onClick={() => toggleTab('git' as ViewType)}
+                  className="w-full text-left bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl hover:border-indigo-500/40 transition-colors active:scale-[0.99]"
+                >
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
+                         <GitBranch className="w-6 h-6 text-indigo-400" />
+                      </div>
+                      <div className="flex-1">
+                         <h3 className="font-black text-white text-sm uppercase tracking-wider">Git &amp; Deployment</h3>
+                         <p className="text-[10px] text-[#8b949e] font-medium italic">Connect GitHub, commit &amp; push, export a ZIP, and deploy — open the DevOps engine</p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-[#484f58]" />
+                   </div>
+                </button>
+
                 {/* Workspace Panels Toggle */}
                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl">
                    <div className="flex items-center gap-4 mb-6">
@@ -796,7 +814,7 @@ export function SettingsPanel({
                    </div>
 
                    <div className="grid gap-2">
-                      {menuItems.map(item => (
+                      {menuItems.filter(item => item.id !== 'git').map(item => (
                         <button
                           key={item.id}
                           onClick={() => setEnabledModules(prev => ({ ...prev, [item.id]: !prev[item.id] }))}

@@ -105,6 +105,59 @@ export function parseImagePartsResponse(resp: unknown): GeneratedImage | null {
   return null;
 }
 
+/** Finish/block reasons that mean the model DECLINED for policy reasons — a content refusal, NOT an outage. */
+const REFUSAL_FINISH_RE = /SAFETY|PROHIBITED|RECITATION|BLOCK|IMAGE_SAFETY|SPII|COPYRIGHT/i;
+
+/**
+ * The model's own first text explanation from a no-image response (e.g. a refusal reason), trimmed —
+ * null when there is none. Used only for server logs; NEVER surfaced verbatim to the user (white-label).
+ */
+export function extractResponseText(resp: unknown): string | null {
+  const candidates = (resp as any)?.candidates;
+  if (!Array.isArray(candidates)) return null;
+  for (const cand of candidates) {
+    const parts = cand?.content?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const p of parts) {
+      if (typeof p?.text === 'string' && p.text.trim()) return p.text.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * True when a NO-IMAGE response is a content REFUSAL (the model declined — a real brand, public figure,
+ * copyrighted character, or unsafe request) rather than a transient/system failure. This is the key
+ * distinction that makes the error HONEST (rule 5): a refusal must tell the user to change the prompt,
+ * NOT "try again in a minute" (which never works). Detected from an explicit block/finish reason, or from
+ * a 200 response that carries a text explanation but no image (a soft refusal). Pure.
+ */
+export function isImageRefusal(resp: unknown): boolean {
+  const r = resp as any;
+  const block = r?.promptFeedback?.blockReason;
+  if (typeof block === 'string' && block) return true;
+  const candidates = r?.candidates;
+  if (Array.isArray(candidates)) {
+    for (const c of candidates) {
+      if (typeof c?.finishReason === 'string' && REFUSAL_FINISH_RE.test(c.finishReason)) return true;
+    }
+  }
+  // A response that produced TEXT but no image, for a dedicated image request, is in practice a soft
+  // refusal (the model is explaining why it didn't draw it) — treat it as "change the prompt", not transient.
+  return extractResponseText(resp) !== null && parseImagePartsResponse(resp) === null;
+}
+
+/**
+ * The honest, WHITE-LABEL, actionable message for a content refusal — the app is "NavBharatAI", no vendor
+ * named, and it tells the user the real reason (their prompt) and how to succeed, instead of a misleading
+ * "server busy, try again". This is the message the "spiderman" case should have shown.
+ */
+export const IMAGE_REFUSAL_MESSAGE =
+  'NavBharatAI couldn’t create this image. This usually happens when the request names a real brand, a ' +
+  'public figure, or a copyrighted character (like a movie or comic hero) — or asks for content it can’t ' +
+  'generate. Try describing an ORIGINAL design instead (for example: “a friendly web-slinging superhero in ' +
+  'a red and blue suit”, not a named character).';
+
 /** Request guard for the route. */
 export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   if (!body || typeof body !== 'object') return false;

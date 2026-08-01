@@ -313,7 +313,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           <p className="text-xs text-white/40">Write a prompt to generate images — logos, banners, icons</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">Pollinations AI</span>
+          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
           <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-full border border-emerald-500/30">Free</span>
         </div>
       </div>

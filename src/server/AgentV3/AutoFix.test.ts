@@ -4,6 +4,7 @@ import {
   formatRuntimeErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome,
   reviewCriticalUnresolvedSummary,
   runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError,
+  isFatalRuntimeError, fatalRuntimeErrorCount,
 } from './AutoFix';
 
 describe('runtime-verification honesty records (rule 5 — checked-clean vs couldn\'t-check vs errors-remain)', () => {
@@ -37,6 +38,13 @@ describe('runtime-verification honesty records (rule 5 — checked-clean vs coul
     expect(r.autoResolved).toBe(false);
     expect(r.message).toMatch(/^2 runtime error/);
     expect(r.message).toMatch(/may still be present/i);
+    // M3-S3.1: 'x is not a function' is app-crashing → the record names the crash count.
+    expect(r.message).toMatch(/1 of them crash the app/i);
+  });
+
+  it('runtimeErrorsRemainRecord: no crash note when the residual errors are non-fatal (M3-S3.1)', () => {
+    const r = runtimeErrorsRemainRecord([{ t: 1, kind: 'error', text: 'Failed to fetch' }]);
+    expect(r.message).not.toMatch(/crash the app/i);
   });
 
   it('all three verdicts are advisory (never severity "error") — the runtime loop never blocks a build', () => {
@@ -171,6 +179,42 @@ describe('filterActionableErrors', () => {
     expect(filterActionableErrors(null)).toEqual([]);
     expect(filterActionableErrors('oops')).toEqual([]);
     expect(filterActionableErrors([null, {}, { text: '' }])).toEqual([]);
+  });
+});
+
+// M3-S3.1 — distinguish an app that actually CRASHED at runtime from benign console chatter, so the
+// "really works" verdict and the repair pass focus on real crashes.
+describe('isFatalRuntimeError + fatalRuntimeErrorCount (M3-S3.1)', () => {
+  it('flags real app-crashing errors as fatal', () => {
+    for (const t of [
+      "TypeError: Cannot read properties of undefined (reading 'map')",
+      'x.forEach is not a function',
+      'ReferenceError: foo is not defined',
+      'Error: Maximum update depth exceeded',
+      'Rendered more hooks than during the previous render',
+      'Warning: Objects are not valid as a React child',
+      'Minified React error #310',
+    ]) {
+      expect(isFatalRuntimeError(t), t).toBe(true);
+    }
+  });
+
+  it('does NOT flag benign noise or a plain non-crash log', () => {
+    for (const t of ['GET /favicon.ico 404', 'Download the React DevTools', '[HMR] update applied', 'Slow network is detected', 'User clicked the save button', '']) {
+      expect(isFatalRuntimeError(t), t).toBe(false);
+    }
+  });
+
+  it('counts only the crashing errors in a mixed list', () => {
+    const errs: RuntimeError[] = [
+      { t: 1, kind: 'error', text: "Cannot read properties of null (reading 'id')" },
+      { t: 2, kind: 'log', text: 'saved successfully' },
+      { t: 3, kind: 'error', text: 'ReferenceError: bar is not defined' },
+      { t: 4, kind: 'warning', text: 'ResizeObserver loop' },
+    ];
+    expect(fatalRuntimeErrorCount(errs)).toBe(2);
+    expect(fatalRuntimeErrorCount([])).toBe(0);
+    expect(fatalRuntimeErrorCount(undefined as never)).toBe(0);
   });
 });
 

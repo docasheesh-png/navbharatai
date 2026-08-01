@@ -361,7 +361,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
   `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both)
-- **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`
+- **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`,
+  `RENDER_API_KEY` (admin SET in Cloud Run 2026-08-02 — the separate-BACKEND deploy: NavBharatAI triggers a
+  real deploy of the user's Node/Express backend to Render via the Render API, `rnd_…` key. Read by
+  `src/server/AgentV3/renderDeploy.ts`. BYO-account model: deploys to the account that owns this key; without
+  it the backend-deploy path honestly reports "set RENDER_API_KEY", never a fake deploy.)
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

@@ -96,7 +96,7 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
@@ -1553,6 +1553,23 @@ export class ToolDispatcher {
   }
 
   /**
+   * WRITE-TIME Rules-of-Hooks guard (M1-S1.1, prevent-not-heal): after a React file is written/edited,
+   * return a steering note for any Rules-of-Hooks violation so the model fixes the runtime-crashing hook
+   * IN THE SAME TURN — before the build ships it (the post-build readiness gate stays the backstop). The
+   * deterministic AST analysis is fast and gated to React source internally; best-effort ('' on anything),
+   * never blocks a write. Kill switch AGENTV3_HOOKS_WRITE_GUARD=off.
+   */
+  private async hookWriteNote(path: string, content: string): Promise<string> {
+    if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
+    try {
+      const report = await analyzeHooksRules({ [path]: content });
+      return hookViolationWriteNote(report);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * Force known-breaking dep versions (Prisma → ^6) to their known-good major when the agent WRITES a
    * package.json — the sibling choke point to pinKnownDepsInInstallCommand (#1526), which only catches
    * explicit install commands. Path-gated (fast no-op for every non-package.json write), best-effort,
@@ -1708,6 +1725,9 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint — if a test file exists, suggest running it.
         const testHint = testFileHint(path);
+        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard — steer the model to fix a
+        // runtime-crashing hook THIS turn, before the build ships it (readiness gate stays the backstop).
+        const hooksNote = await this.hookWriteNote(path, content);
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -1725,10 +1745,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint
+            reviewNote + cascadeNote + testHint + hooksNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote;
       }
 
       case 'write_files_batch': {
@@ -1896,7 +1916,9 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint.
         const editTestHint = testFileHint(path);
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint;
+        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
+        const editHooksNote = await this.hookWriteNote(path, updated);
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editHooksNote;
       }
 
       case 'bash': {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 
 const wrap = (body: string) => ({ 'src/App.tsx': body });
 
@@ -164,5 +164,57 @@ describe('analyzeHooksRules — robustness', () => {
   it('does not throw on unparseable content', async () => {
     const r = await analyzeHooksRules({ 'src/broken.tsx': 'export function A( { const useState( <<<' });
     expect(Array.isArray(r.violations)).toBe(true);
+  });
+});
+
+// M1-S1.1 — the WRITE-TIME steering note (prevent-not-heal): when a just-written React file has a
+// Rules-of-Hooks violation, the write result carries a clear, model-actionable fix instruction so the
+// bug is corrected the same turn, not shipped and caught post-build.
+describe('hookViolationWriteNote — write-time steering note', () => {
+  it('returns a fix note for a conditional hook (the crashing class)', async () => {
+    const r = await analyzeHooksRules({ 'src/Comp.tsx': `
+      import { useState } from 'react';
+      export function Comp({ on }: { on: boolean }) {
+        if (on) { const [x] = useState(0); return <div>{x}</div>; }
+        return null;
+      }
+    ` });
+    expect(r.ok).toBe(false); // sanity: analyzer flags it
+    const note = hookViolationWriteNote(r);
+    expect(note).toContain('RULES OF HOOKS');
+    expect(note).toContain('useState');
+    expect(note).toMatch(/line \d+/);
+  });
+
+  it('returns a note for a hook after an early return', async () => {
+    const r = await analyzeHooksRules({ 'src/Comp.tsx': `
+      import { useEffect } from 'react';
+      export function Comp({ ready }: { ready: boolean }) {
+        if (!ready) return null;
+        useEffect(() => {}, []);
+        return <div/>;
+      }
+    ` });
+    const note = hookViolationWriteNote(r);
+    expect(note).toContain('useEffect');
+    expect(note.toLowerCase()).toContain('early return');
+  });
+
+  it('returns EMPTY for a clean file (hooks at the top level) — never nags a correct file', async () => {
+    const r = await analyzeHooksRules({ 'src/Comp.tsx': `
+      import { useState, useEffect } from 'react';
+      export function Comp() {
+        const [x, setX] = useState(0);
+        useEffect(() => { setX(1); }, []);
+        return <div>{x}</div>;
+      }
+    ` });
+    expect(r.ok).toBe(true);
+    expect(hookViolationWriteNote(r)).toBe('');
+  });
+
+  it('is empty for a report with no violations, junk, or missing fields', () => {
+    expect(hookViolationWriteNote({ violations: [], filesScanned: 1, counts: { 'conditional-hook': 0, 'hook-after-return': 0, 'hook-in-loop': 0, 'hook-in-callback': 0 }, ok: true })).toBe('');
+    expect(hookViolationWriteNote(undefined as never)).toBe('');
   });
 });

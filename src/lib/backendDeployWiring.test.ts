@@ -58,3 +58,17 @@ describe('backendDeployWiring — glue between the deploy panel and the config g
     expect(buildBackendConfigInjection('github', {})).toBeNull();
   });
 });
+
+describe('backendDeployWiring — BYO-token setup is surfaced (slice 3 groundwork for real deploy)', () => {
+  it('the injection tells the user exactly which token to set and where (Settings → Secrets)', () => {
+    const inj = buildBackendConfigInjection('render', { 'package.json': '{"name":"api"}' })!;
+    const joined = inj.logLines.join('\n');
+    expect(joined).toContain('RENDER_API_KEY');           // the exact BYO token env
+    expect(joined).toContain('Settings → Secrets & Keys'); // where to put it in NavBharatAI
+    expect(inj.plan.tokenEnv).toBe('RENDER_API_KEY');
+  });
+  it('each host names its own token', () => {
+    expect(buildBackendConfigInjection('gcloud', {})!.logLines.join(' ')).toContain('GCP_SERVICE_ACCOUNT_KEY');
+    expect(buildBackendConfigInjection('railway', {})!.logLines.join(' ')).toContain('RAILWAY_TOKEN');
+  });
+});

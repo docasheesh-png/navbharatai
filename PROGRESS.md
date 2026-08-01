@@ -23363,3 +23363,28 @@ host IS the choice (no separate ask-flow needed). 6 wiring tests + slice-1's 8; 
 **Remaining:** (3) BYO-token capture per host in Settings → Secrets; (4) a real per-host deploy provider
 (token present → real deploy → separate backend URL). Until slice 4 the honest path is config-inject +
 GitHub push + the user connects their host — real, no fake success.
+
+---
+
+## 2026-08-02 — Two tasks (admin "ek-ek karke dono, bina ruke")
+
+### Kaam 1 — build-report 1327b405 autopsy: PREVENT the 3 recurring defect classes (prevent-not-heal)
+The SaaS-dashboard build failed readiness 0/100 (preview "Closed Port Error") because a WEAK free-tier model
+(glm-4.7-flash → KIMI, under a GLM-429 storm + KIMI truncation, ~22 min) generated three genuinely-flawed
+patterns — NOT false positives: (1) a conditional `useMemo` (Rules-of-Hooks violation → runtime crash → dev
+server never bound port 5173), (2) a hardcoded real-format provider token in `ApiKeys.tsx`, (3) `Math.random()`
+for a token in `Webhooks.tsx`. The readiness gate CORRECTLY reported NOT READY.
+**Fix (50/50 law — kill the condition upstream):** `architectSystemPrompt()` now carries a
+"WRITE-IT-RIGHT-THE-FIRST-TIME" block instructing the builder to never (1) call a hook conditionally/after an
+early return/in a loop, (2) hardcode a real-format token (use an obvious placeholder like
+`sk_test_YOUR_KEY_HERE` or env), (3) use `Math.random()` for a token/OTP/secret. 3 regression tests assert the
+guidance is in the prompt. Server tsc clean; systemPrompt.test 45 pass.
+
+### Kaam 2 — backend-deploy slice-3 groundwork: surface the BYO-token setup
+`buildBackendConfigInjection` log lines now tell the user the exact host token env AND where to put it in
+NavBharatAI (`Settings → Secrets & Keys`) so NavBharatAI can deploy it for them (slice 4), or deploy on their
+own host — honest, no fake deploy. 2 more wiring tests. Frontend tsc: no new errors.
+
+Remaining backend-deploy: slice 4 — a real per-host server-side deploy provider (token present → real deploy →
+separate backend URL). Remaining build-quality: the WEAK free-tier ceiling itself (429 storm + truncation)
+stays a strategic open item.

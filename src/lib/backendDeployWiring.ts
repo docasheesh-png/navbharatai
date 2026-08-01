@@ -67,7 +67,8 @@ export function buildBackendConfigInjection(
   const logLines = [
     `✅ Added ${host === 'cloud-run' ? 'Cloud Run' : plan.hostLabel} deploy config to your project: ${added}.`,
     `ℹ️ This makes your BACKEND deploy-ready on ${plan.hostLabel} — separate from your frontend. We don't fake a deploy.`,
-    `🔑 It deploys to YOUR ${plan.hostLabel} account (set ${plan.tokenEnv} there — never on NavBharatAI's account).`,
+    `🔑 It deploys to YOUR ${plan.hostLabel} account, never NavBharatAI's. To let NavBharatAI deploy it for you`,
+    `   (coming next), add your ${plan.tokenEnv} in Settings → Secrets & Keys; or deploy on your host yourself.`,
     `📌 ${plan.portNote}`,
     ...plan.steps.map((s, i) => `${i + 1}. ${s}`),
   ];

@@ -369,3 +369,20 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('go mod tidy');
   });
 });
+
+describe('WRITE-IT-RIGHT prevention (build-report 1327b405: hooks crash + hardcoded token + Math.random token)', () => {
+  const prompt = architectSystemPrompt();
+  it('tells the builder never to call a hook conditionally (Rules of Hooks — the crash that closed the preview port)', () => {
+    expect(prompt).toContain('Rules of Hooks');
+    expect(prompt.toLowerCase()).toContain('conditionally');
+    expect(prompt).toContain('unconditionally at the');
+  });
+  it('tells the builder never to hardcode a real-format token — use an obvious placeholder', () => {
+    expect(prompt).toContain('sk_test_YOUR_KEY_HERE');
+    expect(prompt.toLowerCase()).toContain('never hardcode a real-format api token');
+  });
+  it('tells the builder never to use Math.random() for a token/OTP/secret', () => {
+    expect(prompt).toContain('crypto.randomUUID()');
+    expect(prompt).toContain('Math.random()');
+  });
+});

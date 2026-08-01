@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
 import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5DeployProvider } from '../../lib/deployCapability';
+import { isBackendDeployHost, buildBackendConfigInjection } from '../../lib/backendDeployWiring';
 
 interface GitPanelProps {
   token: string | null;
@@ -698,9 +699,28 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     setDeployLogs(unavailableDeployMessage(name).map(line => '[' + now() + '] ' + line));
   };
 
+  // SEPARATE BACKEND (admin 2026-07-31): for a backend host (Cloud Run / Render / Railway) we don't fake a
+  // deploy — we make the backend deploy-READY by adding the real host config (Dockerfile / render.yaml /
+  // railway.json) to the project, then show the honest BYO-account steps. The user pushes to GitHub and
+  // connects their OWN host account (per CLAUDE.md: user apps never deploy on NavBharatAI's account).
+  const injectBackendDeployConfig = () => {
+    clearAllPipelineTimeouts();
+    setValidationErrors([]);
+    setDeployedUrl('');
+    setActiveStep(1);
+    const inj = buildBackendConfigInjection(selectedPlatform, files);
+    if (!inj) { showDeployUnavailable(); return; }
+    if (onFilesChange) onFilesChange(inj.nextFiles); // add the config files to the project (real, no fake deploy)
+    setDeployStatus('unavailable'); // honest: config added, but the deploy itself is the user's next step
+    const now = () => new Date().toLocaleTimeString();
+    setDeployLogs(inj.logLines.map((line) => '[' + now() + '] ' + line));
+  };
+
   // Run the real deploy action for the selected target, or honestly report it isn't available.
   const triggerPushAndDeploy = () => {
     clearAllPipelineTimeouts();
+    // A separate-backend host: generate + inject its real deploy config (never a faked deploy).
+    if (isBackendDeployHost(selectedPlatform)) { injectBackendDeployConfig(); return; }
     switch (deployCapability(selectedPlatform)) {
       case 'github-push':
         executeRealGitHubPush();

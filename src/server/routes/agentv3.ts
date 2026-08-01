@@ -234,7 +234,7 @@ import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
-import { checkPreviewCompiles, previewCompileRepairInstruction } from '../runtime/PreviewCompileCheck';
+import { checkPreviewCompiles, previewCompileRepairInstruction, previewDivergenceBlocksDelivery, previewCompileUnresolvedSummary } from '../runtime/PreviewCompileCheck';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
@@ -8288,6 +8288,20 @@ export function registerAgentV3Routes(app: Express): void {
                   buildDiag.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_COMPILE_HEALED', message: 'in-browser preview compile issue fixed — the live preview now compiles.', autoResolved: true });
                 }
               }
+            }
+            // BILLING HONESTY (autopsy 2026-08-01, buildId 1047276c — charged ₹88.82 for a preview that
+            // would not compile): if the divergence SURVIVED the heal AND hits a guaranteed-reachable ENTRY
+            // file (main/App/index — the reported "Duplicate declaration" in App.tsx), the live preview the
+            // user opens genuinely white-screens → this is NOT a delivered working app. Flip to ok:false so
+            // the verdict is honest AND the "working app or free" guard makes it FREE (never charge for a
+            // preview the user can't see). Scoped to entry files so a broken-but-unimported source file
+            // (this module's documented reachability limit) never falsely fails a working build.
+            if (result && result.ok && !compile.ok && previewDivergenceBlocksDelivery(compile.errors)) {
+              // Flip result.ok only — buildResultRef (the deadline-finalizer's snapshot) isn't set yet here
+              // and is captured downstream ONLY `if (result.ok)`, so this flip keeps both exits honest and
+              // the normal-settle billing (which keys on result.ok) makes the build free.
+              result = { ...result, ok: false, summary: previewCompileUnresolvedSummary() };
+              buildDiag.record({ phase: 'preview', severity: 'error', code: 'OUTCOME_PREVIEW_COMPILE', message: `The live in-browser preview does not compile (entry file: ${compile.errors.find((e) => previewDivergenceBlocksDelivery([e]))?.file ?? 'entry'}) — the build is not fully working and was not charged.`, autoResolved: false });
             }
           }
         } catch { /* preview-compile guard is best-effort — never blocks a build */ }

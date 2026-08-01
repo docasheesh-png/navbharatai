@@ -90,6 +90,33 @@ export function checkPreviewCompiles(
 }
 
 /**
+ * The app ENTRY files, which are ALWAYS reachable from the live preview (main is the entry, App is
+ * imported by main, index is the alt entry). Matched EXACTLY at the src root (or repo root) — so a nested
+ * barrel like `src/types/index.ts` is NOT treated as an entry. Pure.
+ */
+const ENTRY_FILE_RE = /^(src\/)?(main|App|index)\.(tsx|jsx|ts|js)$/;
+
+/**
+ * Whether an UNHEALED preview-compile divergence should block delivery (make the build honestly not-ok →
+ * free). TRUE only when at least one failing file is a guaranteed-REACHABLE entry file — so the user's
+ * live preview genuinely white-screens (the reported App.tsx/main.tsx "Duplicate declaration" case). A
+ * divergence only in a non-entry (possibly never-imported) file stays advisory, respecting this module's
+ * documented reachability limitation — no false build failure on a broken-but-unused file. Pure.
+ */
+export function previewDivergenceBlocksDelivery(errors: PreviewCompileError[]): boolean {
+  if (!Array.isArray(errors)) return false;
+  return errors.some((e) => e && typeof e.file === 'string' && ENTRY_FILE_RE.test(e.file.replace(/^\.\//, '')));
+}
+
+/** Honest user-facing summary when the live preview will not compile — free (working app or free). Pure. */
+export function previewCompileUnresolvedSummary(): string {
+  return (
+    'Your app was built, but the live preview does not compile yet, so it is not fully working — ' +
+    'you have NOT been charged for this build. Reply "fix it" (or "continue") and I\'ll resolve it and finish.'
+  );
+}
+
+/**
  * A focused repair instruction for a bounded LLM heal pass — fix ONLY the preview compile errors, with
  * the smallest edits, writing code the Babel preview accepts.
  */

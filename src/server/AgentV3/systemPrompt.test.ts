@@ -62,6 +62,16 @@ describe('Node-only backend libs in frontend guidance (deep-test App #12 — jso
   });
 });
 
+describe('Design-kit guidance (M2-S2.1 — reuse the scaffold component kit for a premium look)', () => {
+  it('points the architect at the ready-made kit classes and palette vars', () => {
+    const p = architectSystemPrompt();
+    expect(p).toMatch(/DESIGN KIT/i);
+    expect(p).toContain('.card');
+    expect(p).toContain('.badge');
+    expect(p).toContain('.container');
+  });
+});
+
 describe('React Rules-of-Hooks guidance (M1-S1.3 — prevent the #1 runtime crash upstream)', () => {
   it('tells the architect to call hooks unconditionally at the top level, not after an early return', () => {
     const p = architectSystemPrompt();

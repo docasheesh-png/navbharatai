@@ -4,7 +4,7 @@ import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
-import { summarizeFailurePatterns } from '../lib/buildReportAnalytics';
+import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -39,6 +39,7 @@ interface AdminBuildReportRow {
   tier: ReportTier;
   billedInr: number | null;
   billedUsd: number | null;
+  buildMs: number | null;
   rootCause: string | null;
   summary: string | null;
 }
@@ -178,6 +179,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   // M8-S8.1 — data-driven failure signal: which failure class recurs most across all reports.
   const failureSummary = useMemo(() => summarizeFailurePatterns(buildReports), [buildReports]);
+  // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
+  const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
+  const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
 
   const tierBadge = (tier: ReportTier): { label: string; cls: string } => {
     switch (tier) {
@@ -1241,6 +1245,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+
+              {/* Build-time signal (M6-S6.1) — average / median / slowest builds, so speed is measurable. */}
+              {!buildReportsLoading && buildTimeSummary.counted > 0 && (
+                <div className="bg-[#161b22] border border-sky-500/20 rounded-[1.25rem] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Activity className="w-4 h-4 text-sky-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Build speed</h4>
+                    <span className="text-[11px] text-[#8b949e] font-bold">across {buildTimeSummary.counted} build(s)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-6">
+                    <div>
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Average</p>
+                      <p className="text-xl font-black text-white font-mono">{fmtDuration(buildTimeSummary.avgMs)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Median</p>
+                      <p className="text-xl font-black text-white font-mono">{fmtDuration(buildTimeSummary.medianMs)}</p>
+                    </div>
+                    <div className="min-w-[180px]">
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest mb-1">Slowest</p>
+                      {buildTimeSummary.slowest.slice(0, 3).map((s, i) => (
+                        <p key={i} className="text-[11px] text-[#8b949e] truncate"><span className="text-amber-400 font-bold font-mono">{fmtDuration(s.ms)}</span> · {s.app}</p>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}

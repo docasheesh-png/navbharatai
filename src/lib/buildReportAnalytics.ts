@@ -8,6 +8,39 @@ export interface FailureAnalyticsInput {
   ok: boolean | null;
   rootCause: string | null;
   appLabel?: string | null;
+  /** Build duration in ms (for the speed signal); optional so failure analysis ignores it. */
+  buildMs?: number | null;
+}
+
+export interface BuildTimeSummary {
+  /** Number of builds that carried a usable duration. */
+  counted: number;
+  /** Average build time in ms (0 when none). */
+  avgMs: number;
+  /** Median build time in ms (0 when none). */
+  medianMs: number;
+  /** The slowest builds, newest-count first, capped. */
+  slowest: Array<{ app: string; ms: number }>;
+}
+
+/**
+ * Summarise build DURATIONS across a set of reports — the speed signal (M6-S6.1). Only builds with a
+ * positive numeric buildMs are counted; returns avg, median and the slowest builds. Pure — never throws.
+ */
+export function summarizeBuildTimes(reports: FailureAnalyticsInput[], topN = 5): BuildTimeSummary {
+  const list = Array.isArray(reports) ? reports : [];
+  const timed = list.filter((r) => r && typeof r.buildMs === 'number' && Number.isFinite(r.buildMs) && (r.buildMs as number) > 0);
+  const durations = timed.map((r) => r.buildMs as number);
+  if (durations.length === 0) return { counted: 0, avgMs: 0, medianMs: 0, slowest: [] };
+  const sum = durations.reduce((a, b) => a + b, 0);
+  const sorted = [...durations].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const medianMs = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  const slowest = [...timed]
+    .sort((a, b) => (b.buildMs as number) - (a.buildMs as number))
+    .slice(0, Math.max(1, topN))
+    .map((r) => ({ app: r.appLabel || 'Untitled build', ms: r.buildMs as number }));
+  return { counted: durations.length, avgMs: Math.round(sum / durations.length), medianMs, slowest };
 }
 
 export interface FailurePattern {

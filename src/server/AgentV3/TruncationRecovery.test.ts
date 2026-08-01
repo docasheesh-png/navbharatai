@@ -53,9 +53,24 @@ describe('truncationRecoverySteer', () => {
     expect(steer).toContain('src/index.css');
   });
 
+  it('names a write_file TOOL call cut off mid-content (the salvaged-path / Unterminated-JSON case)', () => {
+    const steer = truncationRecoverySteer({ truncatedToolPaths: ['src/App.tsx'] })!;
+    expect(steer).toContain('src/App.tsx');
+    expect(steer).toMatch(/cut off mid-content/);
+  });
+
+  it('does not repeat a truncated tool path already covered by a broken/text entry', () => {
+    const steer = truncationRecoverySteer({
+      brokenJs: [{ path: 'src/App.tsx', message: 'boom' }],
+      truncatedToolPaths: ['src/App.tsx', 'src/Page.tsx'],
+    })!;
+    expect((steer.match(/src\/App\.tsx/g) || []).length).toBe(1); // de-duped across sources
+    expect(steer).toContain('src/Page.tsx');
+  });
+
   it('returns null when there is nothing to recover', () => {
     expect(truncationRecoverySteer({})).toBeNull();
-    expect(truncationRecoverySteer({ brokenJs: [], textMarkerPaths: [] })).toBeNull();
+    expect(truncationRecoverySteer({ brokenJs: [], textMarkerPaths: [], truncatedToolPaths: [] })).toBeNull();
   });
 });
 

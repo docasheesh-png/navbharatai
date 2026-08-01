@@ -36,13 +36,20 @@ export function textMarkerFilePaths(turnText: string | undefined | null): string
 export function truncationRecoverySteer(input: {
   brokenJs?: readonly SyntaxErrorInfo[];
   textMarkerPaths?: readonly string[];
+  /** Files whose write_file TOOL CALL was cut off mid-arguments — the path survived (salvaged) but the
+   *  `content` did not, so nothing was written. The bare "Unterminated string in JSON" case, now named. */
+  truncatedToolPaths?: readonly string[];
 }): string | null {
   const brokenJs = input.brokenJs ?? [];
   const textMarkerPaths = input.textMarkerPaths ?? [];
+  const truncatedToolPaths = input.truncatedToolPaths ?? [];
   const brokenSet = new Set(brokenJs.map((b) => b.path));
   // A file that BOTH failed to parse and was in the text markers is listed once, under "broken".
   const lostOnly = textMarkerPaths.filter((p) => !brokenSet.has(p));
-  if (brokenJs.length === 0 && lostOnly.length === 0) return null;
+  // A salvaged truncated tool write already covered by a broken/text entry is not repeated.
+  const textSet = new Set(textMarkerPaths);
+  const truncatedOnly = truncatedToolPaths.filter((p) => !brokenSet.has(p) && !textSet.has(p));
+  if (brokenJs.length === 0 && lostOnly.length === 0 && truncatedOnly.length === 0) return null;
 
   const lines: string[] = [];
   for (const b of brokenJs.slice(0, 15)) {
@@ -50,6 +57,9 @@ export function truncationRecoverySteer(input: {
   }
   for (const p of lostOnly.slice(0, 15)) {
     lines.push(`- ${p} — you wrote this as TEXT, not with the write_file tool, so it was NOT saved`);
+  }
+  for (const p of truncatedOnly.slice(0, 15)) {
+    lines.push(`- ${p} — your write_file call was cut off mid-content, so it was NOT saved`);
   }
   return `[TRUNCATION GUARD] Your previous response hit the max-token limit, so the following file(s) are ` +
     `missing or broken:\n${lines.join('\n')}\n\nRewrite each listed file COMPLETELY using the write_file ` +

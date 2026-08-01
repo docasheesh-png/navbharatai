@@ -1559,10 +1559,11 @@ export class ToolDispatcher {
    * deterministic AST analysis is fast and gated to React source internally; best-effort ('' on anything),
    * never blocks a write. Kill switch AGENTV3_HOOKS_WRITE_GUARD=off.
    */
-  private async hookWriteNote(path: string, content: string): Promise<string> {
+  private async hookWriteNote(files: Record<string, string>): Promise<string> {
     if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
+    if (!files || Object.keys(files).length === 0) return '';
     try {
-      const report = await analyzeHooksRules({ [path]: content });
+      const report = await analyzeHooksRules(files);
       return hookViolationWriteNote(report);
     } catch {
       return '';
@@ -1727,7 +1728,7 @@ export class ToolDispatcher {
         const testHint = testFileHint(path);
         // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard — steer the model to fix a
         // runtime-crashing hook THIS turn, before the build ships it (readiness gate stays the backstop).
-        const hooksNote = await this.hookWriteNote(path, content);
+        const hooksNote = await this.hookWriteNote({ [path]: content });
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -1863,7 +1864,15 @@ export class ToolDispatcher {
         const dupWarning = dupSkipped.length
           ? `\n[DUPLICATE MODULE BLOCKED] ${dupSkipped.length} file(s) were NOT written — they would create a SECOND copy of a module that already exists under a different directory convention (${dupSkipped.slice(0, 8).join('; ')}${dupSkipped.length > 8 ? '…' : ''}). Two copies drift and break the build — EDIT the existing file(s) in place. Use ONE directory convention for the whole app.`
           : '';
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}`;
+        // M1-S1.2 (prevent-not-heal): write-time Rules-of-Hooks guard on the batch's written files —
+        // the same steering as write_file/edit_file, extended to the multi-file create path so a new
+        // component with a runtime-crashing hook is fixed this turn, not caught post-build. Run across
+        // all written files at once (cross-file context); the note names each violating file.
+        const writtenSet = new Set(written);
+        const writtenRecord: Record<string, string> = {};
+        for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
+        const batchHooksNote = await this.hookWriteNote(writtenRecord);
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchHooksNote}`;
       }
 
       case 'edit_file': {
@@ -1917,7 +1926,7 @@ export class ToolDispatcher {
         // Level 6: test file hint.
         const editTestHint = testFileHint(path);
         // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
-        const editHooksNote = await this.hookWriteNote(path, updated);
+        const editHooksNote = await this.hookWriteNote({ [path]: updated });
         return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editHooksNote;
       }
 

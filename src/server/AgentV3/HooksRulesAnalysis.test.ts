@@ -183,7 +183,17 @@ describe('hookViolationWriteNote — write-time steering note', () => {
     const note = hookViolationWriteNote(r);
     expect(note).toContain('RULES OF HOOKS');
     expect(note).toContain('useState');
-    expect(note).toMatch(/line \d+/);
+    expect(note).toMatch(/:\d+:/); // file:line label
+  });
+
+  it('labels each violation with its FILE (multi-file batch clarity, M1-S1.2)', async () => {
+    const r = await analyzeHooksRules({
+      'src/Good.tsx': `import { useState } from 'react';\nexport function Good(){ const [x]=useState(0); return <div>{x}</div>; }`,
+      'src/Bad.tsx': `import { useState } from 'react';\nexport function Bad({on}:{on:boolean}){ if(on){ const [x]=useState(0); return <div>{x}</div>; } return null; }`,
+    });
+    const note = hookViolationWriteNote(r);
+    expect(note).toContain('src/Bad.tsx'); // names the offending file
+    expect(note).not.toContain('src/Good.tsx'); // the clean file is not flagged
   });
 
   it('returns a note for a hook after an early return', async () => {

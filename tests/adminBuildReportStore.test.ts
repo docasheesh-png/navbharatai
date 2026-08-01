@@ -56,6 +56,8 @@ describe('buildAdminReportRecord', () => {
     expect(rec.meta.ok).toBe(true);
     expect(rec.meta.appLabel).toBe('Build a hospital management app');
     expect(rec.meta.reportedAt).toBe(5_000);
+    // buildMs is endedAt − startedAt from the report (2000 − 1000 in baseReport).
+    expect(rec.meta.buildMs).toBe(1_000);
     // The id is deterministic from reportedAt + workspaceId (sanitised).
     expect(rec.meta.id).toBe('5000_ws-1');
   });

@@ -67,6 +67,8 @@ export interface AdminBuildReportMeta {
   billedInr: number | null;
   /** The same charge in USD (admin-only cross-check). */
   billedUsd: number | null;
+  /** How long the build took, in milliseconds (endedAt − startedAt); null when unknown — the speed signal. */
+  buildMs: number | null;
   rootCause: string | null;
   summary: string | null;
 }
@@ -116,6 +118,10 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
   const trimmed = trimReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
   const userTier = cap(trimmed.billing?.userTier, 80);
+  const buildMs =
+    typeof trimmed.startedAt === 'number' && typeof trimmed.endedAt === 'number' && trimmed.endedAt >= trimmed.startedAt
+      ? trimmed.endedAt - trimmed.startedAt
+      : null;
   return {
     meta: {
       id,
@@ -131,6 +137,7 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       tier: classifyReportTier(userTier),
       billedInr: typeof trimmed.billing?.billedInr === 'number' ? trimmed.billing.billedInr : null,
       billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
+      buildMs,
       rootCause: cap(trimmed.rootCause, 400),
       summary: cap(trimmed.summary, 400),
     },

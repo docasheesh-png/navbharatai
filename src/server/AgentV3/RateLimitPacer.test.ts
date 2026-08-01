@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TokenBucket, AimdConcurrency, isThrottleSignal, pacerEnabled, pacerConfigFromEnv, RateLimitPacer,
+  ThrottleHealth,
 } from './RateLimitPacer';
 
 describe('TokenBucket — paces requests to stay under the rate', () => {
@@ -100,5 +101,47 @@ describe('RateLimitPacer.run — paces + adapts, never changes the result', () =
     const grown = p.concurrencyLimit;
     await expect(p.run(async () => { throw new Error('duplicate identifier'); })).rejects.toThrow('duplicate identifier');
     expect(p.concurrencyLimit).toBe(grown); // unchanged by a non-throttle error
+  });
+});
+
+// M5-S5.1 — throttle-health: an honest, measurable 0-100 signal of the 429 ceiling per provider.
+describe('ThrottleHealth', () => {
+  it('is 100 before any samples (unknown = assume healthy)', () => {
+    expect(new ThrottleHealth().score).toBe(100);
+    expect(new ThrottleHealth().count).toBe(0);
+  });
+  it('stays 100 while every call succeeds', () => {
+    const h = new ThrottleHealth();
+    for (let i = 0; i < 20; i++) h.record(false);
+    expect(h.score).toBe(100);
+  });
+  it('drops toward 0 under a sustained throttle storm', () => {
+    const h = new ThrottleHealth();
+    for (let i = 0; i < 40; i++) h.record(true);
+    expect(h.score).toBeLessThan(10);
+    expect(h.throttleRate).toBeGreaterThan(0.9);
+  });
+  it('recovers as successes resume after a storm', () => {
+    const h = new ThrottleHealth();
+    for (let i = 0; i < 20; i++) h.record(true);
+    const low = h.score;
+    for (let i = 0; i < 40; i++) h.record(false);
+    expect(h.score).toBeGreaterThan(low);
+    expect(h.score).toBeGreaterThan(80);
+  });
+});
+
+describe('RateLimitPacer — exposes throttle health from real outcomes (M5-S5.1)', () => {
+  const noWait = { now: () => 0, sleep: async () => {} };
+  it('healthScore drops after throttles and recovers after successes', async () => {
+    const p = new RateLimitPacer({ ratePerSec: 1000, burst: 1000, minConcurrency: 2, maxConcurrency: 8 }, noWait);
+    expect(p.healthScore).toBe(100);
+    for (let i = 0; i < 10; i++) {
+      await expect(p.run(async () => { const e = new Error('429 rate limit') as Error & { status: number }; e.status = 429; throw e; })).rejects.toThrow();
+    }
+    expect(p.healthScore).toBeLessThan(100);
+    const dip = p.healthScore;
+    for (let i = 0; i < 30; i++) await p.run(async () => 1);
+    expect(p.healthScore).toBeGreaterThan(dip);
   });
 });

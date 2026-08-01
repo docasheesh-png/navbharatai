@@ -7,6 +7,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
+import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
@@ -1606,7 +1607,30 @@ export class ToolDispatcher {
     const input = call.input;
     switch (call.name) {
       case 'read_file': {
-        const full = await this.actuator.readFile(this.workspaceId, reqStr(input, 'path'));
+        const reqPath = reqStr(input, 'path');
+        let full: string;
+        try {
+          full = await this.actuator.readFile(this.workspaceId, reqPath);
+        } catch (err) {
+          // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
+          // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
+          // src/components/X.tsx). Look up the real file by basename across everything the workspace already
+          // knows (cheap, in-memory), then across the on-disk list, and hand back the ACTUAL path(s). Any path
+          // drift — a missing folder segment, a case difference, a .ts↔.tsx mixup — self-corrects on the first
+          // miss instead of stalling. Honest: a suggestion is only ever a path that genuinely exists.
+          const base = (err instanceof Error ? err.message : String(err)) || `read_file: ${reqPath} does not exist.`;
+          let known: string[] = [];
+          try { known = getWorkspaceMemory(this.workspaceId).knownFilePaths(); } catch { /* memory best-effort */ }
+          let hint = pathMissHint(reqPath, known);
+          if (!hint) {
+            // In-memory index missed it — fall back to the actuator's authoritative on-disk list (a miss is
+            // already the stuck/error path, so one listFiles to unstick the agent is worth the latency).
+            try { hint = pathMissHint(reqPath, await this.actuator.listFiles(this.workspaceId)); } catch { /* list best-effort */ }
+          }
+          // Re-throw so the miss stays an honest is_error result (the outer catch formats it), but with the
+          // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
+          throw new Error(`${base}${hint}`.trim());
+        }
         // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
         // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
         // model concluded the FILE was "truncated at exactly N lines" and destructively 'repaired' a

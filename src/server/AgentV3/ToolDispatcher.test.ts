@@ -567,6 +567,22 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('Error:');
   });
 
+  it('read_file miss on a path-drifted file names the REAL location (ui/ drift self-correct)', async () => {
+    // The real build report: component created at src/components/ui/button.tsx, read from src/components/.
+    act.files.set('src/components/ui/button.tsx', 'export const Button = () => null;');
+    const res = await d.dispatch(call('read_file', { path: 'src/components/button.tsx' }));
+    expect(res.is_error).toBe(true); // still an honest error…
+    expect(res.content).toContain('src/components/ui/button.tsx'); // …but it hands back the real path
+    expect(res.content.toLowerCase()).toContain('did you mean');
+  });
+
+  it('read_file miss with no plausible sibling stays a bare honest error (no misleading hint)', async () => {
+    act.files.set('src/App.tsx', 'x');
+    const res = await d.dispatch(call('read_file', { path: 'src/Totally/Unrelated.tsx' }));
+    expect(res.is_error).toBe(true);
+    expect(res.content).not.toContain('did you mean');
+  });
+
   it('edit_file replaces a unique string and emits a diff', async () => {
     act.files.set('a.ts', 'const x = 1;\nconst y = 2;');
     const res = await d.dispatch(call('edit_file', { path: 'a.ts', old_string: 'const x = 1;', new_string: 'const x = 42;' }));

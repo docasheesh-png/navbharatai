@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -22,18 +22,27 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
 
+type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
+
 interface AdminBuildReportRow {
   id: string;
   reportedAt: number;
   userId: string | null;
   email: string | null;
+  name: string | null;
   workspaceId: string | null;
   buildId: string | null;
   ok: boolean | null;
   appLabel: string;
+  userTier: string | null;
+  tier: ReportTier;
   rootCause: string | null;
   summary: string | null;
 }
+
+type ReportSortKey = 'time' | 'name' | 'app' | 'tier';
+type ReportTierFilter = 'all' | 'paid' | 'free' | 'admin';
+type ReportStatusFilter = 'all' | 'ok' | 'failed';
 
 const statCard = (label: string, value: string | number, sub: string, color: string, Icon: React.ComponentType<any>) => (
   <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 relative overflow-hidden">
@@ -124,6 +133,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [buildReportsLoading, setBuildReportsLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<{ meta: AdminBuildReportRow; report: any } | null>(null);
   const [selectedReportLoading, setSelectedReportLoading] = useState(false);
+  // Build Reports — filters & sorting (admin 2026-08-01): who sent which report, when, free/paid.
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportTierFilter, setReportTierFilter] = useState<ReportTierFilter>('all');
+  const [reportStatusFilter, setReportStatusFilter] = useState<ReportStatusFilter>('all');
+  const [reportSortKey, setReportSortKey] = useState<ReportSortKey>('time');
+  const [reportSortAsc, setReportSortAsc] = useState(false); // default: newest first
+
+  // Apply the search + tier + status filters, then sort. Pure derivation of the fetched rows.
+  const visibleBuildReports = useMemo(() => {
+    const q = reportSearch.trim().toLowerCase();
+    const filtered = buildReports.filter((r) => {
+      if (reportTierFilter !== 'all' && r.tier !== reportTierFilter) return false;
+      if (reportStatusFilter === 'ok' && r.ok !== true) return false;
+      if (reportStatusFilter === 'failed' && r.ok !== false) return false;
+      if (q) {
+        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = reportSortAsc ? 1 : -1;
+    const sorted = [...filtered].sort((a, b) => {
+      switch (reportSortKey) {
+        case 'name': return dir * (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? '');
+        case 'app': return dir * (a.appLabel ?? '').localeCompare(b.appLabel ?? '');
+        case 'tier': return dir * (a.tier ?? '').localeCompare(b.tier ?? '');
+        case 'time':
+        default: return dir * (a.reportedAt - b.reportedAt);
+      }
+    });
+    return sorted;
+  }, [buildReports, reportSearch, reportTierFilter, reportStatusFilter, reportSortKey, reportSortAsc]);
+
+  const tierBadge = (tier: ReportTier): { label: string; cls: string } => {
+    switch (tier) {
+      case 'paid': return { label: 'Paid', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' };
+      case 'free': return { label: 'Free', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
+      case 'admin': return { label: 'Admin/Tester', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+      default: return { label: 'Unknown', cls: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/30' };
+    }
+  };
 
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
@@ -1154,30 +1204,125 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </button>
               </div>
 
+              {/* Filters + sorting (admin 2026-08-01): who sent which report, when, free/paid */}
+              {!buildReportsLoading && buildReports.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8b949e]" />
+                    <input
+                      value={reportSearch}
+                      onChange={(e) => setReportSearch(e.target.value)}
+                      placeholder="Search name, email, or app…"
+                      className="w-full bg-[#161b22] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-[12px] text-white placeholder:text-[#8b949e] focus:border-indigo-500/50 outline-none"
+                    />
+                  </div>
+                  <select
+                    value={reportTierFilter}
+                    onChange={(e) => setReportTierFilter(e.target.value as ReportTierFilter)}
+                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
+                    title="Filter by user type"
+                  >
+                    <option value="all">All users</option>
+                    <option value="paid">Paid</option>
+                    <option value="free">Free</option>
+                    <option value="admin">Admin/Tester</option>
+                  </select>
+                  <select
+                    value={reportStatusFilter}
+                    onChange={(e) => setReportStatusFilter(e.target.value as ReportStatusFilter)}
+                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
+                    title="Filter by build outcome"
+                  >
+                    <option value="all">All status</option>
+                    <option value="ok">Success</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                  <select
+                    value={reportSortKey}
+                    onChange={(e) => setReportSortKey(e.target.value as ReportSortKey)}
+                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
+                    title="Sort by"
+                  >
+                    <option value="time">Sort: Time</option>
+                    <option value="name">Sort: Name</option>
+                    <option value="app">Sort: App</option>
+                    <option value="tier">Sort: User type</option>
+                  </select>
+                  <button
+                    onClick={() => setReportSortAsc((v) => !v)}
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                    title={reportSortAsc ? 'Ascending' : 'Descending'}
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5" /> {reportSortAsc ? 'Asc' : 'Desc'}
+                  </button>
+                </div>
+              )}
+
               {buildReportsLoading ? (
                 <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading reports…</div>
               ) : buildReports.length === 0 ? (
                 <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No build reports submitted yet.</div>
               ) : (
-                <div className="grid gap-2">
-                  {buildReports.map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => openBuildReport(r.id)}
-                      className="w-full text-left bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4 hover:border-indigo-500/40 hover:bg-white/5 transition-all flex items-start gap-3"
-                    >
-                      <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-sm font-bold text-white truncate">{r.appLabel}</span>
-                        <span className="block text-[11px] text-[#8b949e] mt-0.5 truncate">
-                          {r.email || r.userId || 'unknown user'} · {new Date(r.reportedAt).toLocaleString()}
-                        </span>
-                        {r.rootCause && <span className="block text-[11px] text-amber-400/80 mt-1 truncate">Root cause: {r.rootCause}</span>}
-                      </span>
-                      <Eye className="w-4 h-4 text-[#8b949e] shrink-0 mt-0.5" />
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <p className="text-[11px] text-[#8b949e] font-bold">
+                    Showing {visibleBuildReports.length} of {buildReports.length} report(s)
+                  </p>
+                  {visibleBuildReports.length === 0 ? (
+                    <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No reports match these filters.</div>
+                  ) : (
+                    <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="text-[10px] uppercase tracking-wider text-[#8b949e] border-b border-white/10">
+                              <th className="px-3 py-2.5 font-black w-10">SN</th>
+                              <th className="px-3 py-2.5 font-black">Application</th>
+                              <th className="px-3 py-2.5 font-black">Sender</th>
+                              <th className="px-3 py-2.5 font-black">Email</th>
+                              <th className="px-3 py-2.5 font-black whitespace-nowrap">Time</th>
+                              <th className="px-3 py-2.5 font-black">User</th>
+                              <th className="px-3 py-2.5 font-black">Status</th>
+                              <th className="px-3 py-2.5 font-black w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleBuildReports.map((r, idx) => {
+                              const badge = tierBadge(r.tier);
+                              return (
+                                <tr
+                                  key={r.id}
+                                  onClick={() => openBuildReport(r.id)}
+                                  className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] cursor-pointer transition-colors"
+                                >
+                                  <td className="px-3 py-2.5 text-[12px] text-[#8b949e] tabular-nums">{idx + 1}</td>
+                                  <td className="px-3 py-2.5 max-w-[240px]">
+                                    <span className="flex items-center gap-2">
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                                      <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
+                                    </span>
+                                    {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-[12px] text-white/90 truncate max-w-[140px]">{r.name || <span className="text-[#8b949e]">—</span>}</td>
+                                  <td className="px-3 py-2.5 text-[12px] text-[#8b949e] truncate max-w-[180px]">{r.email || r.userId || 'unknown'}</td>
+                                  <td className="px-3 py-2.5 text-[11px] text-[#8b949e] whitespace-nowrap">{new Date(r.reportedAt).toLocaleString()}</td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`inline-block text-[10px] font-black px-2 py-0.5 rounded-full border ${badge.cls}`} title={r.userTier || undefined}>{badge.label}</span>
+                                  </td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`text-[11px] font-black ${r.ok === true ? 'text-emerald-400' : r.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>
+                                      {r.ok === true ? 'Success' : r.ok === false ? 'Failed' : '—'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2.5"><Eye className="w-4 h-4 text-[#8b949e]" /></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Detail viewer for the selected report */}

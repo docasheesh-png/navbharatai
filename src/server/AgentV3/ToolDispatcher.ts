@@ -98,6 +98,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
+import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
@@ -1560,6 +1561,31 @@ export class ToolDispatcher {
    * deterministic AST analysis is fast and gated to React source internally; best-effort ('' on anything),
    * never blocks a write. Kill switch AGENTV3_HOOKS_WRITE_GUARD=off.
    */
+  /**
+   * WRITE-TIME duplicate-import guard (build-report autopsy 2026-08-01, buildId 1047276c): a weak model
+   * re-imports a symbol already imported (e.g. main.tsx default-imports ErrorBoundary and the model adds a
+   * named import of the same) — esbuild parses it clean, so nothing catches it, but the in-browser preview
+   * rejects it with "Duplicate declaration" and the user sees a BROKEN preview. Remove the fully-redundant
+   * duplicate here so it is never born. Pure + safe (only drops a binding that already exists); emits an
+   * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
+   */
+  private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
+    if (process.env.AGENTV3_DUP_IMPORT_GUARD === 'off') return content;
+    if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;
+    try {
+      const { content: next, removed } = dedupeDuplicateImports(content);
+      if (removed.length > 0) {
+        this.events?.emit({
+          type: 'narration', agent,
+          text: `🔧 Removed ${removed.length} duplicate import(s) in \`${path}\` that would have broken the preview ("Duplicate declaration").`,
+          ts: Date.now(),
+        });
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`[DUP-IMPORT] removed ${removed.length} duplicate import(s) in ${path}: ${removed.join('; ')}`); } catch { /* audit best-effort */ }
+      }
+      return next;
+    } catch { return content; }
+  }
+
   private async hookWriteNote(files: Record<string, string>): Promise<string> {
     if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
     if (!files || Object.keys(files).length === 0) return '';
@@ -1692,6 +1718,7 @@ export class ToolDispatcher {
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
         // version. This is the sibling choke point to the install-command pin (#1526).
         content = this.pinPackageJsonContent(path, content);
+        content = this.dedupeImportsForSource(path, content, agent);
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -1847,7 +1874,7 @@ export class ToolDispatcher {
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
           // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
           // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
-          const writtenContent = this.pinPackageJsonContent(file.path, file.content);
+          const writtenContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content), agent);
           await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
@@ -1909,7 +1936,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const updated = guardConfigContent(path, this.applyPostgresProviderLock(path, edited));
+        const updated = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {

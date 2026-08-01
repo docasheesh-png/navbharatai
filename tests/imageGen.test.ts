@@ -4,6 +4,7 @@ import {
   isValidImageGenRequest, IMAGE_STYLE_ENHANCERS, IMAGE_SIZE_RATIOS,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
+  pollinationsEnabled, pollinationsImageUrl, IMAGE_SIZE_PIXELS,
 } from '../src/server/lib/imageGen';
 
 /**
@@ -88,12 +89,37 @@ describe('imageGenModels', () => {
 });
 
 describe('imageGenConfigured', () => {
-  it('is true when EITHER a Gemini OR a Grok/xAI key is present (multi-provider)', () => {
-    expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(false);
-    expect(imageGenConfigured({ GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
-    expect(imageGenConfigured({ GOOGLE_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
-    expect(imageGenConfigured({ GROK_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
-    expect(imageGenConfigured({ XAI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  it('is always true while the free Pollinations provider is on (no key needed)', () => {
+    expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  });
+  it('is true when a Gemini OR Grok/xAI key is present, even with Pollinations off', () => {
+    const off = { IMAGE_GEN_POLLINATIONS: 'off' };
+    expect(imageGenConfigured({ ...off, GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ ...off, GROK_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ ...off, XAI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
+
+describe('Pollinations free provider (admin: "free wala chalu karo")', () => {
+  it('is enabled by default, off only via the explicit kill switch', () => {
+    expect(pollinationsEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(pollinationsEnabled({ IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+    expect(pollinationsEnabled({ IMAGE_GEN_POLLINATIONS: 'on' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  });
+  it('builds a URL with the prompt, the size pixels, no-logo, and a model', () => {
+    const url = pollinationsImageUrl('a blue robot', 'wide', {} as NodeJS.ProcessEnv);
+    expect(url.startsWith('https://image.pollinations.ai/prompt/')).toBe(true);
+    expect(url).toContain(encodeURIComponent('a blue robot'));
+    expect(url).toContain(`width=${IMAGE_SIZE_PIXELS.wide.w}`);
+    expect(url).toContain(`height=${IMAGE_SIZE_PIXELS.wide.h}`);
+    expect(url).toContain('nologo=true');
+    expect(url).toContain('model=flux');
+  });
+  it('defaults to square pixels for an unknown size and honours a model override', () => {
+    const url = pollinationsImageUrl('x', 'nope', { IMAGE_GEN_POLLINATIONS_MODEL: 'turbo' } as unknown as NodeJS.ProcessEnv);
+    expect(url).toContain(`width=${IMAGE_SIZE_PIXELS.square.w}`);
+    expect(url).toContain('model=turbo');
   });
 });
 

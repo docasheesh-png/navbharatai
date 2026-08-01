@@ -41,6 +41,32 @@ export const IMAGE_SIZE_RATIOS: Record<string, string> = {
   icon: '1:1',
 };
 
+/** Size id → concrete pixel dimensions (for providers that take width/height, e.g. Pollinations). */
+export const IMAGE_SIZE_PIXELS: Record<string, { w: number; h: number }> = {
+  square: { w: 1024, h: 1024 },
+  wide: { w: 1280, h: 720 },
+  portrait: { w: 768, h: 1024 },
+  icon: { w: 512, h: 512 },
+};
+
+/** Whether the FREE image provider (Pollinations) is enabled — default ON; kill switch IMAGE_GEN_POLLINATIONS=off. */
+export function pollinationsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.IMAGE_GEN_POLLINATIONS || '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Build the Pollinations image URL (the FREE provider — no key, no per-image cost). Server-proxied by the
+ * route (the bytes are fetched and re-served as a data URL), so — unlike the old raw client hot-link — the
+ * user never talks to a third party and the result is branded NavBharatAI. `nologo=true` strips the
+ * provider watermark. Pure + bounded. Model is env-tunable via IMAGE_GEN_POLLINATIONS_MODEL (default flux).
+ */
+export function pollinationsImageUrl(prompt: string, size?: string, env: NodeJS.ProcessEnv = process.env): string {
+  const px = IMAGE_SIZE_PIXELS[size || ''] || IMAGE_SIZE_PIXELS.square;
+  const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
+  const p = encodeURIComponent(String(prompt || '').slice(0, MAX_PROMPT_CHARS));
+  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&model=${encodeURIComponent(model)}`;
+}
+
 /**
  * The model ladder for image generation, newest→older, env-tunable via IMAGE_GEN_MODEL (comma
  * list) without a deploy — same discipline as the other model ladders (Decision "A").
@@ -175,9 +201,10 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   return true;
 }
 
-/** True when ANY image-generation provider key is configured — Gemini (primary) OR xAI/Grok (fallback). */
+/** True when ANY image provider is available — the free Pollinations provider (no key), OR a Gemini key,
+ *  OR an xAI/Grok key. With Pollinations on (the default), image generation is always configured. */
 export function imageGenConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(
+  return pollinationsEnabled(env) || Boolean(
     env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY
     || env.GROK_API_KEY || env.XAI_API_KEY,
   );

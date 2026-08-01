@@ -7,6 +7,7 @@ import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
+  pollinationsEnabled, pollinationsImageUrl,
 } from '../lib/imageGen';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
@@ -89,7 +90,30 @@ export function registerImageGenRoutes(app: Express): void {
       // Provider/model names to an admin are allowed (White-Label §3); a normal user never sees this.
       const diag: string[] = [];
 
-      // PRIMARY provider — Gemini image models (skipped entirely when no Gemini key is present).
+      // FREE provider — Pollinations, tried FIRST (admin choice 2026-08-01: "free wala chalu karo"). Costs
+      // ₹0 (no key, no per-image charge), so it removes the paid-provider margin problem entirely. Unlike
+      // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
+      // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
+      if (pollinationsEnabled()) {
+        try {
+          const r = await timeout(fetch(pollinationsImageUrl(prompt, req.body.size)));
+          const ct = r.headers.get('content-type') || '';
+          if (r.ok && ct.startsWith('image/')) {
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length > 0) { deliver({ mimeType: ct, base64: buf.toString('base64') }); return; }
+            diag.push('pollinations: empty image body');
+          } else {
+            diag.push(`pollinations: ${r.ok ? `non-image (${ct || 'unknown'})` : `HTTP ${r.status}`}`);
+            console.warn(`[IMAGE_GEN] pollinations returned ${r.ok ? `non-image ${ct}` : `HTTP ${r.status}`} — trying paid fallbacks.`);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          diag.push(`pollinations: ${msg.slice(0, 160)}`);
+          console.warn(`[IMAGE_GEN] pollinations failed: ${msg}`);
+        }
+      }
+
+      // PRIMARY (paid) provider — Gemini image models (skipped entirely when no Gemini key is present).
       if (geminiImageConfigured()) {
         const { GoogleGenAI } = await import('@google/genai');
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;

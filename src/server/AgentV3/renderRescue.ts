@@ -17,9 +17,20 @@ export function renderRescueEligible(input: { ok: boolean; expectsArtifacts: boo
   return input.ok === false && input.expectsArtifacts === true && input.filesWritten > 0;
 }
 
-/** Does the real-browser verdict CONFIRM the app is genuinely working? The preview must have rendered
- *  AND there must be no actionable runtime console errors. Only then is upgrading `ok` honest (never a
- *  fake success — a blank/erroring preview leaves the build failed). */
-export function renderRescueConfirmsSuccess(input: { rendered: boolean; consoleErrorCount: number }): boolean {
-  return input.rendered === true && input.consoleErrorCount === 0;
+/** Does the real-browser verdict CONFIRM the app is genuinely working? The preview must have rendered,
+ *  there must be no actionable runtime console errors, AND there must be no deterministic proof of a
+ *  latent RUNTIME CRASH. Only then is upgrading `ok` honest (never a fake success — a blank/erroring
+ *  preview leaves the build failed).
+ *
+ *  The `runtimeCrashBlocker` guard (real report 8a6e4585): a React Rules-of-Hooks violation renders
+ *  fine on the FIRST paint and crashes only on a later re-render/interaction — so a one-shot HTML
+ *  snapshot with zero console errors passes while the real app white-screens the moment the user
+ *  touches it (exactly what the admin saw). A deterministic AST proof of a runtime crash OUTWEIGHS a
+ *  single render check, so the rescue must stand down and leave the build honestly not-ok. */
+export function renderRescueConfirmsSuccess(input: {
+  rendered: boolean;
+  consoleErrorCount: number;
+  runtimeCrashBlocker?: boolean;
+}): boolean {
+  return input.rendered === true && input.consoleErrorCount === 0 && input.runtimeCrashBlocker !== true;
 }

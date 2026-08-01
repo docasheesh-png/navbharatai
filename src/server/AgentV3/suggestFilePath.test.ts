@@ -24,9 +24,20 @@ describe('suggestPathsByBasename', () => {
     expect(suggestPathsByBasename('src/components/Button.tsx', known)).toEqual(['src/components/ui/button.tsx']);
   });
 
-  it('matches the same stem across extensions (.tsx ~ .ts)', () => {
+  it('matches the same stem across extensions WITHIN the source family (.tsx ~ .ts)', () => {
     const known = ['src/lib/db.ts'];
     expect(suggestPathsByBasename('src/lib/db.tsx', known)).toEqual(['src/lib/db.ts']);
+  });
+
+  it('does NOT suggest a markup/style file for a missing source file (real report: index.ts ↛ index.html/css)', () => {
+    // src/types/index.ts genuinely did not exist; the old stem-match wrongly offered index.html + index.css.
+    const known = ['index.html', 'src/index.css'];
+    expect(suggestPathsByBasename('src/types/index.ts', known)).toEqual([]);
+  });
+
+  it('still cross-suggests within the style family (.scss ~ .css) but not into source', () => {
+    expect(suggestPathsByBasename('src/theme/main.scss', ['src/theme/main.css'])).toEqual(['src/theme/main.css']);
+    expect(suggestPathsByBasename('src/theme/main.ts', ['src/theme/main.css'])).toEqual([]);
   });
 
   it('prefers an exact case-sensitive basename over a case-insensitive one', () => {

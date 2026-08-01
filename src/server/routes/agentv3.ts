@@ -94,6 +94,7 @@ import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
 import { summarizeFileTree } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
+import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
 import { flushDecision } from '../AgentV3/DurableFlush';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
@@ -6533,6 +6534,17 @@ export function registerAgentV3Routes(app: Express): void {
         const disciplineBlock = weakBuildDisciplineBlock(noClaudeBuild);
         if (disciplineBlock) architectSystem = `${disciplineBlock}\n\n---\n\n${architectSystem}`;
       } catch { /* weak-tier discipline is best-effort — never blocks a build */ }
+      // M2-S2.2 (design system): on a FRESH build, hand the model a domain-fit, WCAG-checked accent
+      // palette (hospital→teal, finance→emerald, restaurant→amber, …) so the app gets a professional,
+      // fitting colour scheme instead of always-indigo or a random guess. Advisory only (the model may
+      // design its own with equal contrast). Additive + best-effort; skipped on edits and via
+      // AGENTV3_PALETTE_PRESET=off.
+      try {
+        if (!isEditMode && process.env.AGENTV3_PALETTE_PRESET !== 'off') {
+          const paletteBlock = palettePromptBlock(pickPaletteForPrompt(prompt));
+          architectSystem = `${paletteBlock}\n\n---\n\n${architectSystem}`;
+        }
+      } catch { /* palette preset is best-effort — never blocks a build */ }
       // Phase S2 — IDE↔v5.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
       // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.

@@ -48,7 +48,14 @@ export const IMAGE_SIZE_RATIOS: Record<string, string> = {
 export function imageGenModels(): string[] {
   const env = (process.env.IMAGE_GEN_MODEL || '').trim();
   if (env) return env.split(',').map((s) => s.trim()).filter(Boolean);
-  return ['gemini-2.5-flash-image', 'gemini-2.0-flash-preview-image-generation'];
+  // Newest→older. The `-preview` id is included as a fallback because the GA id is not live on every
+  // key/region yet; a wrong id simply throws and the ladder falls through (comma-ladder discipline), so
+  // adding a rung can only help. Tune without a deploy via IMAGE_GEN_MODEL.
+  return [
+    'gemini-2.5-flash-image',
+    'gemini-2.5-flash-image-preview',
+    'gemini-2.0-flash-preview-image-generation',
+  ];
 }
 
 /** Compose the full image prompt from the user's text + style + aspect hint. Pure, bounded. */

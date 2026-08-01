@@ -34,6 +34,16 @@ describe('parseReviewOutput — no phantom criticals (66ec5c1e)', () => {
     expect(parsed.some((i) => /useChartData|hook rules/i.test(i.message) && i.severity === 'suggestion')).toBe(true);
   });
 
+  it('skips an EMOJI-PREFIXED heading regardless of marker order (8a6e4585: "🚨 ### Issues")', () => {
+    // Real report 8a6e4585 re-rendered its findings with a leading 🚨 before the ### heading. The
+    // section-label skip must hold no matter whether # or the emoji comes first.
+    for (const header of ['🚨 ###  Issues', '### 🚨 Issues', '- 🚨 Critical Issues', '## ⚠️ Warnings']) {
+      const parsed = parseReviewOutput(header);
+      expect(parsed.filter((i) => /^issues?$/i.test(i.message) || /^(critical\s+)?issues?$/i.test(i.message))).toHaveLength(0);
+      expect(parsed.filter((i) => i.severity === 'critical')).toHaveLength(0);
+    }
+  });
+
   it('a GENUINE critical is still counted (self-dismissal guard is conservative)', () => {
     const parsed = parseReviewOutput('[CRITICAL] The checkout API is completely broken — every order 500s. Score: 20');
     expect(parsed.filter((i) => i.severity === 'critical')).toHaveLength(1);

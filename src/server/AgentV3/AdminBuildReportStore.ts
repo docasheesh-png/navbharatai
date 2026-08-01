@@ -63,6 +63,10 @@ export interface AdminBuildReportMeta {
   userTier: string | null;
   /** Simplified paid/free/admin classification, derived from userTier — the admin "free/paid" column. */
   tier: ReportTier;
+  /** How much the user was actually charged for this build, in ₹ (0 for a free/failed build; null if unknown). */
+  billedInr: number | null;
+  /** The same charge in USD (admin-only cross-check). */
+  billedUsd: number | null;
   rootCause: string | null;
   summary: string | null;
 }
@@ -125,6 +129,8 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       appLabel: appLabelFromPrompt(trimmed.prompt),
       userTier,
       tier: classifyReportTier(userTier),
+      billedInr: typeof trimmed.billing?.billedInr === 'number' ? trimmed.billing.billedInr : null,
+      billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
       rootCause: cap(trimmed.rootCause, 400),
       summary: cap(trimmed.summary, 400),
     },

@@ -36,11 +36,13 @@ interface AdminBuildReportRow {
   appLabel: string;
   userTier: string | null;
   tier: ReportTier;
+  billedInr: number | null;
+  billedUsd: number | null;
   rootCause: string | null;
   summary: string | null;
 }
 
-type ReportSortKey = 'time' | 'name' | 'app' | 'tier';
+type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
 type ReportTierFilter = 'all' | 'paid' | 'free' | 'admin';
 type ReportStatusFilter = 'all' | 'ok' | 'failed';
 
@@ -159,12 +161,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         case 'name': return dir * (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? '');
         case 'app': return dir * (a.appLabel ?? '').localeCompare(b.appLabel ?? '');
         case 'tier': return dir * (a.tier ?? '').localeCompare(b.tier ?? '');
+        case 'charged': return dir * ((a.billedInr ?? 0) - (b.billedInr ?? 0));
         case 'time':
         default: return dir * (a.reportedAt - b.reportedAt);
       }
     });
     return sorted;
   }, [buildReports, reportSearch, reportTierFilter, reportStatusFilter, reportSortKey, reportSortAsc]);
+
+  const fmtCharge = (inr: number | null): { text: string; cls: string } => {
+    if (inr == null) return { text: '—', cls: 'text-zinc-500' };
+    if (inr <= 0) return { text: '₹0', cls: 'text-[#8b949e]' };
+    return { text: `₹${inr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, cls: 'text-emerald-300 font-bold' };
+  };
 
   const tierBadge = (tier: ReportTier): { label: string; cls: string } => {
     switch (tier) {
@@ -1247,6 +1256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <option value="name">Sort: Name</option>
                     <option value="app">Sort: App</option>
                     <option value="tier">Sort: User type</option>
+                    <option value="charged">Sort: ₹ Charged</option>
                   </select>
                   <button
                     onClick={() => setReportSortAsc((v) => !v)}
@@ -1281,6 +1291,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               <th className="px-3 py-2.5 font-black">Email</th>
                               <th className="px-3 py-2.5 font-black whitespace-nowrap">Time</th>
                               <th className="px-3 py-2.5 font-black">User</th>
+                              <th className="px-3 py-2.5 font-black whitespace-nowrap">Charged</th>
                               <th className="px-3 py-2.5 font-black">Status</th>
                               <th className="px-3 py-2.5 font-black w-8"></th>
                             </tr>
@@ -1307,6 +1318,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   <td className="px-3 py-2.5 text-[11px] text-[#8b949e] whitespace-nowrap">{new Date(r.reportedAt).toLocaleString()}</td>
                                   <td className="px-3 py-2.5">
                                     <span className={`inline-block text-[10px] font-black px-2 py-0.5 rounded-full border ${badge.cls}`} title={r.userTier || undefined}>{badge.label}</span>
+                                  </td>
+                                  <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                                    {(() => { const c = fmtCharge(r.billedInr); return <span className={`text-[12px] ${c.cls}`} title={r.billedUsd != null ? `$${r.billedUsd}` : undefined}>{c.text}</span>; })()}
                                   </td>
                                   <td className="px-3 py-2.5">
                                     <span className={`text-[11px] font-black ${r.ok === true ? 'text-emerald-400' : r.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>

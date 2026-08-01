@@ -66,6 +66,8 @@ describe('buildAdminReportRecord', () => {
     });
     expect(paid.meta.userTier).toBe('paid');
     expect(paid.meta.tier).toBe('paid');
+    expect(paid.meta.billedInr).toBe(42);
+    expect(paid.meta.billedUsd).toBe(0.5);
 
     const free = buildAdminReportRecord(baseReport({ billing: { userTier: 'free-list (admin/tester)', billedUsd: 0, billedInr: 0, powerMode: false, powerLevel: 'weak', noClaude: true } } as Partial<BuildDiagnosticsReport>), {
       userId: 'u', email: 'e@x.com', name: null, workspaceId: 'w', reportedAt: 1,

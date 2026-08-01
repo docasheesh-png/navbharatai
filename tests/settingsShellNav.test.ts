@@ -52,12 +52,12 @@ describe('Settings Terminal — KB entry + Offline AI navigation', () => {
     expect(nav!.settingsScreen).toBe(screen);
   });
 
-  it('removed tiles stay removed: settings_git points to the sidebar, not a settings screen', () => {
+  it('Git moved from the sidebar INTO App Settings (admin 2026-08-01)', () => {
     const entry = kb('settings_git');
     expect(entry).toBeTruthy();
-    expect(entry!.path).toContain('Sidebar → Git');
-    // settings_root no longer lists Git inside App Settings.
-    const root = kb('settings_root');
-    expect(root!.description).not.toMatch(/App Settings \([^)]*Git/);
+    // No longer on the sidebar rail — it now opens from App Settings.
+    expect(entry!.path).not.toContain('Sidebar → Git');
+    expect(entry!.path).toContain('App Settings');
+    expect(entry!.path).toMatch(/Git & Deployment/i);
   });
 });

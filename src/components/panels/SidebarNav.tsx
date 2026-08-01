@@ -110,7 +110,10 @@ export function SidebarNav({
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
   setShowVishwakarmaChooser, setErrorContext,
 }: SidebarNavProps) {
-  const visibleItems = menuItems.filter(item => enabledModules[item.id] !== false);
+  // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
+  // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
+  // open (from Settings → Git & Deployment).
+  const visibleItems = menuItems.filter(item => item.id !== 'git' && enabledModules[item.id] !== false);
 
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }

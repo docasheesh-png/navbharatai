@@ -175,7 +175,40 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   return true;
 }
 
-/** True when an image-generation key is configured (same env chain the vision path uses). */
+/** True when ANY image-generation provider key is configured — Gemini (primary) OR xAI/Grok (fallback). */
 export function imageGenConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(
+    env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY
+    || env.GROK_API_KEY || env.XAI_API_KEY,
+  );
+}
+
+/** True when only the Gemini key chain is present (used to pick which provider(s) to try). */
+export function geminiImageConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY);
+}
+
+/** The xAI/Grok API key (either accepted env name), or null. Grok is the image FALLBACK provider. */
+export function grokImageKey(env: NodeJS.ProcessEnv = process.env): string | null {
+  return env.GROK_API_KEY || env.XAI_API_KEY || null;
+}
+
+/** The Grok image model id, env-tunable via IMAGE_GEN_GROK_MODEL (default the current text-to-image model). */
+export function grokImageModel(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.IMAGE_GEN_GROK_MODEL || '').trim() || 'grok-2-image';
+}
+
+/**
+ * Parse the first base64 image out of an xAI /v1/images/generations response. xAI returns
+ * `{ data: [{ b64_json: "<...>" }] }` (OpenAI-compatible). Returns null when there is no image
+ * (an honest "no image" — the caller reports failure, never a placeholder). Pure.
+ */
+export function parseGrokImageResponse(resp: unknown): GeneratedImage | null {
+  const data = (resp as any)?.data;
+  if (!Array.isArray(data)) return null;
+  for (const d of data) {
+    const b64 = d?.b64_json;
+    if (typeof b64 === 'string' && b64.length > 0) return { mimeType: 'image/png', base64: b64 };
+  }
+  return null;
 }

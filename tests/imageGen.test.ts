@@ -3,6 +3,7 @@ import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured,
   isValidImageGenRequest, IMAGE_STYLE_ENHANCERS, IMAGE_SIZE_RATIOS,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
+  geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
 } from '../src/server/lib/imageGen';
 
 /**
@@ -87,10 +88,32 @@ describe('imageGenModels', () => {
 });
 
 describe('imageGenConfigured', () => {
-  it('is true only when an image key env is present', () => {
+  it('is true when EITHER a Gemini OR a Grok/xAI key is present (multi-provider)', () => {
     expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(false);
     expect(imageGenConfigured({ GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
     expect(imageGenConfigured({ GOOGLE_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ GROK_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ XAI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
+
+describe('Grok image fallback (keeps the feature alive when Gemini is access-denied)', () => {
+  it('geminiImageConfigured is true ONLY for a Gemini key, not a Grok key', () => {
+    expect(geminiImageConfigured({ GEMINI_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(geminiImageConfigured({ GROK_API_KEY: 'k' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  });
+  it('grokImageKey accepts either env name; grokImageModel is env-tunable with a default', () => {
+    expect(grokImageKey({ GROK_API_KEY: 'a' } as unknown as NodeJS.ProcessEnv)).toBe('a');
+    expect(grokImageKey({ XAI_API_KEY: 'b' } as unknown as NodeJS.ProcessEnv)).toBe('b');
+    expect(grokImageKey({} as NodeJS.ProcessEnv)).toBeNull();
+    expect(grokImageModel({} as NodeJS.ProcessEnv)).toBe('grok-2-image');
+    expect(grokImageModel({ IMAGE_GEN_GROK_MODEL: 'grok-3-image' } as unknown as NodeJS.ProcessEnv)).toBe('grok-3-image');
+  });
+  it('parseGrokImageResponse extracts the b64_json image, null when absent (never a placeholder)', () => {
+    expect(parseGrokImageResponse({ data: [{ b64_json: 'ZZZZ' }] })).toEqual({ mimeType: 'image/png', base64: 'ZZZZ' });
+    expect(parseGrokImageResponse({ data: [{ url: 'http://x' }] })).toBeNull();
+    expect(parseGrokImageResponse({ data: [] })).toBeNull();
+    expect(parseGrokImageResponse(null)).toBeNull();
   });
 });
 

@@ -6,6 +6,7 @@ import { validateBody, vobject, vstring } from '../lib/validate';
 import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
+  geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
 } from '../lib/imageGen';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
@@ -69,14 +70,16 @@ export function registerImageGenRoutes(app: Express): void {
     }
 
     try {
-      const { GoogleGenAI } = await import('@google/genai');
-      const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey });
       const prompt = buildImagePrompt(req.body);
       const timeout = <T,>(p: Promise<T>): Promise<T> => Promise.race([
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('image-generation timeout')), ROUTE_TIMEOUT_MS)),
       ]);
+      // Deliver a generated image: only a genuinely-delivered image spends an allowance (a failed rung never does).
+      const deliver = (img: { mimeType: string; base64: string }) => {
+        if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+        res.json({ image: `data:${img.mimeType};base64,${img.base64}`, mimeType: img.mimeType });
+      };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
       // declined a real brand / public figure / copyrighted character — e.g. "spiderman") must tell the
       // user to change the prompt, NOT "try again in a minute" (a transient message they'd retry forever).
@@ -85,40 +88,70 @@ export function registerImageGenRoutes(app: Express): void {
       // can diagnose a live outage (bad model id / billing / quota / region) WITHOUT Cloud Run log access.
       // Provider/model names to an admin are allowed (White-Label §3); a normal user never sees this.
       const diag: string[] = [];
-      for (const model of imageGenModels()) {
-        try {
-          const result: any = await timeout(ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseModalities: ['IMAGE', 'TEXT'] },
-          }));
-          const img = parseImagePartsResponse(result);
-          if (img) {
-            // Only a genuinely-delivered image spends an allowance — a failed rung never does.
-            if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
-            res.json({ image: `data:${img.mimeType};base64,${img.base64}`, mimeType: img.mimeType });
-            return;
+
+      // PRIMARY provider — Gemini image models (skipped entirely when no Gemini key is present).
+      if (geminiImageConfigured()) {
+        const { GoogleGenAI } = await import('@google/genai');
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        const ai = new GoogleGenAI({ apiKey });
+        for (const model of imageGenModels()) {
+          try {
+            const result: any = await timeout(ai.models.generateContent({
+              model,
+              contents: prompt,
+              config: { responseModalities: ['IMAGE', 'TEXT'] },
+            }));
+            const img = parseImagePartsResponse(result);
+            if (img) { deliver(img); return; }
+            if (isImageRefusal(result)) {
+              sawRefusal = true;
+              console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
+            } else {
+              diag.push(`${model}: no image part (${extractResponseText(result)?.slice(0, 120) || 'empty response'})`);
+              console.warn(`[IMAGE_GEN] ${model} returned no image part — trying the next rung.`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            diag.push(`${model}: ${msg.slice(0, 160)}`);
+            console.warn(`[IMAGE_GEN] ${model} failed: ${msg}`);
           }
-          if (isImageRefusal(result)) {
-            sawRefusal = true;
-            // The model's own reason stays in server logs only (white-label — never shown to the user).
-            console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
+        }
+      }
+
+      // FALLBACK provider — xAI/Grok text-to-image (OpenAI-compatible /v1/images/generations). This is what
+      // keeps the feature ALIVE when the Gemini project is denied image access (the live 403). Uses the
+      // already-configured GROK_API_KEY/XAI_API_KEY; invisible to the user (still "NavBharatAI").
+      const gKey = grokImageKey();
+      if (gKey) {
+        const gModel = grokImageModel();
+        try {
+          const r = await timeout(fetch('https://api.x.ai/v1/images/generations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gKey}` },
+            body: JSON.stringify({ model: gModel, prompt, n: 1, response_format: 'b64_json' }),
+          }));
+          const data: any = await r.json().catch(() => null);
+          if (r.ok) {
+            const img = parseGrokImageResponse(data);
+            if (img) { deliver(img); return; }
+            diag.push(`${gModel}: no image in response`);
           } else {
-            diag.push(`${model}: no image part (${extractResponseText(result)?.slice(0, 120) || 'empty response'})`);
-            console.warn(`[IMAGE_GEN] ${model} returned no image part — trying the next rung.`);
+            diag.push(`${gModel}: ${r.status} ${JSON.stringify(data?.error || data || '').slice(0, 140)}`);
+            console.warn(`[IMAGE_GEN] ${gModel} failed: HTTP ${r.status}`);
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          diag.push(`${model}: ${msg.slice(0, 160)}`);
-          console.warn(`[IMAGE_GEN] ${model} failed: ${msg}`);
+          diag.push(`${gModel}: ${msg.slice(0, 160)}`);
+          console.warn(`[IMAGE_GEN] ${gModel} failed: ${msg}`);
         }
       }
+
       if (sawRefusal) {
         // A real refusal is NOT transient — 422 (unprocessable), with the actionable white-label message.
         res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE });
         return;
       }
-      // Every rung threw (a genuine outage / model error) — honest transient error (model ids stay in logs).
+      // Every provider failed (a genuine outage / access error) — honest transient error (ids stay in logs).
       // For an admin/free-list caller, attach the real per-rung diagnostic so the true cause is visible.
       const isAdminCaller = isAgentV3FreeUser(account.uid, account.email);
       const baseMsg = 'NavBharatAI could not generate the image right now — please try again in a minute.';

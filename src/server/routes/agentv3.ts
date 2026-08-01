@@ -1588,7 +1588,7 @@ export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): Na
   return [...kimi, ...glm, ...rest];
 }
 
-export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[] {
+export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: boolean }): NamedRunner[] {
   // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
   // per the confirmed Model Routing Policy the FIRST build call must be the flagship cheap coder
   // (GLM glm-5.2 / Kimi), NOT Claude — Claude is only the last-resort backstop. So the cheap floor now
@@ -1674,13 +1674,22 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
   const kimiDefault = opts?.free ? ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'];
   const glmEnv = opts?.free ? process.env.AGENTV3_FREE_GLM_MODEL : process.env.GLM_MODEL;
   const kimiEnv = opts?.free ? process.env.AGENTV3_FREE_KIMI_MODEL : process.env.KIMI_MODEL;
+  // FLAGSHIP-ONLY (admin 2026-08-02, weak-fail repair): when the WEAK build fails, its last repair pass
+  // must run on the TOP GLM/Kimi model — NOT the cheap flash/coder rungs that produced the failing app.
+  // The flagship is the LAST rung of each cheapest-first free ladder (glm-5.2 / kimi-k2.7-code), so
+  // `flagshipOnly` keeps just that rung. A paid/flagship-first ladder is already flagship-led, so slicing
+  // its last (glm-4.7) would WEAKEN it — flagshipOnly is therefore honoured only for the free ladder.
+  const pickLadder = (env: string | undefined, def: string[]): string[] => {
+    const ladder = parseModelLadder(env, def);
+    return opts?.flagshipOnly && opts?.free && ladder.length > 1 ? ladder.slice(-1) : ladder;
+  };
   if (floor === 'glm' || floor === 'both' || floor === 'on') {
     // thinkingControl: the app-level thinking toggle (same one that drives Claude's adaptive
     // thinking) is forwarded to GLM's reasoning switch — one setting controls every module.
-    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(glmEnv, glmDefault), { thinkingControl: true });
+    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', pickLadder(glmEnv, glmDefault), { thinkingControl: true });
   }
   if (floor === 'kimi' || floor === 'both' || floor === 'on') {
-    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(kimiEnv, kimiDefault), {}, kimiTimeoutMs);
+    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', pickLadder(kimiEnv, kimiDefault), {}, kimiTimeoutMs);
   }
   // Amazon Bedrock — Z.AI GLM 5 as a cheap-floor rung (admin 2026-07-08). Bedrock exposes its
   // SERVERLESS models via an OpenAI-COMPATIBLE endpoint, so the SAME OpenAiToolRunner the GLM/KIMI
@@ -1884,8 +1893,33 @@ export function fastLaneProviderLabel(used: string | undefined): string {
  * paid/power build keeps Claude-first (Sonnet in normal, Opus in power). Pure + exported for tests.
  * (This closes the leak where the heal gates built a `claudeFirst` runner regardless of tier.)
  */
-export function healRunnerRoutingOpts(freeTierBuildActive: boolean): { claudeFirst: boolean; cheapOnly: boolean } {
-  return freeTierBuildActive ? { claudeFirst: false, cheapOnly: true } : { claudeFirst: true, cheapOnly: false };
+/** Kill switch for the weak-fail flagship repair (admin 2026-08-02). Default ON; `off` reverts weak heals
+ *  to today's cheap/Vertex path without a deploy. */
+export function weakFlagshipHealEnabled(): boolean {
+  return (process.env.AGENTV3_WEAK_FLAGSHIP_HEAL ?? 'on').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Routing for a post-build HEAL/repair pass. A heal pass only ever runs when the build already has a
+ * problem to fix, so this is the "the build is failing" moment.
+ *
+ * WEAK/FREE (admin 2026-08-02, "weak me last me GLM/Kimi ke top module use kar sakte hai"): a failing
+ * weak build's repair must run on the TOP GLM/Kimi model (glm-5.2 / kimi-k2.7-code) — NOT the cheap
+ * flash/coder that produced the failing app — so the last resort is genuinely stronger. Enforced by
+ * leading the heal chain with the FLAGSHIP-ONLY free floor (`allowCheapFloor + free + flagship`); Claude
+ * stays stripped by `noClaude` at the call site (Sonnet/Opus never on weak — Vertex/Gemini + Haiku remain
+ * the final backstops). The main build is UNCHANGED (still cheapest-first) — only repairs go flagship, and
+ * only on a build that is already failing. Cost is therefore bounded to failing builds.
+ *
+ * PAID: unchanged — Claude-first repair (Sonnet/Opus), no cheap floor.
+ */
+export function healRunnerRoutingOpts(
+  freeTierBuildActive: boolean,
+): { claudeFirst: boolean; cheapOnly: boolean; allowCheapFloor?: boolean; free?: boolean; flagship?: boolean } {
+  if (!freeTierBuildActive) return { claudeFirst: true, cheapOnly: false };
+  return weakFlagshipHealEnabled()
+    ? { claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true }
+    : { claudeFirst: false, cheapOnly: true };
 }
 
 /**
@@ -1915,7 +1949,7 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -1951,7 +1985,7 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // provider with its key present. Escalation / claudeFirst retries never opt in, so they stay on
   // Claude. Computed before the Claude-only early-return so the floor still applies in a Claude-only
   // env (no Vertex/Gemini configured).
-  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free }) : [];
+  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free, flagshipOnly: opts?.flagship }) : [];
   // Claude-only env shortcut — but NEVER for a weak/noClaude build (the guarded chain below handles it;
   // a weak build with no non-Claude provider was already refused upstream as WEAK_ENGINE_UNAVAILABLE).
   if (cheap.length === 0 && floorRunners.length === 0 && opts?.noClaude !== true) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env

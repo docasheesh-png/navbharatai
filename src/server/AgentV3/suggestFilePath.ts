@@ -19,13 +19,36 @@ function stem(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(0, dot) : name;
 }
+/** Lowercase final extension without the dot ('src/a/Button.tsx' → 'tsx'); '' when none. */
+function ext(name: string): string {
+  const base = basename(name);
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+}
+// Extension FAMILIES — a same-stem, cross-extension suggestion is only sensible WITHIN a family. Without
+// this, a missing `src/types/index.ts` matched `index.html` and `index.css` purely on the stem "index"
+// (real build report 2026-08-02) — a misleading hint that sends the model to an unrelated file. A source
+// miss should only ever be redirected to another source file, a style to a style, a markup to a markup.
+const EXT_FAMILIES: string[][] = [
+  ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts'], // source code
+  ['css', 'scss', 'sass', 'less'],                        // stylesheets
+  ['html', 'htm'],                                        // markup
+  ['json', 'jsonc'],                                      // data
+  ['md', 'mdx'],                                          // docs
+];
+/** True when two extensions belong to the same family (so a same-stem cross-ext hint is sensible). */
+function sameFamily(a: string, b: string): boolean {
+  if (a === b) return true;
+  return EXT_FAMILIES.some((fam) => fam.includes(a) && fam.includes(b));
+}
 
 /**
  * Given a missing path and every path the workspace knows about, return the most likely REAL locations,
  * best match first, de-duplicated and capped. Matching is by filename:
  *   1. exact basename, case-sensitive   (src/a/Button.tsx  ~  src/b/Button.tsx)   — strongest
  *   2. exact basename, case-insensitive (Button.tsx        ~  button.tsx)
- *   3. same stem, any extension, case-insensitive (Button.tsx ~ button.ts / button.jsx)
+ *   3. same stem, SAME-FAMILY extension, case-insensitive (Button.tsx ~ button.ts / button.jsx — but
+ *      NOT index.ts ~ index.html / index.css: a source miss never redirects to markup/style)
  * A candidate equal to the missing path itself is never suggested. Empty `known` → [].
  */
 export function suggestPathsByBasename(missing: string, known: string[], limit = 4): string[] {
@@ -33,6 +56,7 @@ export function suggestPathsByBasename(missing: string, known: string[], limit =
   if (!missBase) return [];
   const missBaseLower = missBase.toLowerCase();
   const missStemLower = stem(missBase).toLowerCase();
+  const missExt = ext(missBase);
 
   const exact: string[] = [];
   const ci: string[] = [];
@@ -43,7 +67,10 @@ export function suggestPathsByBasename(missing: string, known: string[], limit =
     const kBase = basename(k);
     if (kBase === missBase) exact.push(k);
     else if (kBase.toLowerCase() === missBaseLower) ci.push(k);
-    else if (stem(kBase).toLowerCase() === missStemLower && missStemLower.length > 0) stemMatch.push(k);
+    else if (
+      stem(kBase).toLowerCase() === missStemLower && missStemLower.length > 0
+      && sameFamily(missExt, ext(kBase))
+    ) stemMatch.push(k);
   }
 
   const ordered: string[] = [];

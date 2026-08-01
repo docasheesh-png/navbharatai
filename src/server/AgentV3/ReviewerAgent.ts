@@ -51,6 +51,26 @@ const SECTION_LABEL_RE =
 const SELF_DISMISSED_RE =
   /\bfalse[\s-]?positive\b|\bnot (a |an )?(real|actual|genuine|true|valid) (issue|problem|bug|concern|error|violation|vulnerability)\b/i;
 
+/**
+ * Strip ALL leading finding-list noise — markdown heading (#), blockquote (>), the severity emoji,
+ * bullets, list numbers and whitespace — ORDER-INDEPENDENTLY, so a heading is recognised whether the
+ * reviewer wrote "### Issues", "🚨 ### Issues", or "- 🚨 Issues". Real report 8a6e4585 exposed the gap:
+ * a single-pass strip that removed `#` BEFORE the emoji left "###  Issues" intact after the emoji was
+ * peeled, so the heading slipped through as a phantom critical. Looping until stable removes the markers
+ * regardless of their order. Pure.
+ */
+function stripLeadingFindingNoise(s: string): string {
+  let out = s;
+  let prev: string;
+  do {
+    prev = out;
+    out = out
+      .replace(/^[#>🚨⚠️💡•\-*\s]+/, '')   // markdown heading / quote / severity emoji / bullet / whitespace
+      .replace(/^\d+[.)]\s*/, '');           // a leading list number ("1. ", "2) ")
+  } while (out !== prev);
+  return out;
+}
+
 /** Parse structured reviewer text into typed issues (best-effort). Exported for direct unit tests. */
 export function parseReviewOutput(text: string): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
@@ -64,16 +84,15 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
     else if (lower.includes('[suggestion]') || lower.startsWith('suggestion:') || line.includes('💡'))
       severity = 'suggestion';
     if (severity) {
-      const message = line
-        .replace(/\[(critical|warning|suggestion)\]/gi, '')
-        .replace(/^(critical|warning|suggestion):/gi, '')
-        .replace(/^[#>\s]+/, '')            // strip leading markdown heading (#) / blockquote (>) markers
-        .replace(/^\d+[.)]\s*/, '')         // strip a leading list number ("1. ", "2) ")
-        .replace(/^[🚨⚠️💡\s•\-*]+/, '')
-        .replace(/\*+/g, '')                // strip markdown bold/italic asterisks
+      const message = stripLeadingFindingNoise(
+        line
+          .replace(/\[(critical|warning|suggestion)\]/gi, '')
+          .replace(/^(critical|warning|suggestion):/gi, ''),
+      )
+        .replace(/\*+/g, '') // strip markdown bold/italic asterisks
         .trim();
       if (!message) continue;
-      // A markdown SECTION HEADER ("### [CRITICAL] Issues") is not a finding — never count it.
+      // A markdown SECTION HEADER ("### [CRITICAL] Issues", "🚨 ### Issues") is not a finding — never count it.
       if (SECTION_LABEL_RE.test(message)) continue;
       // The reviewer discharged its own finding as a false positive → demote so it can't fail the build.
       const effective: ReviewIssue['severity'] =

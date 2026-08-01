@@ -61,13 +61,18 @@ export function registerImageGenRoutes(app: Express): void {
       return;
     }
 
-    // Daily allowance / Professional Pass (flag-off = no-op). Every image carries a real per-image
-    // provider charge, so this is the ONE Other AI action capped even for a Pass holder. The gate runs
-    // AFTER the cheap validity checks so a malformed request never costs a user one of their images.
-    const gate = await gateToolAction(account.uid, account.email, 'image');
-    if (!gate.allow) {
-      res.status(gate.status).json(gate.body);
-      return;
+    // Image generation is FREE for the user while the free provider (Pollinations) is on (admin 2026-08-01:
+    // "free denge user ko"): it costs NavBharatAI ₹0, so there is NO paywall/quota — sign-in above plus the
+    // hourly rate limiter are the only guards. The Professional-Pass allowance gate re-applies ONLY when the
+    // free provider is turned OFF, because then images fall through to the PAID providers (Gemini/Grok) and
+    // the real per-image cost must be metered again.
+    let gate: Awaited<ReturnType<typeof gateToolAction>> | null = null;
+    if (!pollinationsEnabled()) {
+      gate = await gateToolAction(account.uid, account.email, 'image');
+      if (!gate.allow) {
+        res.status(gate.status).json(gate.body);
+        return;
+      }
     }
 
     try {
@@ -76,9 +81,11 @@ export function registerImageGenRoutes(app: Express): void {
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('image-generation timeout')), ROUTE_TIMEOUT_MS)),
       ]);
-      // Deliver a generated image: only a genuinely-delivered image spends an allowance (a failed rung never does).
+      // Deliver a generated image: only a genuinely-delivered image spends a PAID allowance (and only when
+      // the paywall is active, i.e. the free provider is off — see above). A free Pollinations image never
+      // counts against a quota. A failed rung never spends anything.
       const deliver = (img: { mimeType: string; base64: string }) => {
-        if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+        if (gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
         res.json({ image: `data:${img.mimeType};base64,${img.base64}`, mimeType: img.mimeType });
       };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model

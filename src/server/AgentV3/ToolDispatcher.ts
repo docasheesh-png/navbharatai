@@ -6,6 +6,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { robustTscCommand } from './tscCommand';
+import { parseTscErrors } from './EndgameRepair';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
@@ -3118,8 +3119,47 @@ export class ToolDispatcher {
           if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
           crossLang = typecheckSummary(outcomes);
         }
-        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java/Go sources to check.');
-        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python, Java, or Go sources detected — nothing beyond the tsc gate.';
+        // REAL semantic type-check (deep-test autopsy 2026-08-01): esbuild's frontend check above only
+        // catches PARSE errors — it is BLIND to SEMANTIC TypeScript errors (a duplicate identifier, an
+        // `import type` used as a value, a class that doesn't extend Component so `this.state`/`this.props`
+        // "do not exist", a value used as a type). A real SaaS-dashboard build spent 30 min getting
+        // false-green esbuild typechecks, then failed the final `tsc && vite build` on exactly those
+        // (TS2300 duplicate 'Team', TS1361 import-type, TS2339 ErrorBoundary state/props, TS2749). Running
+        // the REAL, incremental `tsc --noEmit` HERE surfaces them per file so the agent fixes them the
+        // moment they appear — not 30 minutes later at the final build. Only for a TS project; a syntax
+        // break is fixed FIRST (tsc on unparseable code just echoes parse noise). Honest: a tsc that can't
+        // run is silently skipped (the esbuild note still stands) — never a fake pass.
+        let tscHeader = '';
+        let tscRanClean = false;
+        const isTsProject = files.includes('tsconfig.json')
+          && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
+        if (isTsProject && !syntaxHeader) {
+          try {
+            const r = await withTimeout(
+              this.actuator.runCommand(
+                this.workspaceId,
+                robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60'),
+              ),
+              30_000,
+              'typecheck-tsc',
+            );
+            const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+            const tscErrs = parseTscErrors(combined);
+            if (tscErrs.length > 0) {
+              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${tscErrs.length} TypeScript error(s).`);
+              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}\n\n`;
+            } else {
+              tscRanClean = true;
+            }
+          } catch { /* real-tsc pass is best-effort — a toolchain miss must never fake a pass */ }
+        }
+        if (syntaxHeader || tscHeader) {
+          return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();
+        }
+        const feHeadline = tscRanClean
+          ? 'frontend parses clean (esbuild) AND type-checks clean (tsc --noEmit)'
+          : 'frontend parses clean (esbuild)';
+        return crossLang || `typecheck: ${feHeadline}; no Python, Java, or Go sources detected.`;
       }
 
       case 'code_graph': {

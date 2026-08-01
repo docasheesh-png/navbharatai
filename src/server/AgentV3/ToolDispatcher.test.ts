@@ -77,10 +77,46 @@ describe('ToolDispatcher', () => {
     expect(res.content).toMatch(/do NOT hand-count/i);       // steers away from the tag-counting flail
   });
   it('typecheck reports frontend clean when every file parses', async () => {
+    act.files.set('tsconfig.json', '{}');
     act.files.set('src/App.tsx', 'export default function App(){ return null }');
+    act.commandResult = { exitCode: 0, stdout: '', stderr: '' }; // tsc --noEmit clean
     const res = await d.dispatch(call('typecheck', {}), 'architect');
     expect(res.content).not.toMatch(/SYNTAX ERROR/);
-    expect(res.content).toMatch(/parses clean|OK|nothing beyond/i);
+    expect(res.content).not.toMatch(/TYPE ERROR/);
+    // Honest: it says it ran the REAL type-checker, not just the esbuild parse.
+    expect(res.content).toMatch(/type-checks clean \(tsc --noEmit\)/);
+  });
+
+  // Deep-test autopsy 2026-08-01 (real report: a SaaS dashboard on kimi-k2.5). esbuild's parse-only
+  // typecheck stayed GREEN for 30 min while the real `tsc && vite build` failed on SEMANTIC errors
+  // (TS2300 duplicate 'Team', TS1361 import-type, TS2339 ErrorBoundary state/props). The typecheck tool
+  // must now run REAL `tsc --noEmit` and surface those per file — the class of bug that caused the flail.
+  it('typecheck runs REAL tsc --noEmit and surfaces SEMANTIC errors esbuild is blind to', async () => {
+    act.files.set('tsconfig.json', '{"compilerOptions":{"strict":true}}');
+    // Parses clean (so no syntax header) — the error is SEMANTIC, exactly what esbuild misses.
+    act.files.set('src/App.tsx', 'export default function App(){ return null; }');
+    act.commandResult = {
+      exitCode: 2,
+      stdout: "src/App.tsx(7,8): error TS2300: Duplicate identifier 'Team'.\n"
+        + "src/ErrorBoundary.tsx(10,10): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.\n",
+      stderr: '',
+    };
+    const res = await d.dispatch(call('typecheck', {}), 'architect');
+    expect(res.content).toMatch(/TYPE ERROR/);
+    expect(res.content).toContain('TS2300');
+    expect(res.content).toContain("Duplicate identifier 'Team'");
+    expect(res.content).toContain('TS2339');
+    expect(res.content).toMatch(/tsc && vite build.*will FAIL/);
+    // It actually invoked the real type-checker.
+    expect(act.commands.some((c) => c.includes('--noEmit'))).toBe(true);
+  });
+
+  it('typecheck skips the tsc pass for a non-TS project (never fakes a pass)', async () => {
+    act.files.set('index.html', '<!doctype html><html></html>'); // no tsconfig, no .tsx
+    act.commandResult = { exitCode: 0, stdout: '', stderr: '' };
+    const res = await d.dispatch(call('typecheck', {}), 'architect');
+    expect(res.content).not.toMatch(/type-checks clean \(tsc/); // must NOT claim tsc ran
+    expect(act.commands.some((c) => c.includes('--noEmit'))).toBe(false); // no tsc for a non-TS app
   });
 
   // Deep-test 2026-07-18 (root fix): a write/edit that introduces a DUPLICATE declaration (or any syntax

@@ -5,6 +5,7 @@ import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { validateBody, vobject, vstring } from '../lib/validate';
 import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
+  isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
 } from '../lib/imageGen';
 
 /**
@@ -75,6 +76,10 @@ export function registerImageGenRoutes(app: Express): void {
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('image-generation timeout')), ROUTE_TIMEOUT_MS)),
       ]);
+      // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
+      // declined a real brand / public figure / copyrighted character — e.g. "spiderman") must tell the
+      // user to change the prompt, NOT "try again in a minute" (a transient message they'd retry forever).
+      let sawRefusal = false;
       for (const model of imageGenModels()) {
         try {
           const result: any = await timeout(ai.models.generateContent({
@@ -89,12 +94,23 @@ export function registerImageGenRoutes(app: Express): void {
             res.json({ image: `data:${img.mimeType};base64,${img.base64}`, mimeType: img.mimeType });
             return;
           }
-          console.warn(`[IMAGE_GEN] ${model} returned no image part — trying the next rung.`);
+          if (isImageRefusal(result)) {
+            sawRefusal = true;
+            // The model's own reason stays in server logs only (white-label — never shown to the user).
+            console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
+          } else {
+            console.warn(`[IMAGE_GEN] ${model} returned no image part — trying the next rung.`);
+          }
         } catch (err) {
           console.warn(`[IMAGE_GEN] ${model} failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      // Every rung failed — honest, white-label error (model ids stay in server logs only).
+      if (sawRefusal) {
+        // A real refusal is NOT transient — 422 (unprocessable), with the actionable white-label message.
+        res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE });
+        return;
+      }
+      // Every rung threw (a genuine outage / model error) — honest transient error (model ids stay in logs).
       res.status(502).json({ error: 'NavBharatAI could not generate the image right now — please try again in a minute.' });
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s image engine is briefly busy — please try again.' });

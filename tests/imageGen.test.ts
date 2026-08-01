@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured,
   isValidImageGenRequest, IMAGE_STYLE_ENHANCERS, IMAGE_SIZE_RATIOS,
+  isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
 } from '../src/server/lib/imageGen';
 
 /**
@@ -41,6 +42,33 @@ describe('parseImagePartsResponse', () => {
     expect(parseImagePartsResponse({ candidates: [{ content: { parts: [{ text: 'sorry' }] } }] })).toBeNull();
     expect(parseImagePartsResponse({})).toBeNull();
     expect(parseImagePartsResponse(null)).toBeNull();
+  });
+});
+
+describe('isImageRefusal — honest refusal vs transient failure (the "spiderman" case)', () => {
+  it('a text-only, no-image response is treated as a content refusal (change the prompt)', () => {
+    const resp = { candidates: [{ content: { parts: [{ text: 'I can’t create that copyrighted character.' }] } }] };
+    expect(isImageRefusal(resp)).toBe(true);
+    expect(extractResponseText(resp)).toMatch(/copyrighted/i);
+  });
+  it('an explicit block/finish reason is a refusal', () => {
+    expect(isImageRefusal({ promptFeedback: { blockReason: 'PROHIBITED_CONTENT' } })).toBe(true);
+    expect(isImageRefusal({ candidates: [{ finishReason: 'IMAGE_SAFETY', content: { parts: [] } }] })).toBe(true);
+    expect(isImageRefusal({ candidates: [{ finishReason: 'RECITATION', content: { parts: [] } }] })).toBe(true);
+  });
+  it('a response that DID return an image is NOT a refusal', () => {
+    const resp = { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }] } }] };
+    expect(isImageRefusal(resp)).toBe(false);
+  });
+  it('an empty/malformed response (a thrown-rung shape) is NOT a refusal — that stays transient', () => {
+    expect(isImageRefusal({})).toBe(false);
+    expect(isImageRefusal(null)).toBe(false);
+    expect(isImageRefusal({ candidates: [{ content: { parts: [] } }] })).toBe(false);
+  });
+  it('the refusal message is actionable and white-label (no vendor/model name)', () => {
+    expect(IMAGE_REFUSAL_MESSAGE).toMatch(/NavBharatAI/);
+    expect(IMAGE_REFUSAL_MESSAGE).toMatch(/original/i);
+    expect(IMAGE_REFUSAL_MESSAGE).not.toMatch(/gemini|google|pollinations|openai|dall|imagen/i);
   });
 });
 

@@ -121,7 +121,9 @@ describe('AI Image Gen — our own engine, no third-party hotlink', () => {
   it('the client calls our server route — the third-party hotlink is gone for good', () => {
     const src = readFileSync(join(__dirname, '../src/components/ide/AIImageGenerator.tsx'), 'utf8');
     expect(src).toContain("'/api/image/generate'");
-    expect(src).not.toContain('pollinations');
+    // Case-INSENSITIVE — the "Pollinations AI" badge (capital P) slipped past the old lowercase check
+    // (white-label leak, PROGRESS 2026-07-31). No vendor name may appear on this user-facing surface.
+    expect(src).not.toMatch(/pollinations/i);
   });
 
   it('the /api/image/generate route is registered on the server', () => {

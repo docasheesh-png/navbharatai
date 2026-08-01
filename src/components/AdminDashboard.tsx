@@ -4,6 +4,7 @@ import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
+import { summarizeFailurePatterns } from '../lib/buildReportAnalytics';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -174,6 +175,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     if (inr <= 0) return { text: '₹0', cls: 'text-[#8b949e]' };
     return { text: `₹${inr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, cls: 'text-emerald-300 font-bold' };
   };
+
+  // M8-S8.1 — data-driven failure signal: which failure class recurs most across all reports.
+  const failureSummary = useMemo(() => summarizeFailurePatterns(buildReports), [buildReports]);
 
   const tierBadge = (tier: ReportTier): { label: string; cls: string } => {
     switch (tier) {
@@ -1212,6 +1216,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
                 </button>
               </div>
+
+              {/* Top failure patterns (M8-S8.1) — data-driven: which failure class recurs most, so the
+                  most-impactful fix is chosen from real evidence. Only shown when there are failures. */}
+              {!buildReportsLoading && failureSummary.totalFailed > 0 && (
+                <div className="bg-[#161b22] border border-amber-500/20 rounded-[1.25rem] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Top failure patterns</h4>
+                    <span className="text-[11px] text-[#8b949e] font-bold">
+                      {failureSummary.totalFailed} failed of {failureSummary.totalReports} report(s)
+                    </span>
+                  </div>
+                  <div className="grid gap-1.5">
+                    {failureSummary.patterns.map((p) => {
+                      const pct = failureSummary.totalFailed > 0 ? Math.round((p.count / failureSummary.totalFailed) * 100) : 0;
+                      return (
+                        <div key={p.label} className="flex items-center gap-3">
+                          <span className="w-40 shrink-0 text-[12px] font-bold text-white truncate" title={p.sample}>{p.label}</span>
+                          <span className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                            <span className="block h-full bg-amber-500/70 rounded-full" style={{ width: `${pct}%` }} />
+                          </span>
+                          <span className="w-16 shrink-0 text-right text-[11px] text-[#8b949e] tabular-nums">{p.count} · {pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Filters + sorting (admin 2026-08-01): who sent which report, when, free/paid */}
               {!buildReportsLoading && buildReports.length > 0 && (

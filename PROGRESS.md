@@ -23342,3 +23342,24 @@ account" steps. Every path deploys to the user's OWN account; nothing is faked. 
 ask-when-unchosen flow; (3) BYO-token capture per host (Settings → Secrets) with honest "set TOKEN" states;
 (4) a real server-side deploy provider per host (token present → real deploy → separate backend URL). Until
 slice 4, the honest path is config-gen + GitHub-push + user connects their host (real, no fake success).
+
+---
+
+## 2026-07-31 — FEATURE (backend-deploy, slice 2): deploy panel wires Cloud Run/Render/Railway to real config-inject
+
+Slice 2 of the separate-backend deploy feature (slice 1 = the config generator, merged). The deploy panel
+(`GitPanel`) ALREADY listed `gcloud` / `render` / `railway`, but selecting them only showed the honest
+"not available" message. Now they do something REAL — without faking a deploy.
+
+**FIX.** New pure `src/lib/backendDeployWiring.ts`: `gitPanelBackendHost` (gcloud→cloud-run, render, railway),
+`parseBackendAppInfo` (reads name/start/build/node from the workspace package.json), and
+`buildBackendConfigInjection` (returns the plan + the merged file map + honest log lines). `GitPanel.triggerPushAndDeploy`
+now short-circuits a backend host to `injectBackendDeployConfig()`: it adds the real config files
+(Dockerfile+.dockerignore / render.yaml / railway.json) to the project via `onFilesChange` and prints the
+honest BYO-account steps ("deploy-ready on YOUR host, set <TOKEN>, push to GitHub & connect"). Never claims a
+deploy happened. The frontend-deploy paths (github/static/v5 providers) are untouched. The user PICKING the
+host IS the choice (no separate ask-flow needed). 6 wiring tests + slice-1's 8; server/frontend tsc clean.
+
+**Remaining:** (3) BYO-token capture per host in Settings → Secrets; (4) a real per-host deploy provider
+(token present → real deploy → separate backend URL). Until slice 4 the honest path is config-inject +
+GitHub push + the user connects their host — real, no fake success.

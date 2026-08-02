@@ -12,6 +12,7 @@ import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
+import { shouldFailoverToLive, liveFailoverNotice } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
@@ -153,6 +154,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // a boot — show a thin working strip until the iframe actually finishes loading.
   const [liveLoading, setLiveLoading] = useState(false);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
+  // LIVE FAILOVER (admin report 858f6d7b) — a broken in-browser preview must never be a dead end while
+  // the real app is running on the sandbox. Both refs are once-per-workspace guards; `failoverNote`
+  // keeps the switch honest instead of letting the view jump for no visible reason.
+  const failedOverToLive = useRef(false);
+  const userPickedInBrowser = useRef(false);
+  const [failoverNote, setFailoverNote] = useState('');
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
   // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
@@ -173,7 +180,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // this, "+New chat" reset state.workspaceId to '' but the old app kept rendering in the iframe.
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
-  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); }, [workspaceId]);
+  useEffect(() => {
+    setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
+    failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
+  }, [workspaceId]);
 
   const runDiagnose = useCallback(async () => {
     if (!workspaceId) return;
@@ -431,16 +442,31 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     const onMessage = (e: MessageEvent) => {
       const d = e.data as { __nbaiPreviewError?: boolean; source?: string; message?: string } | null;
       if (!d || d.__nbaiPreviewError !== true || !workspaceId || typeof d.message !== 'string') return;
+      // RESCUE FIRST, then record. Before this, a broken in-browser preview was only ever WRITTEN DOWN
+      // (into the report the user never opens) while a working live server sat one unclicked button
+      // away — so a build that genuinely succeeded read as "the app didn't build". Reporting the
+      // failure honestly is necessary; leaving the user staring at it when we can fix it is not.
+      const source: 'in-browser' | 'live' = d.source === 'live' ? 'live' : 'in-browser';
+      if (shouldFailoverToLive({
+        mode, hasLiveUrl: !!effectiveUrl, errorSource: source,
+        alreadyFailedOver: failedOverToLive.current, userPickedInBrowser: userPickedInBrowser.current,
+      })) {
+        failedOverToLive.current = true;
+        setFailoverNote(liveFailoverNotice());
+        setMode('live');
+      }
       fetch('/api/agentv3/preview-error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, userId, email, source: d.source === 'live' ? 'live' : 'in-browser', message: d.message.slice(0, 4000) }),
+        body: JSON.stringify({ workspaceId, userId, email, source, message: d.message.slice(0, 4000) }),
         keepalive: true,
       }).catch(() => { /* best-effort — capturing the error must never disrupt the preview */ });
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [workspaceId, userId, email]);
+    // `mode` + `effectiveUrl` are read by the failover decision, so the listener must be re-bound when
+    // they change — a stale closure would judge the failover against a previous render's state.
+  }, [workspaceId, userId, email, mode, effectiveUrl]);
 
   // VISUAL EDITOR (v1, in-browser mode only — see ReactPreview.ts's injected inspector script).
   // Clicking an element in edit mode reports back {file, line, column, newText}; this applies it via
@@ -557,7 +583,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // full-fidelity view is discoverable even though we no longer auto-switch to it.
   const switcher = (
     <div className="flex items-center gap-1">
-      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
+      <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
       <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity — real npm/runtime)">{effectiveUrl ? '● ' : ''}Live server</button>
     </div>
   );
@@ -595,6 +621,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
+        {failoverNote && (
+          <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
+            <span className="flex-1">{failoverNote}</span>
+            <button onClick={() => setFailoverNote('')} className="shrink-0 text-sky-400 hover:text-sky-200" title="Dismiss">✕</button>
+          </div>
+        )}
         {liveLoading && (
           <div className="h-0.5 bg-zinc-800 overflow-hidden">
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />

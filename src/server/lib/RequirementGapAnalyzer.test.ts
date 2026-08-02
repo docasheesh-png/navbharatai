@@ -166,3 +166,85 @@ describe('India-first requirement guidance (M7-S7.1)', () => {
     expect(buildRequirementGuidance(analyzeRequirementGaps('make me a thing'))).toBe('');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// DOMAIN CLASSIFICATION CORPUS (admin report 2026-08-02, buildId 858f6d7b — "choti moti apps bhi nahi
+// ban rahi hai"). A plain to-do app was classified `social` and handed social's implicit features
+// (auth & profiles, realtime feed, notifications, moderation, media upload). The cause was a keyword
+// class bug, not a one-off: headline regexes matched short English stems INSIDE unrelated words, so
+// "mobile-friendly" fired `friend` → social. Sweeping a corpus of realistic prompts found 9 of 18
+// misclassified — "cartoon" → cart → ecommerce, "photoshop" → shop → ecommerce, "editable"/"portable"
+// → table → booking, and every prompt containing "user-friendly"/"mobile-friendly" → social.
+//
+// This matters because the classification is not cosmetic: with AGENTV3_REQUIREMENT_AWARE=on the
+// domain's implicit features are INJECTED into the build prompt, so a calculator was being told it
+// probably needs moderation and media upload — bloat that lengthens the build and helps push the
+// generation into the output-token ceiling.
+//
+// This corpus is the tripwire for the whole class: a new keyword that leaks into ordinary English
+// fails here instead of silently reshaping real builds.
+describe('domain classification corpus — a stem must never match inside an unrelated word', () => {
+  const cases: Array<{ name: string; prompt: string; domain: string }> = [
+    // The exact prompt from the report. "mobile-friendly" must not make a to-do list a social network.
+    { name: 'to-do list (report 858f6d7b)', domain: 'productivity',
+      prompt: 'Build a to-do list app: add, edit, complete and delete tasks, organise them by category, filter by all/active/done, and save everything in the browser so it persists on reload. Clean, mobile-friendly UI with light/dark mode.' },
+    { name: 'notes app', prompt: 'A simple notes app with markdown support and a user-friendly sidebar.', domain: 'productivity' },
+    { name: 'kanban board', prompt: 'A kanban board to manage tasks across to-do, doing and done columns.', domain: 'productivity' },
+    { name: 'habit tracker', prompt: 'A habit tracker with streaks, daily check-ins and a friendly dashboard.', domain: 'productivity' },
+    // "friendly" must not imply a social network in ANY app.
+    { name: 'calculator', prompt: 'Build a scientific calculator with a mobile-friendly responsive layout.', domain: 'general' },
+    { name: 'weather', prompt: 'A weather dashboard showing a 7-day forecast, mobile-friendly and fast.', domain: 'general' },
+    { name: 'pomodoro', prompt: 'A pomodoro timer with a friendly UI and sound alerts.', domain: 'general' },
+    // "cartoon" is not a cart; "photoshop" is not a shop.
+    { name: 'drawing app', prompt: 'A cartoon drawing app with a canvas, brush sizes and colour picker.', domain: 'general' },
+    { name: 'image editor', prompt: 'A photoshop-like image editor in the browser with layers and filters.', domain: 'general' },
+    // "editable"/"portable" are not a restaurant table.
+    { name: 'data table', prompt: 'A data table component with sortable columns, editable cells and portable CSS.', domain: 'general' },
+    // The genuine domains must keep classifying EXACTLY as before — the fix narrows false positives only.
+    { name: 'chat app', prompt: 'A realtime chat app with rooms, message history and user profiles.', domain: 'social' },
+    { name: 'hospital', prompt: 'A hospital management system with patient records, doctors and appointments.', domain: 'healthcare' },
+    { name: 'online store', prompt: 'An online store with a product catalog, cart and checkout.', domain: 'ecommerce' },
+    { name: 'restaurant POS', prompt: 'A restaurant POS with menu management, KOT for the kitchen and GST billing.', domain: 'restaurant' },
+    { name: 'salon booking', prompt: 'A salon booking app where customers reserve a slot with a stylist.', domain: 'booking' },
+    { name: 'shopping cart', prompt: 'An ecommerce site with a shopping cart, product listings and checkout.', domain: 'ecommerce' },
+    // A CRM prompt mentions "kanban" too — productivity must not steal a strictly more specific domain.
+    { name: 'CRM', domain: 'crm',
+      prompt: 'Manage contacts and a sales pipeline with kanban deal stages lead → qualified → won/lost, contact profiles, notes & tasks and a pipeline-value dashboard.' },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name} → ${c.domain}`, () => {
+      expect(analyzeRequirementGaps(c.prompt).domain).toBe(c.domain);
+    });
+  }
+
+  // Narrowing a keyword is only safe if the GENUINE signal still classifies. These lock the three
+  // narrowings that could plausibly have over-corrected: booking without the word "table", social
+  // without a bare "like", and ecommerce without an unanchored "book"/"store".
+  it('genuine booking intent survives dropping the bare word "table"', () => {
+    expect(analyzeRequirementGaps('Let diners book a table at the restaurant for a given time slot.').domain).toBe('booking');
+    expect(analyzeRequirementGaps('A table reservation system for a cafe.').domain).toBe('booking');
+    expect(analyzeRequirementGaps('A hotel booking site with room availability and payments.').domain).toBe('booking');
+  });
+
+  it('a bookstore is commerce, not a reservations app', () => {
+    expect(analyzeRequirementGaps('An online bookstore selling novels with a cart and checkout.').domain).toBe('ecommerce');
+  });
+
+  it('genuine social signals still classify after narrowing bare "like"', () => {
+    expect(analyzeRequirementGaps('A photo feed where users can post images and give likes.').domain).toBe('social');
+    expect(analyzeRequirementGaps('A blog with a like button and comments.').domain).toBe('social');
+  });
+
+  it('gives a to-do app features it can actually use instead of a social network\'s', () => {
+    const g = analyzeRequirementGaps(cases[0].prompt);
+    expect(g.likelyMissing.join(' | ')).toMatch(/due dates|reminders|progress|streak/i);
+  });
+
+  it('never hands a to-do app social features it has no use for (the real damage)', () => {
+    const g = analyzeRequirementGaps(cases[0].prompt);
+    for (const junk of ['moderation / reporting', 'media upload', 'realtime feed / updates']) {
+      expect(g.likelyMissing).not.toContain(junk);
+    }
+  });
+});

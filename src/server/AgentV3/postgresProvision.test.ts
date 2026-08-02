@@ -4,6 +4,7 @@ import {
   commandNeedsLiveDatabase,
   schemaTargetsPostgres,
   postgresEnvLines,
+  mergeEnvVar,
   schemaTargetsSqlite,
   revertSqliteToPostgres,
   postgresWatchdogCommand,
@@ -107,6 +108,29 @@ describe('postgresEnvLines', () => {
     expect(postgresEnvLines('')).toEqual({});
     expect(postgresEnvLines('   ')).toEqual({});
     expect(postgresEnvLines(null)).toEqual({});
+  });
+});
+
+describe('mergeEnvVar — write a provisioned DATABASE_URL into a first-time app .env without clobbering', () => {
+  const url = 'postgresql://postgres@localhost:5432/myapp';
+  it('appends to an empty/absent .env (a from-scratch Drizzle app had no .env)', () => {
+    expect(mergeEnvVar('', 'DATABASE_URL', url)).toBe(`DATABASE_URL=${url}\n`);
+    expect(mergeEnvVar(null, 'DATABASE_URL', url)).toBe(`DATABASE_URL=${url}\n`);
+  });
+  it('preserves existing vars and appends when the key is absent', () => {
+    const out = mergeEnvVar('NODE_ENV=development\nPORT=3000', 'DATABASE_URL', url);
+    expect(out).toContain('NODE_ENV=development');
+    expect(out).toContain('PORT=3000');
+    expect(out).toContain(`DATABASE_URL=${url}`);
+  });
+  it('REPLACES an existing (blank/placeholder) DATABASE_URL line in place, not a duplicate', () => {
+    const out = mergeEnvVar('DATABASE_URL=\nAPI_KEY=x', 'DATABASE_URL', url);
+    expect((out.match(/^DATABASE_URL=/gm) || []).length).toBe(1);
+    expect(out).toContain(`DATABASE_URL=${url}`);
+    expect(out).toContain('API_KEY=x');
+  });
+  it('also replaces an `export DATABASE_URL=` form', () => {
+    expect(mergeEnvVar('export DATABASE_URL=old', 'DATABASE_URL', url)).toBe(`DATABASE_URL=${url}`);
   });
 });
 

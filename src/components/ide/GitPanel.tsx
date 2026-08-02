@@ -273,6 +273,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       addLogLine(isRealGithubRepo ? `✅ Imported into Code Studio.` : `✅ Template loaded into Code Studio.`);
       setSyncProgressStage('Done');
       setSuccessfullySyncedProject(product);
+      // Surface the imported files IMMEDIATELY: switch the sidebar from this Git panel to the File
+      // Explorer so the user actually SEES them. Previously the files loaded into the workspace but the
+      // view stayed on the Git panel, so a repo click looked like "nothing happened". CodeStudio then
+      // opens the first imported file in the editor (its file-set-change effect).
+      onToggleView?.('files');
     } else {
       addLogLine(`Nothing was imported.`);
       setSyncProgressStage('Failed');
@@ -792,7 +797,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         </button>
       </div>
 
-      <div className={cn("flex-1 flex flex-col min-h-0", activeTab === 'deploy' ? "overflow-y-auto no-scrollbar" : "overflow-hidden")}>
+      {/* Mobile-friendly: BOTH tabs scroll as one natural column (the Sync tab used to be overflow-hidden
+          → its content was clipped and unreachable on a short mobile screen). A visible scrollbar signals
+          scrollability; the inner lists below are bounded (max-h) instead of flex-1 so they never trap the
+          page scroll on mobile. */}
+      <div className={cn("flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain")}>
         {activeTab === 'deploy' ? (
           <div className="p-4 space-y-4 flex flex-col flex-1">
             {/* Header / Intro */}
@@ -908,7 +917,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 </span>
               </div>
 
-              <div className="flex-1 overflow-y-auto no-scrollbar pr-0.5 space-y-3 text-xs">
+              <div className="pr-0.5 space-y-3 text-xs">
                 {/* 1. GITHUB CONFIG */}
                 {selectedPlatform === 'github' && (
                   <div className="space-y-4">
@@ -1867,7 +1876,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             </div>
 
             {/* Searchable Projects List Container */}
-            <div className="flex-1 flex flex-col min-h-0 border border-white/5 rounded-xl p-2.5 space-y-2 bg-black/10 select-none overflow-hidden">
+            <div className="flex flex-col border border-white/5 rounded-xl p-2.5 space-y-2 bg-black/10 select-none">
               <div className="flex items-center justify-between shrink-0">
                 <span className="text-[8.5px] font-black text-[#8b949e] uppercase tracking-wider px-1">Available Apps / Projects</span>
                 {isFetchingProjects && <TirangaLoader className="w-3 h-3 text-indigo-400" />}
@@ -1886,7 +1895,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
 
               {/* List grid */}
-              <div className="flex-1 overflow-y-auto no-scrollbar space-y-1.5 pr-0.5 min-h-0">
+              <div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-1.5 pr-0.5">
                 {fetchedProjects
                   .filter((p) => p.displayName?.toLowerCase().includes(syncQuery.toLowerCase()) || p.name?.toLowerCase().includes(syncQuery.toLowerCase()))
                   .map((project) => (

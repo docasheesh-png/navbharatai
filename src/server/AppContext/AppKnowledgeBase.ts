@@ -113,13 +113,13 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'agentv3_builder',
     name: 'NavBharatAI Pro v5.0 (beta)',
-    path: 'Sidebar → "App Builder v5.0"  OR  the floating "v5.0" button (bottom-right when enabled for your account).',
-    description: `Claude-Code-class agentic app builder (Vargen 3.0). Capabilities:
-• POWER SELECTOR (build-options menu — the gear/settings popover above the message box): five tiers of build engine, cheapest → strongest. "Weak" = the FREE tier (runs on the fast GLM/Kimi engines, never Claude). "Normal" = balanced (Sonnet, adaptive routing). "Strong 💪" = Sonnet pinned 100% (the whole build runs on Sonnet — never Opus). "Powerful" = Claude Opus 4.8 at medium reasoning effort. "Full Team" = Opus 4.8 at max effort (ultracode). The tier you select is exactly the model that runs — the backend pins it (admin rule 2026-07-13). FULL TEAM PREMIUM EXPERIENCE (Fix 60): on the Full Team tier a running build shows the live ⚡ FULL TEAM HQ card above the message box — the real agent roster (Architect + every specialist, with what each is doing right now), real plan-progress squares, and a live clock — AND the message box stays LIVE during the build: type and send while the team works, and they act on your message at the very next step (a "queued" note appears instantly, then "picked up" when the team folds it in). This mid-build messaging works ONLY on Full Team — on other tiers the composer shows Stop while building, which is expected behavior, not a bug. WHO SEES WHAT: a FREE user (never purchased) can use ONLY "Weak"; once you add credits (become a paid user) all five unlock, defaulting to "Normal", and you can pick any of them per build. Billing follows the model the tier pins: Weak & Normal bill at the cheap Sonnet-equivalent rate (× 1.2; × 3 if Sonnet itself runs); Strong bills Sonnet-equivalent × 3; the two Opus tiers bill the REAL Opus cost × 2 (a higher tier makes Opus think more, so the bill scales with the real tokens spent). This is enforced server-side — a free account can never spend the paid engines. IF A FREE USER ASKS why the other tiers are locked / "select nahi ho raha" / greyed out with a 🔒: explain warmly, IN THE USER'S OWN LANGUAGE and in your own words (never a canned copy-paste — vary the phrasing each time, keep the meaning), that on a free account only the "Weak" tier is available, and that recharging (adding credits to the wallet) instantly unlocks every tier from Normal to Full Team — the tier selector is behind the 🎛️ options button (lucide sliders icon) just left of the message box. IF THE USER SAYS THEY ALREADY RECHARGED/PAID but the tiers are still locked: NEVER repeat "recharge karo" — instead walk them through (in their language, own words): (1) close and reopen the 🎛️ options popover (it re-checks your account) or refresh the page once; (2) open Wallet & Billing from the sidebar and confirm the payment shows as SUCCESS and the tokens were credited; (3) if the payment shows SUCCESS there and the tiers are STILL locked after a refresh, apologize and tell them to contact support with their payment reference — do not blame them or loop the same suggestion.
+    path: 'Sidebar → "App Builder v5.0"  OR  Professionals → "NavBharatAI Pro v5.0" card (both open the same v5.0 builder).',
+    description: `World-class agentic app builder (Vargen 3.0). Capabilities:
+• POWER SELECTOR (build-options menu — the gear/settings popover above the message box): five tiers of build engine, cheapest → strongest. "Weak" = the FREE tier (runs on NavBharatAI's fast economy engine — the free tier that never uses the premium engines). "Normal" = balanced (the standard engine, adaptive). "Strong 💪" = a stronger engine, pinned for the whole build. "Powerful" = NavBharatAI's most capable engine at higher reasoning effort. "Full Team" = the most capable engine at maximum effort (ultracode). The tier you select is exactly the engine that runs — the backend pins it. FULL TEAM PREMIUM EXPERIENCE (Fix 60): on the Full Team tier a running build shows the live ⚡ FULL TEAM HQ card above the message box — the real agent roster (Architect + every specialist, with what each is doing right now), real plan-progress squares, and a live clock — AND the message box stays LIVE during the build: type and send while the team works, and they act on your message at the very next step (a "queued" note appears instantly, then "picked up" when the team folds it in). This mid-build messaging works ONLY on Full Team — on other tiers the composer shows Stop while building, which is expected behavior, not a bug. WHO SEES WHAT: a FREE user (never purchased) can use ONLY "Weak"; once you add credits (become a paid user) all five unlock, defaulting to "Normal", and you can pick any of them per build. Billing follows the tier and the real work done: the lower tiers cost the least, and the two top ("Powerful"/"Full Team") tiers cost more because they run the most capable engine at higher effort — the bill scales with the tokens actually spent, and a live cost estimate is always shown. This is enforced server-side — a free account can never spend the paid engines. IF A FREE USER ASKS why the other tiers are locked / "select nahi ho raha" / greyed out with a 🔒: explain warmly, IN THE USER'S OWN LANGUAGE and in your own words (never a canned copy-paste — vary the phrasing each time, keep the meaning), that on a free account only the "Weak" tier is available, and that recharging (adding credits to the wallet) instantly unlocks every tier from Normal to Full Team — the tier selector is behind the 🎛️ options button (lucide sliders icon) just left of the message box. IF THE USER SAYS THEY ALREADY RECHARGED/PAID but the tiers are still locked: NEVER repeat "recharge karo" — instead walk them through (in their language, own words): (1) close and reopen the 🎛️ options popover (it re-checks your account) or refresh the page once; (2) open Wallet & Billing from the sidebar and confirm the payment shows as SUCCESS and the tokens were credited; (3) if the payment shows SUCCESS there and the tiers are STILL locked after a refresh, apologize and tell them to contact support with their payment reference — do not blame them or loop the same suggestion.
 • UNSEND & EDIT (take back / re-write your last message): hover the LAST message you sent in a build chat — two actions appear under it. ✏️ EDIT takes the message back AND drops its text into the message box so you can re-write it and send again. ✕ UNSEND just takes it back. Both do the SAME full take-back: they stop any build still running for that message and permanently remove it from the conversation — the visible thread, the durable transcript the AI replays, and the AI's project memory — so it never resurfaces or influences a future turn. Neither undoes files already written (take-back forgets the message, it doesn't roll back the app — the preview and file list keep reflecting reality); to undo file changes, use the Git/History checkpoints. Only the newest message is editable/unsendable; older messages keep Copy. Use Edit to fix a typo or reword a request, and Unsend when you'd rather the AI simply forgot what you sent.
 • START FROM A TEMPLATE (cold-start helper): when a new Pro v5.0 chat is empty, a row of one-tap starter templates appears under the message box — SaaS dashboard, CRM, invoicing, online store, restaurant/menu, bookings, social feed, community forum, events, project board, notes, learning platform (LMS), portfolio, fitness tracker, expense tracker, and more. Tapping one fills the message box with a rich, detailed prompt for that kind of app, which you then edit and send — it never builds on its own, so you stay in control. Great for "I don't know what to type" — pick the closest template, tweak it, build. You can also SAVE YOUR OWN: tap the ☆ (Save as template) under any message you sent to store its prompt as a reusable template on this device; your saved templates then appear under "Your templates" in that same picker (each with a × to remove). Saved on-device only (not synced across devices).
 • MULTI-AGENT "AI team": an Architect plans and delegates to a six-layer roster of specialist agents — planning (Requirements, Planner, Product), development (Frontend, Backend, Fullstack, Database, Mobile, API, DevOps, Infrastructure, Designer), quality (QA, Tester, Security, Performance, Accessibility, Reviewer), repair (Debugger, Refactor, Optimizer), knowledge (Docs, Researcher) and operations (Deploy, Monitor, Recovery) — routed by capability and working in parallel where safe.
-• MULTI-PROVIDER resilience: native Claude for building, with automatic fallback to Vertex / Gemini / Grok for chat so it always replies.
+• MULTI-ENGINE resilience: builds on NavBharatAI's own engines, with automatic fallback across them so it always replies — you never see a provider name or a dead end.
 • IDE ↔ v5.0 FILE SYNC (live, two-way): the Code Studio IDE and the v5.0 builder are two organs of ONE workspace per session. A ZIP you upload is mirrored into v5.0, files you delete in the IDE are removed from v5.0, AND every manual edit you make in the editor is auto-saved (debounced) to v5.0's DURABLE store — so your hand edits survive sandbox recycling and the build's file-guardian never reverts them. On your NEXT build, v5.0 ACKNOWLEDGES what you changed ("I noticed you manually edited N files in the IDE since my last build") and reads + builds ON TOP of your edits instead of overwriting them — like Google AI Studio, where a change in one place is instantly known everywhere.
 • PROJECT MEMORY & artifact intelligence: as it builds it indexes your files into a live project graph (symbols, components, routes, imports, dependencies) and remembers errors and fixes; agents can "recall" this to find where things are and what failed before. After each build it also writes a short REFLECTION — the lessons learned from that build's errors and fixes — back into project memory; and at the START of each new build it RECALLS the relevant past lessons and applies them, closing the learning loop so the project genuinely improves across iterations. Recalled lessons are also EVOLVED before reuse (Layer 59 "Knowledge Evolution"): near-duplicates are merged, contradictions are resolved so newer advice overrides stale advice it disagrees with, and fresher lessons are ranked higher — keeping the project's working knowledge accurate and current. Recall ranks like a real search engine (BM25): a rare, specific term outweighs a common one, and lessons are OUTCOME-WEIGHTED so a PROVEN fix (it actually worked) outranks a one-off error and a repeatedly-confirmed lesson ranks higher — the agent is reminded of the most relevant AND most trustworthy lessons first. And these lessons are no longer trapped in one project: your highest-confidence lessons are remembered ACROSS ALL your projects (a cross-project "brain"), so what the AI learned building app A helps it build app B.
 • PERSONALIZATION (Layer — Preference Learning): v5.0 quietly learns YOUR preferred stack from your past SUCCESSFUL builds — the framework, database, styling and language you keep choosing, and the kinds of apps you build most — inferred from what actually shipped (never from a form you fill in). On your next build, when you don't specify a stack, it leans toward those learned defaults so it builds the way you like by default; you can always override them just by asking for something different.
@@ -127,7 +127,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • ONE-CLICK AI FIX (P-UX.3): when the in-browser preview fails to build, the Preview tab shows a "Fix with AI" button. Tapping it FIRST runs a free "deep refresh" — a clean, cache-bypassing rebuild of the preview — because a blank or failed preview is often just a stale cached render or a transient glitch and simply works after a fresh rebuild (no AI needed, no credit spent); if it recovers, the Preview shows a "recovered after a deep refresh — no AI fix was needed" note. Only if the preview STILL fails does it prepopulate the exact build error into the chat box, so you just press Send and the agent diagnoses and repairs it. It prepopulates (rather than auto-sending) so you always review before a fix runs.
 • SELF-EVALUATION: agents can "evaluate" the project for real structural defects (unresolved imports that would break the build, import cycles, front-end→back-end layering violations, forEach(async …) loops that silently do not await), security issues (hardcoded secrets/keys, hardcoded JWT signing secrets, credentials embedded in DB/queue connection strings, eval, new Function() dynamic code, command injection via a shell exec built from dynamic input, dangerouslySetInnerHTML, raw innerHTML/outerHTML/insertAdjacentHTML XSS sinks, insecure http) AND an authenticity check that detects fake/incomplete/placeholder code (TODO/FIXME/HACK markers, "not implemented" throws, stub/dummy/mock data, lorem ipsum, empty console.log-only handlers, empty catch blocks that silently swallow errors) — enforcing the "real features only, no fakes" rule — AND a dependency-consistency check (packages imported in code but missing from package.json, which would break the build at install/runtime; declared-but-unused dependencies; plus floating/unpinned versions like "*"/"latest" that make builds non-reproducible) AND an environment-variable completeness check (variables read in code via process.env / import.meta.env but missing from .env.example, which would break the app at runtime for the user, who is never told to set them) AND an accessibility check (Layer 78 "Sabke-Liye"/Inclusion: images with no alt text, form controls with no accessible name, click handlers on non-interactive elements that keyboard and screen-reader users cannot reach, positive tabindex that breaks focus order, and pages with no document language) — so the apps it builds are usable by everyone — AND a trust/safety/compliance check (Layer 77 "Bharosa", DPDP/GDPR-oriented: personal data written to logs, sensitive values kept in browser storage, cookies set without SameSite, personal data sent over plain http, third-party trackers running with no cookie-consent surface, and collecting personal data with no privacy policy) that ends with an honest "launch-safe" certificate (CERTIFIED / CONDITIONAL / NOT CERTIFIED) — so the apps it builds are safe to launch publicly — AND a calibrated "build confidence" score (Layer 74 "Sahyog": 0–100% with a High/Medium/Low band and a plain-language "here's why", synthesized from all the checks above) so the assistant tells you honestly how confident it is rather than over-promising — and fix them before claiming the app is done.
 • BUILD-HEALTH CARD (R2 — Earned readiness, shown every build): after each build finishes, v5.0 shows a build-health card right in the chat — an honest 0–100 score, a ready / not-ready verdict, and the exact blockers (things that still break the app) and warnings (advisory) — derived from the build's own diagnostics. So you see at a glance whether the app is genuinely ready or what to fix before shipping, instead of taking "done" on faith.
-• SECOND OPINION (Layer 84 — Multi-Model Ensemble): the agent team can get an independent cross-model "second opinion" — a DIFFERENT AI model (the non-Claude Vertex/Gemini/Grok router) critically reviews risky or final work for bugs, security issues and wrong assumptions — going beyond a single model's judgement. The Architect can also convene a multi-perspective CONSENSUS panel (Layer 49 — Collective Intelligence): the same hard decision is put to independent correctness, security and UX reviewers and their viewpoints are synthesized into one verdict — multiple expert lenses, not one.
+• SECOND OPINION (Layer 84 — Multi-Model Ensemble): the agent team can get an independent cross-model "second opinion" — a DIFFERENT, independent AI engine critically reviews risky or final work for bugs, security issues and wrong assumptions — going beyond a single model's judgement. The Architect can also convene a multi-perspective CONSENSUS panel (Layer 49 — Collective Intelligence): the same hard decision is put to independent correctness, security and UX reviewers and their viewpoints are synthesized into one verdict — multiple expert lenses, not one.
 • PLAN REVIEW (Layer 54 — Strategic Intelligence): in Plan mode, before you approve the proposed build plan, v5.0 reviews it for strategic gaps and shows them next to the plan — no testing/verification step, no setup/scaffolding before features, a deploy was requested but never planned, an under-scoped one-line plan, or vague unactionable steps — so you can strengthen the plan up front instead of discovering the gap after the build.
 • TEST COVERAGE check (Phase 6 — Testing & Autonomous Loops): when v5.0 evaluates a build, it also reports which modules and components have NO test, so the build agent writes the missing tests and verifies the app actually works instead of assuming it — the build is earned, not guessed.
 • QUALITY DEFAULTS (U-2 — Production basics by default): every successful build automatically gets the launch basics — SEO + OpenGraph meta tags (title, description, share preview), a mobile viewport, an html lang attribute, a theme-color, a web app manifest with a real installable icon, robots.txt, AND an offline-first service worker (with its registration) so the app is a genuine installable PWA that works offline — plus a starter test skeleton. It adds only what is missing and never overwrites an existing manifest/service worker. This runs BY DEFAULT after each build (no need to ask), so the apps it builds are search-friendly, shareable, installable and offline-capable out of the box.
@@ -314,15 +314,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • HISTORY: your v5.0 conversations are saved to NavBharatAI's main History (the sidebar "History" option, under All/Apps OR the "Pro" filter — v5.0 chats show under Pro now) when you are signed in, so you can return to them later; inside v5.0 the "History" tab also lists the project's git checkpoints — and these are now DURABLE: every checkpoint a build commits is saved, so the full timeline survives a page refresh, a recycled sandbox, and shows up the same across your devices (not just the current session). Click "Restore" next to a checkpoint to roll the project back to that point; if a checkpoint isn't active in the current session yet, v5.0 tells you honestly instead of pretending it restored.
 • OPEN = NEW, RELOAD = CONTINUE: opening NavBharatAI Pro v5.0 from the menu/sidebar always starts a fresh NEW chat (a clean canvas), so you never land on an old project by accident. But if you simply RELOAD the browser (F5) while working in v5.0, you come right back to the SAME project with your messages, files and preview restored — reload continues, opening starts fresh. To reopen a specific past project, pick it from the Recent Chats list (below) or from History.
 • RECENT CHATS in the ☰ menu (app-wide): the main 3-line ☰ menu now has a "Recent Chats" section listing your latest conversations (Free, Pro and Doctor), newest first, each with a coloured badge — tap any one to reopen it and continue where you left off, or tap "View all history →" for the full list. A v5.0 chat reopens inside Pro v5.0 with the same project/files/memory.
-• SESSION HISTORY MENU (3-line ☰ in the v5.0 header): tap the menu icon at the top-left of the v5.0 header to open your SESSION HISTORY — every saved v5.0 build for your account, grouped like Claude/ChatGPT (Today / Yesterday / Previous 7 days / Previous 30 days / Older), each one showing a real status dot (building / built / failed / stopped) — not just old chat text. Sessions whose app is PUBLISHED show a glowing green "Live" dot (verified against the deployment registry — the dot appears only when the app is really live at its URL, never for held or taken-down apps; a failed later build keeps its red "Failed" dot so problems stay visible). The session you currently have open is marked "Current session". Tap any session to reopen it and continue exactly where you left off (same project, files, plan and memory). Each session row has two actions: a 📌 PIN (pin an important build so it floats to the top under a "Pinned" section, above the date groups, no matter how old — tap again to unpin; pinning never changes the build's "time ago") and a ✕ DELETE (permanently remove it, confirmed first). A SEARCH box at the top of the list filters your sessions instantly by name as you type (client-side, no reload) — type part of an app's name to find it. The same menu has a "+ New chat" to start a fresh project. Because sessions are saved PER ACCOUNT (not per device), the list and the ability to continue the SAME project/memory work from ANY device you sign in on — open it on your phone, continue on your laptop, like Claude. ("New" in the header still starts a fresh project too.)
+• SESSION HISTORY MENU (3-line ☰ in the v5.0 header): tap the menu icon at the top-left of the v5.0 header to open your SESSION HISTORY — every saved v5.0 build for your account, grouped by date (Today / Yesterday / Previous 7 days / Previous 30 days / Older), each one showing a real status dot (building / built / failed / stopped) — not just old chat text. Sessions whose app is PUBLISHED show a glowing green "Live" dot (verified against the deployment registry — the dot appears only when the app is really live at its URL, never for held or taken-down apps; a failed later build keeps its red "Failed" dot so problems stay visible). The session you currently have open is marked "Current session". Tap any session to reopen it and continue exactly where you left off (same project, files, plan and memory). Each session row has two actions: a 📌 PIN (pin an important build so it floats to the top under a "Pinned" section, above the date groups, no matter how old — tap again to unpin; pinning never changes the build's "time ago") and a ✕ DELETE (permanently remove it, confirmed first). A SEARCH box at the top of the list filters your sessions instantly by name as you type (client-side, no reload) — type part of an app's name to find it. The same menu has a "+ New chat" to start a fresh project. Because sessions are saved PER ACCOUNT (not per device), the list and the ability to continue the SAME project/memory work from ANY device you sign in on — open it on your phone, continue on your laptop. ("New" in the header still starts a fresh project too.)
 • MOBILE FOOTER (phone/tablet): while NavBharatAI Pro v5.0 is open on a phone or tablet, the app's bottom bar shows v5.0's OWN six buttons — History (the session-history list as a bottom sheet), Pro Chat (back to the chat), Preview (the live preview), Files (the files v5.0 built — tap a file for Open in Code Studio / Copy file / Copy path / Delete, and Delete is REAL: the file is removed from the durable workspace too, it never comes back on reload), Report (downloads the real build report JSON), and More (Framework picker, Diff, Terminal, Checkpoints, Report history, GitHub, Deploy, Live site, New chat). The v5.0 header on mobile is slim — just the title, framework icon, build stamp and the Stop/Resume button. On desktop everything stays in the header exactly as before. Also: once you open the Preview it now STAYS alive when you switch tabs or go back to chat — switching away no longer destroys the rendered preview.
 • RESPONSIVE PREVIEW (device views): the Preview toolbar has four viewport buttons — Auto, Mobile, Tablet, Desktop — that work on BOTH previews (the In-browser build and the Live server). These are REAL, not labels: picking Mobile renders your app at a true phone width (390px) so its OWN responsive CSS / media-query breakpoints actually switch to the mobile layout; Tablet is 768px and Desktop is 1280px. Auto fills the panel (default). A device wider than the panel is scaled down to fit while still laying out at the true device width, so what you see is exactly how the app responds at that size — the fastest way to check your app looks right on phone, tablet and desktop without leaving the preview.
 • TERMINAL after a restart: if the live sandbox went to sleep (server restart / idle), the Terminal tab tells you honestly that the workspace is dormant and your saved files are safe — send a message in v5.0 chat to bring the sandbox back online, then the terminal works again (it never fakes output or shows a dead-end).
-• FILE UNDERSTANDING: attach any file with the paperclip button next to the message box — images, PDFs, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), ZIP archives, and any text/code file (you can also paste a screenshot). v5.0 reads it and can analyze it or build from it. Documents are read for free on the server; images/PDFs are read by the cheap vision models (Gemini/Grok) by default, and by Claude only when you turn on Power mode — so reading files never costs build-grade money.
-• HONEST billing: normal builds are charged the Sonnet-equivalent token cost × 1.2 (× 3 if Sonnet itself runs); Power/Opus builds are charged the REAL Opus token cost × 2. You never see which provider actually ran; a live cost estimate is shown.
+• FILE UNDERSTANDING: attach any file with the paperclip button next to the message box — images, PDFs, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), ZIP archives, and any text/code file (you can also paste a screenshot). v5.0 reads it and can analyze it or build from it. Documents are read for free on the server; images/PDFs are read by NavBharatAI's economy vision engine by default, and by the top engine only when you turn on Power mode — so reading files never costs build-grade money.
+• HONEST billing: you are charged for the real work each build does — the everyday tiers cost the least, and the top "Power" tiers cost more because they run the most capable engine. You never see which provider actually ran; a live cost estimate is shown before and a real charge after.
 • BUDGET REACHED / CONTINUE: a very large build can hit its per-build budget cap. When that happens v5.0 does NOT fail or silently keep spending — it PAUSES honestly, saves your files, and shows a calm "budget reached — Continue building" state with a Continue button. Clicking Continue resumes the same build with a fresh budget window (it uses more of your balance); you can also just stop there. This is separate from running out of wallet balance (which blocks new paid builds until you recharge).
-• COST BREAKDOWN ("Why this cost?"): after a billed build, a "Why this cost?" toggle appears next to the ₹ amount in the result footer — expand it to see exactly how the charge was computed: your input/output token split, the tier that ran, the base (Sonnet-equivalent or real-Opus) cost, the markup multiplier applied, and the final USD → ₹. Free builds show no charge to explain.`,
-    howToUse: 'Open it from the floating "v5.0" button (bottom-right) or from the menu (Pro v5.0) — when opened from the menu it appears as a "NavBharatAI Pro v5.0" tab in the top header, alongside your other open tabs. Type what you want to build, and press Send. To analyze or build from a file, click the paperclip next to the message box and attach images, PDFs, Word/Excel/PowerPoint, ZIP, or text/code files (or paste a screenshot) — then ask your question. Open the build-options menu (the sliders icon on the left of the message box) to toggle Planning, Thinking, or Power (the Opus max-capability mode, billed at real Opus cost × 2 — also makes Claude read attached images). The live surfaces — Preview / Files / Diff / Terminal / History — are tab pills in the header: tap one to open that workspace beside the chat (it takes over the screen on mobile), and tap it again (or the ✕) to collapse back to full-width chat. Press Stop to cancel.',
+• COST BREAKDOWN ("Why this cost?"): after a billed build, a "Why this cost?" toggle appears next to the ₹ amount in the result footer — expand it to see exactly how the charge was computed: your input/output token split, the tier that ran, the base cost for that tier, the markup applied, and the final USD → ₹. Free builds show no charge to explain.`,
+    howToUse: 'Open it from the sidebar menu → "App Builder v5.0" (or from Professionals → the "NavBharatAI Pro v5.0" card) — it then appears as a "NavBharatAI Pro v5.0" tab in the top header, alongside your other open tabs. Type what you want to build, and press Send. To analyze or build from a file, click the paperclip next to the message box and attach images, PDFs, Word/Excel/PowerPoint, ZIP, or text/code files (or paste a screenshot) — then ask your question. Open the build-options menu (the sliders icon on the left of the message box) to toggle Planning, Thinking, or Power (the maximum-capability mode — bills more because it runs the top engine, and also uses that engine to read attached images). The live surfaces — Preview / Files / Diff / Terminal / History — are tab pills in the header: tap one to open that workspace beside the chat (it takes over the screen on mobile), and tap it again (or the ✕) to collapse back to full-width chat. Press Stop to cancel.',
     relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],
     aiSurface: 'engineer_ai',
     keywords: [
@@ -442,9 +442,9 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'agentv3_export',
     name: 'Export project (.zip) — your code, no lock-in',
-    path: 'NavBharatAI Pro v5.0 → header tab row → "Export .zip" button',
-    description: 'Download your entire v5.0 project as a real .zip file that you fully own. It contains the source files (generated folders like node_modules, dist and .git are excluded so it stays the clean source). Open it in any code editor (VS Code, etc.) or host it on any provider — there is no lock-in. The zip is built right in your browser from the live project files.',
-    howToUse: 'Open NavBharatAI Pro v5.0 and build or open a project. In the tab row at the top of the builder, click "Export .zip". The download starts automatically once the project files are packaged.',
+    path: 'NavBharatAI Pro v5.0 → Files tab → "ZIP" button (top of the file list)',
+    description: 'Download your entire v5.0 project as a real .zip file that you fully own. It contains the source files (generated folders like node_modules, dist and .git are excluded so it stays the clean source). Open it in any code editor (VS Code, etc.) or host it on any provider — there is no lock-in. The zip is packaged by the server (/api/download-zip) from your live project files, then the download starts automatically; a failure shows an honest "Download failed — try again" instead of a silent stall.',
+    howToUse: 'Open NavBharatAI Pro v5.0 and build or open a project, then open the Files tab (or the sidebar Files view). At the top of the file list, tap the "ZIP" button — the whole project downloads as a .zip. (After a deploy you can also download the ZIP from the deploy card in the chat.)',
     relatedFeatures: ['agentv3_builder'],
     keywords: ['export', 'download', 'zip', 'download project', 'export code', 'download code', 'my code', 'source code', 'no lock-in', 'portability', 'take my code', 'code nikalo', 'project download', 'download karo', 'zip nikalo', 'apna code'],
     aiSurface: 'nbi_chat',
@@ -452,9 +452,9 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'agentv3_zip_import',
     name: 'Import an existing app (.zip) into v5.0',
-    path: 'NavBharatAI Pro v5.0 → chat composer → 📎 attach → pick your app\'s .zip → send',
+    path: 'NavBharatAI Pro v5.0 → chat composer → 📎 attach menu → "Import project (.zip)" → pick your app\'s .zip (it imports immediately — no send needed)',
     description: 'Bring an app you already built (exported from any tool — Lovable, Bolt, v0, VS Code, or an earlier NavBharatAI export) into NavBharatAI Pro v5.0 by attaching its .zip in the chat. The archive is really unpacked into your workspace: the files appear in the Files tab and Code Studio (IDE), the framework (React/Vite, Next.js, Vue, …) is detected from package.json and locked to the session, the live preview is set up automatically in the background (npm install + dev server), and the AI reads the real project so your first edit request works with full context. Full-stack apps that need a database get a local PostgreSQL provisioned in the sandbox plus a dev .env (so the server boots instead of crashing on a missing DATABASE_URL); external paid services (payments, third-party APIs) can\'t be provisioned, so those features stay inactive until you add real keys in Settings → Secrets — the preview is honest about that. Small images, icons and fonts (logos/favicons, ≤200KB each) are kept as real assets so the preview isn\'t full of broken images; large media/binaries are skipped. Safety: node_modules/build folders are skipped (re-created by install), and secret files (.env, keys) are never imported — re-enter your own secrets (the app\'s expected variable names are surfaced from its .env template). Per-file limit 900KB, up to 2000 files.',
-    howToUse: 'Open NavBharatAI Pro v5.0, tap the 📎 paperclip in the chat box, choose your app\'s .zip and send (with or without a message). Watch the import summary appear in chat; your files show in the Files tab and the IDE, and the preview boots in the background. Then simply tell v5.0 what to change.',
+    howToUse: 'Open NavBharatAI Pro v5.0, tap the 📎 attach button in the chat box, choose "Import project (.zip)", and pick your app\'s .zip — it imports right away (no send needed). Watch the import summary appear in chat; your files show in the Files tab and the IDE, and the preview boots in the background. Then simply tell v5.0 what to change.',
     relatedFeatures: ['agentv3_builder', 'agentv3_export', 'agentv3_files'],
     keywords: ['import', 'import app', 'import zip', 'zip upload', 'upload zip', 'existing app', 'purani app', 'apni app', 'app import karo', 'zip se app', 'zip dalo', 'bring my app', 'migrate app', 'lovable', 'bolt', 'v0', 'edit my existing app', 'meri bani hui app', 'zip import'],
     aiSurface: 'nbi_chat',
@@ -462,9 +462,9 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'agentv3_github_import',
     name: 'Import an existing app from GitHub into v5.0',
-    path: 'NavBharatAI Pro v5.0 → chat composer → options (⚙) → "GitHub / URL" → pick a repo from your list (1 click) or paste a URL',
+    path: 'NavBharatAI Pro v5.0 → chat composer → the gear "Build options" (⚙) button → "Import Repo" (GitHub / URL) → pick a repo from your list (1 click) or paste a URL',
     description: 'Bring an app that lives in a GitHub repository into NavBharatAI Pro v5.0 with ONE click: the Import Project dialog lists your own repositories (recently updated first, searchable, private repos marked) — clicking one imports it immediately. Not connected yet? A single "Connect GitHub" button signs you in and approves access (private repos included), then you land back on the list. The repo is really cloned into your workspace and lands the same way a zip import does — files appear in the Files tab and Code Studio (IDE), the framework is detected from package.json and locked to the session, the live preview is set up automatically in the background, and the AI reads the real project and gives a survey before your first edit request. You can also paste any https://github.com/owner/repo URL (e.g. someone else\'s public repo). The SAME dialog has an Import / Push toggle: switch to "Push" and click one of your repos to publish your CURRENT app to it (a new repo is created automatically if it does not exist). Push is safe — secrets like .env and service-account files are never sent, and if the repo already has newer commits you are asked to import first instead of overwriting your work.',
-    howToUse: 'Open NavBharatAI Pro v5.0 → tap the options (⚙) button next to the chat box → "GitHub / URL". If asked, click "Connect GitHub" once. Then simply click the repository you want — the import, Files/IDE, preview boot and AI survey all happen automatically. Or paste a repo URL below the list and press Import.',
+    howToUse: 'Open NavBharatAI Pro v5.0 → tap the gear "Build options" (⚙) button next to the chat box → "Import Repo". If asked, click "Connect GitHub" once. Then simply click the repository you want — the import, Files/IDE, preview boot and AI survey all happen automatically. Or paste a repo URL below the list and press Import.',
     relatedFeatures: ['agentv3_builder', 'agentv3_zip_import', 'agentv3_files', 'agentv3_ship_to_main'],
     keywords: ['github import', 'import from github', 'repo import', 'clone repo', 'github url', 'import repository', 'github se app', 'repo se import', 'apni github app', 'private repo', 'github wali app', 'repository import karo'],
     aiSurface: 'nbi_chat',
@@ -521,12 +521,12 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
   {
     id: 'agentv3_build_report',
-    name: 'Download build diagnostics report (every issue v5.0 hit)',
-    path: 'NavBharatAI Pro v5.0 → header tab row → "Build report" button',
-    description: 'A self-diagnostics report of your LAST build: a structured, technical list of every issue NavBharatAI Pro v5.0 ran into while building your app — whether it auto-recovered or not. The report leads with a plain-language ROOT CAUSE line (the single most important sentence — no hunting through hundreds of entries) and a noise-free "Problems" list (only real warnings/errors — every routine tool-call/heartbeat/progress-narration line is excluded from the default view, and an identical entry repeated back-to-back is collapsed into one line with a ×N count instead of bloating the report). It captures provider fallbacks (e.g. Claude to Haiku), failed tool calls, "replied without building" nudges, readiness-gate blockers, sandbox problems and runtime errors, each tagged with a code, severity, and whether it was auto-resolved or remained unresolved. It also includes a full "AI Diagnosis Bundle": the raw sandbox command logs (npm install / tsc / vite build / dev-server stdout, stderr and exit codes), every model turn\'s input/output shape (model, finish reason, token counts, latency, and whether the response was truncated), and the complete un-truncated error messages with stack traces — the signals that explain most "the app generated but won\'t run" failures. A "Report history" button lets you browse and reopen PAST builds\' reports too — so a small, quick recent build (an edit, a retry) never permanently hides a previous, richer report; each past entry shows its timestamp, ok/fail status and root cause at a glance. Click "Build report" in the v5.0 header to download the full report as a JSON file, "Text report" for the SAME report as a readable plain-text document (root cause first, problems only, plus the full sandbox/LLM/reviewer detail — easier to read than JSON), or "Copy report" for a readable summary (root cause + problems) plus the full JSON, ready to paste into a support chat.',
-    howToUse: 'Build an app in NavBharatAI Pro v5.0. Then click "Build report" for JSON, "Text report" for a readable .txt document, or "Copy report" to copy a readable summary + the full JSON to your clipboard and paste it straight into a support chat (no download/upload needed). Click "Report history" to browse past builds\' reports and reopen one — download/copy then apply to THAT build instead of the latest one; "Back to latest report" returns to the current build. The build report is saved together WITH the chat itself (embedded in the same durable conversation record), so reopening that conversation from History always brings its Build report back with it — it is never lost, even after a very long build whose live connection dropped. The latest report is also saved durably per workspace (survives a page reload), and past reports are kept in a bounded history so a later small build never destroys access to one you already had.',
+    name: 'Report a build to NavBharatAI (admin-only report)',
+    path: 'NavBharatAI Pro v5.0 → header tab row → "Report" button',
+    description: 'A build\'s diagnostics report is now sent to the NavBharatAI team, not shown to you. After a build, a single "Report" button appears in the v5.0 header (and in the mobile More sheet). Tapping it submits that build\'s full diagnostics report — root cause, problems, sandbox/LLM detail — to NavBharatAI so the team can review it and improve the build engine. You see only a short "Report sent" acknowledgement; the report content itself is not shown, downloaded or copied to you (admin 2026-07-29). This keeps engine internals private and is why the download/copy/report-history options were removed. The report is still saved durably server-side for the team.',
+    howToUse: 'Build an app in NavBharatAI Pro v5.0, then tap "Report" in the tab row at the top (or More → Report on mobile). You will see "Report sent" — that build\'s report has gone to the NavBharatAI team. There is nothing to download or read; the team reviews reports to make builds better.',
     relatedFeatures: ['agentv3_builder', 'agentv3_files', 'agentv3_export'],
-    keywords: ['build report', 'diagnostics', 'diagnostic report', 'issues', 'errors report', 'download report', 'self diagnose', 'build issues', 'kya dikkat aayi', 'report download', 'json report', 'struggle', 'build log', 'issue list', 'technical report', 'sandbox logs', 'npm install error', 'stack trace', 'llm logs', 'raw logs', 'diagnosis bundle', 'why failed', 'kyu fail hua', 'copy report', 'report empty', 'report khali', 'build report blank', 'root cause', 'problems only', 'report history', 'past build report', 'purani report', 'previous report gone', 'text report', 'readable report', 'txt report', 'report saved', 'report save nahi hui', 'report gayab', 'report missing', 'report not saved', 'report lost', 'report permanently', 'report with chat', 'reopen report'],
+    keywords: ['build report', 'report', 'report button', 'send report', 'report to team', 'report bhejo', 'report kaise', 'diagnostics', 'build issues', 'kya dikkat aayi', 'why failed', 'kyu fail hua', 'report sent', 'report admin', 'feedback', 'report a build', 'support'],
     aiSurface: 'nbi_chat',
   },
   {
@@ -541,10 +541,10 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   },
   {
     id: 'agentv3_deploy',
-    name: 'Deploy to a live URL (one click)',
-    path: 'NavBharatAI Pro v5.0 → header tab row → "Deploy" button (the live link then shows as "Live site")',
-    description: 'Publish your built app to a PERMANENT public URL with one click. The "Deploy" button runs the production build and publishes the app, returning a real https URL that anyone can open and that STAYS LIVE even after the cloud sandbox stops. NO LOCK-IN: NavBharatAI supports MULTIPLE hosting providers — Firebase Hosting (always available) plus Cloudflare Pages, Vercel and Netlify (and more) when their API token is configured by the admin. When more than one is available, a small chooser next to the Deploy button lets you pick WHERE to deploy. Once deployed, a "Live site" link appears in the same header row — click it to open your live app, or share the URL with anyone. The live link is saved, so it comes back even after you refresh or return in a new session. (A custom domain like yourname.com is a separate upcoming feature — the provider URL is already permanent and shareable.)',
-    howToUse: 'Build an app in NavBharatAI Pro v5.0, then click "Deploy" in the tab row at the top. v5.0 builds and publishes it; watch the progress in the chat. When it finishes, click the "Live site" link that appears to open your permanent public URL, and share that URL with anyone.',
+    name: 'Publish to a live URL (one click)',
+    path: 'NavBharatAI Pro v5.0 → header action row → "Publish" button (opens the Hosting chooser; the live link then shows as "Live site")',
+    description: 'Publish your built app to a PERMANENT public URL. The "Publish" button opens a Hosting chooser — host free on NavBharatAI, or bring your own provider (no lock-in) — then runs the production build and publishes, returning a real https URL that anyone can open and that STAYS LIVE even after the cloud sandbox stops. Providers: Firebase Hosting (always available) plus Cloudflare Pages, Vercel and Netlify (and more) when their API token is configured by the admin. Once published, a "Live site" link appears in the same row — click it to open your live app, or share the URL with anyone. The live link is saved, so it comes back even after you refresh or return in a new session. To put it on your own domain, use Settings → App Settings → Domain.',
+    howToUse: 'Build an app in NavBharatAI Pro v5.0, then click "Publish" in the action row at the top (on mobile it is in the More sheet). Pick where to host in the chooser; v5.0 builds and publishes it — watch the progress in the chat. When it finishes, click the "Live site" link that appears to open your permanent public URL, and share that URL with anyone.',
     relatedFeatures: ['agentv3_builder', 'agentv3_preview', 'agentv3_export'],
     keywords: ['deploy', 'publish', 'go live', 'live url', 'public url', 'host', 'hosting', 'share app', 'live site', 'make it live', 'put online', 'deploy karo', 'live karo', 'publish karo', 'app live', 'website live', 'permanent url', 'share link', 'firebase hosting', 'cloudflare', 'cloudflare pages', 'vercel', 'netlify', 'hosting provider', 'kahan deploy', 'no lock-in', 'launch'],
     aiSurface: 'nbi_chat',
@@ -563,7 +563,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     id: 'agentv3_github_storage',
     name: 'Save apps to your own GitHub (git-native)',
     path: 'Sign in with GitHub → build in NavBharatAI Pro v5.0 → your project is committed to a private repo in YOUR GitHub account',
-    description: 'When you sign in with GitHub, NavBharatAI Pro v5.0 stores each project as a real private repo in YOUR OWN GitHub account (not on our servers). Every build commits there, so your code is durable and 100% owned by you — no lock-in. It works like Claude Code: the build is pushed to a branch, a pull request is opened, CI is checked, and the PR is merged only when checks are green (never merged red). Users who sign in with Email/Phone instead get the same durability via a private repo in the platform GitHub org behind the scenes. Requires GitHub git-native storage to be enabled by the admin.',
+    description: 'When you sign in with GitHub, NavBharatAI Pro v5.0 stores each project as a real private repo in YOUR OWN GitHub account (not on our servers). Every build commits there, so your code is durable and 100% owned by you — no lock-in. It works like a professional git workflow: the build is pushed to a branch, a pull request is opened, CI is checked, and the PR is merged only when checks are green (never merged red). Users who sign in with Email/Phone instead get the same durability via a private repo in the platform GitHub org behind the scenes. Requires GitHub git-native storage to be enabled by the admin.',
     howToUse: 'Click "Continue with GitHub" on the login screen and approve the repo permissions. Then build normally in NavBharatAI Pro v5.0 — the builder creates/uses a private repo in your GitHub for the project and commits every build to it. Open your GitHub to see the repo, branches, pull requests and merges.',
     relatedFeatures: ['agentv3_builder', 'agentv3_export', 'login_auth'],
     keywords: ['github', 'github storage', 'my github', 'save to github', 'git', 'repo', 'repository', 'commit', 'pull request', 'pr', 'ci', 'merge', 'own code', 'no lock-in', 'github me save', 'github par', 'apni github', 'git native', 'version control'],
@@ -617,7 +617,7 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
 • CHECKPOINTS code before every edit so you can roll back any change instantly.
 • MULTI-STEP PLANS: breaks large tasks into named steps, shows live progress.
 • SELF-REVIEWS edits with a focused pass to catch missing imports and logic bugs.`,
-    howToUse: 'Open Engineer AI, describe what you want to build in any language. Watch the live preview as it builds. Use the Files, Preview, and Terminal tabs to inspect the workspace.',
+    howToUse: 'Engineer AI is retired — its app-building is now NavBharatAI Pro v5.0. Open "App Builder v5.0" from the sidebar (or the "NavBharatAI Pro v5.0" card under Professionals), describe what you want to build in any language, and watch the live preview as it builds. Use the Files, Preview, Diff and Terminal tabs to inspect the workspace.',
     relatedFeatures: ['engineer_ai_deploy', 'engineer_ai_github', 'settings_database', 'settings_secrets', 'history'],
     aiSurface: 'engineer_ai',
     keywords: [
@@ -629,20 +629,20 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
   },
   {
     id: 'engineer_ai_deploy',
-    name: 'Engineer AI — Deploy to Firebase Hosting',
-    path: 'Engineer AI chat → type "deploy" or the agent calls deploy automatically',
-    description: 'Deploys the built app to a permanent public Firebase Hosting URL. Works for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Returns a live URL that survives sandbox restarts. For Node/Python backends, Engineer AI exposes the live dev-server URL directly (no separate deploy needed).',
-    howToUse: 'Say "deploy" in the Engineer AI chat after the app is built, or Engineer AI will call deploy automatically when the task is complete.',
+    name: 'Deploy to Firebase Hosting (NavBharatAI Pro v5.0)',
+    path: 'NavBharatAI Pro v5.0 → "Publish" → host on NavBharatAI (Firebase Hosting)',
+    description: 'Deploys the built app to a permanent public Firebase Hosting URL. (Engineer AI is retired — app building + deploy is now NavBharatAI Pro v5.0.) Works for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Returns a live URL that survives sandbox restarts. For Node/Python backends, the live server preview is exposed directly.',
+    howToUse: 'Build an app in NavBharatAI Pro v5.0, then tap "Publish" in the action row and choose "host on NavBharatAI" (Firebase Hosting) — it builds and returns a permanent live URL.',
     relatedFeatures: ['engineer_ai', 'settings_database'],
     aiSurface: 'engineer_ai',
     keywords: ['deploy', 'deployment', 'firebase hosting', 'live url', 'publish', 'hosting', 'public url', 'permanent link'],
   },
   {
     id: 'engineer_ai_github',
-    name: 'Engineer AI — GitHub Clone & Push',
-    path: 'Engineer AI chat → describe cloning a repo or pushing code',
-    description: 'Engineer AI can clone any GitHub repository into the sandbox and push code back. Uses GITHUB_TOKEN from Settings → Secrets & Keys for private repos. Supports: clone_repo (import an existing codebase) and git_push (commit + push all changes to the repo).',
-    howToUse: 'Tell Engineer AI "clone my repo at github.com/..." or "push the code to GitHub". Store your GITHUB_TOKEN in Settings → Secrets & Keys first.',
+    name: 'GitHub Clone & Push (NavBharatAI Pro v5.0)',
+    path: 'NavBharatAI Pro v5.0 → gear "Build options" → "Import Repo" (clone) / the "Push" toggle (push back) / "Ship to main"',
+    description: 'Clone any GitHub repository into your workspace and push code back — now handled by NavBharatAI Pro v5.0 (Engineer AI is retired). Import a repo from the "Import Repo" dialog; publish your current app to a repo via the same dialog\'s Push toggle; and, for a repo you own, edit and "Ship to main" (CI-gated merge). Private repos use your connected GitHub or a GITHUB_TOKEN from Settings → App Settings → Secrets & API Keys.',
+    howToUse: 'In NavBharatAI Pro v5.0, open the gear "Build options" → "Import Repo" to clone, use the Import/Push toggle to publish to a repo, or "Ship to main" to merge your own repo. Connect GitHub once, or store a GITHUB_TOKEN in Settings → App Settings → Secrets & API Keys for private repos.',
     relatedFeatures: ['engineer_ai', 'settings_secrets'],
     aiSurface: 'engineer_ai',
     keywords: ['github', 'clone', 'git push', 'repo', 'repository', 'version control', 'push code', 'github token'],
@@ -1219,8 +1219,8 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
     id: 'coding_ai',
     name: 'Coding & Programming Tutor AI',
     path: 'Sidebar → Professionals → Coding & Programming Tutor',
-    description: 'Patient PERSONAL mentor that TEACHES coding & computer science (beginner to intermediate) — takes an intake (your level, languages known, learning goal, weak areas) and, for signed-in users, REMEMBERS you to teach at your exact level over time. Distinct from the Engineer AI (which autonomously builds full apps); here the goal is the learner\'s understanding & skill: learn-to-code (choosing a first language like Python/JavaScript, core concepts — variables, types, conditionals, loops, functions, lists/dicts, OOP basics with examples & exercises), explaining code line-by-line, debugging (teaching the process & WHY it broke, not just the fix), data structures & algorithms + Big-O (placements/interviews, approach-first), projects & practice roadmaps & code review, and web/dev basics + Git/GitHub & good habits. Teaching/honesty: builds understanding not copy-paste (hints & feedback over full solutions; discourages cheating on graded work), accurate & careful (says when unsure, suggests testing/official docs as languages/libraries change), never fabricates APIs/library functions/outputs, refuses malware/harmful code; for building & deploying a full real app points to the Engineer AI.',
-    howToUse: 'Open Sidebar → Professionals → Coding & Programming Tutor and ask: "how do I start learning to code", "explain this code/concept", "help me debug my code", "a roadmap for DSA/placements". Write & test code yourself to learn; to build a full app use the Engineer AI.',
+    description: 'Patient PERSONAL mentor that TEACHES coding & computer science (beginner to intermediate) — takes an intake (your level, languages known, learning goal, weak areas) and, for signed-in users, REMEMBERS you to teach at your exact level over time. Distinct from NavBharatAI Pro v5.0 (which autonomously builds full apps); here the goal is the learner\'s understanding & skill: learn-to-code (choosing a first language like Python/JavaScript, core concepts — variables, types, conditionals, loops, functions, lists/dicts, OOP basics with examples & exercises), explaining code line-by-line, debugging (teaching the process & WHY it broke, not just the fix), data structures & algorithms + Big-O (placements/interviews, approach-first), projects & practice roadmaps & code review, and web/dev basics + Git/GitHub & good habits. Teaching/honesty: builds understanding not copy-paste (hints & feedback over full solutions; discourages cheating on graded work), accurate & careful (says when unsure, suggests testing/official docs as languages/libraries change), never fabricates APIs/library functions/outputs, refuses malware/harmful code; for building & deploying a full real app points to NavBharatAI Pro v5.0.',
+    howToUse: 'Open Sidebar → Professionals → Coding & Programming Tutor and ask: "how do I start learning to code", "explain this code/concept", "help me debug my code", "a roadmap for DSA/placements". Write & test code yourself to learn; to build a full app use NavBharatAI Pro v5.0.',
     relatedFeatures: ['professionals', 'engineer_ai', 'teacher_ai'],
     aiSurface: 'coding_ai',
     keywords: ['coding', 'programming', 'code', 'python', 'javascript', 'java', 'learn to code', 'dsa', 'algorithm', 'debug', 'developer', 'placement', 'coding tutor', 'leetcode', 'web development', 'remembers me', 'personal mentor'],
@@ -1543,8 +1543,8 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
     id: 'repo_analyst',
     name: 'GitHub Repo Analyst & Improver AI',
     path: 'Sidebar → Professionals → GitHub Repo Analyst & Improver',
-    description: 'Expert that analyses PUBLIC GitHub repositories for real (read-only) and gives an honest, actionable report & improvement plan: paste a public repo URL (or owner/repo) and it fetches the actual repo — metadata, license, languages, README, file tree & key files — then reports the overview & tech stack, strengths (good patterns to learn from), gaps/weaknesses (missing tests/docs/CI/error handling/structure), visible security & quality flags (noted as a partial view), the license & what it permits, and a prioritised improvement plan with short adoptable code snippets. License-respecting ("copy good things" = LEARN patterns & write your own original code, comply with & attribute per the actual LICENSE — MIT/Apache vs GPL-copyleft vs no-license/default-copyright; general info, not legal advice). Honesty: works only from the real fetched content (says when files/tree are truncated or missing, never invents repo contents/metrics/vulnerabilities); analyses & ADVISES only — cannot push changes to repos you don\'t own (no write access), so "improve" = the plan/guidance/snippets for you to apply in your own fork (suggests Engineer AI to build it out). Works on public repos without a token (rate-limited); handles not-found/private/rate-limit gracefully.',
-    howToUse: 'Open Sidebar → Professionals → GitHub Repo Analyst & Improver and paste a public GitHub repo URL (or owner/repo), then ask: "analyse this repo", "strengths & gaps?", "security/quality issues you can see?", "a prioritised improvement plan". It fetches and analyses the real repo (read-only). To then build the improvements, use the Engineer AI.',
+    description: 'Expert that analyses PUBLIC GitHub repositories for real (read-only) and gives an honest, actionable report & improvement plan: paste a public repo URL (or owner/repo) and it fetches the actual repo — metadata, license, languages, README, file tree & key files — then reports the overview & tech stack, strengths (good patterns to learn from), gaps/weaknesses (missing tests/docs/CI/error handling/structure), visible security & quality flags (noted as a partial view), the license & what it permits, and a prioritised improvement plan with short adoptable code snippets. License-respecting ("copy good things" = LEARN patterns & write your own original code, comply with & attribute per the actual LICENSE — MIT/Apache vs GPL-copyleft vs no-license/default-copyright; general info, not legal advice). Honesty: works only from the real fetched content (says when files/tree are truncated or missing, never invents repo contents/metrics/vulnerabilities); analyses & ADVISES only — cannot push changes to repos you don\'t own (no write access), so "improve" = the plan/guidance/snippets for you to apply in your own fork (suggests NavBharatAI Pro v5.0 to build it out). Works on public repos without a token (rate-limited); handles not-found/private/rate-limit gracefully.',
+    howToUse: 'Open Sidebar → Professionals → GitHub Repo Analyst & Improver and paste a public GitHub repo URL (or owner/repo), then ask: "analyse this repo", "strengths & gaps?", "security/quality issues you can see?", "a prioritised improvement plan". It fetches and analyses the real repo (read-only). To then build the improvements, use NavBharatAI Pro v5.0.',
     relatedFeatures: ['professionals', 'engineer_ai', 'coding_ai'],
     aiSurface: 'repo_analyst',
     keywords: ['github', 'repo', 'repository', 'analyse', 'analyze', 'code review', 'open source', 'improve repo', 'audit', 'codebase', 'project review', 'github url', 'license', 'repo analyst'],
@@ -1553,30 +1553,29 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',
-    name: 'NavBharatAI Pro Chat',
-    path: 'Home → Pro Chat button  OR  Header → Pro Chat tab',
-    description: `The Pro app-maker chat with three modes:
-• CONVERSATION mode — discuss ideas, plan features, ask questions. The AI answers but does NOT build yet.
-• BUILD mode — describe an app, click Build, and it generates a complete working HTML/CSS/JS app in seconds, shown live on the canvas.
-• CANVAS EDIT mode — when an app is already on the canvas, ask to change it and the AI patches the code precisely, preserving everything you didn't ask to change.
-Also supports: file attachments (text, code), image analysis (vision), and PDF reading.`,
-    howToUse: 'From Home, click Pro Chat. Type your app idea and click Build to generate the app. Once it appears on the canvas, ask follow-up changes directly.',
+    name: 'NavBharatAI Pro (App Builder chat)',
+    path: 'Home → "NavBharatAI Pro" card → "Open Pro Builder"  OR  Sidebar menu → "App Builder v5.0"',
+    description: `NavBharatAI Pro is the agentic app-builder chat (now NavBharatAI Pro v5.0). You:
+• CONVERSATION — discuss ideas, plan features, ask questions (use the Plan/Advise modes for read-only planning).
+• BUILD — describe an app and it plans, codes, previews and ships a complete real project (not just a single HTML canvas).
+• EDIT — once an app exists, ask to change it and it patches precisely, preserving everything you didn't ask to change.
+Also supports: file attachments (text, code, .zip project import), image analysis (vision), and PDF reading.`,
+    howToUse: 'From Home, open the "NavBharatAI Pro" card and tap "Open Pro Builder" (or pick "App Builder v5.0" from the sidebar menu). Type your app idea and send to build; once it appears, ask follow-up changes directly.',
     relatedFeatures: ['free_chat', 'ide', 'engineer_ai'],
     aiSurface: 'pro_chat',
     keywords: ['pro chat', 'pro', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
   },
   {
     id: 'unified-workspace',
-    name: 'Unified Workspace — Chat + Live Code + Preview (Phase 3.1)',
-    path: 'Pro Chat → build an app → live workspace docks on the right (desktop)',
-    description: `World-class "Chat IS the IDE" surface, like Cursor / Bolt / v0 / Lovable. Once an app exists, a live workspace panel docks to the RIGHT of the Pro Chat conversation so you never switch tabs while building:
-• PREVIEW tab — the running app, live, updating as the AI edits files.
-• CODE tab — a file list + full Monaco editor; edit any file directly, changes sync instantly.
-• STUDIO button — opens the full Code Studio IDE for power users.
-• DEPLOY button — one-click deploy straight from the workspace.
-• "Hide app" / "Show app" toggle in the chat header collapses or restores the workspace.
-On mobile the chat stays full-width and Preview/Code remain separate tabs (via the Preview-ready banner). The workspace appears automatically after the first successful build.`,
-    howToUse: 'Open Pro Chat and build any app. On desktop, the live workspace appears on the right automatically. Switch between Preview and Code tabs at the top of that panel. Edit files directly in the Code tab. Use "Hide app" in the chat header to focus on the conversation, "Show app" to bring it back.',
+    name: 'Unified Workspace — Chat + Live Code + Preview',
+    path: 'NavBharatAI Pro v5.0 → build an app → the workspace tabs (Preview / Files / Diff) open beside the chat',
+    description: `World-class "Chat IS the IDE" surface, like Cursor / Bolt / v0 / Lovable — built into NavBharatAI Pro v5.0. Once an app exists, the workspace opens beside the chat as header tabs so you never lose your place while building:
+• PREVIEW tab — the running app, live, updating as the AI edits files (dual: Live server + In-browser, with Diagnose).
+• FILES tab — the whole file tree; open any file to read/edit it in Code Studio, download the project as a ZIP, upload, rename, delete, or restore an earlier version from History.
+• DIFF tab — see exactly what changed in the last build.
+• PUBLISH — one-click deploy straight from the action row (the Hosting chooser).
+Tap a tab to open that surface (it takes over the screen on mobile); tap it again (or ✕) to collapse back to full-width chat. The workspace stays alive when you switch tabs and comes back after a reload.`,
+    howToUse: 'Open NavBharatAI Pro v5.0 and build any app. The workspace tabs (Preview / Files / Diff) open beside the chat — tap one to open that surface, tap again (or ✕) to collapse back to full-width chat. Open a file to edit it in Code Studio.',
     relatedFeatures: ['pro_chat', 'ide', 'auto-test-generation', 'build-version-history'],
     aiSurface: 'pro_chat',
     keywords: [
@@ -1588,10 +1587,10 @@ On mobile the chat stays full-width and Preview/Code remain separate tabs (via t
   },
   {
     id: 'pro_chat_file_upload',
-    name: 'Pro Chat — File & Image Upload',
-    path: 'Pro Chat → paperclip / attachment icon in the chat input',
-    description: 'Upload files to Pro Chat for AI analysis. Supported: images (PNG, JPG, WebP — visual analysis and description), PDFs (full text extraction and Q&A), text/code files (review, explain, modify).',
-    howToUse: 'Click the attachment icon in Pro Chat, select a file, then type your question about it.',
+    name: 'NavBharatAI Pro — File & Image Upload',
+    path: 'NavBharatAI Pro v5.0 → paperclip / attachment (📎) icon in the chat input',
+    description: 'Upload files to NavBharatAI Pro v5.0 for AI analysis. Supported: images (PNG, JPG, WebP — visual analysis and description), PDFs (full text extraction and Q&A), text/code files (review, explain, modify), and .zip project import.',
+    howToUse: 'Click the attachment (📎) icon in NavBharatAI Pro v5.0, select a file, then type your question about it.',
     relatedFeatures: ['pro_chat', 'free_chat_file_analysis'],
     aiSurface: 'pro_chat',
     keywords: ['upload file', 'attach file', 'pdf', 'image upload', 'file attachment', 'vision', 'analyze image', 'read pdf'],
@@ -1601,29 +1600,31 @@ On mobile the chat stays full-width and Preview/Code remain separate tabs (via t
   {
     id: 'free_chat',
     name: 'Free Chat (NavBharatAI)',
-    path: 'Sidebar → Reports  OR  Header → Reports tab',
+    path: 'Home → "Start Free Chat"  OR  Sidebar menu → "NavBharatAI FREE"',
     description: `General-purpose AI chat. Capabilities:
 • Answers questions on any topic — science, history, coding, finance, law, etc.
 • Explains concepts in any language (Hindi, English, Hinglish, Tamil, Telugu, Bengali, Marathi, Punjabi, and more).
 • Analyzes documents (PDF/text files), describes images, reviews code.
+• GENERATES images for FREE — just ask in plain text ("generate an image of a mountain sunrise", "ek logo banao", "draw a red car") and the image appears right in the chat. No separate tool needed.
 • Remembers conversation context within a session.
 • Responds in the SAME language and tone the user writes in — Hindi reply for Hindi input, English for English, etc.
-NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
-    howToUse: 'Open Reports from the sidebar and type your question in any language.',
-    relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis'],
+NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
+    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language. To get a picture, just ask for one in plain text (e.g. "generate an image of…", "ek image banao…") — it is generated free and shown inline.',
+    relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis', 'ai_image_gen'],
     aiSurface: 'nbi_chat',
     keywords: [
-      'free chat', 'reports', 'general chat', 'ask question', 'chat', 'conversation',
+      'free chat', 'navbharatai free', 'start free chat', 'general chat', 'ask question', 'chat', 'conversation',
       'question answer', 'help', 'explain', 'kya hai', 'bataiye', 'samjhao',
-      'hindi chat', 'language', 'translate',
+      'hindi chat', 'language', 'translate', 'muft chat', 'free ai',
+      'generate image in chat', 'image banao', 'photo banao', 'make an image', 'draw', 'picture in chat', 'free image',
     ],
   },
   {
     id: 'free_chat_file_analysis',
     name: 'Free Chat — File, Image & PDF Analysis',
-    path: 'Sidebar → Reports → attachment icon in the chat input',
+    path: 'Sidebar menu → "NavBharatAI FREE" → attachment (📎) icon in the chat input',
     description: 'Attach files to the free chat for analysis. Images: visual description, object recognition, text extraction (OCR). PDFs: full text reading, summarization, Q&A. Code/text files: explanation, review, debugging help.',
-    howToUse: 'In the Free Chat (Reports), click the attachment icon, select your file, then ask your question about it.',
+    howToUse: 'In the Free Chat ("NavBharatAI FREE"), click the attachment (📎) icon, select your file, then ask your question about it.',
     relatedFeatures: ['free_chat', 'pro_chat_file_upload'],
     aiSurface: 'nbi_chat',
     keywords: ['pdf analysis', 'image analysis', 'file upload', 'attach', 'ocr', 'document', 'photo upload', 'analyze pdf', 'analyze image'],
@@ -1664,7 +1665,7 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'ide_git',
     name: 'IDE Git Panel',
     path: 'IDE → Git tab',
-    description: 'Visual git interface inside the IDE. Stage files, write commit messages, commit, push to remote, pull changes, and view the diff of modified files. Requires GITHUB_TOKEN in Secrets & Keys for GitHub operations.',
+    description: 'Visual git interface inside the IDE. Stage files, write commit messages, commit, push to remote, pull changes, and view the diff of modified files. Requires GITHUB_TOKEN in Secrets & API Keys for GitHub operations.',
     howToUse: 'Open IDE → Git tab. Stage changed files, write a commit message, and click Commit & Push.',
     relatedFeatures: ['ide', 'settings_git', 'settings_secrets'],
     keywords: ['git panel', 'git commit', 'git push', 'git pull', 'git diff', 'stage files', 'version control panel', 'ide git', 'commit code'],
@@ -1782,9 +1783,9 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   {
     id: 'nav_app_store',
     name: 'Nav App Store — publish your Android app, and install apps others made',
-    path: 'Home → Other AI → Publish & Deploy → Nav App Store',
+    path: 'Home → Other AI → Publish & Deploy → Nav App Store (or the direct link navbharatai.com/store — same as navbharatai.com/?view=appstore)',
     description: 'NavBharatAI\'s own app store. BROWSE shows every published app — tap one to read what it does, see exactly what it will be allowed to do on your phone, and download the .apk. PUBLISH lets you upload your own .apk: you fill in your name, a contact email, the app name, version, description and category, choose the file, and confirm you have the right to publish it. Publishing is FREE (₹0). MY APPS shows where each of your submissions stands. Every upload goes through the same checks, in this order: NavBharatAI first confirms the file really is a properly signed Android app (an unsigned one is refused, because no phone can install it), records its exact fingerprint, and reads the permissions it asks for; then it is scanned for malware against around 70 security engines. An app the engines call malicious is refused and never stored. An app that cannot be scanned is NOT uploaded — never published unscanned. An app that passes still does not go live: it waits for a person to check it, because malware built for one particular attack is often unknown to every engine on the day it appears. Only a NavBharatAI reviewer can publish an app. Apps that ask for sensitive permissions — reading your text messages and bank OTPs, controlling the screen, installing other apps, drawing over your bank app — are clearly marked, both for the reviewer and for anyone about to download. An app that turns out to be harmful is removed and its file deleted, not just hidden.',
-    howToUse: 'Home → Other AI → Publish & Deploy → Nav App Store. To install something: stay on Browse, tap an app, read what it can do on your phone, then tap "Download .apk" — Android will ask you to allow installs from your browser. To publish your own: open the Publish tab, fill in your details and your app\'s details, choose your .apk file, tick the confirmation, and tap "Submit my app" (the upload shows a live percentage and is sent in pieces, so the file size is no longer the blocker). The size limit shown on the form is the size that can actually be PUBLISHED — it is the smaller of the store cap and what the malware scanner can accept, because an app that cannot be scanned is never published. It is scanned straight away and then waits for a reviewer, usually a day. Watch its progress under My apps. If you built your app with NavBharatAI, get the .apk first from Other AI → Publish & Deploy → APK Builder.',
+    howToUse: 'Home → Other AI → Publish & Deploy → Nav App Store. To install something: stay on Browse, tap an app, read what it can do on your phone, then tap "Download .apk" — Android will ask you to allow installs from your browser. To publish your own: open the Publish tab, fill in your details and your app\'s details, choose your .apk file, tick the confirmation, and tap "Submit my app" (the upload shows a live percentage and is sent in pieces, so the file size is no longer the blocker). The size limit shown on the form is the size that can actually be PUBLISHED — it is the smaller of the store cap and what the malware scanner can accept, because an app that cannot be scanned is never published. It is scanned straight away and then waits for a reviewer, usually a day. Watch its progress under My apps. If you built your app with NavBharatAI, get the .apk first from Other AI → Publish & Deploy → APK Builder. SHAREABLE LINK: the store also opens directly from navbharatai.com/store (or navbharatai.com/?view=appstore) — this lands anyone straight on the public Browse tab without logging in, so it is the link to share when you want someone to see whether an app is live.',
     relatedFeatures: ['apk_builder', 'pro_chat'],
     keywords: [
       'nav app store', 'navbharat app store', 'app store', 'apna store', 'upload apk', 'publish app',
@@ -1798,7 +1799,7 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'monetization',
     name: 'Monetize — start taking money in your app',
     path: 'Home → Other AI → Monetization & Team → Monetize',
-    description: 'Adds a real, working payment button to a page of your app in three taps. FIRST you choose which app: one you built with NavBharatAI Pro, or one of your own GitHub repositories — then the page the button should go on. THEN you choose how customers pay. UPI is first and is the simplest: one field (your UPI ID), no signup, no fees, no server, and the money reaches your bank directly — but UPI cannot tell your website that a payment happened, so you check your bank app before you deliver an order, and Monetize says so plainly. Razorpay and Cashfree accept cards, netbanking and wallets and give automatic confirmation, but need an account and a small server file (which Monetize writes for you as server/payments.js). Stripe is for customers outside India; it cannot take Indian UPI. AdSense shows ads instead of charging, once Google approves your site. FINALLY it writes the button into your real page — a NavBharatAI app is saved with a restore point you can undo, a GitHub repository gets a real commit — and your keys are encrypted into Settings → Secrets & Keys, never written into your app\'s files. The generated payment code decides the price ON YOUR SERVER and verifies the payment signature there, so a customer cannot change the amount or fake a successful payment.',
+    description: 'Adds a real, working payment button to a page of your app in three taps. FIRST you choose which app: one you built with NavBharatAI Pro, or one of your own GitHub repositories — then the page the button should go on. THEN you choose how customers pay. UPI is first and is the simplest: one field (your UPI ID), no signup, no fees, no server, and the money reaches your bank directly — but UPI cannot tell your website that a payment happened, so you check your bank app before you deliver an order, and Monetize says so plainly. Razorpay and Cashfree accept cards, netbanking and wallets and give automatic confirmation, but need an account and a small server file (which Monetize writes for you as server/payments.js). Stripe is for customers outside India; it cannot take Indian UPI. AdSense shows ads instead of charging, once Google approves your site. FINALLY it writes the button into your real page — a NavBharatAI app is saved with a restore point you can undo, a GitHub repository gets a real commit — and your keys are encrypted into Settings → Secrets & API Keys, never written into your app\'s files. The generated payment code decides the price ON YOUR SERVER and verifies the payment signature there, so a customer cannot change the amount or fake a successful payment.',
     howToUse: 'Home → Other AI → Monetization & Team → Monetize. 1) Pick "App built here" or "GitHub repo", choose the app and the page, tap Continue. 2) Tap the payment method — tap UPI if you just want money in your bank. 3) Fill in the fields (UPI needs only your UPI ID; each field says exactly where to find it in the provider\'s dashboard) and tap "Add it to my app". 4) Read the next steps it shows — for Razorpay, Cashfree or Stripe you must put the server/payments.js file it created onto your server and set your real prices inside it.',
     relatedFeatures: ['secrets_keys', 'database_settings', 'pro_chat'],
     keywords: [
@@ -1869,10 +1870,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   },
   {
     id: 'voice_to_app',
-    name: 'Voice to App',
-    path: 'Settings → AI Tools → Voice to App',
-    description: 'Speak your app idea — in Hindi or English — and turn it into a REAL app build. The mic transcribes your speech live in the browser (switchable Hindi/English), you can edit the transcript, add quick prompts and enhancers (mobile-first, animations, dark mode), and then "Apna App Banao" hands the finished prompt straight to NavBharatAI Pro v5.0: the Pro chat opens with your prompt prefilled, and pressing Send starts the genuine live build (real files, live preview, everything the Pro engine does). Voice capture needs a browser that supports speech recognition (Chrome/Edge/Android WebView do); without it you can still type the prompt.',
-    howToUse: 'Settings → AI Tools → Voice to App. Tap the mic, describe your app (Hinglish works), tap again to stop. Edit the text if needed, then tap "Apna App Banao" — the Pro v5.0 chat opens with your prompt ready; press Send to start the real build.',
+    name: 'Voice to App (speak your app idea)',
+    path: 'NavBharatAI Pro v5.0 → the 🎙️ microphone button in the chat composer (tap to speak → your words type straight into the message box)',
+    description: 'Speak your app idea — in Hindi or English — instead of typing it. The 🎙️ mic sits right in the NavBharatAI Pro v5.0 chat composer: tap it and your speech is transcribed live INTO the message box (tap again to stop; it pulses red while listening), then press Send to start the genuine live build (real files, live preview, everything the Pro engine does). Voice capture needs a browser that supports speech recognition (Chrome/Edge/Android WebView do); without it you can still type. (A standalone Voice-to-App page with quick enhancers also exists and the Offline AI can open it, but the built-in mic in the Pro chat is the main, always-available way.)',
+    howToUse: 'Open NavBharatAI Pro v5.0. Tap the 🎙️ mic button next to the message box and describe your app (Hinglish works); tap again to stop. Edit the text if needed, then press Send to start the real build.',
     relatedFeatures: ['pro_chat', 'agentv3_builder', 'project-templates'],
     keywords: ['voice to app', 'voice', 'bol kar app', 'bolkar', 'speech', 'mic', 'microphone', 'awaz se app', 'speak app', 'voice se banao', 'bol do'],
   },
@@ -1918,7 +1919,7 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'professionals',
     name: 'Professionals Hub',
     path: 'Sidebar → Professionals',
-    description: 'The hub for specialized professional AI assistants. Currently hosts Doctor AI (clinical decision support) and Engineer AI (autonomous app builder). Future AI assistants will appear here. Every config-driven professional (Teacher, Lawyer, CA, Mentor, etc.) supports FILE ATTACHMENTS: click the paperclip (or paste a file) to send images, PDFs, Word/Excel/PowerPoint documents, ZIPs, or text/code files — the AI reads their real content and answers about them.',
+    description: 'The hub for specialized professional AI assistants. Currently hosts Doctor AI (clinical decision support), NavBharatAI Pro v5.0 (the autonomous app builder), and a large roster of expert professionals. Future AI assistants will appear here. Every config-driven professional (Teacher, Lawyer, CA, Mentor, etc.) supports FILE ATTACHMENTS: click the paperclip (or paste a file) to send images, PDFs, Word/Excel/PowerPoint documents, ZIPs, or text/code files — the AI reads their real content and answers about them.',
     howToUse: 'Open Professionals from the sidebar, then choose the AI specialist you need. To share a file, click the paperclip button next to the message box (up to 4 files, 10 MB each) or paste an image directly.',
     relatedFeatures: ['doctor_ai', 'engineer_ai', 'professional_pass'],
     keywords: ['professionals', 'specialists', 'experts', 'professional ai', 'specialist ai', 'doctor ai engineer ai', 'attach file', 'upload file', 'send photo', 'send pdf', 'file bhejo', 'photo bhejo', 'document upload'],
@@ -1995,9 +1996,9 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   {
     id: 'share_for_review',
     name: 'Share for Review (Client / Stakeholder Portal)',
-    path: 'Deploy panel → Deploy tab → "Share for review"',
+    path: 'Settings → App Settings → Hosting & Deploy → "Share for review" card',
     description: 'Share your built app READ-ONLY with a client or stakeholder who has no account, and collect their feedback/approval. Creating a review link snapshots the current app and gives you a link like navbharat.ai/?review=<token>. When the person opens it, they see the app running read-only (in a safe sandbox) with a feedback bar to Approve / Request changes / Reject plus a comment. Their responses come back to you under "View feedback". You can Revoke the link anytime (it stops working). No email is sent — you share the link yourself; links expire after 30 days.',
-    howToUse: 'Open the Deploy panel (Deploy tab). In the "Share for review" card, tap "Create review link", then Copy it and send it to your client. They open it, pick Approve / Request changes / Reject, add a comment, and Send. Tap "View feedback" to read their responses, or "Revoke link" to disable it.',
+    howToUse: 'Open Settings → App Settings → Hosting & Deploy. In the "Share for review" card, tap "Create review link", then Copy it and send it to your client. They open it, pick Approve / Request changes / Reject, add a comment, and Send. Tap "View feedback" to read their responses, or "Revoke link" to disable it.',
     relatedFeatures: ['team_collaboration', 'live_collaboration', 'settings_root'],
     keywords: ['share', 'share app', 'review', 'review link', 'client', 'stakeholder', 'feedback', 'approval', 'approve', 'read only', 'read-only preview', 'share for review', 'client feedback', 'sign off', 'demo link', 'show client', 'client ko dikhao', 'feedback lo', 'approval lo', 'share portal'],
     aiSurface: 'nbi_chat',
@@ -2006,14 +2007,23 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'settings_database',
     name: 'Database Settings (Bring Your Own Database)',
     path: 'Settings → App Settings → Database',
-    description: 'Connect your own database provider to use in the apps NavBharatAI Pro v5.0 builds for you. Supported providers: Supabase (PostgreSQL + auth + storage), Firebase (Firestore + Auth + Storage), MongoDB, Neon (serverless Postgres), Appwrite, or a custom connection string. A direct link to the provider\'s API-key page is shown after you select the provider, and EACH input field shows a short "Where to find this" hint pointing at the exact spot in that provider\'s own dashboard where that specific value lives (e.g. Supabase Project URL → Project Settings → API → Project URL). Your credentials are AES-encrypted in Secrets & Keys (never kept in the browser). When you build, NavBharatAI Pro v5.0 detects your connected database and wires that EXACT provider\'s SDK using your keys from .env — it never creates a new or different database, and never asks you to set one up. And if your app needs to save data but you have NOT connected a database yet, v5.0 tells you — in your OWN language (Hindi, Tamil, Bengali, Marathi, English, any Indian language) — that you should connect your own database here first, so your data stays yours. NavBharatAI NEVER stores your app data — all data stays in your own account.',
-    howToUse: 'Settings → Database → select your provider → a link to their API-key page appears and each field shows a "Where to find this" hint → paste your URL/API keys → Save (they are encrypted into Secrets & Keys). NavBharatAI Pro v5.0 then automatically uses that exact database when it builds your app. To update later, retype only the field you want to change — blank fields keep their saved value.',
+    description: 'Connect your own database provider to use in the apps NavBharatAI Pro v5.0 builds for you. Supported providers: Supabase (PostgreSQL + auth + storage), Firebase (Firestore + Auth + Storage), MongoDB, Neon (serverless Postgres), Appwrite, or a custom connection string. A direct link to the provider\'s API-key page is shown after you select the provider, and EACH input field shows a short "Where to find this" hint pointing at the exact spot in that provider\'s own dashboard where that specific value lives (e.g. Supabase Project URL → Project Settings → API → Project URL). Your credentials are AES-encrypted in Secrets & API Keys (never kept in the browser). When you build, NavBharatAI Pro v5.0 detects your connected database and wires that EXACT provider\'s SDK using your keys from .env — it never creates a new or different database, and never asks you to set one up. And if your app needs to save data but you have NOT connected a database yet, v5.0 tells you — in your OWN language (Hindi, Tamil, Bengali, Marathi, English, any Indian language) — that you should connect your own database here first, so your data stays yours. NavBharatAI NEVER stores your app data — all data stays in your own account.',
+    howToUse: 'Settings → Database → select your provider → a link to their API-key page appears and each field shows a "Where to find this" hint → paste your URL/API keys → Save (they are encrypted into Secrets & API Keys). NavBharatAI Pro v5.0 then automatically uses that exact database when it builds your app. To update later, retype only the field you want to change — blank fields keep their saved value.',
     relatedFeatures: ['engineer_ai', 'settings_secrets'],
     keywords: [
       'database', 'db', 'supabase', 'firebase', 'mongodb', 'neon', 'appwrite',
       'byod', 'connect database', 'database credentials', 'database kahan', 'db settings',
       'database key', 'api key database', 'connection string',
     ],
+  },
+  {
+    id: 'notifications_bell',
+    name: 'Notifications (messages from NavBharatAI)',
+    path: 'Top bar → bell icon (next to your profile)',
+    description: 'A notification bell in the top bar shows messages the NavBharatAI team sends you — announcements to all users, or a message addressed to you specifically. A red badge shows how many are unread; opening the bell lists the messages (newest first) and marks them read. Real end-to-end: if there are no messages, it simply shows "No messages yet" (never a fake dot). Admins send these from the Admin dashboard → Settings → Message Users (All Users or a specific user by email).',
+    howToUse: 'Tap the bell icon in the top bar (next to your profile avatar) to see messages from NavBharatAI. The red number is how many you have not read; opening the list marks them read.',
+    relatedFeatures: ['settings_root', 'my_profile'],
+    keywords: ['notification', 'notifications', 'bell', 'message', 'messages', 'announcement', 'inbox', 'admin message', 'navbharatai message', 'notification kahan', 'message aaya', 'ghanti', 'suchna'],
   },
   {
     id: 'settings_multicloud',
@@ -2033,8 +2043,8 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'settings_auth',
     name: 'Authentication Settings (Bring Your Own Login)',
     path: 'Settings → App Settings → Authentication',
-    description: 'Connect a login/signup provider for the apps NavBharatAI Pro builds for you. Dedicated providers: Clerk and Auth0. You can also point auth at Supabase Auth or Firebase Auth — but their login already comes with your Database connection, so pick Clerk/Auth0 here only if you want a dedicated auth provider instead. Each field shows a "Where to find this" hint pointing at the exact spot in the provider\'s dashboard. Your credentials are AES-encrypted in Secrets & Keys (never kept in the browser). When you build, NavBharatAI Pro detects your connected provider and wires real login/signup/sessions with its SDK — it never rolls its own password auth or asks you to set one up. If a database is also connected, it uses the database for DATA and this provider for AUTH.',
-    howToUse: 'Settings → App Settings → Authentication → select Clerk / Auth0 (or Supabase/Firebase) → paste your keys (each field shows where to find it) → Save (encrypted into Secrets & Keys). Your next build wires real login to that provider. Using Firebase/Supabase as your database? Their login is already covered there.',
+    description: 'Connect a login/signup provider for the apps NavBharatAI Pro builds for you. Dedicated providers: Clerk and Auth0. You can also point auth at Supabase Auth or Firebase Auth — but their login already comes with your Database connection, so pick Clerk/Auth0 here only if you want a dedicated auth provider instead. Each field shows a "Where to find this" hint pointing at the exact spot in the provider\'s dashboard. Your credentials are AES-encrypted in Secrets & API Keys (never kept in the browser). When you build, NavBharatAI Pro detects your connected provider and wires real login/signup/sessions with its SDK — it never rolls its own password auth or asks you to set one up. If a database is also connected, it uses the database for DATA and this provider for AUTH.',
+    howToUse: 'Settings → App Settings → Authentication → select Clerk / Auth0 (or Supabase/Firebase) → paste your keys (each field shows where to find it) → Save (encrypted into Secrets & API Keys). Your next build wires real login to that provider. Using Firebase/Supabase as your database? Their login is already covered there.',
     relatedFeatures: ['settings_database', 'settings_secrets', 'engineer_ai'],
     keywords: [
       'authentication', 'auth', 'login', 'signup', 'sign in', 'sign up', 'users', 'user login',
@@ -2046,8 +2056,8 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'settings_storage',
     name: 'Storage Settings (Bring Your Own File Storage)',
     path: 'Settings → App Settings → Storage',
-    description: 'Connect your own file/image storage provider for the uploads in apps NavBharatAI Pro builds for you. Supported standalone providers: S3-compatible (AWS S3, Cloudflare R2, Supabase Storage or MinIO) and Cloudinary. Each field shows a "Where to find this" hint pointing at the exact spot in that provider\'s console. Your credentials are AES-encrypted in Secrets & Keys (never kept in the browser). When you build, NavBharatAI Pro detects your connected storage and wires a REAL direct-to-storage upload — the browser uploads straight to your bucket via a presigned/signed URL, so the secret never leaves the server and your files live in YOUR storage. Note: if you connect Firebase or Supabase as your Database, their storage already comes with that connection — you only need this screen for S3/R2/Cloudinary.',
-    howToUse: 'Settings → App Settings → Storage → select S3-compatible or Cloudinary → paste your bucket/keys (each field shows where to find it) → Save (encrypted into Secrets & Keys). Your next build wires real uploads to that storage. Using Firebase/Supabase? Their storage is already covered by Settings → Database.',
+    description: 'Connect your own file/image storage provider for the uploads in apps NavBharatAI Pro builds for you. Supported standalone providers: S3-compatible (AWS S3, Cloudflare R2, Supabase Storage or MinIO) and Cloudinary. Each field shows a "Where to find this" hint pointing at the exact spot in that provider\'s console. Your credentials are AES-encrypted in Secrets & API Keys (never kept in the browser). When you build, NavBharatAI Pro detects your connected storage and wires a REAL direct-to-storage upload — the browser uploads straight to your bucket via a presigned/signed URL, so the secret never leaves the server and your files live in YOUR storage. Note: if you connect Firebase or Supabase as your Database, their storage already comes with that connection — you only need this screen for S3/R2/Cloudinary.',
+    howToUse: 'Settings → App Settings → Storage → select S3-compatible or Cloudinary → paste your bucket/keys (each field shows where to find it) → Save (encrypted into Secrets & API Keys). Your next build wires real uploads to that storage. Using Firebase/Supabase? Their storage is already covered by Settings → Database.',
     relatedFeatures: ['settings_database', 'settings_secrets', 'engineer_ai'],
     keywords: [
       'storage', 'file storage', 'upload', 'uploads', 'image upload', 'file upload',
@@ -2057,10 +2067,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   },
   {
     id: 'settings_secrets',
-    name: 'Secrets & Keys',
-    path: 'Settings → App Settings → Secrets & Keys',
-    description: 'A secure, encrypted per-user vault for the API keys/secrets your BUILT APPS need — the safe place to store keys instead of pasting them into chat. When NavBharatAI Pro v5 builds an app that needs a key (e.g. OPENAI_API_KEY, STRIPE_SECRET_KEY, DATABASE_URL, a Supabase/Firebase key), it guides you where to get it and asks you to add it HERE, using the exact variable name the code reads. At build time those saved keys are injected automatically into the app\'s environment (.env) — so the app runs with the real key, which is never shown to the AI or exposed in chat, and never committed to git. Also stores GITHUB_TOKEN (Engineer AI reads it to clone/push private repos) and Cashfree payment credentials. Keys are AES-256 encrypted, scoped to your account, and never shared.',
-    howToUse: 'Settings → App Settings → Secrets & Keys → type the exact key name the app needs (e.g. OPENAI_API_KEY) → paste the value → Save. Your next build injects it into the app automatically. Never paste keys into the chat — always store them here.',
+    name: 'Secrets & API Keys',
+    path: 'Settings → App Settings → Secrets & API Keys',
+    description: 'A secure, encrypted per-user vault for the API keys/secrets your BUILT APPS need — the safe place to store keys instead of pasting them into chat. When NavBharatAI Pro v5 builds an app that needs a key (e.g. OPENAI_API_KEY, STRIPE_SECRET_KEY, DATABASE_URL, a Supabase/Firebase key), it guides you where to get it and asks you to add it HERE, using the exact variable name the code reads. At build time those saved keys are injected automatically into the app\'s environment (.env) — so the app runs with the real key, which is never shown to the AI or exposed in chat, and never committed to git. Also stores GITHUB_TOKEN (NavBharatAI Pro v5.0 reads it to clone/push private repos) and Cashfree payment credentials. Keys are AES-256 encrypted, scoped to your account, and never shared.',
+    howToUse: 'Settings → App Settings → Secrets & API Keys → type the exact key name the app needs (e.g. OPENAI_API_KEY) → paste the value → Save. Your next build injects it into the app automatically. Never paste keys into the chat — always store them here.',
     relatedFeatures: ['engineer_ai', 'settings_git', 'engineer_ai_github', 'pro_chat'],
     keywords: ['secrets', 'keys', 'api key', 'token', 'github token', 'credentials', 'secret store', 'key store', 'vault', 'env', 'environment variable', 'GITHUB_TOKEN', 'OPENAI_API_KEY', 'STRIPE', 'DATABASE_URL', 'app keys', 'keys kahan dale', 'api key kahan'],
   },
@@ -2094,11 +2104,11 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   {
     id: 'settings_git',
     name: 'Git / DevOps Panel',
-    path: 'Sidebar → Git',
-    description: 'The full Git & DevOps panel: connect your GitHub account (OAuth or token), pick a repository and branch, make REAL commits and pushes of your workspace files to GitHub, and deploy to real providers (Firebase / Vercel / Netlify / Cloudflare via the v5.0 engine). GitHub connect/disconnect and repository selection live inside this panel.',
-    howToUse: 'Open Git from the sidebar menu. Connect GitHub if not connected, choose your repository and branch, then commit & push your files — real commits appear on GitHub. Use the deploy targets to publish your app.',
+    path: 'Settings → App Settings → General → "Git & Deployment"  (moved here from the sidebar, 2026-08-01)',
+    description: 'The full Git & DevOps panel: connect your GitHub account (OAuth or token), pick a repository and branch, make REAL commits and pushes of your workspace files to GitHub, and deploy to real providers (Firebase / Vercel / Netlify / Cloudflare via the v5.0 engine). GitHub connect/disconnect and repository selection live inside this panel. It used to sit on the left sidebar; it now opens from App Settings.',
+    howToUse: 'Open Settings → App Settings, and on the General screen tap "Git & Deployment" to open the panel. Connect GitHub if not connected, choose your repository and branch, then commit & push your files — real commits appear on GitHub. Use the deploy targets to publish your app.',
     relatedFeatures: ['settings_secrets', 'ide_git', 'engineer_ai_github'],
-    keywords: ['git', 'git panel', 'github settings', 'git configuration', 'repo settings', 'connect github', 'git config', 'github repository', 'push code', 'git kahan hai'],
+    keywords: ['git', 'git panel', 'github settings', 'git configuration', 'repo settings', 'connect github', 'git config', 'github repository', 'push code', 'git kahan hai', 'git settings me', 'version control', 'devops', 'deploy'],
   },
   {
     id: 'settings_terminal',
@@ -2134,9 +2144,9 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   {
     id: 'billing',
     name: 'Billing & Plan',
-    path: 'Settings → Billing  OR  Header → user area',
+    path: 'Sidebar menu → "Wallet & Billing"  OR  tap the token-balance chip in the NavBharatAI Pro v5.0 header',
     description: 'View your current subscription plan (Free / Pro / VIP), usage statistics, payment options, and This Month\'s AI Cost — a running total of estimated AI spend across all Pro builds in the current calendar month. Wallet tokens are REAL: every finished v5.0 Pro build deducts its cost from your token balance automatically (₹1 = 100 tokens, the same rate recharges use), the deduction appears in the build result footer ("−N wallet tokens · M left") and in your wallet ledger, and when the balance runs out new paid builds are blocked until you recharge. TOKENS ARE THE PRIMARY UNIT everywhere: the Pro header chip shows your live token balance (₹ equivalent in its tooltip), the Billing panel leads with tokens, and the "add credits" screen shows your balance and the build estimate in tokens. NEW USERS (still on the welcome bonus, before any purchase) build on our fast economy engine; if an app needs the strongest engine to finish cleanly, you are invited to add credits to complete it — nothing you have done is lost.',
-    howToUse: 'Open Billing to check your plan, view remaining credits, see monthly AI cost, or upgrade. After each Pro build, the tokens deducted and your remaining balance are shown right under the build result; the full deduction history is in your wallet ledger.',
+    howToUse: 'Open "Wallet & Billing" from the sidebar menu (or tap the token-balance chip in the NavBharatAI Pro v5.0 header) to check your plan, view remaining tokens, see this month\'s AI cost, or add credits. After each Pro build, the tokens deducted and your remaining balance are shown right under the build result; the full deduction history is in your wallet ledger.',
     relatedFeatures: ['settings_root', 'donate'],
     keywords: ['billing', 'plan', 'subscription', 'usage', 'payment', 'pricing', 'upgrade', 'credits', 'pro plan', 'free plan', 'monthly cost', 'ai cost', 'monthly ai cost', 'build cost', 'how much spent', 'token deduction', 'tokens deducted', 'wallet tokens', 'token balance', 'balance kata', 'tokens kam hue', 'paise kate', 'kitne token bache'],
   },
@@ -2189,7 +2199,7 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'login_auth',
     name: 'Login / Sign Up',
     path: 'Header → Login button (top right)',
-    description: 'Sign in or create a NavBharatAI account. Authentication is required to save sessions, use Engineer AI, access Pro features, and store settings. Five ways to sign in: (1) Email + Password, (2) Phone number (OTP), (3) Sign in with Google, (4) Sign in with Apple, (5) Continue with GitHub. On the iOS/Android app, Google and Apple use the device\'s native sign-in sheet. GitHub sign-in also connects your repositories (repo + workflow scope) so NavBharatAI can build, commit, and deploy your apps directly to your GitHub.',
+    description: 'Sign in or create a NavBharatAI account. Authentication is required to save sessions, use NavBharatAI Pro v5.0, access Pro features, and store settings. Five ways to sign in: (1) Email + Password, (2) Phone number (OTP), (3) Sign in with Google, (4) Sign in with Apple, (5) Continue with GitHub. On the iOS/Android app, Google and Apple use the device\'s native sign-in sheet. GitHub sign-in also connects your repositories (repo + workflow scope) so NavBharatAI can build, commit, and deploy your apps directly to your GitHub.',
     howToUse: 'Click the Login button in the top-right of the header. Choose Email or Phone for a NavBharatAI account, or use "Sign in with Google", "Sign in with Apple", or "Continue with GitHub" under "or continue with". GitHub will ask permission to access your repositories — granting it lets NavBharatAI push your generated apps to your own GitHub.',
     relatedFeatures: ['history', 'settings_root'],
     keywords: ['login', 'sign in', 'sign up', 'register', 'account', 'auth', 'logout', 'email login', 'phone login', 'otp', 'mobile login', 'google login', 'google sign in', 'sign in with google', 'apple login', 'apple sign in', 'sign in with apple', 'github login', 'github sign in', 'connect github', 'login kaise', 'account kahan', 'google se login', 'apple se login'],
@@ -2199,8 +2209,8 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     name: 'App Navigation Overview',
     path: 'Header (top bar with tabs)  OR  Sidebar (left panel)',
     description: `How to navigate NavBharatAI:
-• HEADER TABS (top bar) — click to open: Home, Pro Chat, Reports (Free Chat), IDE, Engineer AI, Doctor AI, History, Settings, Donate.
-• SIDEBAR (left panel, desktop) — same items listed as links.
+• HEADER TABS (top bar) — each screen you open pins as its own tab (like browser tabs), so you can keep several open at once and switch between them.
+• SIDEBAR / MENU (left panel on desktop, the ≡ hamburger on mobile) — the full list of screens: the free chat, the Pro v5.0 app builder, the Professionals, the Other-AI builder tools, Offline AI, Code Studio, and Settings. Tap any item to open it as a tab.
 • MOBILE — tap the hamburger (≡) icon in the top-left to open the sidebar menu.
 • BACK BUTTON — appears when you've navigated deeper; click to go back one level.
 • TABS are pinned — multiple screens open at once like browser tabs.`,
@@ -2216,56 +2226,56 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
 
   {
     id: 'pro_chat_extended_thinking',
-    name: 'Pro Chat — Extended Thinking (Complex Tasks)',
-    path: 'Pro Chat → just describe a complex task (auto-detected)',
-    description: `Pro Chat automatically detects complex tasks (full-stack apps, multi-system architecture, OAuth, real-time features, enterprise scale) and activates Claude Opus extended reasoning (16k token thinking budget). No setting needed — the AI decides when deep reasoning is required. You will see a "🧠 Complex task detected — using extended reasoning…" status message when active.`,
-    howToUse: 'Describe a complex app (e.g. "Build a full-stack SaaS with OAuth and Stripe payments") and Pro will automatically use extended thinking for deeper architectural reasoning.',
+    name: 'NavBharatAI Pro — Extended Thinking (Complex Tasks)',
+    path: 'NavBharatAI Pro v5.0 → just describe a complex task (auto-detected)',
+    description: `NavBharatAI Pro v5.0 automatically detects complex tasks (full-stack apps, multi-system architecture, OAuth, real-time features, enterprise scale) and switches on deeper "extended thinking" for that build — the engine reasons harder before it writes code. No setting needed; it decides when deep reasoning is required, and shows a short "thinking" status while it plans. (You can also force the strongest reasoning tiers from the build-options menu.)`,
+    howToUse: 'Describe a complex app (e.g. "Build a full-stack SaaS with OAuth and payments") and NavBharatAI Pro v5.0 automatically uses extended thinking for deeper architectural reasoning. For maximum reasoning, pick a higher power tier in the build-options (⚙) menu.',
     relatedFeatures: ['pro_chat', 'pro_chat_planner'],
     aiSurface: 'pro_chat',
     keywords: ['extended thinking', 'deep reasoning', 'complex task', 'thinking budget', 'opus thinking', 'architecture decision'],
   },
   {
     id: 'pro_chat_planner',
-    name: 'Pro Chat — Build Planner (Step-by-Step Progress)',
-    path: 'Pro Chat → submit a build request → see step progress bar',
-    description: `For large builds, Pro Chat shows a live step-by-step progress bar. The AI plans the build first (e.g. "Scaffold files → Install deps → Build UI → Add auth → Integrate DB"), then works through each step. Each step shows: name, current status (pending/working/done), and a reasoning snippet from the AI's chain-of-thought. The reasoning shows WHY the AI is taking the next action.`,
-    howToUse: 'Submit a multi-component build request. The progress panel shows each step as the AI works. Reasoning snippets appear under each running step to show the AI\'s thought process.',
+    name: 'NavBharatAI Pro — Build Planner (Step-by-Step Progress)',
+    path: 'NavBharatAI Pro v5.0 → submit a build request → see the step progress / plan checklist',
+    description: `For large builds, NavBharatAI Pro v5.0 shows a live plan checklist above the message box. The engine plans the build first (e.g. "Scaffold files → Install deps → Build UI → Add auth → Integrate DB"), then works through each step, ticking it off as it goes. Each step shows its name and current status (pending / working / done), so you can watch real progress instead of a spinner. The checklist can be minimized with a tap so it never crowds the chat.`,
+    howToUse: 'Submit a multi-component build request. The plan checklist appears above the message box and ticks off each step as NavBharatAI Pro v5.0 works. Tap the "Plan" header to collapse or expand it.',
     relatedFeatures: ['pro_chat', 'pro_chat_extended_thinking'],
     aiSurface: 'pro_chat',
     keywords: ['build planner', 'step progress', 'plan', 'steps', 'progress bar', 'thinking', 'reasoning', 'chain of thought'],
   },
   {
     id: 'pro_chat_session_memory',
-    name: 'Pro Chat — Cross-Session Memory',
-    path: 'Pro Chat → automatic (no user action needed)',
-    description: `Pro Chat remembers your project across sessions — even after closing the browser or switching devices. It stores: rolling build summary, edit log (what changed in each turn), architectural decisions, and user preferences in Firestore. On the next session with the same project, Pro already knows the stack, past decisions, and recent changes. It will NOT undo things you already built.`,
-    howToUse: 'Just continue building. Pro automatically loads previous session memory at the start of each build request. No setup needed — works as long as you use the same Pro session.',
+    name: 'NavBharatAI Pro — Cross-Session Memory',
+    path: 'NavBharatAI Pro v5.0 → automatic (no user action needed)',
+    description: `NavBharatAI Pro v5.0 remembers your project across sessions — even after closing the browser or switching devices. It keeps a rolling build summary, an edit log (what changed each turn), the architectural decisions made, and your preferences, all stored durably per project. On your next session with the same project it already knows the stack, the past decisions, and the recent changes, and it builds on top of them — it will NOT undo things you already built.`,
+    howToUse: 'Just keep building in NavBharatAI Pro v5.0. It automatically loads your project memory at the start of each build — no setup needed. Reopening the same project (even on another device) continues where you left off.',
     relatedFeatures: ['pro_chat', 'pro_chat_planner', 'history'],
     aiSurface: 'pro_chat',
     keywords: ['session memory', 'remember', 'persistent memory', 'cross session', 'project memory', 'context', 'remember project', 'past builds', 'yaad rakhna'],
   },
   {
     id: 'pro_chat_design_to_code',
-    name: 'Pro Chat — Design-to-Code (Image → UI)',
-    path: 'Pro Chat → attach a design image → describe the app',
-    description: `Upload a Figma export, screenshot, or UI mockup alongside your build request. Claude Opus vision analyzes the design image and generates React/CSS code that matches the visual layout, colors, and component structure. Supports up to 4 design images per request.`,
-    howToUse: 'In Pro Chat, attach a design image (Figma screenshot, UI mockup, wireframe) using the attachment icon, then type your build prompt (e.g. "Build this design as a React app"). Pro will generate matching code.',
+    name: 'NavBharatAI Pro — Design-to-Code (Image → UI)',
+    path: 'NavBharatAI Pro v5.0 → attach a design image → describe the app',
+    description: `Upload a Figma export, screenshot, or UI mockup alongside your build request. NavBharatAI Pro v5.0's vision reads the design image and generates React/CSS code that matches the visual layout, colours, and component structure. You can attach several design images per request.`,
+    howToUse: 'In NavBharatAI Pro v5.0, attach a design image (Figma screenshot, UI mockup, wireframe) using the attachment (📎) icon, then type your build prompt (e.g. "Build this design as a React app"). It generates matching code.',
     relatedFeatures: ['pro_chat', 'pro_chat_file_upload'],
     aiSurface: 'pro_chat',
     keywords: ['design to code', 'figma to code', 'image to code', 'ui from design', 'mockup', 'wireframe', 'screenshot to code', 'visual design', 'design convert'],
   },
   {
     id: 'pro_chat_multi_deploy',
-    name: 'Pro Chat — Multi-Provider Deployment',
-    path: 'Engineer AI can deploy to Vercel/Netlify/GitHub Pages (via agentic loop)',
-    description: `Pro Chat can deploy your app to multiple platforms beyond Firebase Hosting:
+    name: 'NavBharatAI Pro — Multi-Provider Deployment',
+    path: 'NavBharatAI Pro v5.0 → "Publish" → choose a provider (Firebase / Vercel / Netlify / Cloudflare Pages)',
+    description: `NavBharatAI Pro v5.0 can deploy your app to multiple platforms beyond Firebase Hosting:
 • Vercel — React, Next.js, Vue apps → *.vercel.app URL
 • Netlify — static sites → *.netlify.app URL
 • GitHub Pages — static sites → username.github.io/repo/ URL
 • Custom domains — map your own domain (Vercel)
 Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will use the platform's REST API directly — no CLI tools needed.`,
-    howToUse: 'In your Pro Chat or Engineer AI session, provide your deploy token (Vercel, Netlify, or GitHub PAT) via Settings → Secrets & Keys, then ask to deploy.',
-    relatedFeatures: ['pro_chat', 'engineer_ai_deploy', 'settings_secrets'],
+    howToUse: 'In NavBharatAI Pro v5.0, add your provider token (Vercel, Netlify, Cloudflare) via Settings → App Settings → Secrets & API Keys, then tap "Publish" and pick that provider — or host free on NavBharatAI (no token needed).',
+    relatedFeatures: ['pro_chat', 'agentv3_deploy', 'engineer_ai_deploy', 'settings_secrets'],
     aiSurface: 'pro_chat',
     keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
   },
@@ -2362,9 +2372,9 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'auto-dependency-sync',
     name: 'Auto Dependency Sync',
-    path: 'Pro Chat → Build any app → automatic (no user action needed)',
+    path: 'NavBharatAI Pro v5.0 → build any app → automatic (no user action needed)',
     description: `G6 execution-hardening: after every Pro build, NavBharatAI automatically detects every package imported in the generated source code and ensures it is declared in package.json. This prevents the #1 "app generated but won't run" failure where the AI writes \`import axios from 'axios'\` but forgets to add axios to package.json, causing npm install to miss the dependency and the app to crash at runtime. Curated pinned versions are used for 30+ common packages (react-router-dom, zustand, axios, framer-motion, lucide-react, zod, @tanstack/react-query, recharts, etc.); unknown packages default to 'latest'. Non-blocking: never delays or fails the build.`,
-    howToUse: 'Automatic — no action needed. Build any app in Pro Chat. If the generated code imports packages not yet in package.json, they are silently added with pinned versions before the build completes. A status message shows which packages were declared.',
+    howToUse: 'Automatic — no action needed. Build any app in NavBharatAI Pro v5.0. If the generated code imports packages not yet in package.json, they are silently added with pinned versions before the build completes. A status message shows which packages were declared.',
     relatedFeatures: ['pro_chat', 'auto-code-review'],
     aiSurface: 'pro_chat',
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
@@ -2519,42 +2529,42 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'build-performance-analytics',
     name: 'Build Performance Analytics',
-    path: 'Analytics view → Build Performance card',
+    path: 'Home → Other AI → Analytics → Build Performance card',
     description: `Real build-pipeline health computed from your recent build jobs (not faked): success rate %, failure rate %, average build duration, p95 (slowest-5%) duration, and the top failure types (the most common build-error signatures). Helps you see if builds are getting slower or failing more often, and what's breaking most. Backed by GET /api/analytics/builds, which aggregates the last 100 jobs from the build-job store; shows honest zeros until builds have run.`,
-    howToUse: 'Open the Analytics view. The "Build Performance" card appears once at least one build has run, showing success/failure rate, avg + p95 duration, and the top failure types. Use Refresh to recompute.',
+    howToUse: 'Open Analytics (Home → Other AI → Analytics). The "Build Performance" card appears once at least one build has run, showing success/failure rate, avg + p95 duration, and the top failure types. Use Refresh to recompute.',
     relatedFeatures: ['pro_chat', 'admin-metrics', 'build-reliability-metrics', 'build-optimizer'],
     keywords: ['build performance', 'build analytics', 'success rate', 'failure rate', 'build duration', 'p95', 'slow build', 'build health', 'failure types', 'pipeline', 'build stats'],
   },
   {
     id: 'build-optimizer',
     name: 'AI Build Optimizer',
-    path: 'Analytics view → Build Optimizer card',
+    path: 'Home → Other AI → Analytics → Build Optimizer card',
     description: `Prioritized, actionable suggestions to make your builds faster and more reliable, computed from your REAL build history (not faked): flags a high failure rate, a DOMINANT failure signature ("80% of failures share one cause — fix this one class"), a slow average build, and a slow tail (p95 much larger than the average). Each suggestion is severity-ranked (critical/warning/info) with a concrete recommendation. Deterministic analysis of the last 100 build jobs — it stays empty until at least 10 builds have run, so it never over-fits a tiny sample. Backed by GET /api/analytics/build-optimizer.`,
-    howToUse: 'Open the Analytics view. The "Build Optimizer" card appears once you have 10+ builds and there is something worth improving; each row shows the issue and a recommended fix.',
+    howToUse: 'Open Analytics (Home → Other AI → Analytics). The "Build Optimizer" card appears once you have 10+ builds and there is something worth improving; each row shows the issue and a recommended fix.',
     relatedFeatures: ['build-performance-analytics', 'build-reliability-metrics', 'admin-metrics'],
     keywords: ['build optimizer', 'optimize build', 'build suggestions', 'faster builds', 'reduce failures', 'build recommendations', 'why builds fail', 'build slow', 'improve builds', 'failure pattern'],
   },
   {
     id: 'build-reliability-metrics',
     name: 'Build Reliability (MTTD / MTTR)',
-    path: 'Analytics view → Build Reliability card',
+    path: 'Home → Other AI → Analytics → Build Reliability card',
     description: `Real failure-recovery reliability computed from your recent build jobs (not faked): MTTD (Mean Time To Detect — how long a build runs before its failure surfaces), MTTR (Mean Time To Repair — time from a build failing to the next successful build of the SAME app), the recovery rate (% of failures that were later fixed), and the count of still-unresolved failures. A failure with no later success is honestly counted as unresolved and never given an invented repair time. Backed by GET /api/analytics/reliability, which correlates the last 100 jobs by workspace; shows honest zeros until failures have occurred.`,
-    howToUse: 'Open the Analytics view. The "Build Reliability" card appears once at least one build has failed, showing MTTD, MTTR, recovery rate, and unresolved-failure count. Use Refresh to recompute.',
+    howToUse: 'Open Analytics (Home → Other AI → Analytics). The "Build Reliability" card appears once at least one build has failed, showing MTTD, MTTR, recovery rate, and unresolved-failure count. Use Refresh to recompute.',
     relatedFeatures: ['build-performance-analytics', 'pro_chat', 'admin-metrics'],
     keywords: ['reliability', 'mttd', 'mttr', 'mean time to detect', 'mean time to repair', 'recovery rate', 'unresolved failures', 'failure recovery', 'build reliability', 'time to fix', 'incident metrics'],
   },
   {
     id: 'auto-test-generation',
     name: 'Auto Test Generation (Phase 17)',
-    path: 'Pro Chat → Build any app → automatic (no user action needed)',
-    description: `Phase 17 — NavBharatAI Pro v2.0 feature. After every Pro build, NavBharatAI automatically generates Vitest test files for the most important parts of the generated app — exactly like Claude Code does for apps it builds. Key capabilities:
+    path: 'NavBharatAI Pro v5.0 → build any app → automatic (no user action needed)',
+    description: `After every build, NavBharatAI Pro v5.0 automatically generates Vitest test files for the most important parts of the generated app. Key capabilities:
 • ANALYZES generated files by type: components, hooks, services, utilities, stores, pages, contexts — each gets a tailored test prompt.
 • SELECTS highest-value files to test first (hooks > services > stores > components > pages).
 • GENERATES multiple test files in parallel (up to 4 per build) using Promise.allSettled.
 • WRITES category-specific tests: component tests use @testing-library/react, hook tests use renderHook, service tests mock fetch/axios, utility tests cover edge cases.
 • UPDATES the validation report: the 'Automated Tests' gate changes from PENDING to PASS, showing which test files were generated.
 • TEST FILES are included in the downloaded app zip so users can run them locally with: npx vitest run.`,
-    howToUse: 'Automatic — no action needed. Build any app in Pro Chat. Test files (e.g. src/App.test.tsx, src/hooks/useAuth.test.ts) are automatically included in the result. Download the app and run: npm install && npx vitest run',
+    howToUse: 'Automatic — no action needed. Build any app in NavBharatAI Pro v5.0. Test files (e.g. src/App.test.tsx, src/hooks/useAuth.test.ts) are automatically included in the result. Download the app and run: npm install && npx vitest run',
     relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'auto-code-review'],
     aiSurface: 'pro_chat',
     keywords: [
@@ -2568,9 +2578,9 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'quick-start-gallery',
     name: 'Quick-Start Gallery — Example Prompt Cards',
-    path: 'Pro Chat → empty chat → example cards grid (visible before first message)',
-    description: `G9: When Pro Chat has no messages yet, a grid of example prompt cards is shown. Cards cover common app types AND Bharat-first templates: Analytics Dashboard, E-commerce Page, Portfolio Site, Admin Dashboard, UPI Payment App (Razorpay integration), Hindi Language App (bilingual Devanagari), GST Invoice Generator, Startup Registration Tracker. Clicking any card fills the Pro Chat input with a detailed prompt. The Bharat-first templates (UPI, Hindi, GST, Startup) generate real, working Indian-context apps.`,
-    howToUse: 'Open Pro Chat with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. For Bharat-first templates: UPI Payment needs RAZORPAY_KEY_ID, Hindi app is fully self-contained, GST Invoice needs no API key, Startup Tracker stores data in localStorage.',
+    path: 'NavBharatAI Pro v5.0 → empty chat → example cards grid (visible before first message)',
+    description: `G9: When NavBharatAI Pro v5.0 has no messages yet, a grid of example prompt cards is shown. Cards cover common app types AND Bharat-first templates: Analytics Dashboard, E-commerce Page, Portfolio Site, Admin Dashboard, UPI Payment App (Razorpay integration), Hindi Language App (bilingual Devanagari), GST Invoice Generator, Startup Registration Tracker. Clicking any card fills the NavBharatAI Pro v5.0 input with a detailed prompt. The Bharat-first templates (UPI, Hindi, GST, Startup) generate real, working Indian-context apps.`,
+    howToUse: 'Open NavBharatAI Pro v5.0 with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. For Bharat-first templates: UPI Payment needs RAZORPAY_KEY_ID, Hindi app is fully self-contained, GST Invoice needs no API key, Startup Tracker stores data in localStorage.',
     relatedFeatures: ['pro_chat'],
     aiSurface: 'pro_chat',
     keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas', 'upi', 'payment', 'hindi', 'gst', 'invoice', 'startup', 'bharat', 'india', 'razorpay', 'devanagari', 'rupee', 'msme', 'registration'],
@@ -2578,7 +2588,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'backend-scaffolds',
     name: 'Backend Scaffolds — PocketBase & Convex',
-    path: 'Pro Chat → describe a PocketBase or Convex app → auto-seeded skeleton',
+    path: 'NavBharatAI Pro v5.0 → describe a PocketBase or Convex app → auto-seeded skeleton',
     description: `Phase 6.5: Two backend-as-a-service scaffolds are now supported alongside React/Vue/Svelte:
 
 PocketBase (vite-pocketbase):
@@ -2592,7 +2602,7 @@ Convex (vite-convex):
 • Real-time backend in the cloud — user runs npx convex dev to get VITE_CONVEX_URL
 
 Both scaffolds produce real, correctly wired code. The backend services (PocketBase server / Convex cloud) must be provisioned by the user separately.`,
-    howToUse: 'In Pro Chat, include "pocketbase" or "convex" in your prompt. NavBharatAI auto-detects and seeds the correct skeleton. For PocketBase: set VITE_PB_URL in .env to your server URL. For Convex: run npx convex dev in the project folder to provision the backend.',
+    howToUse: 'In NavBharatAI Pro v5.0, include "pocketbase" or "convex" in your prompt. NavBharatAI auto-detects and seeds the correct skeleton. For PocketBase: set VITE_PB_URL in .env to your server URL. For Convex: run npx convex dev in the project folder to provision the backend.',
     relatedFeatures: ['pro_chat', 'auto-dependency-sync'],
     aiSurface: 'pro_chat',
     keywords: ['pocketbase', 'pocket base', 'convex', 'backend scaffold', 'self hosted', 'real time backend', 'baas', 'backend as a service', 'sqlite backend', 'pocketbase app', 'convex app', 'convex dev'],
@@ -2600,34 +2610,34 @@ Both scaffolds produce real, correctly wired code. The backend services (PocketB
   {
     id: 'build-version-history',
     name: 'Build Version History — Go Back to Any Previous Version',
-    path: 'Pro Chat → sidebar → Files → History tab',
+    path: 'NavBharatAI Pro v5.0 → Files tab → History',
     description: `Phase 2.1: Every successful Pro build automatically creates a version checkpoint in Firestore. The History tab in the Files panel shows all past builds for the current session, newest first, each labeled with an auto-generated commit message (e.g. "feat: build \\"todo app\\" — 12 files, vfs tier"). Users can restore any previous version with one click — the workspace reverts to that exact file snapshot and the Code Studio switches to show the restored files. Versions are retained for up to 50 builds per session. Each entry shows: commit message, relative time, file count, build tier, and version number (v1, v2, v3...).`,
-    howToUse: 'Build any app in Pro Chat. Open the Files view (sidebar → Files). Click the "History" tab in the panel header. All past builds appear as version entries. Click "Restore" next to any entry to revert the workspace to that version.',
+    howToUse: 'Build any app in NavBharatAI Pro v5.0. Open the Files tab, then click the "History" tab in the panel header. All past builds appear as version entries. Click "Restore" next to any entry to revert the workspace to that version.',
     relatedFeatures: ['pro_chat', 'files-panel', 'auto-dependency-sync'],
     aiSurface: 'pro_chat',
     keywords: ['version history', 'go back', 'restore', 'undo build', 'previous version', 'revert', 'old version', 'build history', 'checkpoint', 'purana version', 'version 3 pe wapas', 'rollback', 'undo changes', 'history', 'past builds'],
   },
   {
     id: 'unified-memory',
-    name: 'Unified Memory — Pro Chat and Engineer AI Share Context',
-    path: 'Automatic — happens every time you build in Pro Chat then ask Engineer AI to edit',
-    description: `Phase 2.3: Pro Chat maintains a rolling memory of what was built (project summary + last 10 edits). When Engineer AI runs on the same workspace, it now receives this context at the start of every step — so the agent knows what Pro Chat already built, which decisions were made, and what the project contains. This eliminates the "fresh-start" problem where Engineer AI would re-reason decisions already established by Pro Chat. The memory is stored in Firestore (pro_memories collection) and loaded automatically by ProEngineRunner at the start of each agentic run.`,
-    howToUse: 'Automatic — no user action needed. Build in Pro Chat → the memory is saved. Then ask Engineer AI to edit → it picks up the context. Context includes: project summary, tech stack, last 10 edits.',
+    name: 'Unified Memory — your project context carries across builds',
+    path: 'NavBharatAI Pro v5.0 → automatic (no user action needed)',
+    description: `NavBharatAI Pro v5.0 keeps a durable, rolling memory of your project — a project summary, the tech stack, recent edits, and the decisions already made. At the start of every new build it recalls this context, so it never "starts fresh" or re-reasons choices it already made, and it builds ON TOP of your existing app instead of redoing it. The memory survives reloads, closed tabs and new sessions (it is stored durably, per project), and your highest-confidence lessons are even remembered across all your projects — so what the engine learned building one app helps it build the next.`,
+    howToUse: 'Automatic — no user action needed. Keep building in NavBharatAI Pro v5.0; it remembers your project across builds (project summary, tech stack, recent edits) and applies that context to the next build automatically.',
     relatedFeatures: ['pro_chat', 'build-version-history', 'iterative-agent-build'],
     aiSurface: 'engineer_ai',
     keywords: ['memory', 'context', 'remember', 'remember project', 'forget', 'fresh start', 'context lost', 'yaad', 'bhool gaya', 'pichla kaam', 'previous build', 'project context', 'session memory', 'unified memory'],
   },
   {
     id: 'one-click-deploy',
-    name: 'One-Click Deploy Button',
-    path: 'Pro Chat → header bar → Deploy button (visible after app is built)',
-    description: `A "Deploy" button appears in the Pro Chat header bar after any app is successfully built. Clicking it opens a deploy panel with four platform options:
+    name: 'One-Click Publish Button',
+    path: 'NavBharatAI Pro v5.0 → header action row → "Publish" (visible after an app is built)',
+    description: `A "Publish" button appears in the NavBharatAI Pro v5.0 action row after any app is successfully built. Tapping it opens the Hosting chooser — host free on NavBharatAI, or bring your own provider:
 • Vercel — enter token + project name → deploys to *.vercel.app
 • Netlify — enter token + optional site ID → deploys to *.netlify.app
 • Cloudflare Pages — enter API token + account ID + project name → deploys to {name}.pages.dev
 • GitHub Pages — enter token + owner + repo → deploys to username.github.io/repo/
 On success: navigates to the "App is Live!" screen with the live URL. No commands needed — pure GUI.`,
-    howToUse: 'Build an app in Pro Chat. When build completes, a green "Deploy" button appears in the top-right of the chat header. Click it, choose a platform, enter your API token, and click "Deploy Now". For Cloudflare, you also need your Account ID (found at dashboard.cloudflare.com → top-right).',
+    howToUse: 'Build an app in NavBharatAI Pro v5.0. When the build completes, tap "Publish" in the action row, then either host free on NavBharatAI or pick a provider and enter its API token. For Cloudflare, you also need your Account ID (found at dashboard.cloudflare.com → top-right).',
     relatedFeatures: ['pro_chat', 'pro_chat_multi_deploy'],
     aiSurface: 'pro_chat',
     keywords: ['deploy button', 'one click deploy', 'deploy', 'vercel', 'netlify', 'cloudflare', 'cloudflare pages', 'github pages', 'publish', 'launch', 'go live', 'deploy karo', 'live karo', 'publish app', 'deploy app', 'pages.dev'],
@@ -2635,16 +2645,16 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
   {
     id: 'iterative-agent-build',
     name: 'Iterative Agent Build Engine',
-    path: 'Pro Chat → type any app description → send',
-    description: `G10: Pro Chat uses a multi-step agentic build engine (not a single AI call). How it works:
+    path: 'NavBharatAI Pro v5.0 → type any app description → send',
+    description: `G10: NavBharatAI Pro v5.0 uses a multi-step agentic build engine (not a single AI call). How it works:
 • PLANS first: breaks the app into 3–8 named steps shown as a live progress list (scaffold → install → implement → verify).
 • BUILDS step-by-step: each step runs the ReAct loop (reason → act → verify → self-heal), building on the previous.
 • LIVE PROGRESS: every action is streamed in real time — status messages, step starts/completions, terminal output (E2B tier).
 • MEMORY: remembers what was built across turns; edits stay coherent across many conversation rounds.
-• RETRY FIX: if a build fails, say "try again" — Pro Chat automatically restores the original prompt so the agent knows what to rebuild (no context loss).
+• RETRY FIX: if a build fails, say "try again" — NavBharatAI Pro v5.0 automatically restores the original prompt so the agent knows what to rebuild (no context loss).
 • PARTIAL BUILDS: if the time limit is reached, partial work is saved and auto-continued in the next round.
 • TIERS: runs in-memory (VFS, always available), server container (Docker), or cloud VM (E2B, with user's API key).`,
-    howToUse: 'Open Pro Chat and type a detailed app description (e.g. "Build a photo editing app with filters, crop, and brightness controls"). Send. Watch the step-by-step progress. If build fails, type "try again" — the full original prompt is restored automatically.',
+    howToUse: 'Open NavBharatAI Pro v5.0 and type a detailed app description (e.g. "Build a photo editing app with filters, crop, and brightness controls"). Send. Watch the step-by-step progress. If build fails, type "try again" — the full original prompt is restored automatically.',
     relatedFeatures: ['pro_chat', 'one-click-deploy', 'quick-start-gallery'],
     aiSurface: 'pro_chat',
     keywords: ['iterative build', 'step by step', 'agent build', 'build failed try again', 'try again', 'retry build', 'complex app', 'multi step', 'pro chat build', 'app build', 'build engine', 'photo editing app', 'phir se bana', 'dobara bana', 'memory', 'context', 'remember'],
@@ -2652,8 +2662,8 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
   {
     id: 'guider-plan-confirm',
     name: 'Guider — Pre-Build Design Confirmation + Post-Build Quality Grader',
-    path: 'Pro Chat → type any app description → Guider card appears before build starts',
-    description: `Guider is the Pro Chat quality layer that wraps every build with two checks:
+    path: 'NavBharatAI Pro v5.0 → type any app description → Guider card appears before build starts',
+    description: `Guider is the NavBharatAI Pro v5.0 quality layer that wraps every build with two checks:
 
 PRE-BUILD (Plan Confirmation):
 • For every fresh app request, Guider proposes a structured design spec (screens, features, tech stack) and shows it as a confirmation card BEFORE building.
@@ -2666,7 +2676,7 @@ POST-BUILD (Grade + Auto-Refine):
 • If score < threshold and gaps are found, Guider auto-refines up to 2 rounds without any user action.
 • Each refine round targets only the specific gaps (e.g. "missing dark mode toggle", "no error handling in login") without removing working features.
 • Final score + pass/fail shown in chat message.`,
-    howToUse: 'Open Pro Chat and describe an app. A Guider design card will appear — review and click Approve (or edit it). Build starts. After it completes, watch for the Guider grade message — it will auto-fix gaps.',
+    howToUse: 'Open NavBharatAI Pro v5.0 and describe an app. A Guider design card will appear — review and click Approve (or edit it). Build starts. After it completes, watch for the Guider grade message — it will auto-fix gaps.',
     relatedFeatures: ['iterative-agent-build', 'pro_chat', 'auto-code-review'],
     aiSurface: 'pro_chat',
     keywords: ['guider', 'design plan', 'plan confirmation', 'approve plan', 'build spec', 'quality check', 'grade', 'refine', 'auto refine', 'gaps', 'requirements', 'spec', 'confirmation card', 'before build', 'pre build', 'post build', 'quality score', 'plan approve karo', 'design confirm'],
@@ -2674,7 +2684,7 @@ POST-BUILD (Grade + Auto-Refine):
   {
     id: 'auto-code-review',
     name: 'Auto Code Review',
-    path: 'Pro Chat → Build any app → review appears in build summary',
+    path: 'NavBharatAI Pro v5.0 → build any app → review appears in the build summary',
     description: `G5 quality gate: after every new Pro build, an AI-powered code review runs automatically:
 • Security: OWASP Top 10 checks (injection, XSS, hardcoded credentials, CSRF)
 • Quality: unused imports, dead code, functions >50 lines, deep nesting
@@ -2684,7 +2694,7 @@ POST-BUILD (Grade + Auto-Refine):
 Returns a 0-100 score + prioritized findings with file:line + fix suggestion.
 Non-blocking: review never delays or fails the build (12s timeout, best-effort).
 Also available on-demand via Settings → Pro → Code Review button.`,
-    howToUse: 'Build any app in Pro Chat — code review score and top issues appear in the build summary message automatically. For on-demand review without rebuilding, use Settings → Pro → Code Review.',
+    howToUse: 'Build any app in NavBharatAI Pro v5.0 — the code-review score and top issues appear in the build summary message automatically. For an on-demand review without rebuilding, use Home → Other AI → AI Tools → Code Review.',
     relatedFeatures: ['pro_chat', 'engineer_ai', 'admin-metrics'],
     aiSurface: 'pro_chat',
     keywords: ['code review', 'security', 'quality', 'owasp', 'xss', 'injection', 'tech debt', 'accessibility', 'score', 'findings', 'auto review', 'code quality', 'security scan'],

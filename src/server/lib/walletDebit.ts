@@ -1,5 +1,5 @@
 import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
-import { inrToDebitTokens } from './payments';
+import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
@@ -42,9 +42,18 @@ export interface WalletDebitTx {
 
 export interface DebitedWallet {
   wallet: Record<string, any>;
-  /** Whole tokens removed from the balance (billedInr × TOKENS_PER_RUPEE, rounded UP — see inrToDebitTokens). */
+  /** Whole tokens removed from the balance. The sub-token remainder is carried, not rounded away. */
   tokensDebited: number;
+  /**
+   * True when this call actually applied the charge (so the caller must persist the wallet). A charge
+   * smaller than one whole token debits 0 tokens but still moves the carry, so `tokensDebited > 0` is
+   * NOT a safe test for "did anything change".
+   */
+  applied: boolean;
 }
+
+/** Field on the wallet doc holding the unbilled remainder, always 0 ≤ carry < 1 token. */
+export const TOKEN_CARRY_FIELD = 'tokenCarry';
 
 /**
  * PURE debit computation: given the CURRENT wallet doc and a build's billed ₹, return the FULL
@@ -65,23 +74,38 @@ export function computeDebitedWallet(
   const w = current || {};
   const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   if (!Number.isFinite(tx.billedInr) || tx.billedInr <= 0) {
-    return { wallet: w, tokensDebited: 0 };
+    return { wallet: w, tokensDebited: 0, applied: false };
   }
   const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
   if (tx.buildRef && ledger.some((e) => e && e.buildRef === tx.buildRef)) {
-    return { wallet: w, tokensDebited: 0 }; // this build already charged — idempotent no-op
+    return { wallet: w, tokensDebited: 0, applied: false }; // this build already charged — idempotent no-op
   }
 
-  const billedInr = Math.round(tx.billedInr * 100) / 100; // ₹ to the paisa — no float drift
-  // Debit rounds UP (margin protection): a fractional token of build cost is charged as a whole token.
-  const tokens = inrToDebitTokens(tx.billedInr);
+  // EXACT accounting with a carried remainder. The charge is converted to a possibly-fractional token
+  // amount, added to whatever fraction of a token the user's last charge left unbilled, and only the
+  // WHOLE tokens are debited now; the rest waits for the next charge.
+  //
+  // The old code rounded the token debit UP while decrementing `remaining_balance` by the paisa-rounded
+  // ₹ — two views of one balance, moving by different amounts, drifting a little further apart on every
+  // build (and overcharging the user by up to ₹0.01 each time). Here the ₹ is DERIVED from the tokens
+  // actually debited, so the two can never disagree again, and nothing is silently rounded away in
+  // either direction: over any number of charges the total billed equals the total owed to the paisa.
+  const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1); // defensive: 0 ≤ carry < 1
+  const owed = inrToDebitTokens(tx.billedInr) + carriedIn;
+  const tokens = Math.floor(owed);
+  const carryOut = Math.round((owed - tokens) * 1e6) / 1e6; // keep the remainder free of float dust
+  const billedInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
 
   const ledgerEntry = {
     type: 'usage',
     amountCoinsOrTokens: -tokens,
     moneySpent: 0,
     timestamp: now,
-    description: `${tx.description} — ${tokens.toLocaleString()} tokens (₹${billedInr.toFixed(2)})`,
+    // A charge below one whole token says so plainly rather than showing the user a ₹0.00 line they
+    // cannot account for — it really was charged, just on their next one.
+    description: tokens > 0
+      ? `${tx.description} — ${tokens.toLocaleString()} tokens (₹${billedInr.toFixed(2)})`
+      : `${tx.description} — under ₹0.01, carried to your next charge`,
     buildRef: tx.buildRef,
   };
   const nextLedger = [...ledger, ledgerEntry].slice(-MAX_WALLET_LEDGER_ENTRIES);
@@ -91,10 +115,11 @@ export function computeDebitedWallet(
     tokenBalance: n(w.tokenBalance) - tokens,
     totalTokensUsed: n(w.totalTokensUsed) + tokens,
     remaining_balance: Math.round((n(w.remaining_balance) - billedInr) * 100) / 100,
+    [TOKEN_CARRY_FIELD]: carryOut,
     walletLedger: nextLedger,
     updatedAt: now,
   };
-  return { wallet, tokensDebited: tokens };
+  return { wallet, tokensDebited: tokens, applied: true };
 }
 
 export type WalletDebitResult =
@@ -133,7 +158,9 @@ export async function debitWalletForBuild(
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
       const result = computeDebitedWallet(current, tx, new Date().toISOString());
-      if (result.tokensDebited > 0) t.set(walletRef, result.wallet);
+      // `applied`, not `tokensDebited > 0`: a charge under one whole token debits nothing now but
+      // moves the carried remainder, and losing that write would quietly forgive the charge.
+      if (result.applied) t.set(walletRef, result.wallet);
       return result;
     });
     return {

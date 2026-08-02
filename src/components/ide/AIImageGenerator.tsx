@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
+import { auth } from '../../lib/firebase';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -98,9 +99,17 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     setErrorMsg('');
     setIsLoading(true);
     try {
+      // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
+      // so WITHOUT this header the server saw an anonymous caller and asked the (already logged-in) user
+      // to sign in. Root-caused 2026-07-31: the fetch previously sent no Authorization header.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const tok = await auth.currentUser?.getIdToken();
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+      } catch { /* token optional here — the server still returns an honest sign-in prompt if truly anon */ }
       const res = await fetch('/api/image/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ prompt: effectivePrompt, style, size }),
       });
       const data = await res.json().catch(() => null);
@@ -304,7 +313,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           <p className="text-xs text-white/40">Write a prompt to generate images — logos, banners, icons</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">Pollinations AI</span>
+          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
           <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-full border border-emerald-500/30">Free</span>
         </div>
       </div>

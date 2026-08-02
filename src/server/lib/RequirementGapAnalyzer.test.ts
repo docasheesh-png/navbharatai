@@ -139,3 +139,30 @@ describe('analyzeRequirementGaps', () => {
     expect(buildRequirementGuidance(analyzeRequirementGaps('make me a thing'))).toBe('');
   });
 });
+
+// M7-S7.1 — India moat: India-first defaults (₹ / UPI / GST / Hindi / Aadhaar) whenever the market is
+// clearly Indian, so a generated app ships Indian rails by default, not a US-centric $/Stripe/English one.
+describe('India-first requirement guidance (M7-S7.1)', () => {
+  it('detects the Indian market from real signals', () => {
+    for (const p of ['a shop billing app with GST in ₹', 'accept payments via UPI', 'a hospital in Mumbai with Hindi UI', 'lending app with Aadhaar KYC', 'price in lakh and crore']) {
+      expect(analyzeRequirementGaps(p).india, p).toBe(true);
+    }
+  });
+  it('does NOT flag a clearly non-India prompt', () => {
+    expect(analyzeRequirementGaps('a US SaaS billed in dollars via Stripe').india).toBe(false);
+    expect(analyzeRequirementGaps('a simple todo app').india).toBe(false);
+  });
+  it('emits the INDIA-FIRST block (₹ / UPI) for an India prompt — even a generic-domain one', () => {
+    const g = buildRequirementGuidance(analyzeRequirementGaps('a simple billing tool for a Bharat kirana store in ₹'));
+    expect(g).toContain('INDIA-FIRST');
+    expect(g).toContain('₹');
+    expect(g).toMatch(/UPI/);
+  });
+  it('adds GST for a commerce domain and Aadhaar for fintech', () => {
+    expect(buildRequirementGuidance(analyzeRequirementGaps('a restaurant POS with GST billing in ₹'))).toMatch(/GST-compliant invoice/);
+    expect(buildRequirementGuidance(analyzeRequirementGaps('a UPI wallet with Aadhaar KYC'))).toMatch(/Aadhaar \/ PAN-based KYC/);
+  });
+  it('a non-India generic prompt still gets NO guidance (backward-safe)', () => {
+    expect(buildRequirementGuidance(analyzeRequirementGaps('make me a thing'))).toBe('');
+  });
+});

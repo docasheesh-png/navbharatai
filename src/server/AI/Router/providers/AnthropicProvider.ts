@@ -1,4 +1,4 @@
-import { AIProvider, AIProviderResponse } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import Anthropic from '@anthropic-ai/sdk';
 
 /** Detect an image's MIME type from its base64 leading bytes (JPEG/PNG/GIF/WebP). */
@@ -80,6 +80,7 @@ export class AnthropicProvider implements AIProvider {
       latencyMs: Date.now() - startTime,
       provider: 'ANTHROPIC',
       model,
+      usage: readProviderUsage((response as any).usage),
     };
   }
 

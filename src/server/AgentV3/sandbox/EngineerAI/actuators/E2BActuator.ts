@@ -9,13 +9,18 @@ import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, d
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
-import { postgresWatchdogCommand } from '../../../postgresProvision';
+import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
+import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
+import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
 // idle sweep fires before E2B kills the sandbox on its own.
-const IDLE_LIMIT_MS = 45 * 60 * 1000;
+//
+// The limit itself now lives in sandboxReaper.ts (15 minutes, env-tunable) — it was 45, which meant a
+// five-minute build was followed by three quarters of an hour of billed idle VM, usually for someone
+// who had already closed the tab.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
@@ -269,6 +274,9 @@ export class E2BActuator implements IEngineerActuator {
   // the write-tracking hook, so the route drains them (takeSeededScaffold) and persists them durably —
   // otherwise package.json only reaches durable via a flaky end scan ("No package.json found" preview bug).
   private _seededScaffold = new Map<string, Record<string, string>>();
+  // Last time each workspace's DURABLE record was refreshed, so a live build's timestamp says "in use"
+  // to the cross-instance orphan reaper. Throttled — see shouldTouchDurable.
+  private _lastDurableTouch = new Map<string, number>();
 
   /**
    * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
@@ -363,22 +371,81 @@ export class E2BActuator implements IEngineerActuator {
     return { success: false, log: installLog };
   }
 
-  /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
+  /** Pause sandboxes with no activity for the idle limit (abandoned sessions). */
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
+    const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
       const last = this._lastActivity.get(workspaceId) ?? now;
-      if (now - last > IDLE_LIMIT_MS) {
+      if (now - last > limit) {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
+        this._lastDurableTouch.delete(workspaceId);
         this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
+        await sandboxStore.markPaused(workspaceId).catch(() => {});
+      }
+    }
+    await this._sweepOrphanSandboxes().catch(() => {});
+  }
+
+  /**
+   * Pause sandboxes NO instance can see any more — the leak the sweep above cannot reach.
+   *
+   * The in-memory sweep only knows about sandboxes in THIS process's map. Cloud Run runs several
+   * instances and recycles them, and NavBharatAI redeploys on every merge to main, so the instance
+   * that created a sandbox routinely disappears while the sandbox keeps running and keeps billing —
+   * until E2B's own hour-long lifetime finally expires. Nothing was pausing those.
+   *
+   * This pass reads the DURABLE record instead, so an orphan is visible whichever instance made it.
+   * Sandbox.pause is a static cloud-side call, so this instance can stop a VM it never held.
+   *
+   * Safety: the cut-off is held a whole max-length build plus a margin past the last recorded
+   * activity (reapAfterMs), a live build refreshes that record every few minutes, and anything this
+   * instance is actively holding is skipped outright. Every step is best-effort and swallowed — a
+   * cost sweep must never be able to fail a build.
+   */
+  private async _sweepOrphanSandboxes(): Promise<void> {
+    // The durable record only exists when warm resume is on — with it off there is nothing to read.
+    if (!sandboxResumeEnabled()) return;
+    const now = Date.now();
+    const records = await sandboxStore.listStale(now - reapAfterMs()).catch(() => []);
+    if (!records.length) return;
+    for (const rec of sandboxesToReap(records, now)) {
+      if (this.sandboxes.has(rec.workspaceId)) continue; // in use here — the sweep above owns it
+      const paused = await this.pauseSandbox(rec.sandboxId).catch(() => false);
+      // Stamp it either way. If the pause succeeded the compute is stopped; if it failed the sandbox
+      // is already gone or already paused. Re-trying it every two minutes forever helps in neither
+      // case, and the record stays so a returning user can still resume by id.
+      await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
+      if (paused) {
+        this._lastActivity.delete(rec.workspaceId);
+        this._lastDurableTouch.delete(rec.workspaceId);
+        this._fileCache.delete(rec.workspaceId);
       }
     }
   }
 
+  /**
+   * Tell the DURABLE record this sandbox is in use right now, so the cross-instance orphan reaper can
+   * tell a running build apart from an abandoned VM.
+   *
+   * The record used to be written only when a build FINISHED, which meant a build in progress looked
+   * exactly like one that ended long ago. Throttled to one write per few minutes and deliberately not
+   * awaited — the caller is on the hot path of every file write and command, and a slow Firestore must
+   * never add latency to a build. (It writes no userId: a record created here is filled in by the
+   * end-of-build record(), and nothing about resume or reaping depends on that field.)
+   */
+  private _touchDurable(workspaceId: string, sandboxId: string): void {
+    if (!sandboxResumeEnabled() || !workspaceId || !sandboxId) return;
+    const now = Date.now();
+    if (!shouldTouchDurable(this._lastDurableTouch.get(workspaceId), now)) return;
+    this._lastDurableTouch.set(workspaceId, now);
+    void sandboxStore.touch(workspaceId, sandboxId).catch(() => {});
+  }
+
   private async getSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     // Refresh activity FIRST so any in-flight operation protects its sandbox from
-    // the idle sweep for the full IDLE_LIMIT_MS window.
+    // the idle sweep for its full window.
     this._lastActivity.set(workspaceId, Date.now());
 
     const existing = this.sandboxes.get(workspaceId);
@@ -386,6 +453,7 @@ export class E2BActuator implements IEngineerActuator {
       // Reset the E2B cloud-side countdown on every activity so a long build never
       // gets killed mid-run. Fire-and-forget — failure is non-fatal.
       existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+      this._touchDurable(workspaceId, existing.sandboxId);
       return existing;
     }
 
@@ -410,6 +478,10 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
+    // what made a running build indistinguishable from an abandoned one.
+    this._lastDurableTouch.delete(workspaceId);
+    this._touchDurable(workspaceId, sandbox.sandboxId);
     // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY. When we hold a cached copy of the
     // source files this workspace already wrote (the dead sandbox that was just evicted), replay them so
     // the build continues instead of losing everything. No-op on the very first create (cache empty).
@@ -736,9 +808,18 @@ export class E2BActuator implements IEngineerActuator {
           } catch { /* best-effort — never block the dev server on a config patch */ }
         }
       }
-      const devCommand = redirectDevServerOutput(
+      let devCommand = redirectDevServerOutput(
         disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework)),
       );
+      // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
+      // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
+      // the launch never loaded it. Auto-export every KEY=value from .env into the process env before
+      // starting, so ANY app (dotenv or not) sees its env. `set -a` auto-exports; sourcing is guarded with
+      // `2>/dev/null || true` so a malformed user line can never abort the launch (worst case = today's
+      // behaviour). Kill switch: AGENTV3_DEVSERVER_LOAD_DOTENV=off.
+      if ((process.env.AGENTV3_DEVSERVER_LOAD_DOTENV ?? '').trim().toLowerCase() !== 'off') {
+        devCommand = `set -a; if [ -f .env ]; then . ./.env 2>/dev/null || true; fi; set +a; ${devCommand}`;
+      }
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the
       // scaffold/agent declared a new dep (e.g. tailwindcss) but node_modules is stale,
@@ -823,10 +904,21 @@ export class E2BActuator implements IEngineerActuator {
         // .env DATABASE_URL written when the DB was first provisioned still points at the same local Postgres.
         if (diag.recovery === 'reprovision_db') {
           try {
-            await this.provisionBackend(workspaceId, ['db']);
-            stdout += ' (PostgreSQL restarted).';
+            const prov = await this.provisionBackend(workspaceId, ['db']);
+            // FIRST-TIME provision (Mitrify autopsy 2026-08-02): a from-scratch Drizzle/Express app was never
+            // provisioned, so there is no DATABASE_URL anywhere. provisionBackend restarted Postgres AND
+            // returned the URL — write it into .env (merge, preserving the user's other vars) so the app can
+            // read it. For a previously-provisioned app whose DB was merely reaped, .env already has the same
+            // URL and this merge is a harmless no-op. The relaunch below loads .env into the dev-server env.
+            const url = prov?.envVars?.DATABASE_URL;
+            if (url) {
+              const envPath = `${WORKSPACE_ROOT}/.env`;
+              const current = await sandbox.files.read(envPath).catch(() => '');
+              await sandbox.files.write(envPath, mergeEnvVar(current, 'DATABASE_URL', url)).catch(() => {});
+            }
+            stdout += ' (PostgreSQL provisioned + DATABASE_URL written to .env).';
           } catch {
-            stdout += ' (PostgreSQL restart reported errors — retrying anyway).';
+            stdout += ' (PostgreSQL provision reported errors — retrying anyway).';
           }
         }
         // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).

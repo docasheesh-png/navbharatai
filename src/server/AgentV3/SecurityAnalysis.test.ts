@@ -61,6 +61,26 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = "https://api.example.com/v1";')).toEqual([]);
   });
 
+  it('does NOT build-block on credentials in a .env file (they belong there) — downgraded to low, still reported', () => {
+    // ROOT-CAUSE lock (autopsy build 6478f94d): `connection-string-credentials @ .env:2` was flagged HIGH,
+    // blocked the readiness gate, and the un-fixable finding looped the reviewer to the 1740s wall-clock cap.
+    for (const envName of ['.env', '.env.local', '.env.production', '.env.development.local']) {
+      const f = scanSecurity(envName, 'DATABASE_URL=postgres://user:p4ssword@db.host:5432/app');
+      const hit = f.find((x) => x.rule === 'connection-string-credentials');
+      expect(hit).toBeDefined();                 // still REPORTED (honest, visible)
+      expect(hit?.severity).toBe('low');          // but NEVER build-blocking high
+    }
+    // a redis/amqp connection string with a password in .env is likewise 'low', never a blocking high.
+    expect(scanSecurity('.env', 'REDIS_URL=redis://:hunter2pw@redis.host:6379').find((x) => x.rule === 'connection-string-credentials')?.severity).toBe('low');
+  });
+
+  it('STILL blocks (high) on the same credential in real source, and in a committed .env.example template', () => {
+    // real source — a DB URL hardcoded in a .ts must still fail the gate.
+    expect(scanSecurity('src/db.ts', 'const url = "postgres://user:p4ssword@db.host:5432/app";').some((x) => x.rule === 'connection-string-credentials' && x.severity === 'high')).toBe(true);
+    // .env.example is a COMMITTED template — a real secret there is a genuine leak, so it stays high (not downgraded).
+    expect(scanSecurity('.env.example', 'DATABASE_URL=postgres://user:p4ssword@db.host:5432/app').some((x) => x.rule === 'connection-string-credentials' && x.severity === 'high')).toBe(true);
+  });
+
   it('flags a client-exposed secret env var but not a publishable key', () => {
     expect(scanSecurity('a.ts', 'const k = import.meta.env.VITE_STRIPE_SECRET_KEY;').some((f) => f.rule === 'client-exposed-secret' && f.severity === 'high')).toBe(true);
     expect(scanSecurity('.env', 'NEXT_PUBLIC_DB_PASSWORD=hunter2').some((f) => f.rule === 'client-exposed-secret')).toBe(true);

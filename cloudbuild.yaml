@@ -93,11 +93,56 @@ steps:
   # GET /api/warm + an external Cloud Scheduler ping (no self-ping); see docs/SCALABILITY.md
   # §1. Multi-region readiness (config-only, no spend yet) is assessed in docs/SCALABILITY.md §2.
 
+  # Step 5 — COST: prune old container images from the registry. Every merge pushes a new
+  # immutable :$COMMIT_SHA image; without pruning they accumulate forever and Artifact Registry
+  # storage became the single biggest monthly bill line (~32%). This keeps the newest
+  # _KEEP_IMAGES digests (default 5, incl. the live one + a few rollback targets) and deletes the
+  # rest, tags and all. Fully NON-FATAL (`set +e` … `exit 0`): a cleanup hiccup must NEVER fail a
+  # deploy that already succeeded. Runs last, after the new revision is already live.
+  #
+  # ⚠️ BOUNDED (regression fix 2026-08-02): the first run against a huge accumulated backlog deleted
+  # images one-by-one in an UNBOUNDED loop — hundreds of sequential API calls ran for ~1 HOUR and hit
+  # the build timeout, turning green 5-min deploys into 30-min+/timed-out builds. Two hard bounds now
+  # make the cleanup cost O(1) per deploy: prune at most _PRUNE_MAX oldest per run (the backlog drains
+  # over a handful of deploys; steady state is 1-2 new images/deploy, trivially kept up with), and each
+  # delete is `timeout`-capped so a single hung call can't stall the step. For a one-shot bulk drain of
+  # a large existing backlog, set a native Artifact Registry cleanup policy (runs server-side, OFF the
+  # build path) instead of raising _PRUNE_MAX.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set +e
+        KEEP=${_KEEP_IMAGES}
+        MAX=${_PRUNE_MAX}
+        echo "Artifact Registry cleanup: keep newest $$KEEP, prune up to $$MAX oldest this deploy (bounded)…"
+        gcloud container images list-tags gcr.io/$PROJECT_ID/navbharat-cloud-run \
+          --sort-by=~TIMESTAMP --format='get(digest)' 2>/dev/null \
+          | tail -n +$$((KEEP + 1)) | head -n $$MAX | \
+        while read -r digest; do
+          [ -n "$$digest" ] || continue
+          timeout 25 gcloud container images delete "gcr.io/$PROJECT_ID/navbharat-cloud-run@$$digest" \
+            --quiet --force-delete-tags 2>/dev/null \
+            && echo "  pruned $$digest" || echo "  skip   $$digest"
+        done
+        echo "Artifact Registry cleanup done (non-fatal, bounded to $$MAX/deploy)."
+        exit 0
+
 substitutions:
   # SECURITY Phase 4 — the cross-origin preview origin, baked into the client bundle at build time.
   # EMPTY default = the exact same-origin preview behaviour today (zero change). Override in the Cloud
   # Build trigger (set _VITE_PREVIEW_ORIGIN = https://mitrify.xyz) once the preview subdomain is live.
   _VITE_PREVIEW_ORIGIN: ''
+  # COST — how many newest container images to KEEP in the registry on each deploy (Step 5 prunes the
+  # rest). 5 = the live image + a handful of rollback targets. Raise for more rollback history (more
+  # storage $), lower to spend less. Override in the Cloud Build trigger without a code change.
+  _KEEP_IMAGES: '5'
+  # SAFETY BOUND — the MAX number of old images Step 5 deletes per deploy, so cleanup can never run away
+  # and blow the build timeout (the 2026-08-02 regression). 20 keeps each deploy's cleanup to ~1 min; a
+  # large pre-existing backlog drains over a few deploys. For a big one-shot drain, prefer a native
+  # Artifact Registry cleanup policy (server-side, off the build path) over raising this.
+  _PRUNE_MAX: '20'
 
 options:
   logging: CLOUD_LOGGING_ONLY

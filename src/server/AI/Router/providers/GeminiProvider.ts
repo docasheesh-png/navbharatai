@@ -1,4 +1,4 @@
-import { AIProvider, AIProviderResponse } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { GoogleGenAI } from "@google/genai";
 
 export class GeminiProvider implements AIProvider {
@@ -25,7 +25,8 @@ export class GeminiProvider implements AIProvider {
           content: result.text || '',
           latencyMs: latency,
           provider: 'GEMINI',
-          model: model
+          model: model,
+          usage: readProviderUsage((result as any).usageMetadata),
         };
     } catch (error: any) {
         console.error(`[GeminiProvider] Exit. Error: ${error.message}. Latency: ${Date.now() - startTime}ms.`);

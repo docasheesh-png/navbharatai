@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STARTER_TEMPLATES, startersByCategory } from './starterTemplates';
+import { STARTER_TEMPLATES, startersByCategory, partitionStarters } from './starterTemplates';
 
 describe('STARTER_TEMPLATES', () => {
   it('has a healthy library of starters with unique ids', () => {
@@ -32,5 +32,36 @@ describe('startersByCategory', () => {
     const groups = startersByCategory(STARTER_TEMPLATES.filter((t) => t.category === 'Personal'));
     expect(groups).toHaveLength(1);
     expect(groups[0].category).toBe('Personal');
+  });
+});
+
+describe('partitionStarters — tier-aware suggestions (free first-build must work)', () => {
+  it('every template declares a tier; showcase only ever marks pro templates', () => {
+    for (const t of STARTER_TEMPLATES) {
+      expect(['simple', 'pro'], t.id).toContain(t.tier);
+      if (t.showcase) expect(t.tier, t.id).toBe('pro');
+    }
+  });
+
+  it('has a real library of BOTH simple and pro apps, and at least a few pro showcases', () => {
+    const simple = STARTER_TEMPLATES.filter((t) => t.tier === 'simple');
+    const pro = STARTER_TEMPLATES.filter((t) => t.tier === 'pro');
+    expect(simple.length).toBeGreaterThanOrEqual(8);
+    expect(pro.length).toBeGreaterThanOrEqual(8);
+    expect(pro.filter((t) => t.showcase).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('a FREE user is only offered SIMPLE apps (their first build works), pro ones are locked showcases', () => {
+    const { tappable, locked } = partitionStarters(false);
+    expect(tappable.length).toBeGreaterThan(0);
+    expect(tappable.every((t) => t.tier === 'simple')).toBe(true); // never a pro app a free tier would flail on
+    expect(locked.length).toBeGreaterThan(0);
+    expect(locked.every((t) => t.tier === 'pro' && t.showcase === true)).toBe(true);
+  });
+
+  it('an UNLOCKED (paid) user sees the WHOLE library tappable and nothing locked', () => {
+    const { tappable, locked } = partitionStarters(true);
+    expect(tappable).toHaveLength(STARTER_TEMPLATES.length);
+    expect(locked).toHaveLength(0);
   });
 });

@@ -16,10 +16,15 @@ describe('Voice to App — real v5 handoff', () => {
   it('KB entry exists, is honest about the real path, and Offline AI can navigate to it', () => {
     const entry = kb('voice_to_app');
     expect(entry).toBeTruthy();
-    expect(entry!.path).toContain('AI Tools → Voice to App');
-    // The description must state the REAL mechanism (hand-off to Pro v5.0), not a fake generate.
+    // Corrected 2026-07-31: the builder tools left "Settings → AI Tools" (moved to Home → Other AI on
+    // 2026-07-23), and Voice to App is now the inline 🎙️ mic in the NavBharatAI Pro v5.0 composer —
+    // the stale "AI Tools → Voice to App" path pointed at a doorway that no longer exists.
+    expect(entry!.path).toMatch(/Pro v5\.0/);
+    expect(entry!.path).toMatch(/mic/i);
+    expect(entry!.path).not.toMatch(/Settings/);
+    // The description must state the REAL mechanism (speech dictated into the Pro v5.0 chat), not a fake generate.
     expect(entry!.description).toMatch(/Pro v5\.0/);
-    expect(entry!.description).toMatch(/prefilled|prefill/i);
+    expect(entry!.description).toMatch(/mic|speech|transcrib/i);
     expect(navFor(entry!)).toEqual({ view: 'voice' });
   });
 
@@ -116,7 +121,9 @@ describe('AI Image Gen — our own engine, no third-party hotlink', () => {
   it('the client calls our server route — the third-party hotlink is gone for good', () => {
     const src = readFileSync(join(__dirname, '../src/components/ide/AIImageGenerator.tsx'), 'utf8');
     expect(src).toContain("'/api/image/generate'");
-    expect(src).not.toContain('pollinations');
+    // Case-INSENSITIVE — the "Pollinations AI" badge (capital P) slipped past the old lowercase check
+    // (white-label leak, PROGRESS 2026-07-31). No vendor name may appear on this user-facing surface.
+    expect(src).not.toMatch(/pollinations/i);
   });
 
   it('the /api/image/generate route is registered on the server', () => {

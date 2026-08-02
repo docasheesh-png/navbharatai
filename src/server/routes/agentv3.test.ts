@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -99,6 +99,19 @@ describe('needsFallbackConversationPersist (fast-lane "memory gone after reload"
   });
   it('a record updated exactly at buildStartedAt counts as already-persisted (inclusive boundary)', () => {
     expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 1000 }], 'ws-1', 1000)).toBe(false);
+  });
+});
+
+describe('terminalConversationStatus (build-report autopsy 2026-08-02 — "na successful, na fail, na ₹")', () => {
+  it('a definitive SUCCESS stamps status:complete (was left at "running" → reopen showed no verdict)', () => {
+    expect(terminalConversationStatus({ ok: true })).toBe('complete');
+  });
+  it('a definitive FAILURE stamps status:error', () => {
+    expect(terminalConversationStatus({ ok: false })).toBe('error');
+  });
+  it('a NULL/absent verdict leaves status UNTOUCHED — a resumable pause must never be clobbered', () => {
+    expect(terminalConversationStatus(null)).toBeUndefined();
+    expect(terminalConversationStatus(undefined)).toBeUndefined();
   });
 });
 
@@ -236,6 +249,33 @@ describe('chatWorkspaceContextLine — v5.0 always knows its real file count, ev
   });
 });
 
+describe('reviewerShouldRun — a "do not change any files" import/survey turn gets NO post-build reviewer', () => {
+  // ROOT-CAUSE lock (autopsy build 77bd487b): a read-only survey import ran the reviewer ~16 min AND its
+  // heal edited the imported project (added imports + 12 package.json deps) — because the gate keyed off
+  // `wroteFiles`, which INFRA writes (the .env that loads the user's keys) push above zero on a survey turn.
+  it('is FALSE on an import turn even when infra files were written (the exact 77bd487b failure)', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: true, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: true })).toBe(false);
+  });
+  it('is FALSE when nothing was written (nothing to review)', () => {
+    expect(reviewerShouldRun({ wroteFiles: false, isImportTurn: false, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: true })).toBe(false);
+  });
+  it('RUNS on a real agentic build that wrote files (not fast-lane-gated, not an import turn)', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: false })).toBe(true);
+  });
+  it('is skipped for a fast-lane build unless forced or a Sonnet-tier prompt', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: false, startTierSonnet: false })).toBe(false);
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: true, startTierSonnet: false })).toBe(true);
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: false, startTierSonnet: true })).toBe(true);
+  });
+  it('an import turn is NEVER reviewed, whatever the other flags say', () => {
+    for (const fastLaneGated of [true, false]) {
+      for (const startTierSonnet of [true, false]) {
+        expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: true, fastLaneGated, reviewFastlaneForced: true, startTierSonnet })).toBe(false);
+      }
+    }
+  });
+});
+
 describe('agentV3KeyDiag (provider diagnosis)', () => {
   const prev = process.env.ANTHROPIC_API_KEY;
   afterEach(() => {
@@ -338,11 +378,41 @@ describe('resolveJudgeKind — mode-aware judge selection', () => {
 // Model Routing Policy (admin 2026-07-12): a FREE build must NEVER touch Claude — the post-build heal
 // gates (integrity/preview/C9/runtime) + the no-files retry go cheap-only on a free build.
 describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/power stays Claude-first', () => {
-  it('FREE build → cheapOnly, never Claude-first (closes the leak)', () => {
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+  const prev = process.env.AGENTV3_WEAK_FLAGSHIP_HEAL;
+  afterEach(() => { if (prev === undefined) delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; else process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = prev; });
+
+  it('FREE build → cheapOnly + FLAGSHIP floor (admin 2026-08-02: weak repair uses the top GLM/Kimi), never Claude-first', () => {
+    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default on
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
   });
-  it('PAID / POWER build → Claude-first, not cheap-only (unchanged)', () => {
+  it('FREE build with the kill switch OFF → reverts to plain cheap-only (no flagship floor)', () => {
+    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+    expect(weakFlagshipHealEnabled()).toBe(false);
+  });
+  it('PAID / POWER build → Claude-first, not cheap-only (UNCHANGED — flagship weak-heal never touches paid)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });
+  });
+});
+
+describe('cheapBuildFloorRunners flagshipOnly — weak-fail repair runs on the TOP GLM/Kimi rung only', () => {
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'KIMI_API_KEY', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE'];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); process.env.AGENTV3_FLOOR_BALANCE = 'off'; });
+  afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('free + flagshipOnly keeps ONLY the last (flagship) rung of each free ladder — no cheap flash/coder rungs', () => {
+    process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
+    // free default ladders: GLM [flash,4.7,5.2] · KIMI [k2.5,k2.6,k2.7-code] → flagshipOnly → 1 GLM + 1 KIMI
+    const runners = cheapBuildFloorRunners({ free: true, flagshipOnly: true });
+    expect(runners.filter((r) => r.name === 'GLM').length).toBe(1);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(1);
+  });
+  it('free WITHOUT flagshipOnly keeps the full cheapest-first ladder (3 GLM + 3 KIMI rungs)', () => {
+    process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
+    const runners = cheapBuildFloorRunners({ free: true });
+    expect(runners.filter((r) => r.name === 'GLM').length).toBe(3);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(3);
   });
 });
 
@@ -416,7 +486,7 @@ describe('parseKeyPool — provider key rotation pool (ROADMAP Tier-4)', () => {
 });
 
 describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admin: 1st call not Claude)', () => {
-  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE'];
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE', 'AGENTV3_FREE_KIMI_LEAD'];
   let saved: Record<string, string | undefined>;
   beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
@@ -490,6 +560,24 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     const names = (rs: typeof first) => rs.map((r) => r.name).sort();
     expect(names(second)).toEqual(names(first));
     expect(names(third)).toEqual(names(first));
+  });
+  it('FREE-TIER KIMI LEAD — a free build leads with KIMI (GLM 429-storm autopsy 2026-08-02); GLM stays as fallback', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    const free = cheapBuildFloorRunners({ free: true });
+    expect(free[0].name).toBe('KIMI');                                     // KIMI leads on a free build
+    expect(cheapBuildFloorRunners({ free: true })[0].name).toBe('KIMI');   // every free construction — no 50/50 flip
+    expect(free.some((r) => r.name === 'GLM')).toBe(true);                 // GLM still present as the error-fallback
+    // Paid build is UNCHANGED — still the GLM↔KIMI 50/50 alternation.
+    _resetFloorLeadCounter();
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('KIMI');
+  });
+  it('FREE-TIER KIMI LEAD — kill switch AGENTV3_FREE_KIMI_LEAD=off restores GLM-first for free too', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    process.env.AGENTV3_FREE_KIMI_LEAD = 'off';
+    expect(cheapBuildFloorRunners({ free: true })[0].name).toBe('GLM'); // off → falls back to the normal balance (GLM first)
   });
   it('FLOOR BALANCE — kill switch AGENTV3_FLOOR_BALANCE=off restores the fixed GLM-first order', () => {
     process.env.AGENTV3_FLOOR_BALANCE = 'off';
@@ -2051,13 +2139,28 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //   3× integrity passes (import-normalize / css-guard / cred-log) — gated by this change.
     //   3× post-build artifact passes (tests / index.html / scaffold) — gated on `expectsArtifacts`,
     //      which is false on every import turn.
-    expect(count).toBe(8);
+    //   1× the unused-import sweep (first-build-correct, 2026-07-31) — gated on `result.ok &&
+    //      expectsArtifacts && writtenFiles.size > 0`, so it NEVER writes on a read-only import/survey
+    //      turn (same discipline as the artifact passes above). Considered ✓.
+    //   1× the missing vite.config ensure (first-build-correct, 2026-07-31) — gated on `expectsArtifacts`
+    //      (false on every import/survey turn), so it never writes on a read-only turn. It intentionally
+    //      does NOT require result.ok (a missing vite.config is the fix for a FAILED build). Considered ✓.
+    //   1× the entry-file duplicate-import sweep (duplicate-ErrorBoundary autopsy 2026-08-02) — gated on
+    //      `result.ok && expectsArtifacts && writtenFiles.size > 0`, so it NEVER writes on a read-only
+    //      import/survey turn (same discipline as the artifact passes above). Considered ✓.
+    expect(count).toBe(11);
   });
 
-  it('the reviewer still keys off writtenFiles.size (the guard the rogue writes defeated)', () => {
-    // If this ever stops being the gate, the "no reviewer on an analysis-only turn" guarantee — and
-    // the fake "Build Review (88/100)" over a user's own app — needs re-deriving from scratch.
-    expect(SRC).toContain('const reviewerAllowed = writtenFiles.size > 0');
+  it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {
+    // The size-only guard was DEFEATED in practice (build 77bd487b): infra writes on a read-only survey
+    // turn — the `.env` that loads the user's saved keys, foundational scaffolding — pushed
+    // writtenFiles.size above zero, so the reviewer RAN and its heal edited a "do not change any files"
+    // import (Added 4 imports + 12 package.json deps). The gate now ALSO requires !isImportTurn via the
+    // exported `reviewerShouldRun` predicate, so an analysis-only turn is NEVER reviewed regardless of
+    // infra writes (this stacks on top of the writtenFiles.set write-site audit above — defense in depth).
+    // If this stops being the gate, the "no reviewer on an analysis-only turn" guarantee needs re-deriving.
+    expect(SRC).toContain('const reviewerAllowed = reviewerShouldRun(');
+    expect(SRC).toContain('!opts.isImportTurn'); // reviewerShouldRun itself gates on the import turn
   });
 
   it('the build summary still reports honestly from writtenFiles.size', () => {

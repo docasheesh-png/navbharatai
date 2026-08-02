@@ -220,6 +220,26 @@ export async function analyzeHooksRules(files: Record<string, string>): Promise<
   };
 }
 
+/**
+ * WRITE-TIME steering note for the Rules-of-Hooks violations in a JUST-WRITTEN file (M1-S1.1,
+ * prevent-not-heal): a concise, model-actionable message appended to the write_file/edit_file tool
+ * result so the builder fixes the hook IN THE SAME TURN, instead of shipping a runtime crash that the
+ * post-build readiness gate would only catch later (the exact class that crashed the finance app:
+ * useMemo@useChartData.ts:86). Returns '' when the file is clean. Pure — never throws.
+ */
+export function hookViolationWriteNote(report: HooksReport): string {
+  if (!report || report.ok || !Array.isArray(report.violations) || report.violations.length === 0) return '';
+  // Include the file on each line so a multi-file batch write is unambiguous (M1-S1.2). For a single-file
+  // write the file is redundant with the "Edited X" prefix but harmless.
+  const lines = report.violations.slice(0, 5).map((v) => `  • ${v.file}:${v.line}: ${v.hook} — ${v.detail}`);
+  const more = report.violations.length > 5 ? `\n  …and ${report.violations.length - 5} more.` : '';
+  return (
+    `\n⚠️ RULES OF HOOKS — FIX THIS NOW (it crashes React at runtime): a React Hook in this file is not ` +
+    `called unconditionally at the top level, so the hook order changes between renders.\n${lines.join('\n')}${more}\n` +
+    `  Move every hook ABOVE any early return, and OUT of any if/else/ternary/loop/callback, then re-write the file.`
+  );
+}
+
 function describe(kind: HookViolationKind, hook: string): string {
   switch (kind) {
     case 'conditional-hook':

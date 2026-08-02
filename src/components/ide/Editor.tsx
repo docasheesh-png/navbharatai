@@ -3,7 +3,7 @@ import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
 import {
   X, Play, Bug, Save, FileCode, Check,
-  ChevronRight, MoreVertical, Layout,
+  ChevronRight, MoreVertical, Layout, RotateCcw, Search,
   Globe, Paintbrush, Braces, FileText, Image, FolderOpen
 } from 'lucide-react';
 import type { FC, SVGProps } from 'react';
@@ -359,8 +359,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="none"
-            className="w-full h-full bg-[#1e1e1e] text-[#d4d4d4] font-mono text-[13px] leading-relaxed p-4 resize-none outline-none border-none"
-            style={{ fontFamily: "'Courier New', monospace", caretColor: '#569cd6' }}
+            className="w-full h-full font-mono text-[13px] leading-relaxed p-4 resize-none outline-none border-none"
+            // THEME-AWARE (light-theme readability fix 2026-07-22): the mobile textarea editor was hardcoded
+            // to a DARK palette (bg #1e1e1e / text #d4d4d4). The compat layer remapped the BACKGROUND to the
+            // theme surface (white in Light), but #d4d4d4 was never mapped, so the code text stayed light grey
+            // on white — invisible in the Light theme. Drive both colours from the semantic theme variables
+            // (defined per html[data-theme] for all 5 themes), falling back to the original dark values when
+            // no theme attribute is set — so every theme (Light included) renders readable code.
+            style={{
+              fontFamily: "'Courier New', monospace",
+              caretColor: '#569cd6',
+              background: 'var(--surface-card, #1e1e1e)',
+              color: 'var(--text-body, #d4d4d4)',
+            }}
           />
         ) : (
         <MonacoEditor
@@ -399,6 +410,35 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         />
         )}
       </div>}
+
+      {/* Mobile ACTION toolbar (admin 2026-07-31): a phone has no Ctrl key, so the key editor actions
+          (Undo / Redo / Find / Run) become ≥40px tap buttons here. Hidden on desktop, where the real
+          keyboard shortcuts do the job. */}
+      <div className="md:hidden h-11 bg-[#1f1f1f] border-t border-white/5 flex items-center px-2 gap-1.5 shrink-0">
+          {([
+            { label: 'Undo', Icon: RotateCcw, mirror: false, run: () => editorRef.current?.trigger('mobile-toolbar', 'undo', {}) },
+            { label: 'Redo', Icon: RotateCcw, mirror: true, run: () => editorRef.current?.trigger('mobile-toolbar', 'redo', {}) },
+            { label: 'Find', Icon: Search, mirror: false, run: () => editorRef.current?.getAction('actions.find')?.run() },
+          ]).map(({ label, Icon, mirror, run }) => (
+            <button
+              key={label}
+              onClick={() => { editorRef.current?.focus(); run(); }}
+              aria-label={label}
+              className="min-w-[40px] h-9 px-2 bg-white/5 active:bg-white/10 rounded-lg text-white flex items-center justify-center border border-white/5"
+            >
+              <Icon className={cn('w-4 h-4', mirror && 'scale-x-[-1]')} />
+            </button>
+          ))}
+          {onRun && (
+            <button
+              onClick={onRun}
+              aria-label="Run"
+              className="min-w-[40px] h-9 px-3 bg-emerald-600/90 active:bg-emerald-600 rounded-lg text-white flex items-center gap-1.5 font-bold text-xs ml-auto"
+            >
+              <Play className="w-4 h-4" /> Run
+            </button>
+          )}
+      </div>
 
       {/* Mobile Input Helper Toolbar - Hidden on desktop */}
       <div className="md:hidden h-10 bg-[#252526] border-t border-white/5 flex items-center px-1 overflow-x-auto no-scrollbar gap-1 shrink-0">

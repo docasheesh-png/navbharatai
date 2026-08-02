@@ -545,6 +545,11 @@ export interface SimpleBuildDeps {
   concurrency?: number;
   /** Hard cap (ms) on the manifest + all per-file generation + writes (default 240 s). */
   overallTimeoutMs?: number;
+  /** Hard cap (ms) on the PLAN step alone — the manifest + shared-contract calls (default 90 s). A single
+   *  slow/storming provider call (KIMI timeout + GLM 429 retries) once ran the plan 247 s and blew the whole
+   *  240 s budget → the fast lane always timed out and fell to the full builder. Bounding the plan lets the
+   *  fast lane bail FAST (to the full builder, which recovered in ~26 s) instead of wasting the budget. */
+  planTimeoutMs?: number;
   /** Hard cap (ms) on the best-effort preview (default 90 s). */
   previewTimeoutMs?: number;
   /**
@@ -619,15 +624,22 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
-      const manifestText = await deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths));
+      // Bound the PLAN call: if it exceeds planTimeoutMs the fast lane bails NOW (→ full builder) instead
+      // of one slow call running to the 240 s overall cap. `withTimeout` only races, so the underlying call
+      // keeps running in the background, but the lane stops waiting on it.
+      const planCap = deps.planTimeoutMs ?? 90_000;
+      const manifestText = await withTimeout(
+        deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
+        planCap, 'simple-plan');
       const manifest = parseFileManifest(manifestText);
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
-      // names/shapes by construction (best-effort: a failure here just leaves `contract` empty).
+      // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`
+      // empty, so a storming contract call can't eat the budget either).
       if (shareContract) {
         deps.log?.('Designing the shared types & component contract…');
         try {
-          contract = (await deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)) || '').trim();
+          contract = (await withTimeout(deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)), planCap, 'simple-contract') || '').trim();
         } catch { contract = ''; }
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);

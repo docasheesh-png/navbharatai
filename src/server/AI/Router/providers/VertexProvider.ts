@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { VertexAI } from '@google-cloud/vertexai';
-import { AIProvider, AIProviderResponse } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 
 export class VertexProvider implements AIProvider {
     name: 'VERTEX' = 'VERTEX';
@@ -62,7 +62,8 @@ export class VertexProvider implements AIProvider {
                     content: result.response.candidates[0].content.parts[0].text || '',
                     latencyMs: Date.now() - startTime,
                     provider: 'VERTEX',
-                    model: modelName
+                    model: modelName,
+                    usage: readProviderUsage(result.response?.usageMetadata),
                 };
             } catch (error: any) {
                 retries++;

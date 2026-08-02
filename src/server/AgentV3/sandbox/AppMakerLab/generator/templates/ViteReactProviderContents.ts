@@ -159,24 +159,42 @@ export default App;
 // "styled" the default by construction: generators OVERWRITE this file's content freely (the import
 // is already in place), and a modern base (font stack, box-sizing, color-scheme) is the floor even
 // if they never touch it.
+// COLOUR-BY-DEFAULT (design autopsy 2026-08-01, "b/w app bani hai, koi colour nahi"): the old starter
+// DEFINED --accent but barely USED it — buttons were white cards with grey borders and black text, so
+// the baseline every build inherited was essentially black-and-white, and a weak model that lightly
+// styled shipped a colourless app. This starter puts REAL, visible colour on the surfaces the eye lands
+// on by construction: a saturated brand accent, FILLED primary/submit buttons (white text), coloured
+// links, a subtle card shadow and semantic status colours — so even an app the generator barely touches
+// looks designed, not raw. Generators still OVERWRITE this file freely; it is the floor, not a ceiling.
 export const indexCss = `:root {
   color-scheme: light dark;
-  --bg: #f7f7f8;
-  --fg: #1a1a1e;
+  --bg: #f6f7fb;
+  --fg: #17171c;
   --muted: #6b7280;
   --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-fg: #ffffff;
+  --accent-soft: #eef0ff;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --warning: #d97706;
   --card: #ffffff;
   --border: #e5e7eb;
-  --radius: 10px;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(16, 17, 28, 0.06), 0 8px 24px rgba(16, 17, 28, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #101014;
+    --bg: #0d0d12;
     --fg: #ececf1;
     --muted: #9ca3af;
-    --card: #1a1a21;
-    --border: #2d2d36;
+    --accent: #7c74ff;
+    --accent-hover: #948dff;
+    --accent-soft: #1c1b2e;
+    --card: #17171f;
+    --border: #2a2a35;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -192,16 +210,36 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button {
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+::selection { background: var(--accent); color: var(--accent-fg); }
+
+/* Buttons: the default is a subtle secondary; submit / .primary / .btn-primary get the SATURATED
+   brand colour so every form and CTA has visible colour out of the box — never a grey-on-grey button. */
+button, .btn {
   font: inherit;
   cursor: pointer;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 14px;
+  padding: 9px 16px;
   background: var(--card);
   color: var(--fg);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
-button:hover { border-color: var(--accent); }
+button:hover, .btn:hover { border-color: var(--accent); }
+
+button[type="submit"], .btn-primary, .primary, button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+button[type="submit"]:hover, .btn-primary:hover, .primary:hover, button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-fg);
+}
 
 input, textarea, select {
   font: inherit;
@@ -209,10 +247,69 @@ input, textarea, select {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 12px;
+  padding: 9px 12px;
 }
-input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* A styled card surface so panels never look like raw HTML even before the generator styles them. */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+/* PREMIUM DEFAULTS (M2-S2.1 design system): a small, tasteful component kit so every app looks
+   designed out of the box — a floor, not a ceiling (generators override freely). Theme-aware. */
+
+/* Typographic scale — clear hierarchy instead of raw browser <h1..h6>/<p> sizing. */
+h1 { font-size: 2rem;    line-height: 1.2;  font-weight: 800; letter-spacing: -0.02em; margin: 0 0 0.5em; }
+h2 { font-size: 1.5rem;  line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 0.5em; }
+h3 { font-size: 1.25rem; line-height: 1.3;  font-weight: 700; margin: 0 0 0.4em; }
+h4 { font-size: 1.05rem; line-height: 1.35; font-weight: 600; margin: 0 0 0.4em; }
+p  { margin: 0 0 1em; }
+small, .muted { color: var(--muted); }
+
+/* Ghost button — a third, quieter action next to the primary/secondary. */
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+}
+.btn-ghost:hover { background: var(--accent-soft); border-color: transparent; }
+
+/* Badges — small status pills using the semantic colours. */
+.badge {
+  display: inline-flex; align-items: center; gap: 0.35em;
+  font-size: 0.75rem; font-weight: 700; line-height: 1;
+  padding: 0.3em 0.6em; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.badge-success { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.badge-danger  { background: color-mix(in srgb, var(--danger) 15%, transparent);  color: var(--danger); }
+.badge-warning { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
+
+/* Alerts — a tinted, bordered message block for info/success/error/warning states. */
+.alert {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--card);
+}
+.alert-success { border-color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--card)); }
+.alert-danger  { border-color: var(--danger);  background: color-mix(in srgb, var(--danger) 8%, var(--card)); }
+.alert-warning { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--card)); }
+
+/* Layout helpers — a centred page container and tiny flex utilities so structure is easy and consistent. */
+.container { width: 100%; max-width: 1080px; margin-inline: auto; padding-inline: 16px; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row   { display: flex; align-items: center; gap: 12px; }
+
+/* Labelled field — vertical label + input spacing so forms read cleanly. */
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field > label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
 `;

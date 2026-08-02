@@ -214,6 +214,11 @@ export class WorkspaceMemory {
     if (/(^|\/)package\.json$/.test(file)) this.depsInstalledAt = 0;
   }
 
+  /** All file paths currently indexed into the project graph (cheap, in-memory — no disk/shell). */
+  knownFilePaths(): string[] {
+    return [...this.fileFacts.keys()];
+  }
+
   /** Drop a deleted file from the graph. */
   removeFile(file: string): void {
     this.fileFacts.delete(file);

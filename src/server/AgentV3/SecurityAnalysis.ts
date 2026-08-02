@@ -45,6 +45,23 @@ export function isFixtureFile(file: string): boolean {
   return false;
 }
 
+// A dotenv secrets file (`.env`, `.env.local`, `.env.production`, …) is the DESIGNATED, gitignored place
+// for real credentials — a `DATABASE_URL=postgres://user:pass@host/db`, an API key, a JWT secret all BELONG
+// here. Flagging them as a build-BLOCKING 'high' is a false positive whose "fix" is circular ("move to an
+// environment variable" — `.env` IS the environment file) and has no valid auto-fix, so the reviewer loops
+// on it to the wall-clock timeout and marks a working app broken (autopsy build 6478f94d: a `continue` turn
+// failed ok:false on `connection-string-credentials @ .env:2`, then timed out at the 1740s cap). So, exactly
+// like a fixture file, credential-VALUE findings (demoDowngrade rules) in an env file are downgraded to
+// 'low' — still REPORTED (honest, visible), never build-failing. `.env.example`/`.sample`/`.template` are
+// EXCLUDED: those are committed templates that must carry only placeholders (a real secret there IS a leak).
+// Real code vulns (private-key, aws-key, jwt-none, eval, …) are NOT demoDowngrade → they stay high here too.
+// PURE.
+export function isEnvSecretsFile(file: string): boolean {
+  const base = (file || '').toLowerCase().split('/').pop() || '';
+  if (!/^\.env(?:\.[a-z0-9_.-]+)?$/.test(base)) return false;          // .env, .env.local, .env.production, …
+  return !/\.(?:example|sample|template|dist|tpl)$/.test(base);        // but NOT a committed .env.example template
+}
+
 // Placeholder / non-real-credential markers. MUST be tested against the captured credential VALUE
 // (or the token itself), NOT the whole line: two tokens here (`<` and `test`) match far too much of
 // an ordinary line — `<` hits EVERY JSX line (so secret detection was disabled on .tsx, the most
@@ -604,14 +621,17 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
   // leak — downgrade those (demoDowngrade rules) from 'high' to 'low' so a demo app never FAILS its
   // readiness gate on its own mock login creds, while a real secret in real source still blocks. Real
   // code vulns (aws-key, private-key, jwt-none, eval, …) are NOT demoDowngrade → they stay high here too.
-  const fixture = isFixtureFile(file);
+  // Credentials are EXPECTED (not a leak) in a fixture/demo file OR a dotenv secrets file — a value rule
+  // there is downgraded to 'low' so a correct app never FAILS its readiness gate on credentials that belong
+  // exactly where they are. A real secret hardcoded in real source still blocks.
+  const credsBelongHere = isFixtureFile(file) || isEnvSecretsFile(file);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length > 4000) continue; // skip minified/huge lines
     for (const r of RULES) {
       const m = r.re.exec(line);
       if (m && !(r.ignore && r.ignore(m, line))) {
-        const severity: Severity = fixture && r.demoDowngrade ? 'low' : r.severity;
+        const severity: Severity = credsBelongHere && r.demoDowngrade ? 'low' : r.severity;
         findings.push({ file, line: i + 1, severity, rule: r.rule, message: r.message });
       }
     }

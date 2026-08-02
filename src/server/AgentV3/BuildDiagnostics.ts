@@ -364,6 +364,24 @@ export class BuildDiagnostics {
   }
 
   /**
+   * True when an UNRESOLVED readiness blocker proving a RUNTIME CRASH is on the timeline — a React
+   * Rules-of-Hooks violation, an undefined JSX component, or an undefined hook (all recorded with the
+   * literal "crash at runtime"). Such a defect renders fine on the first paint and white-screens on a
+   * later re-render, so the render-rescue (a one-shot snapshot) must NOT upgrade the build to success
+   * while one is present (real report 8a6e4585). Reads the already-computed, full-workspace readiness
+   * result — no re-analysis. Pure query; never throws.
+   */
+  hasRuntimeCrashBlocker(): boolean {
+    return this.issues.some(
+      (i) =>
+        i.code === 'READINESS_BLOCKER' &&
+        i.severity === 'error' &&
+        i.autoResolved !== true &&
+        /crash(es)? at runtime/i.test(i.message || ''),
+    );
+  }
+
+  /**
    * Record a periodic "still working" marker so even a long quiet stretch (a slow or hung step)
    * shows minute-by-minute progress in the report instead of a blank gap. Called on a timer by the
    * route. If a tool call is in-flight, it names it — so a hang is visible as "minute N — stuck on X".

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isViteConfigPath, ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
+import { isViteConfigPath, ensureViteAllowedHosts, ensureViteResolveAlias, ensureViteConfig } from './ViteConfigGuard';
 
 describe('isViteConfigPath', () => {
   it('matches every vite.config extension, in any directory', () => {
@@ -93,3 +93,46 @@ describe('ensureViteResolveAlias — dep-free @→/src alias backstop (protects 
     expect(ensureViteResolveAlias('vite.config.ts', fn)).toBe(fn);
   });
 });
+
+// First-build-correct (missing-config autopsy 2026-07-31): a build FAILED because the app had `vite` in
+// its deps but no vite config at all. ensureViteConfig materializes a correct one, only when it's missing.
+describe('ensureViteConfig — a Vite app always has its config', () => {
+  const pkg = (deps: Record<string, string>) => JSON.stringify({ dependencies: deps });
+
+  it('MATERIALIZES vite.config.ts for a TS React app that has none (the exact failure)', () => {
+    const out = ensureViteConfig({
+      'package.json': pkg({ vite: '^5.0.0', react: '^18.0.0', '@vitejs/plugin-react': '^4.0.0' }),
+      'tsconfig.json': '{}',
+      'src/App.tsx': 'export default () => null',
+    });
+    expect(out).not.toBeNull();
+    expect(out!.path).toBe('vite.config.ts');
+    expect(out!.content).toContain("import react from '@vitejs/plugin-react'");
+    expect(out!.content).toContain('plugins: [react()]');
+    expect(out!.content).toContain('allowedHosts: true');
+  });
+
+  it('uses the SWC plugin import when that is the dependency', () => {
+    const out = ensureViteConfig({ 'package.json': pkg({ vite: '^5', react: '^18', '@vitejs/plugin-react-swc': '^3' }), 'src/App.tsx': 'x' });
+    expect(out!.content).toContain('@vitejs/plugin-react-swc');
+  });
+
+  it('emits vite.config.js (no react plugin) for a plain JS Vite app', () => {
+    const out = ensureViteConfig({ 'package.json': pkg({ vite: '^5' }), 'src/main.js': 'x' });
+    expect(out!.path).toBe('vite.config.js');
+    expect(out!.content).toContain('plugins: []');
+    expect(out!.content).not.toContain('@vitejs/plugin-react');
+  });
+
+  it('NEVER overwrites an existing config (any extension)', () => {
+    for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mts']) {
+      expect(ensureViteConfig({ 'package.json': pkg({ vite: '^5' }), [cfg]: 'export default {}' })).toBeNull();
+    }
+  });
+
+  it('is null when the app is not a Vite app, or package.json is missing/invalid', () => {
+    expect(ensureViteConfig({ 'package.json': pkg({ react: '^18' }) })).toBeNull(); // no vite
+    expect(ensureViteConfig({ 'src/App.tsx': 'x' })).toBeNull();                     // no package.json
+    expect(ensureViteConfig({ 'package.json': '{ not json' })).toBeNull();           // unparseable
+  });
+})

@@ -62,6 +62,26 @@ describe('Node-only backend libs in frontend guidance (deep-test App #12 — jso
   });
 });
 
+describe('Design-kit guidance (M2-S2.1 — reuse the scaffold component kit for a premium look)', () => {
+  it('points the architect at the ready-made kit classes and palette vars', () => {
+    const p = architectSystemPrompt();
+    expect(p).toMatch(/DESIGN KIT/i);
+    expect(p).toContain('.card');
+    expect(p).toContain('.badge');
+    expect(p).toContain('.container');
+  });
+});
+
+describe('React Rules-of-Hooks guidance (M1-S1.3 — prevent the #1 runtime crash upstream)', () => {
+  it('tells the architect to call hooks unconditionally at the top level, not after an early return', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('RULES OF HOOKS');
+    expect(p).toMatch(/top level/i);
+    expect(p).toMatch(/early return/i);
+    expect(p).toMatch(/useMemo|useEffect|useState/);
+  });
+});
+
 describe('summarizeFileTree (edit at scale — bound the injected tree)', () => {
   it('lists every path in full for a SMALL project (unchanged behaviour)', () => {
     const out = summarizeFileTree(['src/App.tsx', 'package.json', 'src/lib/util.ts']);
@@ -347,5 +367,22 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('go run main.go');
     expect(p).toContain('8080');
     expect(p).toContain('go mod tidy');
+  });
+});
+
+describe('WRITE-IT-RIGHT prevention (build-report 1327b405: hooks crash + hardcoded token + Math.random token)', () => {
+  const prompt = architectSystemPrompt();
+  it('tells the builder never to call a hook conditionally (Rules of Hooks — the crash that closed the preview port)', () => {
+    expect(prompt).toContain('Rules of Hooks');
+    expect(prompt.toLowerCase()).toContain('conditionally');
+    expect(prompt).toContain('unconditionally at the');
+  });
+  it('tells the builder never to hardcode a real-format token — use an obvious placeholder', () => {
+    expect(prompt).toContain('sk_test_YOUR_KEY_HERE');
+    expect(prompt.toLowerCase()).toContain('never hardcode a real-format api token');
+  });
+  it('tells the builder never to use Math.random() for a token/OTP/secret', () => {
+    expect(prompt).toContain('crypto.randomUUID()');
+    expect(prompt).toContain('Math.random()');
   });
 });

@@ -24,7 +24,7 @@ import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterA
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { STARTER_TEMPLATES } from './starterTemplates';
+import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
@@ -2117,9 +2117,40 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
-  // Admin 2026-07-06: the Text-report download and Copy-report buttons were removed from the header.
-  // The JSON "Build report" download (downloadDiagnostics) remains the single report export; the
-  // server still keeps the full "0 → last" session history behind it and the History dropdown.
+  // REPORT TO ADMIN (admin 2026-07-29): the build report is ADMIN-ONLY now. The user can no longer
+  // see, download or copy it — a single "Report" button submits the current build's report to the
+  // admin inbox (POST /api/agentv3/report-to-admin), which resolves + snapshots it server-side. The
+  // user gets only an acknowledgement; the report content never reaches the client. (The older
+  // download/copy/history helpers above are no longer wired to any UI and are retained dormant to
+  // avoid a risky large deletion in this file — they can be removed in a dedicated cleanup.)
+  const [reportSending, setReportSending] = useState(false);
+  const [reportSent, setReportSent] = useState(false);
+  const sendReportToAdmin = useCallback(async () => {
+    if (reportSending) return;
+    setReportSending(true);
+    try {
+      const body: Record<string, string> = {};
+      if (state.workspaceId) body.workspaceId = state.workspaceId;
+      if (state.buildId) body.activeBuildId = state.buildId;
+      if (state.promptHash) body.promptHash = state.promptHash;
+      const res = await fetch('/api/agentv3/report-to-admin', {
+        method: 'POST',
+        headers: { ...(await authJsonHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok) {
+        setReportSent(true);
+        setTimeout(() => setReportSent(false), 4000);
+      } else {
+        alert(data?.error || 'Could not send the report right now — please try again in a moment.');
+      }
+    } catch (e) {
+      alert(`Could not send the report: ${e instanceof Error ? e.message : String(e)}.`);
+    } finally {
+      setReportSending(false);
+    }
+  }, [reportSending, state.workspaceId, state.buildId, state.promptHash]);
 
   // ── Mobile footer API (admin 2026-07-07): registration moved BELOW the workspaceFiles state
   // declaration (it feeds the Files count + green-dot signal) — see the effect after it.
@@ -2240,8 +2271,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
-      buildReport: () => { setMobileSheet(null); void downloadDiagnostics(); },
-      reportBusy: downloadingDiag,
+      buildReport: () => { setMobileSheet(null); void sendReportToAdmin(); },
+      reportBusy: reportSending,
       openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
       // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
@@ -2250,7 +2281,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       fileCount: realFileCount,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onFooterApi, showWorkspace, tab, downloadingDiag, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
+  }, [onFooterApi, showWorkspace, tab, reportSending, sendReportToAdmin, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
   // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
   // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
@@ -2696,75 +2727,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
-          {/* Admin 2026-07-06: the moving header carried Export .zip / Text report / Copy report too —
-              removed to declutter. The single JSON "Build report" download stays (the canonical report
-              to send to support), alongside the per-build History dropdown below. */}
+          {/* Report to admin (admin 2026-07-29): ONE button, no download/copy, no history browser —
+              the report is admin-only. Clicking it submits this build's report to NavBharatAI; the
+              user only sees a "sent" acknowledgement, never the report content. */}
           <button
-            onClick={() => downloadDiagnostics('download')}
-            disabled={downloadingDiag}
-            title="Download the diagnostics report from your last build (JSON) — every issue v5.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            onClick={() => void sendReportToAdmin()}
+            disabled={reportSending || !state.workspaceId}
+            title="Send this build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)"
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
           >
-            {downloadingDiag ? <TirangaLoader className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
-            {downloadingDiag ? 'Preparing…' : 'Build report'}
+            {reportSending ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+            {reportSending ? 'Sending…' : reportSent ? 'Report sent' : 'Report'}
           </button>
-          {/* Copy build report (admin 2026-07-12 — re-added, right next to Download): copies the SAME
-              report JSON to the clipboard so it can be pasted straight into a chat/support without a file. */}
-          <button
-            onClick={() => downloadDiagnostics('copy')}
-            disabled={downloadingDiag}
-            title="Copy the last build's diagnostics report (JSON) to the clipboard — paste it straight into a chat or support message."
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5" /> Copy
-          </button>
-          <div className="relative">
-            <button
-              onClick={toggleHistoryReport}
-              disabled={!state.workspaceId}
-              title="Browse past builds' reports — a small recent build never hides a previous, more useful report."
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${selectedHistoryBuildId ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              {selectedHistoryBuildId ? 'Viewing past build' : 'Report history'}
-            </button>
-            {historyReportOpen && (
-              <>
-                <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryReportOpen(false)} aria-hidden="true" />
-                <div className="absolute left-0 top-8 z-50 w-80 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
-                  {selectedHistoryBuildId && (
-                    <button
-                      onClick={() => { setSelectedHistoryBuildId(null); setHistoryReportOpen(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-300 hover:bg-zinc-800"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" /> Back to latest report
-                    </button>
-                  )}
-                  <div className="my-1 border-t border-zinc-800" />
-                  {historyReportLoading ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading…</div>
-                  ) : historyReportItems.length === 0 ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
-                  ) : (
-                    historyReportItems.map((h) => (
-                      <button
-                        key={h.id}
-                        onClick={() => { setSelectedHistoryBuildId(h.id); setHistoryReportOpen(false); }}
-                        title={h.rootCause || ''}
-                        className={`w-full flex items-start gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 ${selectedHistoryBuildId === h.id ? 'bg-indigo-500/10 text-white' : 'text-zinc-300'}`}
-                      >
-                        <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${h.ok === true ? 'bg-emerald-500' : h.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
-                        <span className="flex-1 min-w-0">
-                          <span className="block text-[10px] text-zinc-500">{new Date(h.startedAt).toLocaleString()}</span>
-                          <span className="block truncate">{h.rootCause || '(no root cause recorded)'}</span>
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
           {state.repoUrl && (
             <a
               href={state.repoUrl}
@@ -2864,11 +2838,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 )}
                 {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
                     composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
-                {chatMode === 'build' && (
+                {chatMode === 'build' && (() => {
+                  // TIER-AWARE starters (admin 2026-08-02): a FREE user (powerUnlocked=false) is only offered
+                  // `simple` apps their weak tier actually ships, so their FIRST build works — plus a curated
+                  // few LOCKED `pro` showcases that open the upgrade surface (the free→paid carrot). An
+                  // unlocked user gets the whole library, tappable, no locks.
+                  const { tappable: starterTappable, locked: starterLocked } = partitionStarters(powerUnlocked);
+                  return (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
                     <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
-                      {STARTER_TEMPLATES.map((t) => (
+                      {starterTappable.map((t) => (
                         <button
                           key={t.id}
                           type="button"
@@ -2880,6 +2860,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         </button>
                       ))}
                     </div>
+                    {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
+                        recharge surface) instead of dropping a prompt the weak tier would flail on. */}
+                    {starterLocked.length > 0 && (
+                      <div className="mt-4">
+                        <div className="text-[11px] uppercase tracking-wide text-indigo-400/70 mb-2 flex items-center justify-center gap-1">
+                          <span aria-hidden>⚡</span> Unlock with Pro
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                          {starterLocked.map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              title={`${t.label} needs a Pro tier — the free tier is tuned for simple apps. Tap to unlock.`}
+                              onClick={() => setSettingsOpen(true)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-indigo-300/80 hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-indigo-200 transition-colors"
+                            >
+                              <span aria-hidden>{t.icon}</span>{t.label}<span aria-hidden className="ml-0.5 opacity-70">🔒</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {/* GLOWING "Screenshot → App" button (admin 2026-07-22) — sits with the templates as a
                         highlighted starter: tap → open the gallery → build an app from that screenshot,
                         inline. Second entry to the SAME flow as the Attach-menu option. */}
@@ -2896,7 +2898,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       </button>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             )}
             {chatBlocks.map((b) => {
@@ -3846,48 +3849,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <span className="flex-1 text-left">Checkpoints</span>
                   <span className="text-xs text-zinc-500">{allCheckpoints.length}</span>
                 </button>
-                {/* Report history — the same real per-build report list as the desktop dropdown */}
+                {/* Report to admin (admin 2026-07-29): one action, admin-only report — no download,
+                    no copy, no history browser. Submits this build's report to NavBharatAI. */}
                 <button
-                  onClick={() => void toggleHistoryReport()}
-                  disabled={!state.workspaceId}
+                  onClick={() => { setMobileSheet(null); void sendReportToAdmin(); }}
+                  disabled={reportSending || !state.workspaceId}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
-                  <Clock className="w-4 h-4 shrink-0 text-zinc-400" />
-                  <span className="flex-1 text-left">Report history</span>
-                  {selectedHistoryBuildId && <span className="text-xs text-indigo-400">viewing past build</span>}
+                  {reportSent ? <Check className="w-4 h-4 shrink-0 text-emerald-400" /> : <FileText className="w-4 h-4 shrink-0 text-zinc-400" />}
+                  <span className="flex-1 text-left">{reportSending ? 'Sending report…' : reportSent ? 'Report sent' : 'Report'}</span>
                 </button>
-                {historyReportOpen && (
-                  <div className="mx-4 mb-1 rounded-lg border border-zinc-800 overflow-hidden">
-                    {selectedHistoryBuildId && (
-                      <button
-                        onClick={() => { setSelectedHistoryBuildId(null); setHistoryReportOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-300 hover:bg-zinc-800 touch-manipulation"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" /> Back to latest report
-                      </button>
-                    )}
-                    {historyReportLoading ? (
-                      <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading…</div>
-                    ) : historyReportItems.length === 0 ? (
-                      <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
-                    ) : (
-                      historyReportItems.map((h) => (
-                        <button
-                          key={h.id}
-                          onClick={() => { setSelectedHistoryBuildId(h.id); setHistoryReportOpen(false); }}
-                          title={h.rootCause || ''}
-                          className={`w-full flex items-start gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 touch-manipulation ${selectedHistoryBuildId === h.id ? 'bg-indigo-500/10 text-white' : 'text-zinc-300'}`}
-                        >
-                          <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${h.ok === true ? 'bg-emerald-500' : h.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
-                          <span className="flex-1 min-w-0">
-                            <span className="block text-[10px] text-zinc-500">{new Date(h.startedAt).toLocaleString()}</span>
-                            <span className="block truncate">{h.rootCause || '(no root cause recorded)'}</span>
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
                 {state.repoUrl && (
                   <a
                     href={state.repoUrl}

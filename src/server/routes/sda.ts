@@ -477,6 +477,26 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
       }
 
+      // FREE-tier reliability (admin 2026-07-30, "Doctor AI respond nahi kar raha"): a free TEXT turn
+      // only had GLM-flash → inline Vertex; when BOTH are down (e.g. a GLM-429 storm with no Vertex
+      // project configured) it 503'd and looked "dead". Gemini is explicitly in the free ladder
+      // (GLM/Kimi → Vertex/Gemini → …), so add DIRECT Gemini as a sequential free fallback. It fires
+      // ONLY when the cheap chain produced nothing, so a normal free turn that GLM answers costs nothing
+      // extra. Never Grok/Claude on free. (Image/PDF already reach Gemini via the racer above.)
+      if (!reply && sdaTier === 'free' && sdaGeminiKey && !isImage && !isPDF) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const contents = buildGeminiContents();
+          for (const m of geminiVisionModels()) {
+            try {
+              const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+              const t = r.text || '';
+              if (t.trim()) { reply = t; console.log(`[SDA] Free-tier Gemini fallback ${m} succeeded`); break; }
+            } catch (e: any) { console.warn(`[SDA] free Gemini ${m}:`, e.message); }
+          }
+        } catch (e: any) { console.warn('[SDA] free Gemini fallback err:', e.message); }
+      }
+
       // TIER: Claude is the premium last resort — PAID tier only. A free-tier turn that got no reply
       // from the cheap providers (Gemini/Vertex) fails honestly rather than escalating to a paid model.
       if (!reply && sdaTier === 'paid') {
@@ -501,8 +521,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       }
 
       if (!reply) {
+        // Admin-facing detail stays in the log; the doctor gets an honest, on-brand busy message
+        // (never internal provider/key detail — the client now shows this text directly).
         console.error('[SDA] All AI providers failed — returning 503');
-        return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
+        return res.status(503).json({ error: 'Doctor AI is busy right now — please try again in a moment.' });
       }
 
       // ── Extract CLINICAL_JSON from reply and persist to session store ──────────
@@ -570,8 +592,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {
+      // Full detail to the server log (admin diagnostics); a safe, on-brand message to the doctor —
+      // the client now shows this `error` text directly, so it must never leak internals.
       console.error('[SDA] Error:', err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Doctor AI hit an unexpected error. Please try again in a moment.' });
     }
   });
 }

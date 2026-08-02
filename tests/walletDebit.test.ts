@@ -3,6 +3,7 @@ import {
   computeDebitedWallet,
   debitWalletForBuild,
   MAX_WALLET_LEDGER_ENTRIES,
+  TOKEN_CARRY_FIELD,
   type WalletDebitTx,
 } from '../src/server/lib/walletDebit';
 import { computeCreditedWallet, type WalletCreditTx, TOKENS_PER_RUPEE } from '../src/server/lib/payments';
@@ -101,6 +102,83 @@ describe('computeDebitedWallet — debit math (the missing half of the money pat
     const { wallet } = computeDebitedWallet(existing, tx(), T);
     expect(wallet.hasVishwakarmaPass).toBe(true);
     expect(wallet.someOtherField).toBe('keep-me');
+  });
+});
+
+describe('the sub-token remainder is carried, not rounded away', () => {
+  // The debit used to round UP. That charged the user up to ₹0.01 more than the build cost every time,
+  // and — worse — the ceil went into `tokenBalance` while `remaining_balance` moved by the paisa-rounded
+  // ₹, so the wallet's two views of the same money drifted apart on every build. Now the fraction is
+  // carried to the next charge: nothing is given away, nothing is over-collected.
+
+  it('charges only the whole tokens and remembers the rest', () => {
+    const { wallet, tokensDebited } = computeDebitedWallet(FUNDED, tx({ billedInr: 25.004 }), T);
+    expect(tokensDebited).toBe(2500);                  // 2500.4 owed → 2500 now
+    expect(wallet[TOKEN_CARRY_FIELD]).toBeCloseTo(0.4, 6);
+    expect(wallet.tokenBalance).toBe(7500);
+  });
+
+  it('the carry is spent by the next charge, so nothing is forgiven', () => {
+    const first = computeDebitedWallet(FUNDED, tx({ billedInr: 25.004, buildRef: 'b1' }), T).wallet;
+    const second = computeDebitedWallet(first, tx({ billedInr: 25.007, buildRef: 'b2' }), T);
+    expect(second.tokensDebited).toBe(2501);           // 0.4 carried + 2500.7 = 2501.1
+    expect(second.wallet[TOKEN_CARRY_FIELD]).toBeCloseTo(0.1, 6);
+  });
+
+  it('ten sub-token charges add up to exactly one token — no more, no less', () => {
+    // Ceiling each of these would have billed 10 tokens for 1 token of real cost.
+    let w: Record<string, any> = { ...FUNDED };
+    let total = 0;
+    for (let i = 0; i < 10; i++) {
+      const r = computeDebitedWallet(w, tx({ billedInr: 0.001, buildRef: `m${i}` }), T);
+      w = r.wallet;
+      total += r.tokensDebited;
+    }
+    expect(total).toBe(1);
+    expect(w.tokenBalance).toBe(10000 - 1);
+  });
+
+  it('the ₹ and the tokens always move together — the drift that existed is impossible now', () => {
+    // remaining_balance is DERIVED from the tokens actually debited, so the two balances cannot
+    // disagree however awkward the amount.
+    let w: Record<string, any> = { ...FUNDED };
+    for (const [i, amount] of [25.004, 0.333, 11.117, 0.009, 3.5].entries()) {
+      w = computeDebitedWallet(w, tx({ billedInr: amount, buildRef: `d${i}` }), T).wallet;
+    }
+    const tokensSpent = 10000 - w.tokenBalance;
+    const rupeesSpent = Math.round((100 - w.remaining_balance) * 100) / 100;
+    expect(rupeesSpent).toBeCloseTo(tokensSpent / TOKENS_PER_RUPEE, 6);
+  });
+
+  it('a charge smaller than one token reports applied — so the caller still persists the carry', () => {
+    const r = computeDebitedWallet(FUNDED, tx({ billedInr: 0.004 }), T);
+    expect(r.tokensDebited).toBe(0);
+    expect(r.applied).toBe(true); // tokensDebited > 0 would have dropped the write and forgiven it
+    expect(r.wallet[TOKEN_CARRY_FIELD]).toBeCloseTo(0.4, 6);
+  });
+
+  it('says so honestly in the ledger rather than showing a ₹0.00 line', () => {
+    const { wallet } = computeDebitedWallet(FUNDED, tx({ billedInr: 0.004 }), T);
+    expect(wallet.walletLedger[0].description).toContain('carried to your next charge');
+  });
+
+  it('a rejected or already-charged call is not applied and moves no carry', () => {
+    expect(computeDebitedWallet(FUNDED, tx({ billedInr: 0 }), T).applied).toBe(false);
+    const once = computeDebitedWallet(FUNDED, tx({ billedInr: 25.004 }), T).wallet;
+    const twice = computeDebitedWallet(once, tx({ billedInr: 25.004 }), T);
+    expect(twice.applied).toBe(false);
+    expect(twice.wallet[TOKEN_CARRY_FIELD]).toBeCloseTo(0.4, 6); // unchanged, not doubled
+  });
+
+  it('a corrupt carry on the doc cannot become free credit or a surprise charge', () => {
+    // Whatever ends up in the field, it is clamped to a real remainder before it touches the balance.
+    for (const bad of [99, -5, NaN, 'lots' as unknown as number, undefined]) {
+      const r = computeDebitedWallet({ ...FUNDED, [TOKEN_CARRY_FIELD]: bad }, tx({ billedInr: 1 }), T);
+      expect(r.tokensDebited).toBeGreaterThanOrEqual(100);
+      expect(r.tokensDebited).toBeLessThanOrEqual(101);
+      expect(r.wallet[TOKEN_CARRY_FIELD]).toBeGreaterThanOrEqual(0);
+      expect(r.wallet[TOKEN_CARRY_FIELD]).toBeLessThan(1);
+    }
   });
 });
 

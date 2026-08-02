@@ -194,8 +194,16 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     || /(?:ECONNREFUSED|connection refused)[^\n]*(?::|\bport\s*)5432\b/i.test(text)
     // Postgres' own multi-line "could not connect to server: Connection refused … port 5432?" — the two
     // halves straddle a newline, so match their presence anywhere in the (bounded) tail rather than inline.
-    || (/could not connect to (?:server|database)/i.test(text) && /\b5432\b/.test(text))) {
-    return make('db_unreachable', "The app's database isn't running in the sandbox (Postgres was reaped or never started) — restarting PostgreSQL and retrying.");
+    || (/could not connect to (?:server|database)/i.test(text) && /\b5432\b/.test(text))
+    // DB NEVER PROVISIONED (Mitrify autopsy 2026-08-02): a from-scratch Drizzle/Express app (`server/db.ts`
+    // reads process.env.DATABASE_URL) crashes on boot because NO DATABASE_URL is set — the Prisma-only
+    // provisioner never fired. This is NOT "Postgres reaped"; the DB was never created. Same recovery
+    // (provision Postgres + write DATABASE_URL to .env), so route it to db_unreachable → reprovision_db.
+    || /DATABASE_URL\s+must\s+be\s+set/i.test(text)
+    || /did\s+you\s+forget\s+to\s+provision\s+a\s+database/i.test(text)
+    || /DATABASE_URL\s+(?:is\s+)?(?:not\s+set|not\s+defined|required|missing|undefined|is\s+empty)/i.test(text)
+    || /(?:missing|no)\s+(?:required\s+)?(?:env(?:ironment)?\s+var(?:iable)?\s+)?DATABASE_URL/i.test(text)) {
+    return make('db_unreachable', "The app needs a database but none is set up in the sandbox — provisioning PostgreSQL, writing DATABASE_URL, and retrying.");
   }
 
   // 3) Code error in the generated source — a restart can NEVER fix this; the agent must edit the code.

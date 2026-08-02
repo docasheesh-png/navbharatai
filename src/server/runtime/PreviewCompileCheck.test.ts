@@ -3,6 +3,8 @@ import {
   checkPreviewCompiles,
   previewBabelPresets,
   previewCompileRepairInstruction,
+  previewDivergenceBlocksDelivery,
+  previewCompileUnresolvedSummary,
 } from './PreviewCompileCheck';
 
 // Autopsy 2026-07-22 (buildId 91694679): the in-browser Babel preview can reject code that tsc + the
@@ -108,5 +110,35 @@ describe('previewCompileRepairInstruction', () => {
     expect(instr).toContain('src/ErrorBoundary.tsx');
     expect(instr).toContain('smallest possible edits');
     expect(instr).toContain('Do NOT add or edit tsconfig/babel config');
+  });
+});
+
+// Billing honesty (autopsy 2026-08-01, buildId 1047276c — charged ₹88.82 for a preview that would not
+// compile): an UNHEALED divergence in a guaranteed-reachable ENTRY file makes the build free + not-ok.
+describe('previewDivergenceBlocksDelivery — only entry-file divergences block delivery', () => {
+  it('BLOCKS when the failing file is an entry (src/App.tsx / src/main.tsx / index)', () => {
+    expect(previewDivergenceBlocksDelivery([{ file: 'src/App.tsx', message: 'Duplicate declaration "Team"' }])).toBe(true);
+    expect(previewDivergenceBlocksDelivery([{ file: 'src/main.tsx', message: 'Duplicate declaration "ErrorBoundary"' }])).toBe(true);
+    expect(previewDivergenceBlocksDelivery([{ file: 'index.tsx', message: 'x' }])).toBe(true);
+  });
+
+  it('does NOT block a divergence only in a non-entry (possibly-unimported) file — respects the reachability limit', () => {
+    expect(previewDivergenceBlocksDelivery([{ file: 'src/components/Widget.tsx', message: 'x' }])).toBe(false);
+    expect(previewDivergenceBlocksDelivery([{ file: 'src/types/index.ts', message: 'x' }])).toBe(false); // nested barrel, not an entry
+    expect(previewDivergenceBlocksDelivery([])).toBe(false);
+    expect(previewDivergenceBlocksDelivery(undefined as never)).toBe(false);
+  });
+
+  it('blocks when ANY error is an entry file (mixed set)', () => {
+    expect(previewDivergenceBlocksDelivery([
+      { file: 'src/components/Widget.tsx', message: 'x' },
+      { file: 'src/App.tsx', message: 'Duplicate declaration' },
+    ])).toBe(true);
+  });
+
+  it('the free summary is honest — not charged + actionable', () => {
+    const s = previewCompileUnresolvedSummary();
+    expect(s).toMatch(/not been charged/i);
+    expect(s).toMatch(/preview does not compile/i);
   });
 });

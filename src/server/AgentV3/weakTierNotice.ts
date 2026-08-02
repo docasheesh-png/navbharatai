@@ -75,3 +75,48 @@ export function weakTierWelcomeNotice(langCode: string | null | undefined, seed:
   if (langCode && SINGLE_LANG_VARIANTS[langCode]) return SINGLE_LANG_VARIANTS[langCode];
   return ENGLISH_VARIANTS[idx(ENGLISH_VARIANTS)];
 }
+
+// ── WEAK-tier BUILD-FAILED guidance (admin spec 2026-08-02) ──────────────────────────────────────
+//
+// When a build on the WEAK tier (the free engine, or a paid user who explicitly picked Weak) FAILS to
+// produce a working app, the user is told — in THEIR OWN language — the honest, actionable reason:
+// the Weak engine is the likely cause for a COMPLEX app, and a stronger tier (Strong or higher, via the
+// 🎛️ options button just left of the message box) is what such apps need. Shown ONLY when a real build
+// attempt failed on the weak tier (never on an infra/sandbox failure, which short-circuits earlier), so
+// the message is honest — it never blames the tier for a platform outage.
+//
+// WHITE-LABEL LAW: names only NavBharatAI's own tiers ("Weak" / "Strong") — NEVER a provider/model name
+// (GLM/Kimi/Claude/…). "A stronger engine" is a capability statement, not a vendor. Reuses the SAME vetted
+// per-language vocabulary as the welcome notice ("free Weak engine", "🎛️ options button left of the
+// message box"), so the translations stay consistent and correct. Pure & deterministic.
+
+const FAILED_HINDI =
+  `⚡ यह app **फ्री Weak इंजन** पर बन रही थी, इसलिए यह पूरी नहीं बन पाई — यह एक **complex app** है और ऐसी apps के लिए ज़्यादा powerful इंजन चाहिए। Message box के **बाएँ ${ICON} options बटन** को खोलकर **Strong (या उससे ऊपर) tier** चुनें और यही app दोबारा भेजें — तब यह सही बन जाएगी।`;
+
+const FAILED_ENGLISH =
+  `⚡ This app was building on the **free Weak engine**, so it couldn't be finished — it's a **complex app**, and apps like this need a stronger engine. Open the **${ICON} options button just left of the message box**, choose the **Strong tier (or higher)**, and send the same request again — it'll build correctly then.`;
+
+// One faithful translation per detectable Indian language (same meaning as the English default), reusing
+// each language's already-vetted "free Weak engine" + "🎛️ options button" phrasing from the welcome notice.
+const FAILED_SINGLE_LANG: Record<string, string> = {
+  bn: `⚡ এই app **ফ্রি Weak ইঞ্জিনে** তৈরি হচ্ছিল, তাই এটি সম্পূর্ণ হয়নি — এটি একটি **complex app**, আর এমন app-এর জন্য আরও শক্তিশালী ইঞ্জিন দরকার। message box-এর **বাঁ দিকের ${ICON} options বোতাম** খুলে **Strong (বা তার উপরের) tier** বেছে নিন এবং একই request আবার পাঠান — তখন এটি ঠিকমতো তৈরি হবে।`,
+  pa: `⚡ ਇਹ app **ਫ੍ਰੀ Weak ਇੰਜਣ** 'ਤੇ ਬਣ ਰਹੀ ਸੀ, ਇਸ ਲਈ ਪੂਰੀ ਨਹੀਂ ਬਣ ਸਕੀ — ਇਹ ਇੱਕ **complex app** ਹੈ ਅਤੇ ਅਜਿਹੀਆਂ apps ਲਈ ਵੱਧ ਤਾਕਤਵਰ ਇੰਜਣ ਚਾਹੀਦਾ ਹੈ। message box ਦੇ ਖੱਬੇ ਪਾਸੇ **${ICON} options ਬਟਨ** ਖੋਲ੍ਹ ਕੇ **Strong (ਜਾਂ ਉੱਪਰਲਾ) tier** ਚੁਣੋ ਅਤੇ ਉਹੀ request ਦੁਬਾਰਾ ਭੇਜੋ — ਫਿਰ ਇਹ ਸਹੀ ਬਣ ਜਾਵੇਗੀ।`,
+  gu: `⚡ આ app **ફ્રી Weak એન્જિન** પર બની રહી હતી, તેથી પૂરી બની શકી નહીં — આ એક **complex app** છે અને આવી apps માટે વધુ powerful એન્જિન જોઈએ. message box ની ડાબી બાજુ **${ICON} options બટન** ખોલીને **Strong (કે તેથી ઉપરનું) tier** પસંદ કરો અને એ જ request ફરી મોકલો — પછી આ બરાબર બની જશે.`,
+  or: `⚡ ଏହି app **ମାଗଣା Weak ଇଞ୍ଜିନ୍‌** ରେ ତିଆରି ହେଉଥିଲା, ତେଣୁ ପୂରା ହୋଇପାରିଲା ନାହିଁ — ଏହା ଏକ **complex app**, ଏବଂ ଏଭଳି app ପାଇଁ ଅଧିକ ଶକ୍ତିଶାଳୀ ଇଞ୍ଜିନ୍‌ ଦରକାର। message box ର ବାମ ପାଖରେ **${ICON} options ବଟନ୍‌** ଖୋଲି **Strong (କିମ୍ବା ତା'ଠାରୁ ଉପର) tier** ବାଛନ୍ତୁ ଓ ସେହି request ପୁଣି ପଠାନ୍ତୁ — ତେବେ ଏହା ଠିକ୍‌ ଭାବେ ତିଆରି ହେବ।`,
+  ta: `⚡ இந்த app **இலவச Weak இன்ஜினில்** உருவாகிக் கொண்டிருந்தது, அதனால் முழுமையாக உருவாகவில்லை — இது ஒரு **complex app**, இதுபோன்ற app-களுக்கு வலிமையான இன்ஜின் தேவை. message box-ன் இடதுபுறம் உள்ள **${ICON} options பொத்தானைத்** திறந்து **Strong (அல்லது அதற்கு மேல்) tier**-ஐத் தேர்ந்தெடுத்து அதே request-ஐ மீண்டும் அனுப்புங்கள் — அப்போது சரியாக உருவாகும்.`,
+  te: `⚡ ఈ app **ఉచిత Weak ఇంజిన్** పై తయారవుతోంది, అందుకే పూర్తి కాలేదు — ఇది ఒక **complex app**, ఇలాంటి app-లకు మరింత శక్తివంతమైన ఇంజిన్ కావాలి. message box కి ఎడమవైపు ఉన్న **${ICON} options బటన్** తెరిచి **Strong (లేదా పైన) tier** ఎంచుకుని అదే request మళ్లీ పంపండి — అప్పుడు ఇది సరిగ్గా తయారవుతుంది.`,
+  kn: `⚡ ಈ app **ಉಚಿತ Weak ಎಂಜಿನ್** ನಲ್ಲಿ ತಯಾರಾಗುತ್ತಿತ್ತು, ಆದ್ದರಿಂದ ಪೂರ್ಣಗೊಳ್ಳಲಿಲ್ಲ — ಇದು ಒಂದು **complex app**, ಇಂತಹ app-ಗಳಿಗೆ ಹೆಚ್ಚು ಶಕ್ತಿಶಾಲಿ ಎಂಜಿನ್ ಬೇಕು. message box ನ ಎಡಭಾಗದ **${ICON} options ಬಟನ್** ತೆರೆದು **Strong (ಅಥವಾ ಮೇಲಿನ) tier** ಆಯ್ಕೆಮಾಡಿ ಅದೇ request ಮತ್ತೆ ಕಳುಹಿಸಿ — ಆಗ ಇದು ಸರಿಯಾಗಿ ತಯಾರಾಗುತ್ತದೆ.`,
+  ml: `⚡ ഈ app **സൗജന്യ Weak എൻജിനിൽ** നിർമ്മിക്കുകയായിരുന്നു, അതിനാൽ പൂർത്തിയായില്ല — ഇതൊരു **complex app** ആണ്, ഇത്തരം app-കൾക്ക് കൂടുതൽ കരുത്തുള്ള എൻജിൻ വേണം. message box-ന്റെ ഇടതുവശത്തുള്ള **${ICON} options ബട്ടൺ** തുറന്ന് **Strong (അല്ലെങ്കിൽ അതിനു മുകളിലുള്ള) tier** തിരഞ്ഞെടുത്ത് അതേ request വീണ്ടും അയയ്ക്കുക — അപ്പോൾ ഇത് ശരിയായി നിർമ്മിക്കപ്പെടും.`,
+  ar: `⚡ یہ app **مفت Weak انجن** پر بن رہی تھی، اِس لیے مکمل نہیں ہو سکی — یہ ایک **complex app** ہے اور ایسی apps کے لیے زیادہ طاقتور انجن چاہیے۔ message box کے بائیں طرف **${ICON} options بٹن** کھول کر **Strong (یا اُس سے اوپر) tier** منتخب کریں اور وہی request دوبارہ بھیجیں — تب یہ درست بن جائے گی۔`,
+};
+
+/**
+ * The localized WEAK-tier "this build failed — switch to a stronger tier" guidance. `langCode` is
+ * LanguageDetect's code ('hi', 'ta', 'bn', … or null/undefined for Latin-script/English/Hinglish).
+ * Returns the user's-language message; unknown/non-Indian scripts fall back to English. Pure.
+ */
+export function weakTierBuildFailedNotice(langCode: string | null | undefined): string {
+  if (langCode === 'hi') return FAILED_HINDI;
+  if (langCode && FAILED_SINGLE_LANG[langCode]) return FAILED_SINGLE_LANG[langCode];
+  return FAILED_ENGLISH;
+}

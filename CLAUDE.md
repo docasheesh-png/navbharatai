@@ -207,6 +207,39 @@ An autopsy that only patches the reported symptom (the first 50%) and leaves the
 was a heal needed / why was a workaround possible" half undone is an INCOMPLETE autopsy — it guarantees
 the sibling failure returns. Both halves, every time.
 
+**Step 6 — THE WORLD-BEST PROACTIVE LAYER: every report ALSO gets Claude's own forward-looking suggestions,
+not only the reactive fix (admin-mandated 2026-07-31).** Steps 1–5 are REACTIVE — they mine what already
+broke. That is necessary hygiene, but ALONE it is a treadmill (mopping the floor while the tap runs) that
+never reaches THE AIM (the world's best AI app builder). So with EVERY build report — ON TOP of the full
+5-bucket autopsy — Claude must ALSO step back and give the admin its OWN proactive, senior-engineer
+suggestions toward world-best, in simple language (the admin is non-technical and wants Claude's judgement,
+not a checklist). Every report reply carries BOTH: the OLD autopsy tally AND this proactive layer. Every time:
+
+- **PREVENT, don't heal — the single biggest lever.** For every ❌ / 🥵 AND every ✅ self-heal, ask the
+  harder question: *how do we make the FIRST build correct so this never needs fixing?* Propose the UPSTREAM
+  change (prompt / scaffold / shared contract / plan) that stops the whole class from being generated at
+  all. A build that never creates the bug beats a build that heals it — this is where world-best is actually
+  won (most "continue / fix the error" builds are the engine cleaning up its OWN mistakes; kill them at the
+  source).
+- **Name the big systemic ceiling HONESTLY (rule 3, no sycophancy).** If a recurring pattern is capping the
+  DEFAULT quality — e.g. the GLM / cheap-tier 429 storm and weak-model flailing — say it plainly to the
+  admin even though it "self-heals", instead of hiding a ceiling behind a green checkmark. A self-heal that
+  fires on every build IS the ceiling. Propose the real fix, or record it as a STRATEGIC open item (rule 6).
+- **Guard the EXPERIENCE the user actually feels.** Flag anything a world-best builder would never ship —
+  an unreliable preview, a slow build, a first-try app that looks or works poorly — and propose the
+  improvement. Trust is the product; the user judges by what they SEE, not by our internal metrics.
+- **Lean into the real MOAT, don't clone.** Where relevant, suggest deepening what the competitors
+  (Lovable / Bolt / v0 / Cursor / Replit) do NOT do — NavBharatAI's India-first edge (Hindi, Cashfree,
+  domain recipes, the App Store, mobile-first). Copying makes a follower; the moat makes a leader.
+- **DRIVE it — decide, don't wait.** The admin is non-technical and explicitly wants Claude to CHOOSE what
+  matters most. So Claude PROPOSES and PRIORITIZES these proactively (best-for-the-app default + the
+  60-second rule), announces the ONE highest-value lever, and pursues it — it does not wait to be asked.
+  Reserve real questions for the genuinely consequential fork.
+
+An autopsy that ends at "fixed the reported bug" WITHOUT this forward-looking layer is INCOMPLETE toward THE
+AIM. The reactive five steps keep the app from breaking; this sixth, proactive step is how it becomes the
+best. Both layers — reactive autopsy AND proactive world-best suggestions — with every single report.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every
@@ -324,6 +357,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   ✅ **LIVE 2026-07-21: the admin SET the GLM comma-pool in Cloud Run** (multiple Z.ai keys) as part of the
   GLM-429-storm response — key rotation is now genuinely active in prod.)
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
+  (⚠️ CORRECTION 2026-08-02: the admin verified in the live Cloud Run console that `E2B_PREVIEW_DOMAIN`
+  is **NOT set** — so v5.0 previews use the raw `*.e2b.app` host by code default (`PreviewDomain.ts`
+  `DEFAULT_PREVIEW_DOMAIN = 'e2b.app'`), which always resolves. The `mitrify.xyz` branded-preview proxy
+  VM `e2b-custom-domain-proxy` (Compute Engine, us-west1-a) was **DELETED for cost** the same day
+  (~₹1,350/mo saved). To re-enable branded previews later, set `E2B_PREVIEW_DOMAIN=<wildcard-domain>`
+  AND re-provision an E2B custom-domain route for it — do NOT just set the env with no proxy, or preview
+  URLs will point at an unresolvable host. This key's earlier listing meant only "the code reads it",
+  not "it is set in Cloud Run".)
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
@@ -790,7 +831,7 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 | **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
 | Plan phase | Grok | Grok/Sonnet | **Opus** |
 | Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
-| Heal gates (integrity / preview / C9 / runtime) | **`glm-4.7`/`kimi-k2.5` — NEVER Claude/flash/flagship** | Claude/Sonnet | Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02: "weak me last me GLM/Kimi ke top module"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` reverts to the old cheap-coder heal.** | Claude/Sonnet | Opus |
 
 ### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
 - Free ladder (LIVE, Slice 3): flash-first — `AGENTV3_FREE_GLM_MODEL` (default `glm-4.7-flash,glm-4.7,glm-5.2`),

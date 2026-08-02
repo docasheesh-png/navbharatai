@@ -90,11 +90,32 @@ export function writeParseGuardEnabled(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 /**
+ * True when a syntax error is the DUPLICATE-DECLARATION / duplicate-export class — the one error that is
+ * NEVER a valid transient repair state. Adding a second top-level `const`/`let`/`function`/`class`/export
+ * of a name that already exists always ships Babel's "…has already been declared" white screen. Matched
+ * across esbuild's two phrasings ("The symbol \"x\" has already been declared", "Multiple exports with the
+ * same name \"x\"") and Babel's own ("Duplicate declaration \"x\""). Pure; tolerant of null.
+ */
+export function isDuplicateDeclarationError(info: SyntaxErrorInfo | null | undefined): boolean {
+  const m = info?.message || '';
+  return /already been declared/i.test(m)
+    || /multiple exports with the same name/i.test(m)
+    || /duplicate declaration/i.test(m);
+}
+
+/**
  * Decide whether a write/edit must be REFUSED because it would introduce a syntax error. Returns a
  * model-facing rejection message, or null to allow the write. Pure policy (the esbuild parses are injected
  * as the already-computed old/new errors) so it is fully unit-testable:
  *   • allow when the guard is off, or the new content parses clean;
  *   • allow when the OLD content was ALREADY broken — never block a repair-in-progress on a broken file;
+ *   • EXCEPT a NEWLY-introduced duplicate declaration: refuse it even on an already-broken file, because
+ *     adding a second copy of an existing const/function/class/export is never a valid repair step and
+ *     always yields the "already been declared" white screen (build-report autopsy 2026-08-02 —
+ *     `cancelSubscription` was duplicated in src/lib/api.ts while the file was mid-repair for unrelated
+ *     type errors, so the old `if (errOld) return null` waved the white-screen duplicate straight through).
+ *     Still allow it when the SAME duplicate class was already present in the old file — the model is then
+ *     mid-removal and must not be trapped.
  *   • otherwise (a CLEAN/new file broken by this change) → REFUSE with the exact location + a fix hint.
  */
 export function parseGuardDecision(
@@ -104,7 +125,13 @@ export function parseGuardDecision(
   enabled = true,
 ): string | null {
   if (!enabled || !errNew) return null;   // guard off, or the result parses clean → allow
-  if (errOld) return null;                // was already broken → allow the (repair) write through
+  if (errOld) {
+    // A duplicate declaration is never a valid repair state — refuse it even here, UNLESS the old file
+    // already had a duplicate error (removal-in-progress). Every other error class stays allowed so a
+    // genuine repair on a broken file is never trapped.
+    const introducesDuplicate = isDuplicateDeclarationError(errNew) && !isDuplicateDeclarationError(errOld);
+    if (!introducesDuplicate) return null; // was already broken (non-duplicate) → allow the repair write
+  }
   const loc = errNew.line ? ` (line ${errNew.line}${errNew.column != null ? `:${errNew.column}` : ''})` : '';
   return `WRITE REJECTED — your change introduces a SYNTAX ERROR in ${path}${loc}: ${errNew.message}\n` +
     `It was NOT saved (the app would not compile). The most common cause is a DUPLICATE declaration — a ` +

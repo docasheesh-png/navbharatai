@@ -6,11 +6,14 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { robustTscCommand } from './tscCommand';
+import { parseTscErrors } from './EndgameRepair';
+import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
+import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -95,7 +98,8 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
+import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
@@ -1552,6 +1556,49 @@ export class ToolDispatcher {
   }
 
   /**
+   * WRITE-TIME Rules-of-Hooks guard (M1-S1.1, prevent-not-heal): after a React file is written/edited,
+   * return a steering note for any Rules-of-Hooks violation so the model fixes the runtime-crashing hook
+   * IN THE SAME TURN — before the build ships it (the post-build readiness gate stays the backstop). The
+   * deterministic AST analysis is fast and gated to React source internally; best-effort ('' on anything),
+   * never blocks a write. Kill switch AGENTV3_HOOKS_WRITE_GUARD=off.
+   */
+  /**
+   * WRITE-TIME duplicate-import guard (build-report autopsy 2026-08-01, buildId 1047276c): a weak model
+   * re-imports a symbol already imported (e.g. main.tsx default-imports ErrorBoundary and the model adds a
+   * named import of the same) — esbuild parses it clean, so nothing catches it, but the in-browser preview
+   * rejects it with "Duplicate declaration" and the user sees a BROKEN preview. Remove the fully-redundant
+   * duplicate here so it is never born. Pure + safe (only drops a binding that already exists); emits an
+   * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
+   */
+  private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
+    if (process.env.AGENTV3_DUP_IMPORT_GUARD === 'off') return content;
+    if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;
+    try {
+      const { content: next, removed } = dedupeDuplicateImports(content);
+      if (removed.length > 0) {
+        this.events?.emit({
+          type: 'narration', agent,
+          text: `🔧 Removed ${removed.length} duplicate import(s) in \`${path}\` that would have broken the preview ("Duplicate declaration").`,
+          ts: Date.now(),
+        });
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`[DUP-IMPORT] removed ${removed.length} duplicate import(s) in ${path}: ${removed.join('; ')}`); } catch { /* audit best-effort */ }
+      }
+      return next;
+    } catch { return content; }
+  }
+
+  private async hookWriteNote(files: Record<string, string>): Promise<string> {
+    if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
+    if (!files || Object.keys(files).length === 0) return '';
+    try {
+      const report = await analyzeHooksRules(files);
+      return hookViolationWriteNote(report);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * Force known-breaking dep versions (Prisma → ^6) to their known-good major when the agent WRITES a
    * package.json — the sibling choke point to pinKnownDepsInInstallCommand (#1526), which only catches
    * explicit install commands. Path-gated (fast no-op for every non-package.json write), best-effort,
@@ -1605,7 +1652,30 @@ export class ToolDispatcher {
     const input = call.input;
     switch (call.name) {
       case 'read_file': {
-        const full = await this.actuator.readFile(this.workspaceId, reqStr(input, 'path'));
+        const reqPath = reqStr(input, 'path');
+        let full: string;
+        try {
+          full = await this.actuator.readFile(this.workspaceId, reqPath);
+        } catch (err) {
+          // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
+          // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
+          // src/components/X.tsx). Look up the real file by basename across everything the workspace already
+          // knows (cheap, in-memory), then across the on-disk list, and hand back the ACTUAL path(s). Any path
+          // drift — a missing folder segment, a case difference, a .ts↔.tsx mixup — self-corrects on the first
+          // miss instead of stalling. Honest: a suggestion is only ever a path that genuinely exists.
+          const base = (err instanceof Error ? err.message : String(err)) || `read_file: ${reqPath} does not exist.`;
+          let known: string[] = [];
+          try { known = getWorkspaceMemory(this.workspaceId).knownFilePaths(); } catch { /* memory best-effort */ }
+          let hint = pathMissHint(reqPath, known);
+          if (!hint) {
+            // In-memory index missed it — fall back to the actuator's authoritative on-disk list (a miss is
+            // already the stuck/error path, so one listFiles to unstick the agent is worth the latency).
+            try { hint = pathMissHint(reqPath, await this.actuator.listFiles(this.workspaceId)); } catch { /* list best-effort */ }
+          }
+          // Re-throw so the miss stays an honest is_error result (the outer catch formats it), but with the
+          // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
+          throw new Error(`${base}${hint}`.trim());
+        }
         // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
         // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
         // model concluded the FILE was "truncated at exactly N lines" and destructively 'repaired' a
@@ -1649,6 +1719,7 @@ export class ToolDispatcher {
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
         // version. This is the sibling choke point to the install-command pin (#1526).
         content = this.pinPackageJsonContent(path, content);
+        content = this.dedupeImportsForSource(path, content, agent);
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -1707,6 +1778,9 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint — if a test file exists, suggest running it.
         const testHint = testFileHint(path);
+        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard — steer the model to fix a
+        // runtime-crashing hook THIS turn, before the build ships it (readiness gate stays the backstop).
+        const hooksNote = await this.hookWriteNote({ [path]: content });
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -1724,10 +1798,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint
+            reviewNote + cascadeNote + testHint + hooksNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote;
       }
 
       case 'write_files_batch': {
@@ -1801,7 +1875,7 @@ export class ToolDispatcher {
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
           // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
           // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
-          const writtenContent = this.pinPackageJsonContent(file.path, file.content);
+          const writtenContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content), agent);
           await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
@@ -1842,7 +1916,15 @@ export class ToolDispatcher {
         const dupWarning = dupSkipped.length
           ? `\n[DUPLICATE MODULE BLOCKED] ${dupSkipped.length} file(s) were NOT written — they would create a SECOND copy of a module that already exists under a different directory convention (${dupSkipped.slice(0, 8).join('; ')}${dupSkipped.length > 8 ? '…' : ''}). Two copies drift and break the build — EDIT the existing file(s) in place. Use ONE directory convention for the whole app.`
           : '';
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}`;
+        // M1-S1.2 (prevent-not-heal): write-time Rules-of-Hooks guard on the batch's written files —
+        // the same steering as write_file/edit_file, extended to the multi-file create path so a new
+        // component with a runtime-crashing hook is fixed this turn, not caught post-build. Run across
+        // all written files at once (cross-file context); the note names each violating file.
+        const writtenSet = new Set(written);
+        const writtenRecord: Record<string, string> = {};
+        for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
+        const batchHooksNote = await this.hookWriteNote(writtenRecord);
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchHooksNote}`;
       }
 
       case 'edit_file': {
@@ -1855,7 +1937,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const updated = guardConfigContent(path, this.applyPostgresProviderLock(path, edited));
+        const updated = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
@@ -1895,7 +1977,9 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint.
         const editTestHint = testFileHint(path);
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint;
+        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
+        const editHooksNote = await this.hookWriteNote({ [path]: updated });
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editHooksNote;
       }
 
       case 'bash': {
@@ -2618,6 +2702,24 @@ export class ToolDispatcher {
             extra.push({ severity: c.severity, label: `Dependency conflict (${c.kind}): ${c.detail}` });
           }
         }
+        // PREVIEW-COMPILE HONESTY BLOCKER (readiness-honesty autopsy 2026-08-02): the "Build health"
+        // verdict was computed WITHOUT the in-browser preview compiler, so a build whose ENTRY file will not
+        // compile still scored "READY · 70/100" while the live preview white-screened and the dev server
+        // refused its port. The classic case is the recurring duplicate `ErrorBoundary` import that BABEL
+        // (the in-browser preview's compiler) rejects as "Duplicate declaration" but esbuild — and thus tsc
+        // and vite — silently ACCEPT (a real compiler divergence, verified). So the esbuild/parse gates miss
+        // it. Run the SAME babel dry-compile the preview uses (checkPreviewCompiles) and, when a guaranteed-
+        // reachable ENTRY file (main/App/index) diverges, feed it in as a HARD blocker — the health card can
+        // then never call a white-screening build READY (it now agrees with the route's already-honest
+        // "preview does not compile → not charged" verdict). A non-entry divergence (a possibly-never-
+        // imported file) stays advisory — no false block, matching PreviewCompileCheck's reachability scoping.
+        try {
+          const pc = checkPreviewCompiles(astFiles);
+          if (!pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
+            const entryErr = pc.errors.find((e) => previewDivergenceBlocksDelivery([e]));
+            extra.push({ severity: 'high', label: `the live preview will not compile — ${entryErr?.file ?? 'entry file'}: ${(entryErr?.message ?? 'compile error').slice(0, 160)}` });
+          }
+        } catch { /* the preview-compile gate is best-effort — a compiler failure never fabricates a blocker */ }
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;
@@ -3118,8 +3220,47 @@ export class ToolDispatcher {
           if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
           crossLang = typecheckSummary(outcomes);
         }
-        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java/Go sources to check.');
-        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python, Java, or Go sources detected — nothing beyond the tsc gate.';
+        // REAL semantic type-check (deep-test autopsy 2026-08-01): esbuild's frontend check above only
+        // catches PARSE errors — it is BLIND to SEMANTIC TypeScript errors (a duplicate identifier, an
+        // `import type` used as a value, a class that doesn't extend Component so `this.state`/`this.props`
+        // "do not exist", a value used as a type). A real SaaS-dashboard build spent 30 min getting
+        // false-green esbuild typechecks, then failed the final `tsc && vite build` on exactly those
+        // (TS2300 duplicate 'Team', TS1361 import-type, TS2339 ErrorBoundary state/props, TS2749). Running
+        // the REAL, incremental `tsc --noEmit` HERE surfaces them per file so the agent fixes them the
+        // moment they appear — not 30 minutes later at the final build. Only for a TS project; a syntax
+        // break is fixed FIRST (tsc on unparseable code just echoes parse noise). Honest: a tsc that can't
+        // run is silently skipped (the esbuild note still stands) — never a fake pass.
+        let tscHeader = '';
+        let tscRanClean = false;
+        const isTsProject = files.includes('tsconfig.json')
+          && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
+        if (isTsProject && !syntaxHeader) {
+          try {
+            const r = await withTimeout(
+              this.actuator.runCommand(
+                this.workspaceId,
+                robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60'),
+              ),
+              30_000,
+              'typecheck-tsc',
+            );
+            const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+            const tscErrs = parseTscErrors(combined);
+            if (tscErrs.length > 0) {
+              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${tscErrs.length} TypeScript error(s).`);
+              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}\n\n`;
+            } else {
+              tscRanClean = true;
+            }
+          } catch { /* real-tsc pass is best-effort — a toolchain miss must never fake a pass */ }
+        }
+        if (syntaxHeader || tscHeader) {
+          return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();
+        }
+        const feHeadline = tscRanClean
+          ? 'frontend parses clean (esbuild) AND type-checks clean (tsc --noEmit)'
+          : 'frontend parses clean (esbuild)';
+        return crossLang || `typecheck: ${feHeadline}; no Python, Java, or Go sources detected.`;
       }
 
       case 'code_graph': {

@@ -15,29 +15,71 @@
 // provider identity ever leaks to the user.
 
 import { AIRouterManager } from '../AI/AIRouterManager';
+import type { ChatTurnUsage } from './chatSpend';
 
 export type ProfessionalTier = 'free' | 'paid';
 
+/** One answered turn: the text the user gets, plus what it cost us to produce. */
+export interface ProfessionalAnswer {
+  content: string;
+  /**
+   * What the provider reported for this call — the input to chatSpend.chatTurnCost. `usage` is absent
+   * when the provider reported nothing, which callers must treat as UNMEASURED rather than free.
+   * ADMIN-ONLY: `provider`/`model` are vendor identities and must never reach a user-facing surface
+   * (White-Label Law §2) — they exist here so the cost can be priced against the right rate card.
+   */
+  spend: ChatTurnUsage;
+}
+
 /**
- * Call the Professional-AI resilient chain and return the model's text. `tier` picks the fallback
- * universe (default 'free' — the cheap, Claude-free path the Other-AI tools should use). Throws only
- * when every provider in the chain fails (the caller then reports an honest error — never a fake result).
+ * Call the Professional-AI resilient chain and return the model's text AND what it cost.
+ *
+ * The text-only `callProfessionalAI` below stays the entry point for every existing caller; this is
+ * the same chain with the cost kept instead of discarded. Until now the router's answer carried no
+ * token usage at all, so every AI outside the v5 builder was unpriced — see chatSpend.ts.
+ *
+ * `tier` picks the fallback universe (default 'free' — the cheap, Claude-free path the Other-AI tools
+ * should use). Throws only when every provider in the chain fails (the caller then reports an honest
+ * error — never a fake result).
+ */
+export async function callProfessionalAIWithUsage(
+  systemPrompt: string,
+  prompt: string,
+  tier: ProfessionalTier = 'free',
+): Promise<ProfessionalAnswer> {
+  const answer = (response: { content: string; provider?: string; model?: string; usage?: { inputTokens: number; outputTokens: number } }): ProfessionalAnswer => ({
+    content: response.content,
+    spend: {
+      provider: response.provider,
+      model: response.model,
+      inputTokens: response.usage?.inputTokens,
+      outputTokens: response.usage?.outputTokens,
+    },
+  });
+
+  // Tier-1 leader (both tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
+  try {
+    const leader = AIRouterManager.getRouter('professional-free');
+    const { response, telemetry } = await leader.routeRaced(prompt, systemPrompt);
+    if (telemetry.success && response.content?.trim()) return answer(response);
+  } catch { /* fall through to the tier's fallback universe */ }
+
+  const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
+  const router = AIRouterManager.getRouter(fallbackNs);
+  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
+  if (telemetry.success && response.content?.trim()) return answer(response);
+  throw new Error('All AI providers failed.');
+}
+
+/**
+ * Call the Professional-AI resilient chain and return the model's text. Unchanged for every caller —
+ * it now simply drops the cost half of the answer above.
  */
 export async function callProfessionalAI(
   systemPrompt: string,
   prompt: string,
   tier: ProfessionalTier = 'free',
 ): Promise<string> {
-  // Tier-1 leader (both tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
-  try {
-    const leader = AIRouterManager.getRouter('professional-free');
-    const { response, telemetry } = await leader.routeRaced(prompt, systemPrompt);
-    if (telemetry.success && response.content?.trim()) return response.content;
-  } catch { /* fall through to the tier's fallback universe */ }
-
-  const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
-  const router = AIRouterManager.getRouter(fallbackNs);
-  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
-  if (telemetry.success && response.content?.trim()) return response.content;
-  throw new Error('All AI providers failed.');
+  const { content } = await callProfessionalAIWithUsage(systemPrompt, prompt, tier);
+  return content;
 }

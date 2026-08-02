@@ -26,8 +26,64 @@ export interface ReviewResult {
   summary: string;
 }
 
-/** Parse structured reviewer text into typed issues (best-effort). */
-function parseReviewOutput(text: string): ReviewIssue[] {
+/**
+ * A MARKDOWN SECTION HEADING is not a finding. Reviewers routinely write a header like
+ * "### [CRITICAL] Issues", "## Critical Issues", or "**Findings**" above the actual list —
+ * and a naive per-line `[tag]` scan mis-counts that header as a real critical. Deep-test
+ * 66ec5c1e: a "### [CRITICAL] Issues" header became a PHANTOM critical that FAILED a working,
+ * render-verified app (and drove the auto-fix loop until the 29-min wall-clock cap). After the
+ * severity tag + markdown is stripped, a bare section label is never a finding — skip it.
+ */
+const SECTION_LABEL_RE =
+  /^(critical\s+|major\s+|minor\s+|high\s+|low\s+|potential\s+|other\s+)?(issues?|findings?|problems?|warnings?|suggestions?|concerns?|observations?|summary|assessment|overview|conclusion|review|code review( report)?|report)\s*:?\s*$/i;
+
+/**
+ * SELF-DISMISSAL inside a single finding: the reviewer tagged the line [CRITICAL] (often only
+ * because a tool flagged it) but then, in the SAME finding, concludes it is NOT real — "this is
+ * a false positive", "not a genuine issue". A finding the reviewer discharged in its own words
+ * must NOT fail the build. Deep-test 66ec5c1e: the reviewer wrote "this may be a false positive
+ * from the tool … the project appears to build and run without it" for BOTH of its criticals, yet
+ * the app was reported broken and the auto-fix loop chased the phantoms until the wall-clock cap.
+ * Conservative — only the unambiguous "false positive" / "not a real/genuine issue" phrasings, so
+ * a genuine critical is never silently downgraded. Such a finding is demoted to a suggestion:
+ * retained for the admin audit trail, but never a build-failing critical/warning.
+ */
+const SELF_DISMISSED_RE =
+  /\bfalse[\s-]?positive\b|\bnot (a |an )?(real|actual|genuine|true|valid) (issue|problem|bug|concern|error|violation|vulnerability)\b/i;
+
+/**
+ * EXPLICIT LOW CONFIDENCE on a finding (M4-S4.1): the reviewer is instructed to tag each [CRITICAL] with
+ * its confidence — "(confidence: high|medium|low)". A weak/cheap reviewer that is UNSURE a thing is
+ * really broken must NOT fail the whole build on a guess (a working app reported broken is the worst
+ * outcome — the finance-app phantom-critical class). Only an EXPLICIT medium/low tag downgrades a
+ * critical to a warning (surfaced, non-blocking); an un-tagged critical is treated as high-confidence and
+ * still fails, so a reviewer that ignores the format keeps today's stricter behaviour (backward-safe).
+ * Matches the tag OR a bare hedge like "(low confidence)" / "confidence: medium".
+ */
+const LOW_CONFIDENCE_RE = /\bconfidence\s*[:=]?\s*(low|medium)\b|\b(low|medium)[- ]confidence\b/i;
+
+/**
+ * Strip ALL leading finding-list noise — markdown heading (#), blockquote (>), the severity emoji,
+ * bullets, list numbers and whitespace — ORDER-INDEPENDENTLY, so a heading is recognised whether the
+ * reviewer wrote "### Issues", "🚨 ### Issues", or "- 🚨 Issues". Real report 8a6e4585 exposed the gap:
+ * a single-pass strip that removed `#` BEFORE the emoji left "###  Issues" intact after the emoji was
+ * peeled, so the heading slipped through as a phantom critical. Looping until stable removes the markers
+ * regardless of their order. Pure.
+ */
+function stripLeadingFindingNoise(s: string): string {
+  let out = s;
+  let prev: string;
+  do {
+    prev = out;
+    out = out
+      .replace(/^[#>🚨⚠️💡•\-*\s]+/, '')   // markdown heading / quote / severity emoji / bullet / whitespace
+      .replace(/^\d+[.)]\s*/, '');           // a leading list number ("1. ", "2) ")
+  } while (out !== prev);
+  return out;
+}
+
+/** Parse structured reviewer text into typed issues (best-effort). Exported for direct unit tests. */
+export function parseReviewOutput(text: string): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
   for (const line of text.split('\n')) {
     const lower = line.toLowerCase();
@@ -39,12 +95,24 @@ function parseReviewOutput(text: string): ReviewIssue[] {
     else if (lower.includes('[suggestion]') || lower.startsWith('suggestion:') || line.includes('💡'))
       severity = 'suggestion';
     if (severity) {
-      const message = line
-        .replace(/\[(critical|warning|suggestion)\]/gi, '')
-        .replace(/^(critical|warning|suggestion):/gi, '')
-        .replace(/^[🚨⚠️💡\s•\-*]+/, '')
+      const message = stripLeadingFindingNoise(
+        line
+          .replace(/\[(critical|warning|suggestion)\]/gi, '')
+          .replace(/^(critical|warning|suggestion):/gi, ''),
+      )
+        .replace(/\*+/g, '') // strip markdown bold/italic asterisks
         .trim();
-      if (message) issues.push({ severity, message });
+      if (!message) continue;
+      // A markdown SECTION HEADER ("### [CRITICAL] Issues", "🚨 ### Issues") is not a finding — never count it.
+      if (SECTION_LABEL_RE.test(message)) continue;
+      // The reviewer discharged its own finding as a false positive → demote so it can't fail the build.
+      let effective: ReviewIssue['severity'] =
+        severity !== 'suggestion' && SELF_DISMISSED_RE.test(line) ? 'suggestion' : severity;
+      // CONFIDENCE GATE (M4-S4.1): an EXPLICITLY low/medium-confidence critical is a reviewer guess —
+      // downgrade it to a warning so it is surfaced but never fails a working build. Un-tagged criticals
+      // stay critical (backward-safe). Never UPGRADES anything.
+      if (effective === 'critical' && LOW_CONFIDENCE_RE.test(line)) effective = 'warning';
+      issues.push({ severity: effective, message });
     }
   }
   return issues;
@@ -140,6 +208,15 @@ export async function reviewBuild(opts: {
     '  [CRITICAL] = feature is missing or completely broken.',
     '  [WARNING]  = works but has a bug or missing edge case.',
     '  [SUGGESTION] = minor improvement that would help.',
+    '',
+    'Be precise with [CRITICAL] — it fails the whole build, so only use it for a real, confirmed break:',
+    '  • Put the severity tag on the FINDING itself, never on a section heading (do not write "### [CRITICAL] Issues").',
+    '  • If you inspect a tool-reported problem and conclude it is a false positive, or the app builds and',
+    '    runs fine despite it, do NOT tag it [CRITICAL] — omit it, or use [SUGGESTION]. Never label a finding',
+    '    [CRITICAL] and then explain in the same finding that it is a false positive.',
+    '  • Add your CONFIDENCE to every [CRITICAL] like "[CRITICAL] (confidence: high)". Use high ONLY when',
+    '    you are certain it is really broken; use medium/low when you are unsure — an unsure critical will',
+    '    be treated as a warning, not a build failure, so do NOT block a working app on a guess.',
     '',
     'End with: "Score: N/100" (where N = your quality assessment).',
     'If everything looks good, just write: [PASS] App looks complete. Score: 90',

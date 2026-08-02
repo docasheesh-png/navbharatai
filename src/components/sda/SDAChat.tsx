@@ -14,6 +14,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../../App';
 import { escapeHtml } from '../../lib/escapeHtml';
 import { newSdaCaseId } from '../../lib/sdaCaseId';
+import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -532,7 +533,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
       const res = await fetch('/api/sda-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Send the verified Firebase ID token so the server resolves a REAL identity for the Professional
+        // Pass gate. Without it (the bug: this fetch sent only Content-Type), a SIGNED-IN doctor was seen
+        // as anonymous → "Please sign in to use the Professionals" even though they were logged in.
+        headers: await authJsonHeaders(),
         body: JSON.stringify({
           message: text || 'Please analyze this medical document and extract all relevant clinical findings.',
           history,
@@ -547,7 +551,23 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         }),
       });
 
-      if (!res.ok) throw new Error('Service error');
+      // Surface the server's REAL reason instead of a blanket "unavailable" (which made a sign-in
+      // prompt, a free-limit paywall, or a keys/busy error all look identically like "not responding").
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({} as { error?: string; code?: string }));
+        const honest = errData?.error
+          || (res.status === 401 ? 'Please sign in to use Doctor AI — new users get free messages every day.'
+            : res.status === 402 ? 'You have used your free messages for today. Get the Professional Pass for unlimited access.'
+            : res.status === 429 ? 'Doctor AI is busy right now — please try again in a few seconds.'
+            : 'Doctor AI could not respond right now. Please try again in a moment.');
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: `⚠️ ${honest}`,
+          sender: 'sda',
+          timestamp: new Date(),
+        }]);
+        return;
+      }
       const data = await res.json();
 
       const sdaMsg: SDAMessage = {

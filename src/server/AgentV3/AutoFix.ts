@@ -116,7 +116,46 @@ const NOISE = [
   /\[vite\] connecting/i,
   /\[vite\] connected/i,
   /Download the React DevTools/i,
+  /DevTools failed to load source map/i,
+  /Slow network is detected/i,
+  /was preloaded using link preload but not used/i,
+  /\[HMR\]/i, // hot-module-reload chatter
 ];
+
+// M3-S3.1 — signatures that mean the RUNNING app actually crashed (white-screen / thrown render error /
+// infinite loop), as opposed to a recoverable warning or console chatter. Used to tell a genuinely-broken
+// preview apart from benign noise, so the "really works" verdict and the repair pass focus on real crashes.
+const FATAL_RUNTIME_RE = [
+  /cannot read (?:properties|property) of (?:undefined|null)/i,
+  /\bis not a function\b/i,
+  /\bis not defined\b/i, // ReferenceError
+  /maximum update depth exceeded/i, // infinite render loop
+  /rendered (?:more|fewer) hooks than/i, // Rules-of-Hooks crash
+  /change in the order of hooks/i,
+  /objects are not valid as a react child/i,
+  /too many re-?renders/i,
+  /minified react error/i, // prod React invariant
+  /uncaught (?:typeerror|referenceerror|rangeerror)/i,
+  /cannot access '[^']*' before initialization/i,
+  /converting circular structure to json/i,
+];
+
+/**
+ * True when a single runtime-error text is an app-CRASHING error (a real defect), not benign console
+ * noise. Pure — noise-filtered first, then matched against the fatal signatures. M3-S3.1.
+ */
+export function isFatalRuntimeError(text: string): boolean {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (NOISE.some((re) => re.test(t))) return false;
+  return FATAL_RUNTIME_RE.some((re) => re.test(t));
+}
+
+/** How many of the captured runtime errors are app-crashing (real crashes, not chatter). Pure. */
+export function fatalRuntimeErrorCount(errors: RuntimeError[]): number {
+  const list = Array.isArray(errors) ? errors : [];
+  return list.filter((e) => e && isFatalRuntimeError(e.text)).length;
+}
 
 /**
  * Keep only actionable runtime errors — drop known-benign noise and de-duplicate by text, so the
@@ -231,13 +270,17 @@ export function runtimeUncheckedRecord(): RuntimeVerifyRecord {
 
 /** Actionable runtime errors survived the repair budget — the build shipped but they may still be present. */
 export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerifyRecord {
+  // M3-S3.1: name how many of the remaining errors are app-CRASHING (vs recoverable warnings), so the
+  // admin report tells a genuinely-broken preview apart from console chatter instead of a flat count.
+  const fatal = fatalRuntimeErrorCount(errors);
+  const fatalNote = fatal > 0 ? ` ${fatal} of them crash the app at runtime.` : '';
   return {
     phase: 'autofix',
     severity: 'warning',
     code: 'RUNTIME_ERRORS_REMAIN',
     message:
       `${errors.length} runtime error(s) remained after the auto-fix budget was spent — the app was built, ` +
-      'but these were detected in the browser at runtime and may still be present.',
+      `but these were detected in the browser at runtime and may still be present.${fatalNote}`,
     autoResolved: false,
   };
 }

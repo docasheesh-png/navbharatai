@@ -22840,3 +22840,580 @@ Admin report on Code Studio's Git panel (Cloud Deploy / Cloud Sync). Root-caused
 optional Capacitor native modules, unrelated); `npx vitest run` ✅ **9843/9843 (960 files)**. UI-only change;
 could not render the live Monaco IDE from the dev sandbox, so the visual scroll behaviour is verified by the
 CSS root-cause + CI, with the admin's on-device check as the final confirm.
+---
+
+## 2026-07-29 — Visual Editor Phase 2 (admin: "pura banao — text + resize + reposition + style") — Slice A+B (server)
+
+On Phase 1's reliable `data-nbai-src` mapping, Phase 2 adds real STYLE editing. Slice A+B is the server half.
+
+**`applyVisualStyleEdit` (`VisualEditPatcher.ts`) — the ONE primitive behind toolbar + resize + reposition**
+(all are inline-style edits). Given (filePath, source, line, column, styleUpdates: camelCase CSS → value),
+it merges onto the JSX element's `style={{…}}` via ts-morph (real AST, never a string hack):
+- Adds `style={{…}}` when absent; merges/updates keys when present; removes a key on empty value ('' = reset).
+- PRESERVES a spread inside the object (`{ ...base, color }`) — so apps that spread a base style still work.
+- Refuses HONESTLY when the style is dynamic (`style={x}` or a spread attribute) instead of guessing.
+- Injection-guarded: safe key regex (camelCase identifier) + conservative CSS-value charset (blocks quotes/
+  semicolons/braces/backslash), so values embed in a string literal with zero injection risk.
+- 10 tests (add / merge / remove / resize+reposition keys / self-closing `<img>` / preserve-spread /
+  refuse-dynamic / reject-unsafe key+value / non-JSX+empty).
+
+**Endpoint:** `/api/agentv3/visual-edit` now routes to `applyVisualStyleEdit` when the client sends
+`styleUpdates` (else the existing text edit) — same strict ownership check + dual write-through (live actuator
++ durable merge) as text edits. One endpoint, both edit kinds.
+
+Slice C (next, UI): inspector SELECTION (report the clicked element + its box + current styles to the parent)
++ a floating TOOLBAR in PreviewSurface (font size / color / bold / align / padding) that calls this endpoint
+with live preview. Then Slice D (resize handles) and Slice E (layout-safe reposition).
+
+Gate: server tsc 0 · VisualEditPatcher 18/18 · full suite (running/green).
+
+---
+
+## 2026-07-29 — Visual Editor Phase 2 Slice C (UI): selection + styling toolbar (user-facing)
+
+Makes Phase 2 real for the user. On Phase 1's reliable mapping + Slice A/B's style AST primitive, the preview
+now has a **select → style** interaction.
+
+**Inspector (`ReactPreview.ts`), select-first model:**
+- A single click now SELECTS the resolved host element (green outline) and reports it to the parent
+  (`__nbaiSelect` with file/line/col + the element's current computed styles) — safe to click around and
+  inspect without being trapped in a text caret.
+- A DOUBLE-click (or the toolbar's "Edit text") enters the existing text-edit flow (`beginTextEdit`).
+- New messages: `__nbaiApplyStyle` live-applies a style change to the selected element's DOM (instant
+  preview; re-reports styles so the toolbar stays in sync); `__nbaiEditText`; `__nbaiDeselect`. Leaving edit
+  mode clears the selection.
+
+**Toolbar (`PreviewSurface.tsx`):** a fixed strip appears when an element is selected in edit mode (robust —
+no fragile float-positioning): the tag name, **Bold**, font size **A− / A+**, a **colour** picker, and
+**align L/C/R**, plus **Edit text** and **Done**. Each control live-applies to the iframe AND persists to the
+real source via `/api/agentv3/visual-edit` with `styleUpdates` (→ `applyVisualStyleEdit`) — no reload, so
+rapid tweaks stay smooth; a server error surfaces honestly. Pure helpers `veIsBold`/`veFontPx`/`veRgbToHex`
+open the controls on the element's real values.
+
+Tests: inspector HTML carries `__nbaiSelect`/`__nbaiApplyStyle`/`__nbaiEditText`/`selectEl`/`dblclick`;
+toolbar helpers (bold weight / font px parse / rgb→hex).
+
+Next: Slice D (resize handles → width/height) and Slice E (layout-safe reposition) — both reuse this selection
++ the same `applyVisualStyleEdit` primitive.
+
+Gate: server tsc 0 · frontend tsc (only pre-existing @capacitor env errors) · ReactPreview+visualEditor +
+toolbar-helper tests green · full suite (running/green).
+
+---
+
+## 2026-07-29 — Visual Editor Phase 2 Slice D + E: resize + layout-safe reposition (COMPLETES "pura banao")
+
+Finishes the Visual Editor. Both reuse Slice C's selection + the Slice A `applyVisualStyleEdit` primitive.
+
+**Slice D — Resize (`ReactPreview.ts` inspector):** the selected element gets a bottom-right grip (a
+`position:fixed` handle in the iframe document, so it aligns with the element and follows scroll/resize).
+Dragging it live-sets `width`/`height` (min 8px); on release it posts `__nbaiStyleCommit { width, height }`
+which the parent persists via the same endpoint. The grip is tagged `data-nbai-ui` so it never self-selects,
+and `onClick`/`onMouseOver`/`onBodyDown` all skip UI elements.
+
+**Slice E — Reposition (layout-safe):** dragging the ALREADY-selected element's body moves it via
+`transform: translate(dx, dy)` — chosen deliberately because transforms DON'T reflow siblings, so a free
+move never breaks the responsive layout (the honest, non-breaking reposition I promised over free absolute
+drag). A 3px threshold distinguishes a move-drag from a click-select; on release it persists
+`{ transform: 'translate(Xpx, Ypx)' }`. Both `width/height` and `translate(...)` pass the style patcher's
+safe-value charset, so they round-trip into source cleanly.
+
+**Parent (`PreviewSurface.tsx`):** `applyStyle` was split into `persistStyle` (endpoint only) + `applyStyle`
+(live postMessage + persist); the new `__nbaiStyleCommit` message routes drag results to `persistStyle` (no
+re-apply — the iframe already shows it). Toolbar shows a "drag = move · corner = resize" hint.
+
+Tests: inspector HTML carries `__nbaiStyleCommit` / `onHandleDown` / `translate(` / `data-nbai-ui`.
+
+**Visual Editor COMPLETE (Ph1 → Ph2 C/D/E):** click to select → toolbar (text via double-click, bold, font
+size, colour, align) → drag corner to resize → drag body to move — all landing in the REAL source via AST,
+reliable on every element (data-nbai-src) and every React version. Kill-nothing, honest-refusal on
+un-mappable cases.
+
+Gate: server tsc 0 · frontend tsc (only pre-existing @capacitor env errors) · ReactPreview+visualEditor
+(4) + VisualEditPatcher (18) + toolbar-helper (3) green · full suite (running/green).
+
+---
+
+## 2026-07-30 — Autopsy (buildId 9a88c6e7): fast-lane plan call had no timeout → a 247s plan blew the 240s budget
+
+Report: "math car game" — built successfully (ok:true, preview verified, ₹0.2), BUT took ~8 min for a 6-file
+app. 5-bucket ledger: many self-heals (foundation tsconfig, prod defaults, preview verified); the fast lane
+timed out at 240s → full builder recovered in one shot (26s). Struggle = the **PLAN LLM call ran 247s**
+(latencyMs 247790) amid a provider storm (KIMI 4 timeouts + GLM 6× 429), consuming the ENTIRE 240s fast-lane
+budget so the lane always timed out and fell back — even though the full builder then succeeded in 26s.
+
+Root cause (code-fixable half; the provider storm itself is the infra half, tracked open since autopsy #2/#4/#5):
+`SimpleBuilder` raced the WHOLE lane (manifest + contract + all per-file gen + writes) against one 240s cap,
+but the manifest/contract calls had NO own timeout — so a single storming call could eat the whole budget.
+
+Fix: `SimpleBuilder` gains `planTimeoutMs` (default **90s**) bounding the manifest + shared-contract calls
+individually. If planning exceeds it, the fast lane bails NOW → the full builder takes over fast, instead of
+one slow call running to the 240s overall cap. Live by default (no route change needed). Regression test:
+a 400ms plan call with planTimeoutMs 40 + overallTimeoutMs 5000 returns ok:false in <2.5s (bailed on the plan
+cap, not the overall cap).
+
+Open (infra, tracked): the GLM-429 / KIMI-timeout provider storm that made the plan call slow — the reactive
+stack (rate pacer / key pool / circuit breaker) already exists and is tuned by parallel sessions.
+
+Gate: server tsc 0 · SimpleBuilder 69/69 · full suite (running/green).
+
+---
+
+## 2026-07-22 — Light-theme editor readability: mobile code text was invisible (hardcoded dark palette)
+
+**Report (admin, screenshot):** in the LIGHT theme the Code Studio editor showed code as faint grey on white —
+unreadable. (5 app themes: light / dark / dim / comfort / contrast.)
+
+**Root cause:** on mobile the editor uses a plain `<textarea>` fallback (Monaco is skipped for memory), and it
+was hardcoded to a DARK palette: `bg-[#1e1e1e] text-[#d4d4d4]`. The theme-compat layer remapped the
+BACKGROUND literal (`#1e1e1e` → `--surface-card`, i.e. white in Light) but `#d4d4d4` was never in the compat
+map, so the code text stayed light grey `#d4d4d4` on a white background → invisible in Light.
+
+**Fix:** (a) `Editor.tsx` — the textarea now drives both colours from the semantic theme variables
+(`background: var(--surface-card)`, `color: var(--text-body)`) with the original dark values as fallbacks, so
+it renders readable code in ALL 5 themes (Light → dark `#1e293b` text on white). (b) Sibling sweep (rule 3):
+the editor chrome greys `#969696` (tab labels) and `#858585` (status bar), also unmapped, added to the
+theme-compat `--text-muted` group so they're readable on the light-remapped surfaces too. Frontend tsc: no new
+errors (only pre-existing capacitor-native module stubs). Pure styling change.
+
+---
+
+## 2026-07-30 — Autopsy: import+survey of a 2508-file repo stalled ~10 min (build 77bd487b) — OPEN ROOT CAUSE
+
+**Report (rule 5 forensic autopsy).** Prompt: *"Import this app from my GitHub repository and give me a short
+survey of what it is and how it is structured. Do not change any files yet."* Target = the navbharatai repo
+itself (2508 files). Model claude-sonnet-4-6, cheap-floor active.
+
+**5-bucket ledger:** ✅ self-heal ×1 (5 files missing from the ephemeral sandbox → restored from durable store,
+minute 10). 🔀 ×0, ⏭️ ×0. ❌ report is **truncated** — cuts off at minute 10 with NO preview, NO survey
+delivered, NO top-level `ok`. 🥵 **struggle = the whole build**: a read-only "just survey, don't change files"
+request ran 10+ min, with **8 min fully silent** (minute 2→10: identical heartbeat, zero progress).
+
+**Confirmed in code (not guessed):** (1) instant-connect (`agentv3.ts` ~5818) fetches the tree + package.json/
+README in ~2s and builds `importSurvey` — enough to answer immediately. (2) zipball land
+(`landImportedProject`, 2508 files → durable + sandbox) took 104s, done at minute 2 (IMPORT_DIAGNOSTIC
+elapsed=104005ms). (3) minutes 2→10 logged **zero LLM calls, zero tool calls, zero commands** — `BuildDiagnostics.heartbeat()`
+only shows `last: <lastActivity>` when nothing is in-flight, so the 8 silent minutes were a **non-instrumented
+heavy op** (durable-store persistence / sandbox sync of ~2476 files; the reconcile at minute 10 is its tail).
+The architect had not begun surveying.
+
+**Missing subsystem (the lever):** a **read-only "survey/understand this repo" mode** — deliver the survey from
+the instant-connect tree in ~10s and materialize the sandbox in the BACKGROUND (with live progress), instead of
+dragging a "don't change anything" request through the full 2508-file materialization. And EVERY long phase must
+emit honest progress so nothing is ever silent for minutes.
+
+**Status = OPEN ROOT CAUSE (rule 6, safeguard #3).** The report is truncated (no completion, and NO logged
+command during the 8-min gap), so the EXACT operation that ate those 8 minutes cannot be pinned from this
+evidence alone. Deliberately NOT blind-patching the 2508-file import hot path from a partial report. Admin chose
+"send the full untruncated report" so the true root can be fixed from real evidence — awaiting that report.
+
+**Related sibling (also open, from build 29006bab, same day):** the full-builder per-provider-call timeout is
+120s (`GeminiToolRunner`/providers default), so one storming KIMI call hung ~124s before failover — a silent
+multi-minute stall of the same CLASS. A cheap-floor-only shorter timeout is the candidate fix but carries
+"cut off a legit slow call" risk, so it is NOT shipped blind; proposed, pending admin confirmation. (The
+fast-lane sibling was already bounded in PR #1946 — SimpleBuilder `planTimeoutMs`.)
+
+---
+
+## 2026-07-31 — SaaS-dashboard "continue" autopsy (e37e7221): in-browser preview 25s watchdog too tight
+
+**Full 5-bucket ledger (94 issues, ok:true, weak/free tier, KIMI-built):**
+- ✅ Self-healed (~85): production build SUCCEEDED (`tsc` + `vite build`, dist generated, 616 KB bundle); 1
+  DATA_LOSS (1 file restored from the durable store); the unused-import fixes (the task); 2 tests scaffolded;
+  SEO/PWA production defaults added.
+- 🔀 Worked-around (8): **GLM 429 storm** — `glm-4.7-flash` failed 8× (429 "temporarily overloaded") and fell
+  back to Kimi every time. Deferred debt already covered by the pacer / circuit-breaker / key-pool stack.
+- ⏭️ Skipped (0).
+- ❌ Still-broken (1, the 1 unresolved): **in-browser PREVIEW_ERROR — "did not start within 25 seconds"**.
+  The app BUILT fine (production build passed); the in-browser preview timed out. Opened ~17 min after the
+  build settled, so the report's rootCause ("success", computed at settle) predates it — a minor staleness,
+  not a build failure.
+- 🥵 Struggle: the GLM 429 storm; the reviewer spent ~3 min (many read/grep/glob); one self-corrected wrong
+  import ("I added a wrong import, let me fix").
+
+**Missing subsystem / root cause of the ❌:** the in-browser boot watchdog was a fixed **25s**. A large app
+(a SaaS dashboard's 600 KB+ bundle) loading React + many deps from the esm.sh CDN and compiling in-browser on
+a slow MOBILE network legitimately needs longer — and the SERVER-side preview start already allows 90s, so
+25s was inconsistently tight and false-failed a real, still-loading preview.
+
+**Fix:** bump the in-browser boot watchdog `25s → 45s` (`src/server/runtime/ReactPreview.ts`, message + timer),
+a balanced ceiling (generous for a large app on mobile, still surfaces a genuine hang; the reload button is
+always available). Regression test in `ReactPreview.tailwind.test.ts` locks the 45s watchdog so a tighten
+can't re-break it. Server tsc clean; runtime suite green.
+
+**Honest note:** the GLM 429 storm keeps recurring across reports — it self-heals via the Kimi fallback (app
+still built), so it's debt, not a break; the existing pacer/circuit/key-pool stack is the mitigation. No new
+code fix warranted from this report beyond the preview-timeout.
+
+---
+
+## 2026-07-31 — FIRST-BUILD-CORRECT slice 1 (prevent-not-heal): auto-strip the engine's own unused imports
+
+**Why (the biggest world-best lever, admin-directed):** across many reports the engine burned a whole
+"continue / fix the error" ROUND removing its OWN unused named imports (`Suspense`, `useAuth`, `useEffect`,
+`User` from lucide-react …) after the reviewer flagged them. The app worked the whole time — pure wasted
+effort on cosmetics. Best builders don't create the problem in the first place; the next-best deterministic
+thing is to clean it before it costs a round.
+
+**Fix:** new pure module `UnusedImportSweep.ts` — a FINAL-PASS sweep that removes provably-dead NAMED import
+specifiers, wired into the post-build best-effort polish phase (`routes/agentv3.ts`, alongside auto-tests +
+production defaults). SAFE BY CONSTRUCTION (rule 1): removes a named specifier ONLY when its local binding
+appears NOWHERE ELSE in the file (word-boundary), keep-on-ANY-doubt. NEVER touches side-effect imports
+(`import './x.css'`), namespace imports (`import * as X`), or default imports (`import React`). A USED import
+can never be removed; worst case it leaves a dead import (today's status quo). Additive/best-effort, only
+sweeps the files the model WROTE this build; kill switch `AGENTV3_IMPORT_SWEEP=off`.
+
+**Tests:** 13 cases in `UnusedImportSweep.test.ts` — the exact report cases (drop Suspense/useAuth/useEffect/
+User, keep the used ones, keep a default while dropping a dead named part, alias-by-local-name) PLUS the
+safety invariants (side-effect / namespace / JSX-used / type-only-used / all-used all UNTOUCHED). Server tsc
+clean.
+
+**Proactive world-best note (CLAUDE.md Step 6):** this is slice 1 of "make the first build correct." The
+DEEPER lever is the PROMPT/CONTRACT so the model never emits an unused import at all (a later slice); this
+deterministic sweep is the safe, shippable-today floor. The recurring GLM 429 storm remains the biggest
+open quality ceiling (self-heals via Kimi, so it's debt not a break — but it caps the default experience).
+## 2026-07-30 — FIX: import+survey "do not change files" turn ran a 16-min reviewer that EDITED the project (build 77bd487b full report)
+
+**Full untruncated report (rule 5 autopsy).** The read-only *"import this repo + give me a survey, do not
+change any files"* build actually COMPLETED (`ok:true`, survey delivered) — but ran **~31 minutes**
+(`startedAt`→`endedAt` = 1875s) and, worse, **violated the user's explicit "do not change any files"**:
+- `🔧 Added 4 missing import(s)` and `🔧 Added 12 missing dependencies to package.json (dotenv, helmet,
+  axios, firebase, lucide-react, …)` fired on a turn the user said not to touch.
+- The post-build completeness reviewer's `evaluate` ran **600s** and still timed out
+  (`Post-build review timed out after 210000ms on 503 files`) — ~16 of the 31 min, on a survey.
+
+**ROOT CAUSE (pinned from the full report).** Every post-build gate (readiness / lint / reviewer-autofix at
+`agentv3.ts:8558/8564`) already checks `!isImportTurn`, and the design comment (8480) states import/survey
+turns get NO reviewer. But the reviewer-INVOCATION gate keyed off `writtenFiles.size > 0` as the proxy for
+"we built something to review". On a survey turn that proxy is DEFEATED by INFRA writes — the `.env` that
+loads the user's saved keys (`manifest.fileHashes` shows `.env`; "🔐 Loaded 3 of your saved keys") and
+foundational scaffolding push the count above zero even though ZERO user code was written → the reviewer ran,
+and its heal edited the imported project.
+
+**FIX.** Extracted the gate to an exported pure predicate `reviewerShouldRun({wroteFiles, isImportTurn,
+fastLaneGated, reviewFastlaneForced, startTierSonnet})` that gates on `!isImportTurn` (the real signal used
+by every sibling gate), not just `wroteFiles`. An import/survey turn now NEVER runs the reviewer or its
+file-modifying heal — restoring the documented design intent. Regression-locked in `agentv3.test.ts`
+(5 cases incl. the exact 77bd487b failure: `wroteFiles:true, isImportTurn:true → false`). Server tsc clean;
+agentv3.test.ts 272/272.
+
+**Still OPEN (recorded honestly, rule 6) — separate root causes from the same report, NOT fixed here:**
+- The ~11-min silent sandbox-sync gap (min 2→13) persisting 2476 files, and the sandbox materializing only
+  ~26 of 2476 files (`ls src/` showed just `index.ts`) → the architect's `read_file` on `server.ts`/`App.tsx`
+  failed and the survey was hedged/inaccurate. This is the large-repo import materialization path — needs its
+  own careful fix (deliver the survey from the instant-connect tree + background/verify the sandbox sync);
+  not blind-patched.
+- ANALYZER FALSE-POSITIVE (verified this session): `COMPLIANCE_LOG_LEAK_FOUND` flagged 7 console logs across
+  6 files as "printing a credential/token" — but inspection shows every one logs an ERROR object, not a
+  secret (`console.error('[OTP SEND ERROR]', err)`, `[ROTATE] secret re-encrypt failed: err`,
+  `[OTP PROTECTION SECURITY ERROR] err`, `[CASHFREE WEBHOOK] Fulfillment failed for order ${orderId}`, …).
+  The detector matched on LABEL keywords ("secret"/"OTP"/"SECURITY"/"CASHFREE"), not an actual secret value.
+  No real leak. Separate small hardening (make the detector match the logged VALUE, not the label) — noted,
+  not fixed here.
+
+---
+
+## 2026-07-30 — FIX: credentials in a `.env` file no longer FAIL the build (false-positive → 1740s timeout, build 6478f94d)
+
+**Autopsy (rule 5).** A `continue` turn finished `ok:false` and timed out at the 1740s wall-clock cap. Chain:
+static `scanSecurity` flagged `connection-string-credentials @ .env:2` (a `DATABASE_URL=postgres://user:pass@host`
+— the CORRECT place for it) as **high** → `READINESS_BLOCKER` → reviewer echoed it as `[CRITICAL]` → the
+auto-fix had NO valid action ("move to an env var" is circular; `.env` IS the env file) → looped → `BUILD_TIMEOUT`
+→ `ok:false`. A working app reported as broken. (Same infra `.env` NavBharatAI writes to load the user's keys.)
+
+**ROOT CAUSE.** `scanSecurity` downgrades credential-VALUE findings (`demoDowngrade` rules) to `low` only in
+FIXTURE files; a `.env` file was treated like real source, so a credential that BELONGS in `.env` stayed a
+build-blocking `high`.
+
+**FIX.** New pure `isEnvSecretsFile(file)` (`.env`/`.env.local`/`.env.production`/… but NOT the committed
+`.env.example`/`.sample`/`.template`). `credsBelongHere = isFixtureFile || isEnvSecretsFile` downgrades the
+`demoDowngrade` rules to `low` there — still REPORTED, never build-blocking. Real source keeps blocking
+(`postgres://…` in a `.ts` stays high); a client-exposed `NEXT_PUBLIC_*` secret in `.env` stays high (not a
+demoDowngrade rule). Regression-locked in `SecurityAnalysis.test.ts`. Server tsc clean; SecurityAnalysis 64/64.
+
+**NOTE (session continuity):** this fix + the reviewer-gate census reconcile were first done, then LOST when
+the container was reclaimed before push (only the reviewer-gate commit had been pushed). Both were recovered
+and re-pushed. Lesson: push each green sub-step immediately (safeguard #4).
+
+**Related open (noted, not fixed here):** the reviewer LLM may still phrase "credentials in .env" as a
+`[CRITICAL]` on its own (the static downgrade removes the READINESS_BLOCKER that seeds it); and the auto-fix
+should not LOOP on an un-actionable finding to the wall-clock cap — separate hardenings.
+
+---
+
+## 2026-07-31 — FIX: IDE top-bar "AI" button now opens the FULL NavBharatAI Pro v5.0 (not the in-IDE mini)
+
+**Admin report.** In Code Studio (IDE), the top-right "AI" button opened a small in-IDE mini chat
+(`AgentV3MiniChat`); the admin wants it to open the FULL Pro v5.0, 100% memory-synced with the IDE.
+
+**Root cause.** The button (`id="ide-social-chat-trigger"`) was MEANT to fire the `onSocialChatTrigger` prop,
+but that prop was declared + destructured in `CodeStudio` yet NEVER passed by `ViewPanels`, so the onClick
+silently fell back to the internal `handleScreenChange('ai')` (the mini panel).
+
+**FIX.** `ViewPanels` now passes `onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}` (the FULL Pro v5.0
+surface — same session/workspace/memory the IDE uses, so it's 100% in sync by construction, exactly like the
+existing `onGoToMain`). The button's onClick calls `onSocialChatTrigger` when provided (internal mini kept only
+as a fallback if a parent doesn't wire it). Frontend tsc: no new errors (only pre-existing @capacitor stubs).
+Sync was already guaranteed — `AgentV3MiniChat`/the Pro v5 panel target the same `getAgentV3WorkspaceId` session
+("a second window onto the same brain") — so opening the full panel inherits the same files + conversation.
+
+---
+
+## 2026-07-31 — FIX (zip import, part 1): bulk file-load, no more one-by-one trickle
+
+**Admin report.** A 2500-file `.zip` import (📎 → Import project) showed files appearing ONE-BY-ONE over
+~23 min (~300 files done in 23 min ≈ 4.6s/file), as if being "rebuilt". The files already exist — there is
+NO need to regenerate them; they must sync in BULK.
+
+**ROOT CAUSE (client).** `useZipImport` streamed files from `/api/extract-zip` (SSE) and called
+`setFiles({ ...loadedFiles })` — spreading the ENTIRE growing map — every 20 files. For N files that is
+O(N²) full re-renders of the file tree/editor (2500 files ≈ 125 spreads of up-to-2500 keys), which is the
+visible one-by-one trickle. (The server extraction itself has no artificial delay; the 6s reveal-pacer is
+build-only and never touched imports.)
+
+**FIX (part 1).** Drop the per-batch drip: show only the first ≤8 files instantly (so a tiny app still feels
+live), then let the SINGLE bulk `setFiles(loadedFiles)` at the end commit everything at once — O(N), a few
+seconds instead of tens of minutes. The cheap progress counter still shows "Loading N files…". Frontend tsc:
+no new errors.
+
+**STILL PENDING (part 2, separate).** Boot-only preview for a framework-app import: run the EXISTING files on
+a real dev server (npm install + dev) WITHOUT any LLM/regeneration — needs the direct dev-server-boot path
+(the earlier engine-trigger auto-boot was reverted precisely because it could regenerate). Tracked as the next
+zip task.
+
+---
+
+## 2026-07-31 — FIX (zip import, part 2): framework-app import auto-boots the preview from EXISTING files (no LLM/rebuild)
+
+Follow-up to part 1 (bulk file-load). Admin: after a .zip import the preview must run on its own, and the
+files must NOT be regenerated ("wapas se banane ki need hi kaha hai").
+
+**Approach — reuse the existing boot-only machinery, NOT the LLM.** `PreviewSurface` already has a real
+dev-server boot path: `runDiagnose()` → `POST /api/agentv3/preview-diagnose` (pre-kill port → `npm install`
+→ start dev server → poll), and an auto-resume effect (C1) that runs it automatically when the Live preview
+is shown for a workspace with no live URL. This is install+run of the EXISTING files — no model call, no file
+regeneration. (The earlier engine-trigger auto-boot was reverted precisely because going through `handleSend`
+could regenerate.)
+
+**FIX (part 2).** For a framework-app zip import, `useZipImport` now navigates to the **Preview** tab
+(`toggleTab('preview')`) instead of Code Studio, so `PreviewSurface` mounts and its auto-resume boots the
+dev server on the imported files. Message updated to "Opening the live preview — installing dependencies &
+starting the dev server for your EXISTING files (no rebuild)… if it doesn't appear, tap Diagnose." Static /
+simple-React apps unchanged (inline in-browser preview). Frontend tsc: no new errors.
+
+**HONEST BOUNDARY.** This leans on the existing auto-resume, which requires the sandbox to report
+`livePreviewAvailable` (E2B configured). On a brand-new import the sandbox may need a moment; if the auto-boot
+doesn't fire immediately, the **Diagnose** button in the Preview does the identical one-tap boot (same
+endpoint). Not yet verified end-to-end on a live fresh import that the auto-resume ALWAYS fires on the first
+mount — if a real report shows it needs a manual Diagnose, the next step is to explicitly kick `preview-diagnose`
+right after a framework import rather than rely on the mount-time effect. Recorded honestly (rule 6).
+
+---
+
+## 2026-07-31 — Rock-solid polish campaign (admin: "sabhi feature ko roadmap bana kar polish karo, rocksolid banao … auto")
+
+Generated `FEATURE_ROADMAP.md` (code-anchored inventory of all 203 KB features, 11 categories, a
+6-point "rock-solid" checklist) and began driving it cluster-by-cluster, autonomously (branch → gate →
+PR → CI green → merge), starting from the App Builder as the admin asked.
+
+**Systemic finding (the dominant defect class):** the features themselves are real and work end-to-end —
+the pervasive bug is **stale `AppKnowledgeBase` navigation** left by two big surface migrations that the KB
+was never fully swept for: **Engineer AI is retired** (→ NavBharatAI Pro v5.0) and the **old Pro Chat v2.0
+is retired** (→ Pro v5.0), plus the **2026-07-23 "builder tools moved from Settings → Home Other AI"** move
+and the **Deploy→"Publish"** rename. Every NavBharatAI AI (Free/Pro/Offline/Doctor) reads the KB to answer
+"where is X?", so a stale path silently misdirects real users. Fix = point every entry at the control that
+actually exists, corrected IN PLACE (never delete — the `pro_chat`/`engineer_ai` KnowledgeDocs groups +
+backend `chat.ts` surfaces are live and tested), each locked with a source-anchored regression test.
+
+**Clusters shipped rock-solid (merged to main):**
+- **App Builder / NavBharatAI Pro v5.0 (14/14)** — PR #1964. Fixed: removed the deleted floating-"v5.0"-
+  button path (named the 2 real gates), Export → "Files tab → ZIP", Publish (not "Deploy"), Import .zip →
+  attach-menu "Import project (.zip)", GitHub import → "Build options → Import Repo". Verified real + locked:
+  Plan/Advise+queue, Ship-to-main+Revert, Restore all files, dual Preview+Diagnose, admin-only Report,
+  Files (one FilesPanel/two gates), Software Project Mode, build continuity, git-native storage.
+- **Core AI Chat (10/10)** — PR #1964. Free Chat "Reports" → "NavBharatAI FREE"; retired-Pro-Chat entries
+  repointed to NavBharatAI Pro v5.0; offline/freelancing verified.
+- **Builder Tools / Other AI (11/11)** — PR #1965. Voice to App: stale "Settings → AI Tools → Voice to App"
+  → the real inline 🎙️ mic in the Pro v5.0 composer (the aiToolsReal.test.ts assertion carried the same
+  stale path — the 2026-07-23 sweep fixed ai_debugger but missed voice_to_app; corrected both). Respected
+  the deliberate no-group "Home → Other AI → <tile>" doorways (did NOT add the group — test-locked decision).
+- **Deploy / Hosting (5/5) + Billing (2/2)** — PR #1966 (Tier-1). engineer_ai_deploy / pro_chat_multi_deploy
+  / one-click-deploy repointed off retired Engineer AI + "Pro Chat Deploy button" → NavBharatAI Pro v5.0
+  "Publish" (Hosting chooser). billing: "Settings → Billing" (no such tab) → "Wallet & Billing" + the Pro
+  header token chip.
+- **Reliability / Quality (9/9)** — this PR. "Pro Chat → Build any app" → "NavBharatAI Pro v5.0" on Auto
+  Dependency Sync / Auto Test Generation / Auto Code Review / Build Version History; the 3 Analytics cards
+  got the discoverable "Home → Other AI → Analytics → …" doorway; App SBOM (`/api/workspace/sbom`) + Build
+  Health (Insights panel "Run All Checks") verified real.
+
+Each cluster ships a `tests/polish<Cluster>.test.ts` that anchors the corrected KB path to a real string in
+the live component/route, so a future edit that re-introduces a retired path fails CI. Gate every push:
+`tsc --noEmit` + `tsc -p tsconfig.server.json` + full `vitest run` (10002 tests green as of this PR).
+
+**Open follow-up (honest, rule 6):** a wider legacy prose layer still describes some v2.0-era *capabilities*
+(right-docked canvas, "16k Opus budget", Firestore-only memory) — navigation is now correct everywhere, but
+those descriptions deserve a dedicated refresh pass. Remaining roadmap clusters: Professional AIs (75),
+Collaboration (4), Settings/Connections (16), Admin/Ops (6), Platform/Navigation (51) — same conveyor.
+
+### 2026-07-31 — Rock-solid polish campaign: FIRST FULL PASS COMPLETE (203/203)
+
+All 11 roadmap categories are now ✅ (App Builder 14, Core AI Chat 10, Builder Tools 11, Professional AIs 75,
+Deploy 5, Reliability 9, Billing 2, Collaboration 4, Settings 16, Admin 6, Platform 51). Shipped as PRs
+#1964–#1970 (each: branch → gate → CI green → squash-merge).
+
+**The systemic root cause (fixed everywhere):** the features work; the pervasive bug was **stale KB
+navigation** left by three migrations the KB was never fully swept for — Engineer AI retired (→ v5.0),
+Pro Chat v2.0 retired (→ v5.0), the 2026-07-23 builder-tools move (Settings → Home "Other AI"), and the
+Deploy→"Publish" rename. Every NavBharatAI AI reads the KB `path` to answer "where is X?", so a stale path
+silently misdirected real users. Fixed in place (never deleted — the pro_chat/engineer_ai KnowledgeDocs
+groups + backend surfaces stay live and tested).
+
+**The durable guarantee:** a **campaign-wide regression lock** (`tests/polishAdminPlatform.test.ts`) now
+asserts that NO KB entry's `path` — across all 203 — routes through any retired doorway ("Engineer AI chat",
+"Pro Chat →", "Deploy panel → Deploy tab", "Settings → Billing", "→ Reports tab", "Settings → AI Tools →
+Voice", the deleted floating "v5.0" button, or the bare "Secrets & Keys" label). Plus each cluster has its
+own `tests/polish*.test.ts` anchoring the corrected path to a real component/route string. So the whole
+drift class fails CI if it ever returns.
+
+**Open follow-up (rule 6, the "second lap"):** a wider *legacy prose* layer still carries v2.0-era
+*capability* descriptions (right-docked canvas, "16k Opus budget", Firestore-only memory). All navigation is
+correct; those prose refreshes are the next, lower-priority pass — they never misdirect a user, they just
+read slightly out-of-date.
+
+---
+
+## 2026-07-31 — CONTAMINATION autopsy (report b8c22c26): workspace held NavBharatAI's OWN 2576-file source
+
+**Full 5-bucket ledger (251 issues, KIMI-only 64 turns, ok:NULL, 31 minutes):**
+- ✅ Self-healed: the 2576-file sandbox restore from the durable store; a missing `ProviderUsageLedger.ts`
+  created; deps reinstalled; server eventually booted on 8080.
+- 🔀 Worked-around: repeated `rm -rf node_modules/… && npm install --force` — brute-forcing dependency
+  corruption instead of a real fix.
+- ⏭️ Skipped: 0.
+- ❌ **Still-broken: ok:NULL — the build NEVER converged in 31 minutes.** Core cause: the workspace's
+  durable store held **NavBharatAI's OWN platform source (2576 files: `src/server/AgentV3/…`,
+  `routes/agentv3.ts`, the internal design doc)**, so the prompt "make this app" made the engine try to
+  BUILD AND RUN OUR OWN PLATFORM as the user's app — a nonsensical, never-converging target.
+- 🥵 Struggle: 31-min marathon — `npm run dev` ×6 (113s/135s/83s…), `tsx server.ts` boot attempts, node_modules
+  corruption fixes. The wall-clock cap (1800s/30 min, working as designed) only stopped it at the wall.
+
+**Missing subsystem → FIX (shipped): SELF-SOURCE GUARD.** New pure `PlatformSourceGuard.ts` +
+`looksLikePlatformSource(paths)` — false-positive-proof (fires only when ≥2 highly-specific internal
+platform paths are present). Wired as a pre-flight in `routes/agentv3.ts` right after the build-diagnostics
+are created: if the workspace is the platform's own source, the engine now REFUSES HONESTLY up front
+(`PLATFORM_SOURCE_WORKSPACE`, ok:false, a clear user message + a fresh-workspace hint) instead of grinding
+31 minutes to nothing. Free (no build runs), never bills. 7 guard tests + the full agentv3 route suite (285)
+green; server tsc clean.
+
+**OPEN ROOT CAUSE (rule 6 — origin out of code reach):** HOW the platform source got into that workspace's
+durable store is NOT reproducible from code — the E2B sandbox root is a clean `/home/user/workspace`
+(template = a bare vite-react scaffold) and NO code path copies the platform's own source into a workspace.
+The durable store already held the 2576 files before this build, so it happened in a prior event specific to
+this workspace (a manual import/push of the repo, or a one-off historical mixup). Investigating the origin
+needs the workspace's build history + the GitHub repo `docasheesh-png/overall-layout-structure-…` contents
+(admin-side). The guard makes the damage harmless regardless of the origin.
+
+**Step-6 proactive (world-best):** (1) PREVENT — a build should never grind 30 min to nothing; the guard
+kills this class up front, and the general "huge/non-converging repo" case deserves an earlier no-progress
+stop (next slice). (2) TRUST/SAFETY — a user workspace containing platform source is a real isolation
+concern worth an infra audit. (3) The recurring GLM/cheap flail didn't appear here (KIMI-only), but the
+30-min-marathon-with-no-result is itself a top experience ceiling.
+
+---
+
+## 2026-07-31 — FAILED-build autopsy (report 52c601a3): missing vite.config.ts + honest NOT-READY
+
+**Full 5-bucket ledger (112 issues, ok:FALSE — honestly reported, 62/100 NOT READY, 7.3 min):**
+- ✅ Self-healed: 1-file durable restore; GLM→Kimi fallbacks (2); a RENDER_RESCUE; 33 tool-done.
+- 🔀 Worked-around: **GLM 429 storm** — 8 failures → Kimi.
+- ⏭️ Skipped: 0.
+- ❌ **Still-broken (build FAILED, correctly ok:false):** (1) **rootCause: missing `vite.config.ts`** — the
+  app had `vite` in deps but NO vite config → "the build will fail"; (2) preview error "import.meta is only
+  valid inside modules" (in-browser render); (3) READINESS_BLOCKER: 2 fake/placeholder/not-implemented code
+  issues; (4) 2 unresolved TOOL_ERROR exit-1.
+- 🥵 Struggle: the GLM 429 storm again.
+
+**HONESTY WIN:** the engine reported this build ok:FALSE / "NOT READY 62/100" instead of a fake success —
+the #1810 / readiness-gate honesty work is holding. That is the correct behaviour for a broken app.
+
+**FIX (prevent-not-heal): a Vite app ALWAYS has its config.** Added `ensureViteConfig(files)` to
+`ViteConfigGuard.ts` — materializes a minimal, correct vite config (`.ts` for a TS app, React/SWC plugin
+only when it's a dependency, the scaffold's known-good host/port/allowedHosts block) ONLY when `vite` is a
+dependency AND no config of any extension exists; NEVER overwrites one. Wired as post-build pass **U-4** in
+`routes/agentv3.ts` — gated on `expectsArtifacts` (never a survey turn) but intentionally NOT on `result.ok`,
+because a missing vite.config is the fix for a FAILED build: it loads the FULL file set, adds the config, and
+persists it to the durable store + GitHub so this app and every future "continue" can build. Best-effort;
+census tripwire updated (9 → 10 writers, considered ✓). 5 new tests; server tsc + route suite (285) + vite
+guard suite (19) green.
+
+**Open / noted (rule 6):** (a) the preview "import.meta is only valid inside modules" error survives the
+existing `import.meta` regex transform for at least one file class — a preview-fidelity follow-up. (b) the 2
+fake/placeholder code issues are a model-quality problem (the deeper prevent lever is the prompt/contract).
+(c) the GLM 429 storm remains the standing quality ceiling (self-heals via Kimi; debt, not a break).
+
+---
+
+## 2026-07-31 — FEATURE (backend-deploy, slice 1): separate-backend deploy-config generator (BYO account/token)
+
+Admin: "user ko frontend aur backend alag-alag rakhna ho to?" — the gap was that NavBharatAI deploys a
+FRONTEND one-click but had NO target for a standalone always-on backend. Building it in slices, per user
+("user ke anusar alag-alag; confusion ho to user se pucho") and BYO-token (CLAUDE.md: user apps deploy to the
+USER's own accounts, never NavBharatAI's).
+
+**Slice 1 (this PR) — pure config generator.** New `src/lib/backendDeployConfig.ts`: given a host
+(cloud-run / render / railway) + app info, produces the REAL, correct config file(s) that make the backend
+deploy cleanly on THAT host — `Dockerfile` + `.dockerignore` (Cloud Run), `render.yaml` (Render),
+`railway.json` (Railway) — plus the BYO token env name and honest, ordered "push to GitHub → connect YOUR
+account" steps. Every path deploys to the user's OWN account; nothing is faked. Pure + deterministic;
+8 regression tests. Frontend tsc: no new errors.
+
+**Next slices (planned, one by one):** (2) wire it into the deploy/Git panel with a host-picker + the
+ask-when-unchosen flow; (3) BYO-token capture per host (Settings → Secrets) with honest "set TOKEN" states;
+(4) a real server-side deploy provider per host (token present → real deploy → separate backend URL). Until
+slice 4, the honest path is config-gen + GitHub-push + user connects their host (real, no fake success).
+
+---
+
+## 2026-07-31 — FEATURE (backend-deploy, slice 2): deploy panel wires Cloud Run/Render/Railway to real config-inject
+
+Slice 2 of the separate-backend deploy feature (slice 1 = the config generator, merged). The deploy panel
+(`GitPanel`) ALREADY listed `gcloud` / `render` / `railway`, but selecting them only showed the honest
+"not available" message. Now they do something REAL — without faking a deploy.
+
+**FIX.** New pure `src/lib/backendDeployWiring.ts`: `gitPanelBackendHost` (gcloud→cloud-run, render, railway),
+`parseBackendAppInfo` (reads name/start/build/node from the workspace package.json), and
+`buildBackendConfigInjection` (returns the plan + the merged file map + honest log lines). `GitPanel.triggerPushAndDeploy`
+now short-circuits a backend host to `injectBackendDeployConfig()`: it adds the real config files
+(Dockerfile+.dockerignore / render.yaml / railway.json) to the project via `onFilesChange` and prints the
+honest BYO-account steps ("deploy-ready on YOUR host, set <TOKEN>, push to GitHub & connect"). Never claims a
+deploy happened. The frontend-deploy paths (github/static/v5 providers) are untouched. The user PICKING the
+host IS the choice (no separate ask-flow needed). 6 wiring tests + slice-1's 8; server/frontend tsc clean.
+
+**Remaining:** (3) BYO-token capture per host in Settings → Secrets; (4) a real per-host deploy provider
+(token present → real deploy → separate backend URL). Until slice 4 the honest path is config-inject +
+GitHub push + the user connects their host — real, no fake success.
+
+---
+
+## 2026-08-02 — Two tasks (admin "ek-ek karke dono, bina ruke")
+
+### Kaam 1 — build-report 1327b405 autopsy: PREVENT the 3 recurring defect classes (prevent-not-heal)
+The SaaS-dashboard build failed readiness 0/100 (preview "Closed Port Error") because a WEAK free-tier model
+(glm-4.7-flash → KIMI, under a GLM-429 storm + KIMI truncation, ~22 min) generated three genuinely-flawed
+patterns — NOT false positives: (1) a conditional `useMemo` (Rules-of-Hooks violation → runtime crash → dev
+server never bound port 5173), (2) a hardcoded real-format provider token in `ApiKeys.tsx`, (3) `Math.random()`
+for a token in `Webhooks.tsx`. The readiness gate CORRECTLY reported NOT READY.
+**Fix (50/50 law — kill the condition upstream):** `architectSystemPrompt()` now carries a
+"WRITE-IT-RIGHT-THE-FIRST-TIME" block instructing the builder to never (1) call a hook conditionally/after an
+early return/in a loop, (2) hardcode a real-format token (use an obvious placeholder like
+`sk_test_YOUR_KEY_HERE` or env), (3) use `Math.random()` for a token/OTP/secret. 3 regression tests assert the
+guidance is in the prompt. Server tsc clean; systemPrompt.test 45 pass.
+
+### Kaam 2 — backend-deploy slice-3 groundwork: surface the BYO-token setup
+`buildBackendConfigInjection` log lines now tell the user the exact host token env AND where to put it in
+NavBharatAI (`Settings → Secrets & Keys`) so NavBharatAI can deploy it for them (slice 4), or deploy on their
+own host — honest, no fake deploy. 2 more wiring tests. Frontend tsc: no new errors.
+
+Remaining backend-deploy: slice 4 — a real per-host server-side deploy provider (token present → real deploy →
+separate backend URL). Remaining build-quality: the WEAK free-tier ceiling itself (429 storm + truncation)
+stays a strategic open item.

@@ -79,6 +79,33 @@ export class AimdConcurrency {
   }
 }
 
+/**
+ * M5-S5.1 — a decaying throttle rate for a provider (EWMA of throttle=1 / ok=0) → an honest 0-100 health
+ * score, so the 429 ceiling is MEASURABLE (the GLM-storm the reports keep showing). Pure. 100 = no recent
+ * throttles, 0 = every recent call throttled. Exposed as pacer telemetry (like concurrencyLimit); USING it
+ * to reorder providers touches the model-routing policy and is a deliberate, admin-signed-off follow-up.
+ */
+export class ThrottleHealth {
+  private ewma = 0;
+  private samples = 0;
+  constructor(private readonly alpha = 0.2) {
+    this.alpha = Math.min(1, Math.max(0.01, alpha));
+  }
+  /** Record one call outcome. */
+  record(throttled: boolean): void {
+    this.ewma = (1 - this.alpha) * this.ewma + this.alpha * (throttled ? 1 : 0);
+    this.samples++;
+  }
+  /** 0-100; 100 = healthy. 100 before any samples (unknown = assume healthy, so it never penalises blind). */
+  get score(): number {
+    return this.samples === 0 ? 100 : Math.round((1 - this.ewma) * 100);
+  }
+  /** The decaying throttle ratio in [0,1]. */
+  get throttleRate(): number { return this.ewma; }
+  /** How many outcomes have been recorded. */
+  get count(): number { return this.samples; }
+}
+
 /** True when an error looks like a rate-limit / throttle / timeout the AIMD should back off on. */
 export function isThrottleSignal(err: unknown): boolean {
   const status = (err as { status?: number } | null)?.status;
@@ -126,6 +153,7 @@ export function pacerConfigFromEnv(env: NodeJS.ProcessEnv = process.env): PacerC
 export class RateLimitPacer {
   private readonly bucket: TokenBucket;
   private readonly aimd: AimdConcurrency;
+  private readonly healthT = new ThrottleHealth();
   private inFlight = 0;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -142,6 +170,12 @@ export class RateLimitPacer {
 
   /** Current adaptive concurrency permit count (for telemetry/tests). */
   get concurrencyLimit(): number { return this.aimd.limit; }
+
+  /** Provider throttle-health 0-100 (for telemetry/tests); 100 = no recent 429s. M5-S5.1. */
+  get healthScore(): number { return this.healthT.score; }
+
+  /** The decaying throttle ratio [0,1] observed for this provider (for telemetry/tests). */
+  get throttleRate(): number { return this.healthT.throttleRate; }
 
   private async waitForSlot(): Promise<void> {
     // Wait until in-flight is under the (possibly-shrinking) AIMD limit. Bounded poll so it can't spin.
@@ -169,9 +203,10 @@ export class RateLimitPacer {
     try {
       const out = await fn();
       this.aimd.onSuccess();
+      this.healthT.record(false);
       return out;
     } catch (err) {
-      if (isThrottleSignal(err)) this.aimd.onThrottle();
+      if (isThrottleSignal(err)) { this.aimd.onThrottle(); this.healthT.record(true); }
       else this.aimd.onSuccess(); // a non-throttle failure isn't a capacity signal — don't shrink for it
       throw err;
     } finally {

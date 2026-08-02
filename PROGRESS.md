@@ -22810,3 +22810,33 @@ add a selection toolbar (font size / color / bold / align / padding) + safe resi
 boxes). Free-drag reposition breaks responsive layouts, so a layout-safe nudge/move will be offered instead.
 
 Gate: server tsc 0 · ReactPreview 8/8 + visualEditor 2/2 · full suite (running/green).
+
+## 2026-08-02 — IDE Git panel: 3 real bug fixes (auto-open, mobile scroll, Cloud-Sync import)
+
+Admin report on Code Studio's Git panel (Cloud Deploy / Cloud Sync). Root-caused all three (rule 4).
+
+1. **Git panel auto-opened on every IDE load** (should open only on menu click). ROOT CAUSE: the
+   `github_oauth_return_active_screen` localStorage key (set to `'git'` when starting GitHub OAuth so the
+   user returns to the Git panel) was cleared on a **1000ms timer that unmount cancelled** — so the key
+   survived and forced `activeScreen='git'` on the NEXT load, every load. FIX (`CodeStudio.tsx`): consume
+   the key **immediately** (synchronous `removeItem` in the mount effect, after the initial reads that
+   legitimately use it once), and drop the fragile delayed timer. Git now opens exactly once right after an
+   OAuth return, and only from an explicit menu click afterwards.
+2. **Cloud Deploy + Cloud Sync didn't scroll on mobile.** ROOT CAUSE: the Sync tab's body was
+   `overflow-hidden` (content simply clipped + unreachable on a short mobile viewport), and the Deploy tab
+   nested an inner `overflow-y-auto` region inside the scroll body (a mobile nested-scroll trap). FIX
+   (`GitPanel.tsx`): both tabs now share ONE natural `overflow-y-auto` scroll column; the inner deploy
+   config region is de-trapped (flows in the outer scroll) and the Sync repo list is bounded with
+   `max-h-[50vh]` instead of `flex-1` so a long list scrolls internally without trapping the page.
+3. **Clicking a GitHub repo in Cloud Sync didn't bring files into the IDE.** ROOT CAUSE: `handleSyncProject`
+   loaded the repo files into the workspace (`onFilesChange`), but (a) the sidebar stayed on the Git panel
+   so the File Explorer was never shown, and (b) `activeFile` still pointed at the previous project's file,
+   which no longer existed → the editor showed nothing. FIX: on a successful import, GitPanel switches the
+   sidebar to the File Explorer (`onToggleView('files')`), and `CodeStudio` now resets `activeFile` to the
+   first file whenever the file SET changes to one that no longer contains the current file (fires only on
+   an import/replace, never on a keystroke). The imported repo now appears immediately.
+
+**Verification:** frontend `tsc` clean for the touched files (the only tsc errors are pre-existing missing
+optional Capacitor native modules, unrelated); `npx vitest run` ✅ **9843/9843 (960 files)**. UI-only change;
+could not render the live Monaco IDE from the dev sandbox, so the visual scroll behaviour is verified by the
+CSS root-cause + CI, with the admin's on-device check as the final confirm.

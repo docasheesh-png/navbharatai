@@ -237,15 +237,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     const timer = setTimeout(checkMobile, 100);
     window.addEventListener('resize', checkMobile);
 
-    // Clear the redirect storage after a short delay so subsequent refreshes start fresh
-    const clearTimer = setTimeout(() => {
-      localStorage.removeItem('github_oauth_return_active_screen');
-    }, 1000);
+    // Consume the one-shot OAuth-return screen key IMMEDIATELY so it can never linger to a later mount
+    // and force the Git panel open again. ROOT CAUSE of "Git auto-opens every time": the old clear ran
+    // on a 1000ms timer that unmount (line below) cancelled, so the key survived and re-opened Git on the
+    // next IDE load. The initial `activeScreen`/`isSidebarOpen`/`hasRestoredScreen` reads above already
+    // captured it for the legitimate single post-OAuth open; removing it now keeps that one-time behaviour
+    // while guaranteeing Git only opens from an explicit menu click afterwards.
+    localStorage.removeItem('github_oauth_return_active_screen');
 
     return () => {
       window.removeEventListener('resize', checkMobile);
       clearTimeout(timer);
-      clearTimeout(clearTimer);
     };
   }, []);
 
@@ -255,6 +257,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       setOpenTabs(prev => [...prev, { path: activeFile }]);
     }
   }, [activeFile]);
+
+  // When the workspace file SET changes to a new project (e.g. a Cloud Sync GitHub-repo import replaces
+  // all files), make sure the editor actually opens a REAL file: if the current activeFile no longer
+  // exists in `files`, jump to the first file and reset the open tabs. Without this, after an import the
+  // editor kept pointing at the previous project's file (e.g. index.html) — so the imported repo "didn't
+  // show up" even though its files were already in the workspace. A normal edit keeps activeFile in
+  // `files`, so this only fires on an import/replace, never on a keystroke.
+  useEffect(() => {
+    const keys = Object.keys(files);
+    if (keys.length > 0 && (!activeFile || !(activeFile in files))) {
+      setActiveFile(keys[0]);
+      setOpenTabs([{ path: keys[0] }]);
+    }
+  }, [files]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A10: Snapshot file content when a tab is first opened (establishes the "saved" baseline)
   useEffect(() => {

@@ -23530,3 +23530,69 @@ recorded for the report but never acted on while a healthy alternative existed.
   continuation fix means far less output is now wasted, but tokens spent on a truncated response are still
   charged at the real-cost rate. Whether to exclude discarded truncated output from the bill is an admin
   pricing decision, not a code decision.
+
+---
+
+## 2026-08-02 (evening) — App Store rejection fully answered + 8-times-failed restart-logout ROOT-CAUSED + top failure pattern killed
+
+**Session:** claude/app-control-deployment-q1wq51. Five PRs merged, all CI-green: #2023, #2025, #2027, #2028, #2031.
+
+### 1. Apple App Review rejection (iOS 1.0(46), submission a93fc683) — all 4 issues resolved, RESUBMITTED
+Apple rejected with 4 issues; every one was root-caused and closed:
+- **2.1(a) "microphone button is unresponsive"** (PR #2025): mic buttons were wired to the Web Speech API,
+  which does NOT exist in iOS/iPadOS WKWebView — a dead control on the review iPad. New single source of
+  truth `src/lib/voiceInput.ts` (`speechRecognitionSupported()`, requires a CALLABLE global) replaced 3
+  drifted inline copies; every mic button now renders ONLY where the API exists (AIChat, SDAChat; the
+  "use Chrome" alerts removed — those also violated Apple rules). Locked by `tests/voiceInput.test.ts`.
+- **2.3.8 "app icons appear to be placeholder"** (PR #2027): the iOS project is generated fresh in CI
+  (`cap add ios`) with Capacitor's DEFAULT placeholder icon and nothing replaced it. Now
+  `ios-config/app-icon.png` (real brand mark: brain + Ashoka Chakra, 1024², RGB, NO alpha) is injected
+  into the generated AppIcon.appiconset by `ios-ipa.yml` (fails LOUDLY if missing). Android got the same
+  real icon at every density (`scripts/make-android-icons.py`, adaptive foreground inside the 66dp safe
+  zone). Generators committed (`scripts/make-app-icon.py`) — byte-reproducible.
+- **2.3.6 Age Rating "In-App Controls"** — admin set Parental Controls → None in App Store Connect.
+- **2.1 third-party-AI questions** — admin replied in Resolution Center (honest provider list; user data =
+  only voluntarily-typed prompts/attachments via NavBharatAI's backend over HTTPS).
+- **iOS build 1.0(52)** (run #52, icon-step verified in the log) uploaded via ios-ipa.yml; admin attached
+  it to the version (App Icon asset visibly the REAL icon) and pressed **Resubmit to App Review**. The
+  demo account Apple was given (z@gmail.com) was VERIFIED working at both the Firebase REST and JS-SDK
+  layers from this session (uid GiYN…1gv1) — the admin's "login not working" report was NOT reproducible
+  at the auth layer; awaiting the admin's screenshot to close the UI-side question.
+
+### 2. THE 8-TIMES-FAILED BUG: iOS app logged out on every restart — REAL root cause found (PR #2028)
+`App.tsx`'s boot-auth effect began with `if (Capacitor.isNativePlatform()) return;` (added in #1519 to
+skip web-only getRedirectResult) — the early return ALSO skipped the `onAuthStateChanged` subscription in
+the same effect. On the native app NOTHING listened to Firebase auth: a restored session never reached
+the UI (the reported bug), `ensureNativeSessionPersisted()` (the 2026-07-25 heal, wired INSIDE the
+listener) was dead code on the exact platform it was written for, and `loadingUser` never settled. All 8
+prior attempts fixed the STORAGE layer (which was sound); the LISTENER was the missing half. In-session
+login only looked fine because #1521's "direct UI flip" bypasses the listener. Fix: the platform guard
+now wraps ONLY getRedirectResult; the listener subscribes on BOTH platforms. Locked by
+`tests/authBootListener.test.ts` (no native early-return may precede the listener — comment-stripped CODE
+check). ⚠️ On-device verification still pending: needs the NEXT iOS build (53) installed → login → kill
+app → reopen → must come back logged in. Build 52 (in review) does NOT contain this fix — ship 53 as the
+first update after 52 is approved (admin advised not to disturb the in-flight review).
+
+### 3. Admin dashboard's TOP failure pattern (29%) — "Reviewer critical not resolved" (PR #2031)
+The C9 reviewer-critical repair pass had a FLAT 120s cap + ONE attempt regardless of finding count or
+remaining wall clock — multi-critical repairs died mid-edit; one provider flake ended the only attempt;
+criticals shipped unresolved → honest NOT-ok → the #1 user-report pattern (5 of 17 failed reports). Fix
+(pure + tested in AutoFix.ts): `reviewerFixBudgetMs` (scales 120s→300s with finding count, clamps to
+headroom −30s safety) + `reviewerFixShouldRetry` (ONE retry after a completed-but-failed/non-timeout
+pass; NEVER after a timeout — the raced-out runner may still be editing; max 2 attempts; >150s headroom).
+Fresh runner per attempt; honesty guard unchanged (clears only on fix.ok).
+**OPEN follow-ups (rule 6):** (a) verify-the-heal — re-review after fix.ok before clearing the guard
+(extra LLM pass on failing builds; needs admin sign-off); (b) upstream prevention of criticals continues
+(#2007 prompt-hardening line).
+
+### 4. In-browser preview CDN resilience (PR #2023, autopsy of build report ce713a7e)
+The notes-app build SUCCEEDED (E2B preview verified) but the in-browser Babel/CDN preview blanked on
+`react-dom/client`. TWO root causes: (1) fallback rung 2 (esm.run) was silently CSP-BLOCKED — never in
+script-src, so the "CDN resilience" added earlier NEVER fired in production; (2) the 3 rungs collapsed to
+only 2 CDN networks. Fix: esm.run allow-listed (rung 2 real now), unpkg added as a genuinely-independent
+4th rung (`specUrlAlt2`, ?module), both guarded in `tests/security/headers.test.ts` so a CSP tighten can
+never silently re-kill a fallback rung again.
+
+### Verification
+Every PR: frontend/server tsc clean + full `npx vitest run` green before push (suite grew 995 → 998
+files / 10,270 → 10,333 tests across the session) + CI green before every merge.

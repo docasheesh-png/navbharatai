@@ -5,7 +5,8 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. The server writes payment_transactions
 // / user_token_wallets which navbharat-prod's rules mark `allow write: if false` (server-only); the old
 // unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
-import { doc, getDoc, setDoc, updateDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
+import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
 import { getSecretValue } from '../lib/secrets';
 import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal } from '../lib/payments';
@@ -259,6 +260,74 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       return res.json(result.data);
     } else {
       return res.status(400).json({ error: result.error });
+    }
+  });
+
+  /**
+   * THE THIRD PATH TO A USER'S MONEY (admin 2026-08-01).
+   *
+   * A Cashfree payment reached the wallet by exactly two routes before this, and both can miss. The
+   * webhook is REJECTED outright unless CASHFREE_WEBHOOK_SECRET is configured — without it the
+   * signature cannot be verified, and accepting an unverified webhook would let anyone credit their
+   * own wallet — so with the secret unset that route delivers nothing at all. The other route is the
+   * client redirect, which only fires if the user returns to the app carrying `?payment=success`.
+   *
+   * So a user who pays by UPI and closes the app — the normal thing to do on a phone, because the UPI
+   * app is a DIFFERENT app — had genuinely paid and was never credited. Their order sat at PENDING
+   * forever; nothing in the codebase ever revisited one.
+   *
+   * This asks Cashfree about that user's OWN unfinished orders and credits the ones really paid. It
+   * needs no webhook secret, so the money no longer depends on a piece of configuration. Safe by
+   * construction: the order list is filtered by the VERIFIED uid (a caller cannot sweep someone
+   * else's orders), each order is settled by the same verifyPaymentInternal the redirect uses — which
+   * asks Cashfree for the true status and refuses to credit anything Cashfree does not call paid —
+   * and it is idempotent, short-circuiting an order already marked SUCCESS.
+   *
+   * Setting CASHFREE_WEBHOOK_SECRET is still worth doing: it credits the user in seconds rather than
+   * on their next visit. This makes it an optimisation instead of the difference between a user
+   * getting their money and losing it.
+   */
+  app.post('/api/payment/reconcile', paymentLimiter, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Payments are temporarily unavailable. Please try again shortly.' });
+
+    // Identity from the VERIFIED token — never a client-claimed field, or one user could sweep (and
+    // read the amounts of) another's orders. Same VITEST convention as create-order.
+    const userId = process.env.VITEST
+      ? (typeof req.body?.userId === 'string' ? req.body.userId : null)
+      : await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Please sign in first.' });
+
+    try {
+      const txRef = collection(db, 'payment_transactions');
+      const q = query(txRef, where('userId', '==', userId), where('paymentStatus', '==', 'PENDING'), limit(50));
+      const snap = await getDocs(q);
+      const records = snap.docs.map((d: any) => d.data() as PendingOrderRecord);
+      const orderIds = ordersToReconcile(records, Date.now());
+
+      let creditedInr = 0;
+      let creditedOrders = 0;
+      for (const orderId of orderIds) {
+        // One slow or failing order must not cost the user the others.
+        const result = await verifyPaymentInternal(orderId).catch(() => ({ success: false } as any));
+        if (result?.success && !result.data?.alreadyProcessed) {
+          const added = Number(result.data?.balanceAdded);
+          if (Number.isFinite(added) && added > 0) creditedInr += added;
+          creditedOrders += 1;
+        }
+      }
+
+      // `checked` is honest telemetry for the admin; the user only ever sees a message when money
+      // actually arrived (reconcileMessage returns null otherwise), so simply opening the app never
+      // produces a payment notice.
+      return res.json({
+        checked: orderIds.length,
+        creditedOrders,
+        creditedInr: Math.round(creditedInr * 100) / 100,
+        message: reconcileMessage(creditedInr, creditedOrders),
+      });
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Unable to check your recent payments right now. Please try again.', err, 'payment reconcile');
     }
   });
 

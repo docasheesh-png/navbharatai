@@ -23417,3 +23417,26 @@ own host — honest, no fake deploy. 2 more wiring tests. Frontend tsc: no new e
 Remaining backend-deploy: slice 4 — a real per-host server-side deploy provider (token present → real deploy →
 separate backend URL). Remaining build-quality: the WEAK free-tier ceiling itself (429 storm + truncation)
 stays a strategic open item.
+
+---
+
+## 2026-08-02 — FEATURE (backend-deploy, slice 4): REAL Render backend deploy (admin set RENDER_API_KEY)
+
+Admin set `RENDER_API_KEY` in Cloud Run and chose Render for the first real separate-backend deploy. Registered
+the key name in the CLAUDE.md env registry (Deploy/CDN group).
+
+**Engine — `src/server/AgentV3/renderDeploy.ts` (real, honest, tested).** Talks to the real Render API
+(`api.render.com/v1`) with the key: `buildListServicesRequest` / `buildTriggerDeployRequest` (pure, tested API
+shapes), `parseRenderService` / `matchRenderService` (match the user's repo/app to their Render service),
+and `deployBackendToRender()` which lists → matches → triggers a REAL deploy and returns the live service URL.
+Honest at every branch (rule 2, and DeployProviders' own "no fake provider" law): no key → `not-configured`;
+key present but repo not connected in Render yet → `no-service` with the exact one-time Blueprint step; API
+error → surfaced with the status. 10 regression tests (pure builders + orchestration via injected fetch).
+
+**Route — `POST /api/agentv3/deploy-backend`.** Authed (isAgentV3Enabled + workspace-owner), Render-only for
+now (other hosts still use slice-2 config-inject + GitHub-connect), 503 with an honest "set RENDER_API_KEY"
+when unconfigured, otherwise runs the real deploy and returns the result. Server tsc clean.
+
+**Last mile (slice 4b, small):** wire the GitPanel "Render" deploy button to call this route and show the
+returned URL — the server capability is real + reachable now; the panel button is the remaining hookup.
+Backend now genuinely deploys SEPARATELY from the frontend on the user's own Render account.

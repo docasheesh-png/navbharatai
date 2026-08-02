@@ -136,6 +136,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { deployBackendToRender, renderConfigured } from '../AgentV3/renderDeploy';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -2881,6 +2882,30 @@ export function registerAgentV3Routes(app: Express): void {
   // REAL preview error in the downloadable report (no separate screenshot needed). The build is
   // already finished, so we append to the durable (workspace-keyed) report and the in-memory copy.
   // Best-effort + owner-scoped; never throws.
+  // SEPARATE-BACKEND DEPLOY (slice 4, admin 2026-08-02): trigger a REAL deploy of the user's Node/Express
+  // backend to Render via the Render API + RENDER_API_KEY. Honest — no fake success: reports not-configured
+  // (no key), no-service (repo not connected yet in Render, one-time), or a real live URL on success.
+  app.post('/api/agentv3/deploy-backend', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const platform = typeof req.body?.platform === 'string' ? req.body.platform : 'render';
+    const repoUrl = typeof req.body?.repoUrl === 'string' ? req.body.repoUrl : undefined;
+    const appName = typeof req.body?.appName === 'string' ? req.body.appName : undefined;
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // Only Render is a wired backend host today; others still use the config-inject + GitHub-connect path.
+    if (platform !== 'render') { res.status(400).json({ error: `Backend one-click deploy isn't wired for "${platform}" yet — push to GitHub and connect it on your host (the config was already added).` }); return; }
+    if (!renderConfigured()) { res.status(503).json({ ok: false, reason: 'not-configured', error: 'Set RENDER_API_KEY (Settings → Secrets & Keys) to deploy your backend to Render.' }); return; }
+    try {
+      const result = await deployBackendToRender({ repoUrl, appName });
+      res.status(result.ok ? 200 : 409).json(result);
+    } catch (e) {
+      res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
   app.post('/api/agentv3/preview-error', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;

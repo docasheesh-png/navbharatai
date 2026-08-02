@@ -56,6 +56,22 @@ export function postgresEnvLines(databaseUrl: string | null | undefined): Record
   return { DATABASE_URL: databaseUrl.trim() };
 }
 
+/**
+ * Merge a KEY=value into a `.env` file's text, replacing an existing line for KEY (preserving every other
+ * line) or appending it when absent. Used to write a provisioned DATABASE_URL into a FIRST-TIME app's .env
+ * without clobbering the user's other vars. Returns the new .env content. Pure + unit-testable.
+ */
+export function mergeEnvVar(envContent: string | null | undefined, key: string, value: string): string {
+  const k = String(key).trim();
+  if (!k) return typeof envContent === 'string' ? envContent : '';
+  const line = `${k}=${value}`;
+  const existing = typeof envContent === 'string' ? envContent : '';
+  const keyRe = new RegExp(`^\\s*(?:export\\s+)?${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=.*$`, 'm');
+  if (keyRe.test(existing)) return existing.replace(keyRe, line);
+  const sep = existing && !existing.endsWith('\n') ? '\n' : '';
+  return `${existing}${sep}${line}\n`;
+}
+
 // ── Postgres LIVENESS: keepalive watchdog + preflight probe (last-5-reports gap analysis 2026-07-20) ──
 //
 // THE CLASS behind five consecutive build reports (#14 MediConnect → #18 EstateNest): the sandbox

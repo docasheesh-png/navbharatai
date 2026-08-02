@@ -9,7 +9,7 @@ import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, d
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
-import { postgresWatchdogCommand } from '../../../postgresProvision';
+import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
@@ -808,9 +808,18 @@ export class E2BActuator implements IEngineerActuator {
           } catch { /* best-effort — never block the dev server on a config patch */ }
         }
       }
-      const devCommand = redirectDevServerOutput(
+      let devCommand = redirectDevServerOutput(
         disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework)),
       );
+      // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
+      // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
+      // the launch never loaded it. Auto-export every KEY=value from .env into the process env before
+      // starting, so ANY app (dotenv or not) sees its env. `set -a` auto-exports; sourcing is guarded with
+      // `2>/dev/null || true` so a malformed user line can never abort the launch (worst case = today's
+      // behaviour). Kill switch: AGENTV3_DEVSERVER_LOAD_DOTENV=off.
+      if ((process.env.AGENTV3_DEVSERVER_LOAD_DOTENV ?? '').trim().toLowerCase() !== 'off') {
+        devCommand = `set -a; if [ -f .env ]; then . ./.env 2>/dev/null || true; fi; set +a; ${devCommand}`;
+      }
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the
       // scaffold/agent declared a new dep (e.g. tailwindcss) but node_modules is stale,
@@ -895,10 +904,21 @@ export class E2BActuator implements IEngineerActuator {
         // .env DATABASE_URL written when the DB was first provisioned still points at the same local Postgres.
         if (diag.recovery === 'reprovision_db') {
           try {
-            await this.provisionBackend(workspaceId, ['db']);
-            stdout += ' (PostgreSQL restarted).';
+            const prov = await this.provisionBackend(workspaceId, ['db']);
+            // FIRST-TIME provision (Mitrify autopsy 2026-08-02): a from-scratch Drizzle/Express app was never
+            // provisioned, so there is no DATABASE_URL anywhere. provisionBackend restarted Postgres AND
+            // returned the URL — write it into .env (merge, preserving the user's other vars) so the app can
+            // read it. For a previously-provisioned app whose DB was merely reaped, .env already has the same
+            // URL and this merge is a harmless no-op. The relaunch below loads .env into the dev-server env.
+            const url = prov?.envVars?.DATABASE_URL;
+            if (url) {
+              const envPath = `${WORKSPACE_ROOT}/.env`;
+              const current = await sandbox.files.read(envPath).catch(() => '');
+              await sandbox.files.write(envPath, mergeEnvVar(current, 'DATABASE_URL', url)).catch(() => {});
+            }
+            stdout += ' (PostgreSQL provisioned + DATABASE_URL written to .env).';
           } catch {
-            stdout += ' (PostgreSQL restart reported errors — retrying anyway).';
+            stdout += ' (PostgreSQL provision reported errors — retrying anyway).';
           }
         }
         // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).

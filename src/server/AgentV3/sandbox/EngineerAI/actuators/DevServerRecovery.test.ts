@@ -164,6 +164,19 @@ describe('classifyDevServerFailure — deterministic root cause + recovery from 
     expect(classifyDevServerFailure('could not connect to server: Connection refused\n\tIs the server running on host "localhost" and accepting TCP/IP connections on port 5432?').cause).toBe('db_unreachable');
   });
 
+  it('DB never provisioned — "DATABASE_URL must be set" → db_unreachable → reprovision_db (the Mitrify Drizzle crash)', () => {
+    // The exact from-scratch Drizzle/Express boot crash: no DATABASE_URL anywhere (the Prisma-only
+    // provisioner never fired). Must provision a DB, not blind-retry.
+    const d = classifyDevServerFailure('Error: DATABASE_URL must be set. Did you forget to provision a database?\n    at <anonymous> (/home/user/workspace/server/db.ts:8:9)');
+    expect(d.cause).toBe('db_unreachable');
+    expect(d.recovery).toBe('reprovision_db');
+  });
+  it('other DATABASE_URL-missing phrasings also route to reprovision_db', () => {
+    expect(classifyDevServerFailure('Error: DATABASE_URL is not set').cause).toBe('db_unreachable');
+    expect(classifyDevServerFailure('Missing environment variable DATABASE_URL').cause).toBe('db_unreachable');
+    expect(classifyDevServerFailure('Error: DATABASE_URL is required').cause).toBe('db_unreachable');
+  });
+
   it('unrecognised / empty log → unknown → plain_retry', () => {
     expect(classifyDevServerFailure('').cause).toBe('unknown');
     expect(classifyDevServerFailure('some unrelated noise with no error').recovery).toBe('plain_retry');

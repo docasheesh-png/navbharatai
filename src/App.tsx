@@ -1091,34 +1091,44 @@ export default function App() {
     // that started it is gone on return — getRedirectResult MUST run here at the app
     // root to complete it. For a GitHub redirect we also capture the OAuth token so
     // NavBharatAI can connect to the user's repos.
-    // WEB ONLY: the native app never uses the redirect flow (it signs in via the native plugin), and its
-    // auth instance is deliberately created WITHOUT the popup/redirect resolver (src/lib/firebase.ts —
-    // the WKWebView init-hang root fix), so calling getRedirectResult there would throw on every launch.
-    if (Capacitor.isNativePlatform()) return;
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          try {
-            const ghCred = GithubAuthProvider.credentialFromResult(result);
-            if (ghCred?.accessToken) {
-              localStorage.setItem('gh_token', ghCred.accessToken);
-              rememberGithubOwner(result.user.uid); // this token belongs to THIS user
-              setGithubToken(ghCred.accessToken);
-            }
-          } catch { /* not a GitHub sign-in — ignore */ }
-          setUser(result.user);
-          setLoadingUser(false);
-          setShowAuth(false);
-        }
-      })
-      .catch((e) => {
-        const code = e?.code || '';
-        console.error('[auth] social redirect failed:', code || e?.message || e);
-        // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
-        if (code && code !== 'auth/no-auth-event') {
-          addToast('Sign-in failed. Please try again.', 'error');
-        }
-      });
+    // WEB ONLY — getRedirectResult: the native app never uses the redirect flow (it signs in via the
+    // native plugin), and its auth instance is deliberately created WITHOUT the popup/redirect resolver
+    // (src/lib/firebase.ts — the WKWebView init-hang root fix), so calling getRedirectResult there would
+    // throw on every launch.
+    //
+    // ⚠️ ROOT CAUSE of the "iOS app opens logged-out after every restart" bug (admin 2026-08-02, survived
+    // 8 fix attempts): this web-only guard used to be `if (Capacitor.isNativePlatform()) return;` — an
+    // EARLY RETURN that also skipped the onAuthStateChanged subscription below. On the native app NOTHING
+    // listened to Firebase auth: a restored session (and the cold-restart persistence heal wired inside
+    // the listener) never reached the UI, so every relaunch looked logged-out even when the session was
+    // saved. In-session login only appeared to work because AuthComponent flips the UI directly. The
+    // guard must therefore wrap ONLY getRedirectResult — the listener below runs on BOTH platforms.
+    if (!Capacitor.isNativePlatform()) {
+      getRedirectResult(auth)
+        .then((result) => {
+          if (result?.user) {
+            try {
+              const ghCred = GithubAuthProvider.credentialFromResult(result);
+              if (ghCred?.accessToken) {
+                localStorage.setItem('gh_token', ghCred.accessToken);
+                rememberGithubOwner(result.user.uid); // this token belongs to THIS user
+                setGithubToken(ghCred.accessToken);
+              }
+            } catch { /* not a GitHub sign-in — ignore */ }
+            setUser(result.user);
+            setLoadingUser(false);
+            setShowAuth(false);
+          }
+        })
+        .catch((e) => {
+          const code = e?.code || '';
+          console.error('[auth] social redirect failed:', code || e?.message || e);
+          // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
+          if (code && code !== 'auth/no-auth-event') {
+            addToast('Sign-in failed. Please try again.', 'error');
+          }
+        });
+    }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);

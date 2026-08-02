@@ -123,7 +123,7 @@ import { debitWalletForBuild } from '../lib/walletDebit';
 import { notifyBuildComplete, notifyLowBalance } from '../lib/PushNotificationService';
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
-import { weakTierWelcomeNotice } from '../AgentV3/weakTierNotice';
+import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -9663,6 +9663,17 @@ export function registerAgentV3Routes(app: Express): void {
       const costBreakdown = effectiveBilledUsd <= 0
         ? null
         : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate());
+      // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
+      // tier (the free engine, or a paid user who picked Weak), tell the user — in their OWN language —
+      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the 🎛️ options
+      // button. Gated to `!result.ok && noClaudeBuild && expectsArtifacts` so it only fires on a genuine
+      // failed build on the weak tier — infra/sandbox failures short-circuit earlier and never reach here,
+      // so the tier is never blamed for a platform outage. White-label safe (names tiers, never a model).
+      // Kill switch AGENTV3_WEAK_FAIL_NOTICE=off. Appended to the failure summary so it rides the same bubble.
+      if (!result.ok && noClaudeBuild && expectsArtifacts && (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off') {
+        const failLang = detectLanguageHint(prompt)?.code ?? null;
+        result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${weakTierBuildFailedNotice(failLang)}` };
+      }
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a

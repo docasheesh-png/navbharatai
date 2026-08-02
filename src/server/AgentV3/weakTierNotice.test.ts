@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { weakTierWelcomeNotice } from './weakTierNotice';
+import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from './weakTierNotice';
 
 describe('weakTierWelcomeNotice — localized, rotating weak-tier welcome (admin final spec 2026-07-12, improved 2026-07-13)', () => {
   it('Hindi (hi) yields a Devanagari notice pointing at the 🎛️ options button + recharge unlock', () => {
@@ -72,5 +72,51 @@ describe('weakTierWelcomeNotice — localized, rotating weak-tier welcome (admin
         expect(t.toLowerCase()).not.toMatch(/change any ?time|kabhi bhi badal/);
       }
     }
+  });
+});
+
+describe('weakTierBuildFailedNotice — weak-tier build-failed → switch-to-Strong guidance (admin spec 2026-08-02)', () => {
+  it('Hindi (hi): Devanagari, names Weak + Strong, points at the 🎛️ options button', () => {
+    const t = weakTierBuildFailedNotice('hi');
+    expect(t).toMatch(/Weak/);
+    expect(t).toMatch(/Strong/);
+    expect(t).toMatch(/🎛️/);
+    expect(t).toMatch(/complex/i);
+    expect(/[ऀ-ॿ]/.test(t)).toBe(true);
+  });
+
+  it('English default (null/unknown/non-Indian) names Weak + Strong, no Devanagari', () => {
+    for (const code of [null, undefined, 'zh', 'ja', 'ko', 'ru']) {
+      const t = weakTierBuildFailedNotice(code as string | null | undefined);
+      expect(t).toMatch(/Weak/);
+      expect(t).toMatch(/Strong/);
+      expect(t).toMatch(/🎛️/);
+      expect(/[ऀ-ॿ]/.test(t)).toBe(false);
+    }
+  });
+
+  it('each major Indian language returns the guidance in ITS OWN script', () => {
+    const cases: Array<[string, RegExp]> = [
+      ['bn', /[ঀ-৿]/], ['pa', /[਀-੿]/], ['gu', /[઀-૿]/], ['or', /[଀-୿]/],
+      ['ta', /[஀-௿]/], ['te', /[ఀ-౿]/], ['kn', /[ಀ-೿]/], ['ml', /[ഀ-ൿ]/], ['ar', /[؀-ۿ]/],
+    ];
+    for (const [code, script] of cases) {
+      const t = weakTierBuildFailedNotice(code);
+      expect(t).toMatch(/Weak/);
+      expect(t).toMatch(/Strong/);
+      expect(script.test(t)).toBe(true);
+    }
+  });
+
+  it('WHITE-LABEL: never leaks a provider/model name in any language', () => {
+    const forbidden = /\b(glm|kimi|moonshot|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|bedrock|deepseek|openai|gpt)\b/i;
+    for (const code of [null, 'hi', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn', 'ml', 'ar', 'zh']) {
+      expect(weakTierBuildFailedNotice(code as string | null)).not.toMatch(forbidden);
+    }
+  });
+
+  it('never throws on junk input', () => {
+    expect(() => weakTierBuildFailedNotice(undefined)).not.toThrow();
+    expect(weakTierBuildFailedNotice('xx')).toMatch(/Weak/);
   });
 });

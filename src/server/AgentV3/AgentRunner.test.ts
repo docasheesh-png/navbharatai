@@ -554,9 +554,9 @@ describe('AgentRunner — evidence-based step-limit verdict (working app ≠ fai
     process.env.AGENTV3_STEP_RESUME = 'off'; // this test pins the CAP VERDICT wording; Slice 3's resume has its own suite
     try {
       const result = await cappedRunner({ readiness: false, readinessGate: true }).run('build an app');
-      expect(result.ok).toBe(false);
-      expect(result.summary).toContain('NOT ready');
-      expect(result.summary).toContain('blank preview');
+      expect(result.ok).toBe(false); // the core invariant — an unready capped build is never a fake success
+      // User-facing summary is short + plain now (admin 2026-08-02); the raw blockers ride the health card.
+      expect(result.summary).toMatch(/isn't fully working|still need fixing/i);
     } finally {
       delete process.env.AGENTV3_STEP_RESUME;
     }
@@ -598,11 +598,13 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
     });
   }
 
-  it('downgrades a NOT-READY build to ok:false instead of a fake success', async () => {
+  it('downgrades a NOT-READY build to ok:false with a SHORT, plain user summary (admin 2026-08-02)', async () => {
     const result = await gateRunner(gateDispatcher(false), { readinessGate: true }).run('build an app');
-    expect(result.ok).toBe(false);
-    expect(result.summary).toContain('NOT READY');
-    expect(result.summary).toContain('unresolved import');
+    expect(result.ok).toBe(false); // the core invariant — never a fake success
+    // The user sees ONE calm, plain-language headline — not the technical blocker dump or the model's prose.
+    expect(result.summary).toMatch(/isn't fully working|still need fixing/i);
+    expect(result.summary).not.toContain('unresolved import'); // raw blockers ride the health card / admin report, not the user summary
+    expect(result.summary).not.toContain('may overstate');    // the overstating agent prose is not dumped on the user
   });
 
   it('keeps a READY build as a genuine success', async () => {
@@ -610,16 +612,22 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('leads a NOT-READY summary with the honest verdict, NOT the model\'s "Build complete." prose (App #7/#8)', async () => {
-    // The scripted final turn text is "Build complete." — a false success claim on a failed
-    // build. The summary must OPEN with the NOT-READY verdict so the user is not misled at a
-    // glance; the model's prose is demoted below a clear "may overstate" label.
-    const result = await gateRunner(gateDispatcher(false), { readinessGate: true }).run('build an app');
-    expect(result.ok).toBe(false);
-    // the first line is the honest verdict, not the celebratory prose
-    expect(result.summary.split('\n')[0]).toContain('NOT READY');
-    expect(result.summary.indexOf('NOT READY')).toBeLessThan(result.summary.indexOf('Build complete.'));
-    expect(result.summary).toContain('may overstate');
+  it('AGENTV3_VERBOSE_READINESS=on restores the detailed verdict-first summary (App #7/#8 honesty, debug mode)', async () => {
+    // With the debug flag on, the summary must OPEN with the honest NOT-READY verdict (not the scripted
+    // "Build complete." false claim) and demote the model's prose below a clear "may overstate" label.
+    const prev = process.env.AGENTV3_VERBOSE_READINESS;
+    process.env.AGENTV3_VERBOSE_READINESS = 'on';
+    try {
+      const result = await gateRunner(gateDispatcher(false), { readinessGate: true }).run('build an app');
+      expect(result.ok).toBe(false);
+      expect(result.summary.split('\n')[0]).toContain('NOT READY');
+      expect(result.summary.indexOf('NOT READY')).toBeLessThan(result.summary.indexOf('Build complete.'));
+      expect(result.summary).toContain('may overstate');
+      expect(result.summary).toContain('unresolved import'); // the detailed blockers are present in verbose mode
+    } finally {
+      if (prev === undefined) delete process.env.AGENTV3_VERBOSE_READINESS;
+      else process.env.AGENTV3_VERBOSE_READINESS = prev;
+    }
   });
 
   it('does NOT gate when readinessGate is off (default) — a not-ready scan cannot fail the build', async () => {
@@ -912,7 +920,9 @@ describe('AgentRunner — step-limit auto-resume', () => {
       const { runner } = resumeRunner([TOOL_TURN, DONE_TURN]);
       const res = await runner.run('build an app');
       expect(res.ok).toBe(false);
-      expect(res.summary).toContain('Step limit reached (1)');
+      // Dies at the cap (no auto-resume) — steps pinned to the cap; the user-facing summary is the short
+      // plain message now (admin 2026-08-02) instead of the "Step limit reached" jargon.
+      expect(res.summary).toMatch(/isn't fully working|still need fixing/i);
       expect(res.steps).toBe(1);
     } finally {
       delete process.env.AGENTV3_STEP_RESUME;

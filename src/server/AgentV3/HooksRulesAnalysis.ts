@@ -240,6 +240,27 @@ export function hookViolationWriteNote(report: HooksReport): string {
   );
 }
 
+/**
+ * A precise, model-actionable repair instruction for a POST-BUILD bounded heal pass (build-report
+ * autopsy 2026-08-02, buildId 84902e18: a weak-tier invoicing app shipped a `useMemo` called
+ * conditionally → runtime crash → NOT READY 32/100). Unlike the general build loop, this hands the
+ * healer the EXACT file:line, hook and rule broken, so even a weak coder can make the focused fix.
+ * Returns '' when the report is clean. Pure — never throws.
+ */
+export function hooksRepairInstruction(report: HooksReport): string {
+  if (!report || report.ok || !Array.isArray(report.violations) || report.violations.length === 0) return '';
+  const lines = report.violations.slice(0, 8).map((v) => `  • ${v.file}:${v.line} — ${v.hook} (${v.kind}): ${v.detail}`);
+  const more = report.violations.length > 8 ? `\n  …and ${report.violations.length - 8} more.` : '';
+  return (
+    `The app crashes at runtime because of React Rules-of-Hooks violations — a hook is not called ` +
+    `unconditionally at the top level of its component/custom hook, so the hook order changes between ` +
+    `renders. Fix EACH file listed:\n${lines.join('\n')}${more}\n` +
+    `For each: move the hook ABOVE any early return and OUT of any if/else/ternary/&&/||/loop/callback, ` +
+    `so it always runs on every render in the same order — preserve the component's behaviour, then ` +
+    `re-write the file(s). Change nothing else.`
+  );
+}
+
 function describe(kind: HookViolationKind, hook: string): string {
   switch (kind) {
     case 'conditional-hook':

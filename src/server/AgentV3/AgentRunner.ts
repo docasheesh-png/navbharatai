@@ -619,20 +619,27 @@ export class AgentRunner {
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
               if (!readiness.ready) {
                 ok = false;
-                const blockers = readiness.blockers.length
-                  ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
-                  : '';
-                // HONESTY (deep-test App #7 + #8): the model's turn text almost always OPENS with a
-                // celebratory "fully built and running!" claim. Leading the summary with that prose
-                // and only appending the verdict below misled the user at a glance about a build that
-                // FAILED the gate. Put the honest NOT-READY verdict FIRST; keep the model's prose
-                // below it, clearly labelled as possibly overstating — so the very first thing the
-                // user reads is the truth, not a false success.
-                const claim = turn.text.trim();
-                const claimBlock = claim
-                  ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
-                  : '';
-                summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
+                // USER-FACING SUMMARY = SHORT + PLAIN (admin 2026-08-02: "isko simple short karo"). The raw
+                // technical blockers (file:line, babel code frames like `Duplicate declaration ErrorBoundary`,
+                // Rules-of-Hooks paths) AND the model's long, possibly-overstating "here's everything I built"
+                // prose are developer NOISE to a non-technical user — a wall of text on a failed build. They
+                // are NOT lost: the exact blockers ride the build-health card (buildHealth.blockers) and the
+                // admin build report (rootCause / problems / issues structured fields), and the route appends
+                // the actionable next step (e.g. the weak-tier "switch to a stronger tier" guidance). The user
+                // just gets one honest, calm headline. AGENTV3_VERBOSE_READINESS=on restores the old detailed
+                // summary (blockers dump + labelled agent prose) for deep debugging.
+                if ((process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on') {
+                  const blockers = readiness.blockers.length
+                    ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
+                    : '';
+                  const claim = turn.text.trim();
+                  const claimBlock = claim
+                    ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
+                    : '';
+                  summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
+                } else {
+                  summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
+                }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
           }
@@ -870,8 +877,11 @@ export class AgentRunner {
               summary = `Step limit reached (${stepCap}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
             } else {
               ok = false;
-              const blockers = readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : '';
-              summary = `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
+              // User-facing: short + plain (admin 2026-08-02). The exact blockers stay on the health card +
+              // admin report; AGENTV3_VERBOSE_READINESS=on restores the detailed line for debugging.
+              summary = (process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on'
+                ? `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : ''}`
+                : `⚠️ This app isn't fully working yet — a couple of things still need fixing. Send another message and I'll keep going.`;
               // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
               // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
               // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,

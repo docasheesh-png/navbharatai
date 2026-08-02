@@ -5,6 +5,7 @@ import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
+import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
@@ -8424,6 +8425,54 @@ export function registerAgentV3Routes(app: Express): void {
             }
           }
         } catch { /* preview-compile guard is best-effort — never blocks a build */ }
+      }
+
+      // POST-BUILD RULES-OF-HOOKS HEAL + HONEST RE-JUDGE (build-report autopsy 2026-08-02, buildId
+      // 84902e18): a weak-tier invoicing app shipped `useMemo` called conditionally (useDashboardStats.ts:16)
+      // → React crashes at runtime → the readiness gate correctly downgraded it to NOT READY 32/100. But
+      // there was NO heal for a hooks violation (unlike the preview-compile guard directly above): the
+      // write-time steering note was the ONLY defence, and a weak coder that ignores it had no second chance,
+      // so the build just failed. Add a bounded, FOCUSED heal — when a FAILED artifact build has a real
+      // Rules-of-Hooks violation, hand the healer the EXACT file:line / hook / rule broken
+      // (hooksRepairInstruction) for a single repair pass, then RE-JUDGE through the SAME readiness gate and
+      // recover the build to OK only when the gate GENUINELY passes (double-gated: hooks now clean AND
+      // assessBuildReadiness ready) — so the verdict is never falsely flipped. The heal's writes reach
+      // writtenFiles via the shared onFileWrite, so the re-analysis sees the fix. Weak-tier routed (no
+      // Sonnet/Opus on a free build, per policy). Best-effort — never blocks a build. Kill switch
+      // AGENTV3_HOOKS_HEAL=off.
+      if ((process.env.AGENTV3_HOOKS_HEAL ?? '').trim().toLowerCase() !== 'off'
+        && result && !result.ok && expectsArtifacts && writtenFiles.size > 0 && autoFixEnabled() && !abort.signal.aborted) {
+        try {
+          const hooksReport = await analyzeHooksRules(Object.fromEntries(writtenFiles));
+          const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+          if (!hooksReport.ok && hooksReport.violations.length > 0 && timeLeft) {
+            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a React hooks issue so the app runs without crashing…', ts: Date.now() });
+            const hooksHealRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+              model: resolveModel(powerLevelReqEffective),
+              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+            });
+            const healed = await hooksHealRunner.run(hooksRepairInstruction(hooksReport));
+            if (healed.ok) {
+              const after = await analyzeHooksRules(Object.fromEntries(writtenFiles));
+              if (after.ok) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'HOOKS_RULES_HEALED', message: `Fixed ${hooksReport.violations.length} React Rules-of-Hooks violation(s) — the app no longer crashes at runtime.`, autoResolved: true });
+                // Recover the build to OK only if the FULL readiness gate now passes (not just hooks) — so a
+                // build with OTHER unresolved blockers stays honestly NOT-ready.
+                if (readinessGateEnabled()) {
+                  try {
+                    const verdict = await dispatcher.assessBuildReadiness();
+                    if (verdict.ready) {
+                      result = { ...result, ok: true, summary: 'Built your app — a React Rules-of-Hooks issue was detected and automatically fixed, so it now runs correctly.' };
+                      buildDiag.record({ phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_HOOKS_HEAL', message: `Readiness re-judged after the hooks heal: now READY (score ${verdict.score}/100).`, autoResolved: true });
+                    }
+                  } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
+                }
+              }
+            }
+          }
+        } catch { /* hooks heal is best-effort — never blocks or fails a build */ }
       }
 
       // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v5.0 used to

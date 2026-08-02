@@ -147,9 +147,16 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
       try {
         const titleMatch = generatedCode.match(/<title[^>]*>([^<]+)<\/title>/i);
         const name = titleMatch?.[1]?.trim() || 'NavBharat App';
+        // Hosting is durable now (Firestore-backed) so the save endpoint requires a signed-in user.
+        const saveHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        try {
+          const { auth } = await import('../../lib/firebase');
+          const tok = await auth.currentUser?.getIdToken();
+          if (tok) saveHeaders.Authorization = `Bearer ${tok}`;
+        } catch { /* best-effort; the server answers 401 with an honest message */ }
         const res = await fetch('/api/pwa/save', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: saveHeaders,
           body: JSON.stringify({ html: generatedCode, name }),
         });
         const data = await res.json();

@@ -202,7 +202,13 @@ export async function ensureSite(workspaceId: string): Promise<string> {
 
 /** Attach (or return the existing) custom domain on the workspace's dedicated site. */
 export async function attachCustomDomain(workspaceId: string, domain: string): Promise<CustomDomainStatus> {
-  const siteId = siteIdForWorkspace(workspaceId);
+  // ROOT CAUSE of "Failed to start domain connection" (admin 2026-08-02, mitrify.xyz): this function
+  // assumed the workspace's dedicated site already existed — but the site is only created by the
+  // DEPLOY path (Deployment.ts). A user who connects a domain BEFORE a dedicated-site deploy (e.g.
+  // their app was published via the instant /pwa hosting instead) hit `customDomains.create` on a
+  // NONEXISTENT site → Google API 404 → 500. The site must be ensured HERE too — ensureSite is
+  // idempotent (409 = success), so a site the deploy path already created is simply reused.
+  const siteId = await ensureSite(workspaceId);
   const existing = await getCustomDomainRaw(siteId, domain);
   if (existing) return customDomainStatus(domain, existing);
   await api(

@@ -2153,7 +2153,10 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      turn, so it never writes on a read-only turn). It intentionally does NOT require result.ok — a
     //      duplicate import is the fix for a FAILED build, and it runs BEFORE the verdict so the duplicate
     //      never fails the build in the first place (same "fix a failed build" discipline as vite.config). ✓.
-    expect(count).toBe(12);
+    //   1× the golden-scaffold pre-seed (starter-template apps, 2026-08-02) — gated on
+    //      `intent === 'new_build' && !isImportTurn` plus an exact chip-prompt match and an EMPTY src/
+    //      tree, so it never writes on a read-only import/survey turn (or any edit/rebuild turn). ✓.
+    expect(count).toBe(13);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

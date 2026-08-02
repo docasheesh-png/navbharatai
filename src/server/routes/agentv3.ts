@@ -147,6 +147,7 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
@@ -7327,7 +7328,10 @@ export function registerAgentV3Routes(app: Express): void {
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
           .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
-        const fastGenerate = async (system: string, user: string): Promise<string> => {
+        // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
+        // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
+        // — a distinction the lane previously threw away, which is how a truncated app shipped as done.
+        const fastGenerateOnce = async (system: string, user: string): Promise<{ text: string; stopReason: string | null }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -7378,7 +7382,50 @@ export function registerAgentV3Routes(app: Express): void {
           // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
           // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
           captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
-          return t.text;
+          return { text: t.text, stopReason: t.stopReason ?? null };
+        };
+        // TRUNCATION CONTINUATION (admin report 858f6d7b). Every fast-lane generation now runs to
+        // COMPLETION instead of silently stopping at the provider's output ceiling. Previously a
+        // `finish=max_tokens` response was accepted as final: the one-shot call was cut off before it
+        // emitted `src/main.tsx`, the healer synthesized a generic replacement, and that file's import
+        // is what the user's preview then failed on — plus ~16k of 33k billed output tokens were spent
+        // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
+        // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
+        // a continuation that FAILS never loses the work already produced — we keep what we have.
+        const fastGenerate = async (system: string, user: string): Promise<string> => {
+          const first = await fastGenerateOnce(system, user);
+          let text = first.text;
+          let stopReason = first.stopReason;
+          let attempts = 0;
+          while (shouldContinue(stopReason, attempts)) {
+            attempts += 1;
+            events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
+            let next: { text: string; stopReason: string | null };
+            try {
+              next = await fastGenerateOnce(system, continuationPrompt(text));
+            } catch (err) {
+              // A failed continuation must never discard the complete files we already have.
+              buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
+              break;
+            }
+            text = joinContinuation(text, next.text);
+            stopReason = next.stopReason;
+          }
+          if (attempts > 0) {
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUED', message: `A generation hit the output-token ceiling and was continued ${attempts} time(s) so no file was left half-written.`, autoResolved: true, detail: `finalStopReason=${stopReason ?? 'unknown'}` });
+          }
+          // LAST LINE OF DEFENCE: continuations exhausted and the model is STILL mid-file. parseFileBlocks
+          // deliberately accepts a final unterminated block (so a missing ENDFILE cannot swallow the next
+          // file), which means a half-written file is indistinguishable from a complete one downstream —
+          // it would be written to the workspace and shipped as built. Drop it and say so, honestly.
+          const halfWritten = isTruncatedStop(stopReason) ? unterminatedTailPath(text) : null;
+          if (halfWritten) {
+            const cut = text.lastIndexOf('<<<FILE');
+            if (cut > 0) text = text.slice(0, cut);
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_TRUNCATED_FILE_DROPPED', message: `${halfWritten} was still being written when the output limit was reached after ${MAX_CONTINUATIONS} continuations — it was DISCARDED rather than saved half-finished.`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ ${halfWritten} was cut off mid-write, so I discarded the partial file rather than saving a broken one — I'll rebuild it.`, ts: Date.now() });
+          }
+          return text;
         };
         const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
           // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).

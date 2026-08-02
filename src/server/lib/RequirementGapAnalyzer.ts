@@ -45,7 +45,9 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'ecommerce',
-    re: /shop|store|ecommerce|e-commerce|cart|checkout|\bproduct\b|\border\b|inventory|marketplace|catalog/i,
+    // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
+    // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.
+    re: /\bshops?\b|shopping|\bstores?\b|ecommerce|e-commerce|\bcarts?\b|checkout|\bproduct\b|\border\b|inventory|marketplace|catalog/i,
     features: [
       { label: 'payments + refunds', re: /pay|payment|checkout|stripe|razorpay|refund/i },
       { label: 'product catalog + search', re: /catalog|search|filter|browse/i },
@@ -57,7 +59,12 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'social',
-    re: /social|\bfeed\b|\bpost\b|follow|\bchat\b|message|comment|\blike\b|friend|profile/i,
+    // `friend` is boundary-anchored: unanchored it matched "mobile-friendly" / "user-friendly", the
+    // single most common phrase in a build prompt, so ordinary apps (a to-do list, a calculator, a
+    // weather dashboard) were classified as social networks and handed moderation + media upload.
+    // `\blike\b` is narrowed to the social SIGNAL (likes / a like button): bare "like" is ordinary
+    // English and fired on "a photoshop-like image editor", classifying it as a social network.
+    re: /social|\bfeed\b|\bpost\b|follow|\bchat\b|message|comment|\blikes\b|\blike button\b|\bfriends?\b|profile/i,
     features: [
       { label: 'auth & profiles', re: /auth|login|profile|account/i },
       { label: 'realtime feed / updates', re: /realtime|live|feed|stream/i },
@@ -79,7 +86,11 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'booking',
-    re: /book|reservation|reserve|\bslot\b|rental|\brent\b|table|ticket/i,
+    // `book` is boundary-anchored (it matched "bookstore"), and `table` is DROPPED entirely: a bare
+    // "table" is far more often a data/pricing table than a restaurant one, so it turned a data-table
+    // component into a reservations app. Genuine table booking still classifies here via `book` /
+    // `reserve` / `reservation`, which is what actually carries the booking intent.
+    re: /\bbooks?\b|\bbooking\b|reservation|reserve|\bslot\b|rental|\brent\b|ticket/i,
     features: [
       { label: 'availability calendar', re: /calendar|availab|slot|schedul/i },
       { label: 'booking + confirmation', re: /book|reserv|confirm/i },
@@ -92,7 +103,9 @@ const DOMAINS: DomainDef[] = [
   // wins): these only catch prompts the domains above did not. High-demand verticals for the SMB market.
   {
     key: 'education',
-    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|e-?learning|classroom|\bexam\b|\btutor|coaching|edtech|syllabus|curriculum/i,
+    // `\btutor` is closed to `\btutors?\b|tutoring`: the open prefix matched "tutorial", so any app
+    // described as having a tutorial was classified as an education platform.
+    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|e-?learning|classroom|\bexam\b|\btutors?\b|tutoring|coaching|edtech|syllabus|curriculum/i,
     features: [
       { label: 'roles (student / teacher / admin)', re: /role|rbac|permission|teacher|admin|staff/i },
       { label: 'courses & lessons / content', re: /course|lesson|module|content|curriculum|syllabus/i },
@@ -209,6 +222,26 @@ const DOMAINS: DomainDef[] = [
       { label: 'pipeline-value dashboard & sales reporting', re: /dashboard|report|pipeline value|revenue|forecast|metric|analytic/i },
       { label: 'search & filters across contacts and deals', re: /search|filter|sort|segment/i },
       { label: 'roles (sales rep / manager / admin)', re: /role|rbac|permission|\brep\b|manager|team|admin/i },
+    ],
+  },
+  // Appended (2026-08-02, autopsy of buildId 858f6d7b) — the to-do / notes / kanban / habit family is one
+  // of the MOST-built categories on the platform and had no domain at all, so every such prompt fell to
+  // whichever unrelated headline happened to fire (social, via "mobile-friendly"). Even with that keyword
+  // bug fixed, the honest outcome would have been `general` — which offers a task app nothing useful.
+  // These are the features a task/notes app actually tends to need and prompts routinely leave implicit.
+  // Placed LAST so best-feature-score keeps every existing classification unchanged: a CRM prompt that
+  // also says "kanban" still resolves to CRM, because CRM scores strictly higher on it.
+  {
+    key: 'productivity',
+    re: /to.?do\b|\btodo\b|task (manager|list|board|track)|\btasks?\b.*\b(list|manage|track|board|categor)|kanban|checklist|\bnotes? app\b|note.?taking|habit track|\bhabits?\b.*\b(track|streak)|productivity app|\bplanner\b|reminder app/i,
+    features: [
+      { label: 'create / edit / complete / delete items', re: /add|creat|edit|updat|complete|delete|remove|\bcrud\b/i },
+      { label: 'categories, tags or lists to organise items', re: /categor|tag|label|list|group|project|folder/i },
+      { label: 'filter, sort & search', re: /filter|sort|search|\ball\b|active|done|pending|archiv/i },
+      { label: 'persistence (saved across reloads / synced across devices)', re: /save|persist|storage|local.?storage|sync|offline|database|reload/i },
+      { label: 'due dates, reminders & notifications', re: /due|deadline|date|remind|notif|alert|schedul|recurring/i },
+      { label: 'ordering — drag-and-drop or priority', re: /drag|reorder|priorit|\border\b|rank|move/i },
+      { label: 'progress / streaks / completion stats', re: /progress|streak|stat|chart|analytic|complet.*rate|dashboard/i },
     ],
   },
 ];

@@ -23440,3 +23440,93 @@ when unconfigured, otherwise runs the real deploy and returns the result. Server
 **Last mile (slice 4b, small):** wire the GitPanel "Render" deploy button to call this route and show the
 returned URL — the server capability is real + reachable now; the panel button is the remaining hookup.
 Backend now genuinely deploys SEPARATELY from the frontend on the user's own Render account.
+
+---
+
+## 2026-08-02 — AUTOPSY of buildId 858f6d7b ("ab to choti moti apps bhi nahi ban rahi hai")
+
+Admin submitted a build report for a plain to-do list app plus a screenshot of a red preview error. The
+headline finding is that **the app was never broken — what the admin SAW was broken**, and the reason it
+looked broken traces back through three independent root causes that compound.
+
+### The chain (what actually happened, in order)
+1. `AGENTV3_REQUIREMENT_AWARE=on` classified the prompt as domain **`social`**. Cause: the headline regex
+   keyword `friend` is unanchored, so **"mobile-friendly"** matched. A to-do app was therefore handed
+   social's implicit features (auth & profiles, realtime feed, notifications, moderation, media upload).
+2. The one-shot generation hit kimi's output ceiling — `finish=max_tokens`, 8000 output tokens, twice
+   (`src/index.css` and the whole-app one-shot). The fast lane has **no truncation handling at all**
+   (`TruncationRecovery` is wired only into `AgentRunner`, and fast-lane calls are `tools: []` text calls
+   that never reach it), so the truncated response was accepted as a finished app.
+3. `src/main.tsx` was never emitted — the response was cut off before it. The foundational-file healer
+   noticed and synthesized a generic `main.tsx`.
+4. That synthesized `main.tsx` imports `react-dom/client`. The **In-browser** preview resolves packages
+   from a public CDN, the fetch failed in the admin's browser, and the iframe painted a red wall.
+5. Meanwhile the **Live server** preview was fine: `npm run dev` exit 0, vite ready, preview published at
+   `5173-….e2b.app`, and the engine's own verification opened it in a real browser and recorded
+   "renders correctly". A working preview sat one unclicked button away and nothing acted on the failure.
+
+### Ledger (5 buckets)
+- ✅ **Self-healed (2)** — missing `src/main.tsx` synthesized; fast lane salvaged its 4 finished files into
+  the workspace for the full builder. Per the 50/50 law both are RED FLAGS, not wins: fix #2 below makes
+  the main.tsx heal dead code, because the file will now actually be generated.
+- 🔀 **Worked around (2)** — the 240s fast lane timed out with 4/14 files and handed off to the full
+  builder; `npm install` carried its `--legacy-peer-deps` fallback. The first is a deferred root cause
+  and is recorded below as still open.
+- ⏭️ **Skipped (1)** — the `social` misclassification was recorded as an `info` REQUIREMENT_GAPS line and
+  otherwise acted on as if correct.
+- ❌ **Still broken (2)** — both `PREVIEW_ERROR`s the user actually saw.
+- 🥵 **Struggle (3)** — 591s wall clock for a to-do app; plan (89s) + shared contract (70s) consumed 159s
+  of the 240s fast-lane budget BEFORE the first file was written; ~16k of 33k billed output tokens were
+  spent on truncated text that was discarded.
+
+### Missing subsystem (step 2)
+**The fast lane had no completion guarantee.** Every other lane can detect and recover a truncated turn;
+the lane that builds most apps could not, so "the model stopped early" and "the model finished" were
+indistinguishable to it. Secondary: **nothing closed the loop on a failed preview** — failures were
+recorded for the report but never acted on while a healthy alternative existed.
+
+### DNA-level fixes shipped
+1. **`previewLiveFailover.ts` (new, pure + 8 tests)** — a broken in-browser preview is no longer a dead
+   end. On a real in-browser failure with a live URL available, the Preview switches to the live server
+   once, with an honest note. Guards: never from `live`, never twice, never over an explicit user choice.
+   Keeps A4's in-browser default (an ephemeral URL must not be what a user depends on first).
+2. **`FastLaneContinuation.ts` (new, pure + 16 tests)** — `fastGenerate` now runs generations to
+   COMPLETION. A `max_tokens`/`length` stop triggers a bounded continuation (`MAX_CONTINUATIONS = 3`)
+   that resumes from the exact cut point and concatenates; `parseFileBlocks`' last-wins de-dupe makes
+   both resume styles (mid-content, or re-emitting the file) correct. Deliberately provider-cap-agnostic
+   — raising `max_tokens` only moves the ceiling and can 400 on a provider whose real cap is lower.
+   Last line of defence: if continuations are exhausted mid-file, `unterminatedTailPath` names the
+   half-written file and it is DISCARDED rather than saved looking complete (`parseFileBlocks` accepts a
+   final unterminated block by design, so downstream could not tell half a file from a whole one).
+   New honest report codes: `FASTLANE_CONTINUED`, `FASTLANE_CONTINUATION_FAILED`,
+   `FASTLANE_TRUNCATED_FILE_DROPPED`.
+3. **`RequirementGapAnalyzer` keyword class fix + corpus tripwire.** A sweep of 18 realistic prompts found
+   **9 misclassified**: "mobile-friendly"/"user-friendly" → `friend` → social (to-do, notes, calculator,
+   weather, pomodoro, habit); "cartoon" → `cart` → ecommerce; "photoshop-like" → `shop` → ecommerce AND
+   `like` → social; "editable"/"portable" → `table` → booking; "tutorial" → `tutor` → education.
+   Anchored `friend`→`\bfriends?\b`, `cart`/`shop`/`store`, `book`, `tutor`; narrowed bare `like` to the
+   real social signal (`likes` / `like button`); DROPPED bare `table` from booking (genuine table booking
+   still classifies via `book`/`reserve`/`reservation` — locked by test). Added the missing
+   **`productivity`** domain (to-do / notes / kanban / habit — one of the most-built categories, which had
+   no domain at all) placed LAST so best-feature-score keeps every existing classification unchanged (a
+   CRM prompt that says "kanban" still resolves to CRM). The corpus test is the tripwire for the whole
+   class: a future keyword that leaks into ordinary English fails CI instead of silently reshaping builds.
+   It was verified to genuinely FAIL first (12 failures against the unfixed analyzer).
+
+### Verification
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json` clean · `npx vitest run` **997 files /
+10315 tests passed** · `npx vite build` clean.
+
+### OPEN root causes (rule 6 — recorded, not silently patched)
+- **The fast lane's 240s budget ignores its own preamble.** Plan + shared contract took 159s of 240s on a
+  to-do app, leaving 81s for 14 files, so the lane could not have finished regardless of model quality.
+  The honest fix is a budget that accounts for the preamble (or skipping the contract phase for a small
+  app that does not need one) — not a bigger timeout. NOT fixed here; needs its own change.
+- **Weak-tier latency.** Single kimi calls took 70-119s (plan 89s, contract 70s, index.css 108s, one-shot
+  119s). 591s wall clock for a to-do app is a real quality ceiling on the free/weak tier, and no amount of
+  local tuning fixes a slow provider. Needs 2-3 more reports before changing routing — deliberately not
+  guessed at.
+- **Truncated output is still billed.** ~16k of 33k output tokens on this build were discarded text. The
+  continuation fix means far less output is now wasted, but tokens spent on a truncated response are still
+  charged at the real-cost rate. Whether to exclude discarded truncated output from the bill is an admin
+  pricing decision, not a code decision.

@@ -27,6 +27,7 @@ import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
@@ -4360,8 +4361,18 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/**
+ * The user-facing build-health card. The readiness engine's lines are deliberately FORENSIC
+ * ("hardcoded-secret @ server/index.js:24 — …") because the repair loop and the admin Report need
+ * file:line precision. But the CARD is a user surface, so it renders SHORT plain-language lines via
+ * simplifyHealthLines — de-duplicated and capped (admin 2026-08-02: "itna bada aur complex likhne ki
+ * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
+ */
 function BuildHealthCard({ health }: { health: BuildHealth }) {
   const ready = health.ready;
+  const blockers = simplifyHealthLines(health.blockers, 3);
+  const warnings = simplifyHealthLines(health.warnings, 2);
+  const more = blockers.more + warnings.more;
   return (
     <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
       <div className="flex items-center gap-1.5 font-semibold">
@@ -4371,19 +4382,22 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
         <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>Build health: {ready ? 'READY' : 'NOT READY'}</span>
         <span className="text-zinc-500">· {health.score}/100</span>
       </div>
-      {health.blockers.length > 0 && (
+      {blockers.lines.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-amber-200/90">
-          {health.blockers.slice(0, 6).map((b, i) => (
+          {blockers.lines.map((b, i) => (
             <li key={`b${i}`} className="flex gap-1"><span className="text-amber-500">✗</span><span>{b}</span></li>
           ))}
         </ul>
       )}
-      {health.warnings.length > 0 && (
+      {warnings.lines.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-zinc-400">
-          {health.warnings.slice(0, 4).map((w, i) => (
+          {warnings.lines.map((w, i) => (
             <li key={`w${i}`} className="flex gap-1"><span className="text-zinc-500">•</span><span>{w}</span></li>
           ))}
         </ul>
+      )}
+      {more > 0 && (
+        <div className="mt-1 text-[10px] text-zinc-500">+{more} more · see Report for details</div>
       )}
     </div>
   );

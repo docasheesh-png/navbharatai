@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from './weakTierNotice';
 
 describe('weakTierWelcomeNotice — localized, rotating weak-tier welcome (admin final spec 2026-07-12, improved 2026-07-13)', () => {
-  it('Hindi (hi) yields a Devanagari notice pointing at the 🎛️ options button + recharge unlock', () => {
+  it('Hindi (hi) yields a Devanagari notice pointing at the ⚙️ options button + recharge unlock', () => {
     const t = weakTierWelcomeNotice('hi', 0);
     expect(t).toMatch(/Weak/);
-    expect(t).toMatch(/🎛️/);           // the real settings/options (sliders) button icon
-    expect(t).not.toMatch(/🎚️/);       // the OLD, mismatching vertical-fader icon must be gone
+    expect(t).toMatch(/⚙️/);            // the real Settings gear button icon (composer toolbar)
+    expect(t).not.toMatch(/🎛️|🎚️/);    // the OLD mismatching slider/fader icons must be gone
     expect(t).toMatch(/recharge|रिचार्ज/i);
     expect(/[ऀ-ॿ]/.test(t)).toBe(true); // actually Devanagari
   });
@@ -35,7 +35,7 @@ describe('weakTierWelcomeNotice — localized, rotating weak-tier welcome (admin
     for (const [code, script] of cases) {
       const t = weakTierWelcomeNotice(code, 0);
       expect(t).toMatch(/Weak/);
-      expect(t).toMatch(/🎛️/);
+      expect(t).toMatch(/⚙️/);
       expect(script.test(t)).toBe(true);   // the translation is really in that language's script
     }
   });
@@ -44,7 +44,7 @@ describe('weakTierWelcomeNotice — localized, rotating weak-tier welcome (admin
     for (const code of [null, undefined, 'zh', 'ja', 'ko', 'ru']) {
       const t = weakTierWelcomeNotice(code as string | null | undefined, 1);
       expect(t).toMatch(/Weak/);
-      expect(t).toMatch(/🎛️/);
+      expect(t).toMatch(/⚙️/);
       expect(t).toMatch(/recharge/i);
       expect(/[ऀ-ॿ]/.test(t)).toBe(false);
     }
@@ -76,11 +76,11 @@ describe('weakTierWelcomeNotice — localized, rotating weak-tier welcome (admin
 });
 
 describe('weakTierBuildFailedNotice — weak-tier build-failed → switch-to-Strong guidance (admin spec 2026-08-02)', () => {
-  it('Hindi (hi): Devanagari, names Weak + Strong, points at the 🎛️ options button', () => {
+  it('Hindi (hi): Devanagari, names Weak + Strong, points at the ⚙️ options button', () => {
     const t = weakTierBuildFailedNotice('hi');
     expect(t).toMatch(/Weak/);
     expect(t).toMatch(/Strong/);
-    expect(t).toMatch(/🎛️/);
+    expect(t).toMatch(/⚙️/);
     expect(t).toMatch(/complex/i);
     expect(/[ऀ-ॿ]/.test(t)).toBe(true);
   });
@@ -90,7 +90,7 @@ describe('weakTierBuildFailedNotice — weak-tier build-failed → switch-to-Str
       const t = weakTierBuildFailedNotice(code as string | null | undefined);
       expect(t).toMatch(/Weak/);
       expect(t).toMatch(/Strong/);
-      expect(t).toMatch(/🎛️/);
+      expect(t).toMatch(/⚙️/);
       expect(/[ऀ-ॿ]/.test(t)).toBe(false);
     }
   });
@@ -118,5 +118,26 @@ describe('weakTierBuildFailedNotice — weak-tier build-failed → switch-to-Str
   it('never throws on junk input', () => {
     expect(() => weakTierBuildFailedNotice(undefined)).not.toThrow();
     expect(weakTierBuildFailedNotice('xx')).toMatch(/Weak/);
+  });
+});
+
+describe('control location + icon are CORRECT (real-screenshot fix 2026-08-02): ⚙️ gear, BELOW the message box', () => {
+  it('every welcome + failed notice points at the ⚙️ gear, never the wrong 🎛️/🎚️ icon', () => {
+    const codes = [null, 'hi', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn', 'ml', 'ar', 'zh'] as (string | null)[];
+    for (const c of codes) {
+      for (const t of [weakTierWelcomeNotice(c, 0), weakTierWelcomeNotice(c, 1), weakTierWelcomeNotice(c, 2), weakTierBuildFailedNotice(c)]) {
+        expect(t).toMatch(/⚙️/);
+        expect(t).not.toMatch(/🎛️|🎚️/);
+      }
+    }
+  });
+
+  it('English notices say the button is BELOW the message box, never LEFT of it', () => {
+    for (let s = 0; s < 3; s++) {
+      expect(weakTierWelcomeNotice(null, s).toLowerCase()).toContain('below the message box');
+      expect(weakTierWelcomeNotice(null, s).toLowerCase()).not.toContain('left of the message box');
+    }
+    expect(weakTierBuildFailedNotice(null).toLowerCase()).toContain('below the message box');
+    expect(weakTierBuildFailedNotice(null).toLowerCase()).not.toContain('left of the message box');
   });
 });

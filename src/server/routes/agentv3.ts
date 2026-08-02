@@ -4651,7 +4651,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     // Weak-tier welcome notice (admin final spec 2026-07-12): a FREE user on the weak tier is told — in
     // their own language, right at the top of the reply — that they are on the free Weak engine, where the
-    // 🎛️ tier selector lives (the options/sliders button just left of the message box), and that the first
+    // ⚙️ tier selector lives (the Settings-gear "Build options" button in the toolbar just below the message box), and that the first
     // recharge unlocks all tiers.
     // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
     // the phrasing rotates by seed so repeats never read identically.
@@ -9804,7 +9804,7 @@ export function registerAgentV3Routes(app: Express): void {
         : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate());
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
       // tier (the free engine, or a paid user who picked Weak), tell the user — in their OWN language —
-      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the 🎛️ options
+      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the ⚙️ options
       // button. Gated to `!result.ok && noClaudeBuild && expectsArtifacts` so it only fires on a genuine
       // failed build on the weak tier — infra/sandbox failures short-circuit earlier and never reach here,
       // so the tier is never blamed for a platform outage. White-label safe (names tiers, never a model).

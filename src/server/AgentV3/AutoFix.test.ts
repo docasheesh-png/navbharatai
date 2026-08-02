@@ -2,10 +2,53 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   autoFixEnabled, reviewerAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors,
   formatRuntimeErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome,
+  reviewerFixBudgetMs, reviewerFixShouldRetry,
   reviewCriticalUnresolvedSummary,
   runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError,
   isFatalRuntimeError, fatalRuntimeErrorCount,
 } from './AutoFix';
+
+// C9-RETRY (admin dashboard autopsy 2026-08-02): "Reviewer critical not resolved" was the TOP failure
+// pattern (29% of failed user reports). The repair pass had a flat 120s cap and ONE attempt — timeouts
+// and one-shot provider flakes shipped the criticals unresolved. These lock the two class fixes.
+describe('reviewerFixBudgetMs — repair budget scales with findings and clamps to headroom', () => {
+  it('base is the old 120s for a single finding with unlimited headroom (no regression)', () => {
+    expect(reviewerFixBudgetMs(1, Infinity)).toBe(120_000);
+  });
+  it('more findings get more time, capped at 5 minutes', () => {
+    expect(reviewerFixBudgetMs(2, Infinity)).toBe(180_000);
+    expect(reviewerFixBudgetMs(3, Infinity)).toBe(240_000);
+    expect(reviewerFixBudgetMs(10, Infinity)).toBe(300_000); // MAX
+  });
+  it('clamps to the wall-clock headroom minus a 30s safety margin (never starts a doomed repair)', () => {
+    expect(reviewerFixBudgetMs(3, 150_000)).toBe(120_000); // 150s left → 120s budget
+    expect(reviewerFixBudgetMs(1, 100_000)).toBe(70_000);
+  });
+  it('never below the 60s floor, and defends nonsense input', () => {
+    expect(reviewerFixBudgetMs(1, 45_000)).toBe(60_000);
+    expect(reviewerFixBudgetMs(0, Infinity)).toBe(120_000);
+    expect(reviewerFixBudgetMs(NaN as never, Infinity)).toBe(120_000);
+  });
+});
+
+describe('reviewerFixShouldRetry — ONE bounded retry, never after a timeout, never without headroom', () => {
+  it('grants a single retry after a completed-but-failed pass with real headroom', () => {
+    expect(reviewerFixShouldRetry(1, 300_000, false)).toBe(true);
+    expect(reviewerFixShouldRetry(1, Infinity, false)).toBe(true);
+  });
+  it('hard-bounds at 2 attempts total', () => {
+    expect(reviewerFixShouldRetry(2, Infinity, false)).toBe(false);
+    expect(reviewerFixShouldRetry(3, Infinity, false)).toBe(false);
+  });
+  it('NEVER retries after a timeout — the raced-out runner may still be editing (overlap = corruption risk)', () => {
+    expect(reviewerFixShouldRetry(1, Infinity, true)).toBe(false);
+    expect(reviewerFixShouldRetry(1, 999_999, true)).toBe(false);
+  });
+  it('refuses a retry that the wall clock would cut off anyway (needs > 150s)', () => {
+    expect(reviewerFixShouldRetry(1, 150_000, false)).toBe(false);
+    expect(reviewerFixShouldRetry(1, 150_001, false)).toBe(true);
+  });
+});
 
 describe('runtime-verification honesty records (rule 5 — checked-clean vs couldn\'t-check vs errors-remain)', () => {
   it('runtimeVerifiedRecord: an honest POSITIVE — captured a real session, no errors (info, resolved)', () => {

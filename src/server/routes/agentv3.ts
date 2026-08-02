@@ -205,7 +205,7 @@ import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
@@ -9110,32 +9110,52 @@ export function registerAgentV3Routes(app: Express): void {
               ? `${criticals.length} critical + ${warningFixes.length} functional issue(s)`
               : `${criticals.length} critical issue(s)`;
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${label} — fixing them now…`, ts: Date.now() });
-            const critFixRunner = new AgentRunner({
-              ...baseRunnerOpts,
-              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-              model: resolveModel(powerLevelReqEffective),
-              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
-            });
-            try {
-              const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), 120_000, 'reviewer-autofix');
-              // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
-              // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
-              // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
-              // future slice could re-review to confirm the criticals are actually gone.)
-              if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
-              // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
-              // TURN's writes (on an edit turn that's a handful of files), and the old
-              // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
-              // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
-              if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
-              // HONEST outcome (deep-test 2026-07-18): only claim "Auto-fixed" when the repair actually
-              // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
-              // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
-              try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
-            } catch (e) {
-              console.log(`[AGENTV3] reviewer auto-fix failed: ${e instanceof Error ? e.message : String(e)}`);
-              // A THROWN failure (timeout / abort) also leaves the criticals in place — report it honestly.
-              try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(false, label) }); } catch { /* best-effort */ }
+            // C9-RETRY (admin dashboard autopsy 2026-08-02 — "Reviewer critical not resolved" was the TOP
+            // failure pattern, 29% of failed user reports): the single flat-120s attempt died on timeouts
+            // and one-shot provider flakes, and the criticals shipped unresolved. Two class fixes, both
+            // pure + tested in AutoFix.ts:
+            //  - reviewerFixBudgetMs: the budget scales with how many findings must be fixed and clamps
+            //    to the wall-clock headroom (up to 5 min when the build has it — kills the timeout class);
+            //  - reviewerFixShouldRetry: ONE bounded retry after a COMPLETED-but-failed or non-timeout
+            //    thrown pass, never after a timeout (the raced-out runner may still be editing — two
+            //    concurrent runners on one workspace is a corruption risk), max 2 attempts total.
+            const fixHeadroomMs = () => effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
+            for (let fixAttempt = 1; ; fixAttempt++) {
+              // A FRESH runner per attempt — never re-run a runner whose previous run was abandoned.
+              const critFixRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                model: resolveModel(powerLevelReqEffective),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              let timedOut = false;
+              let fixOk = false;
+              try {
+                const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), reviewerFixBudgetMs(autoFixItems.length, fixHeadroomMs()), 'reviewer-autofix');
+                fixOk = !!fix.ok;
+                // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
+                // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
+                // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
+                // future slice could re-review to confirm the criticals are actually gone.)
+                if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
+                // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
+                // TURN's writes (on an edit turn that's a handful of files), and the old
+                // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
+                // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
+                if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                // HONEST outcome (deep-test 2026-07-18): only claim "Auto-fixed" when the repair actually
+                // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
+                // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
+                try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
+              } catch (e) {
+                timedOut = e instanceof Error && /timed out/i.test(e.message);
+                console.log(`[AGENTV3] reviewer auto-fix failed (attempt ${fixAttempt}): ${e instanceof Error ? e.message : String(e)}`);
+                // A THROWN failure (timeout / abort) also leaves the criticals in place — report it honestly.
+                try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(false, label) }); } catch { /* best-effort */ }
+              }
+              if (fixOk || abort.signal.aborted || !reviewerFixShouldRetry(fixAttempt, fixHeadroomMs(), timedOut)) break;
+              // WHITE-LABEL narration — the retry is invisible plumbing; the user only sees us still working.
+              events.emit({ type: 'narration', agent: 'architect', text: `🔧 Still resolving ${label} — taking another pass…`, ts: Date.now() });
             }
           }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }

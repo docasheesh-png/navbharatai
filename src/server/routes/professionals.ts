@@ -3,6 +3,7 @@ import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../l
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
+import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { sendSafeError } from '../lib/httpError';
 import {
@@ -114,6 +115,15 @@ export function registerProfessionalsRoutes(app: Express): void {
     const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
+      return;
+    }
+
+    // IMAGE-GENERATION INTENT (admin 2026-08-02): a Professional (Teacher, Lawyer, …) does not generate
+    // images — when the user asks it to CREATE one, point them to the dedicated AI Image Gen tool instead of
+    // an unhelpful refusal. Uses the RAW user message (not the doc-augmented one), and skips when a real
+    // image is attached (that is a vision/analysis request, not generation). No free message is burned.
+    if (typeof message === 'string' && !rawAttachments.some((a) => isVisionAttachment(a.type, a.name)) && detectImageIntent(message).wants) {
+      res.json({ reply: imageGenGuidance(), professionalId: config.id });
       return;
     }
 

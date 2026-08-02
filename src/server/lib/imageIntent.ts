@@ -78,6 +78,28 @@ export function detectImageIntent(message: string): ImageIntent {
   return { wants: true, prompt: extractImagePrompt(raw) };
 }
 
+/**
+ * Guidance every chat AI shows when a user asks it to GENERATE an image but that AI is not the image
+ * generator (Pro chat, Doctor AI, and every other Professional) — point them to the dedicated tool where
+ * real image generation lives, with the exact navigation path from AppKnowledgeBase (`ai_image_gen`).
+ * Bilingual + on-brand (never names an underlying provider). Pure — same output every time.
+ * (admin 2026-08-02: "koi bhi AI se image banwane ko kahe to sabhi Other AI → AI Image Gen ki guide karein".)
+ */
+export function imageGenGuidance(): string {
+  return (
+    '🎨 Image banane ke liye NavBharatAI ka dedicated **AI Image Gen** tool use karein:\n\n' +
+    '**Home → Other AI → AI Image Gen**\n\n' +
+    'Wahan image describe karke style aur size chunein, phir **Generate** dabayein — high-quality image ' +
+    'ban jaayegi jise aap download kar sakte hain, aur aapki recent history bhi save rehti hai.'
+  );
+}
+
+/** A one-line pointer appended to NavBharatAI Free\'s inline-generated image, so even the AI that DOES make
+ *  a picture still tells the user about the fuller tool (styles, sizes, download, history). Pure. */
+export function imageGenToolPointer(): string {
+  return '_Zyada options (style, size, download, history) ke liye: **Home → Other AI → AI Image Gen**_';
+}
+
 /** Strip the command lead-in ("generate an image of", "banao", …) so the model gets the subject. */
 export function extractImagePrompt(message: string): string {
   const raw = String(message || '').trim();

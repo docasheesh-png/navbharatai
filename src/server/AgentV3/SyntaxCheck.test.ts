@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, parseGuardDecision, writeParseGuardEnabled, type SyntaxErrorInfo } from './SyntaxCheck';
+import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, parseGuardDecision, writeParseGuardEnabled, isDuplicateDeclarationError, type SyntaxErrorInfo } from './SyntaxCheck';
 
 describe('firstSyntaxError — single-file parse for the write guard', () => {
   it('returns the error for a duplicate declaration, null for clean code', async () => {
@@ -29,6 +29,38 @@ describe('parseGuardDecision — refuse a write that breaks a CLEAN file, allow 
   });
   it('ALLOWS a repair on an already-broken file (old was broken → never block)', () => {
     expect(parseGuardDecision('src/App.tsx', err('old broke'), err('still broken'), true)).toBeNull();
+  });
+  it('REFUSES a NEWLY-introduced duplicate even on an already-broken file (autopsy 2026-08-02, cancelSubscription)', () => {
+    // The real hole: src/lib/api.ts was mid-repair for unrelated type errors (errOld present, NOT a
+    // duplicate) when a second `export async function cancelSubscription` was added — the old
+    // `if (errOld) return null` waved the "already been declared" white screen straight through.
+    const msg = parseGuardDecision(
+      'src/lib/api.ts',
+      err('Expected ";" but found "const"'),                                   // old: unrelated in-flight error
+      err('Multiple exports with the same name "cancelSubscription"'),         // new: duplicate export introduced
+      true,
+    );
+    expect(msg).toMatch(/WRITE REJECTED/);
+    expect(msg).toMatch(/DUPLICATE declaration/);
+  });
+  it('REFUSES a duplicate const introduced onto an already-broken file', () => {
+    const msg = parseGuardDecision('src/lib/api.ts', err('Unexpected token'), err('The symbol "delay" has already been declared'), true);
+    expect(msg).toMatch(/WRITE REJECTED/);
+  });
+  it('does NOT trap a removal-in-progress: old ALSO had the duplicate → allow', () => {
+    expect(parseGuardDecision(
+      'src/lib/api.ts',
+      err('The symbol "cancelSubscription" has already been declared'),        // old already duplicate
+      err('The symbol "cancelSubscription" has already been declared'),        // new still duplicate (mid-removal)
+      true,
+    )).toBeNull();
+  });
+  it('isDuplicateDeclarationError classifies esbuild + Babel phrasings, tolerates null', () => {
+    expect(isDuplicateDeclarationError(err('The symbol "x" has already been declared'))).toBe(true);
+    expect(isDuplicateDeclarationError(err('Multiple exports with the same name "x"'))).toBe(true);
+    expect(isDuplicateDeclarationError(err('Duplicate declaration "Team"'))).toBe(true);
+    expect(isDuplicateDeclarationError(err('Unexpected token'))).toBe(false);
+    expect(isDuplicateDeclarationError(null)).toBe(false);
   });
   it('the guard is default-ON (kill switch AGENTV3_WRITE_PARSE_GUARD=off)', () => {
     expect(writeParseGuardEnabled({} as NodeJS.ProcessEnv)).toBe(true);

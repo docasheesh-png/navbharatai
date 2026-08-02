@@ -61,7 +61,7 @@ import { dependencyMutationGuard, dependencyMutationGuardMessage } from './Depen
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
-import { applyFullStackGuards } from './FullStackGuards';
+import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, conventionRelative } from './ProjectIntegrityChecks';
 
 /**
@@ -2644,6 +2644,28 @@ export class ToolDispatcher {
               this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
+          // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
+          // `import ErrorBoundary from './ErrorBoundary'` + `import { ErrorBoundary } from './ErrorBoundary'`
+          // that BABEL rejects as "Duplicate declaration" — but esbuild AND tsc silently ACCEPT (a real
+          // compiler divergence), so the write-time guards and the type-checker miss it, and it white-screens
+          // the preview + refuses the dev-server port. Runs HERE, before the readiness gate, so the duplicate
+          // is removed on EVERY build — success, failure, OR wall-clock-capped alike (the route's post-build
+          // sweep ran too late and only on result.ok, so a 30-min capped build kept the duplicate). Pure +
+          // safe (dedupeSameModuleImports keeps the first binding, drops a later same-module redundant one);
+          // same durable write path; the cleaned file feeds the readiness gate below so its verdict is honest.
+          try {
+            for (const [file, content] of Object.entries(astFiles)) {
+              if (typeof content !== 'string') continue;
+              const deduped = dedupeSameModuleImports(file, content);
+              if (deduped !== content) {
+                astFiles[file] = deduped;
+                try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
+                try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
+                try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
+                this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+              }
+            }
+          } catch { /* best-effort — a failure just leaves the honest blocker below */ }
           // DEPENDENCY RECONCILE (P-PIPE): a package imported but not in package.json fails install/runtime
           // with "Cannot find module". For the curated well-known allowlist (real npm packages, version-
           // pinned; alias-colliding names excluded) add it to package.json deterministically so the app

@@ -1707,6 +1707,15 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   const balanceOn = (process.env.AGENTV3_FLOOR_BALANCE ?? 'on').trim().toLowerCase() !== 'off';
   const baseOf = (e: NamedRunner): string => e.reportAs ?? e.name;
   const hasBoth = runners.some((e) => baseOf(e) === 'GLM') && runners.some((e) => baseOf(e) === 'KIMI');
+  // FREE-TIER KIMI LEAD (admin 2026-08-02, QR-build autopsy: a free build logged 106 GLM failures vs 2 KIMI
+  // — GLM's free rung glm-4.7-flash is by far the most 429-throttled right now). On a FREE build, KIMI LEADS
+  // outright instead of the 50/50 balance, so the first-attempt call hits the currently-reliable provider;
+  // GLM stays right behind it as the error-fallback, so no capability is lost — only the lead changes. Paid
+  // builds keep the GLM↔KIMI 50/50 alternation unchanged. Kill switch AGENTV3_FREE_KIMI_LEAD=off restores the
+  // balanced order for free builds too.
+  const freeKimiLead = opts?.free === true && hasBoth
+    && (process.env.AGENTV3_FREE_KIMI_LEAD ?? 'on').trim().toLowerCase() !== 'off';
+  if (freeKimiLead) return balanceFloorLead(runners, true);
   return balanceFloorLead(runners, balanceOn && hasBoth && floorLeadCounter++ % 2 === 1);
 }
 

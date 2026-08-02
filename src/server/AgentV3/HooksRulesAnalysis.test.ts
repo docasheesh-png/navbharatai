@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
+import { analyzeHooksRules, hookViolationWriteNote, hooksRepairInstruction } from './HooksRulesAnalysis';
 
 const wrap = (body: string) => ({ 'src/App.tsx': body });
 
@@ -226,5 +226,28 @@ describe('hookViolationWriteNote — write-time steering note', () => {
   it('is empty for a report with no violations, junk, or missing fields', () => {
     expect(hookViolationWriteNote({ violations: [], filesScanned: 1, counts: { 'conditional-hook': 0, 'hook-after-return': 0, 'hook-in-loop': 0, 'hook-in-callback': 0 }, ok: true })).toBe('');
     expect(hookViolationWriteNote(undefined as never)).toBe('');
+  });
+});
+
+describe('hooksRepairInstruction — focused post-build heal prompt (autopsy 2026-08-02, buildId 84902e18)', () => {
+  it('carries the EXACT file:line/hook so even a weak coder can make the focused fix', async () => {
+    const r = await analyzeHooksRules({ 'src/hooks/useDashboardStats.ts': `
+      import { useMemo } from 'react';
+      export function useDashboardStats(rows: number[]) {
+        if (!rows.length) return { total: 0 };
+        const total = useMemo(() => rows.reduce((a, b) => a + b, 0), [rows]);
+        return { total };
+      }
+    ` });
+    expect(r.ok).toBe(false); // the useMemo is after an early return
+    const instr = hooksRepairInstruction(r);
+    expect(instr).toMatch(/useDashboardStats\.ts/);
+    expect(instr).toMatch(/useMemo/);
+    expect(instr).toMatch(/above any early return|top level/i);
+  });
+
+  it('is EMPTY for a clean report / junk — never nags a correct build', () => {
+    expect(hooksRepairInstruction({ violations: [], filesScanned: 1, counts: { 'conditional-hook': 0, 'hook-after-return': 0, 'hook-in-loop': 0, 'hook-in-callback': 0 }, ok: true })).toBe('');
+    expect(hooksRepairInstruction(undefined as never)).toBe('');
   });
 });

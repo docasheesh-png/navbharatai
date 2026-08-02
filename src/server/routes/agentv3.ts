@@ -4,6 +4,7 @@ import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/i
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
+import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
 import {
@@ -9638,6 +9639,40 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
+      // ENTRY-FILE DUPLICATE-IMPORT SWEEP (build-report + IMG autopsy 2026-08-02, RECURRING): the entry file
+      // (src/main.tsx) repeatedly shipped BOTH `import ErrorBoundary from './ErrorBoundary'` AND
+      // `import { ErrorBoundary } from './ErrorBoundary'` → babel/Vite hard-fail "Duplicate declaration
+      // 'ErrorBoundary'" → the in-browser preview won't compile AND the dev server never binds its port
+      // ("Closed Port Error on 5173"), so the whole app white-screens. The write-time guards (ToolDispatcher
+      // #1999 / full-stack guards) only run on the paths THEY own, and the entry file can be shaped by the
+      // scaffold + a post-build injector too — so a duplicate slips through on the vite-react path. This is
+      // the LAST choke point before the app is declared done: after every write, sweep the entry file with
+      // the same deterministic same-module dedupe (keep the first binding, drop a later redundant one). Pure
+      // + safe (only removes a binding that already exists); best-effort — never affects the build result.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          const entryFromWrites = ['src/main.tsx', 'src/main.jsx', 'src/index.tsx', 'src/index.jsx', 'main.tsx', 'main.jsx']
+            .find((p) => writtenFiles.has(p));
+          let entryResolved: string | undefined = entryFromWrites;
+          let entrySrc: string | null = entryFromWrites ? (writtenFiles.get(entryFromWrites) ?? null) : null;
+          // The entry may live only on disk (written by the scaffold, not this turn's writtenFiles map).
+          if (!entrySrc) {
+            for (const cand of ['src/main.tsx', 'src/main.jsx', 'src/index.tsx', 'src/index.jsx']) {
+              try { entrySrc = await actuator.readFile(workspaceId, cand); entryResolved = cand; break; } catch { /* try next */ }
+            }
+          }
+          if (entryResolved && entrySrc) {
+            const deduped = dedupeSameModuleImports(entryResolved, entrySrc);
+            if (deduped !== entrySrc) {
+              await actuator.writeFile(workspaceId, entryResolved, deduped);
+              writtenFiles.set(entryResolved, deduped);
+              try { getWorkspaceMemory(workspaceId).indexFile(entryResolved, deduped); } catch { /* index best-effort */ }
+              await saveWorkspaceFiles(workspaceId, { [entryResolved]: deduped }).catch(() => {});
+              events.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${entryResolved}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+            }
+          }
+        }
+      } catch { /* entry-file dedupe is best-effort — never affects the build result */ }
       // P-UX.7 — surface the build's token count to the client (in + out) for a usage badge. 0 → omitted.
       const totalTokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
       // SOFTWARE PROJECT MODE (SPM-2): a successful MODULE turn with plan modules still buildable

@@ -11,6 +11,7 @@ import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
+import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -111,6 +112,14 @@ export function registerSdaRoutes(app: Express): void {
       const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, sdaIdentity?.email || null);
       if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
       const sdaTier: ProfessionalTier = sdaGate.tier;
+
+      // IMAGE-GENERATION INTENT (admin 2026-08-02): Doctor AI does not generate images — if the doctor asks
+      // it to CREATE a picture (e.g. "draw a diagram of the heart"), point them to the dedicated AI Image
+      // Gen tool instead of an unhelpful answer. Skipped when a file is attached (that is a document/image
+      // ANALYSIS request, which SDA does handle). No free message is burned.
+      if (!fileData && typeof message === 'string' && detectImageIntent(message).wants) {
+        return res.json({ reply: imageGenGuidance(), sessionId: sessionId || userId || null });
+      }
 
       // ── Session / clinical-store resolution ──────────────────────────────────
       // sessionId is preferred; fall back to userId for backwards compat.

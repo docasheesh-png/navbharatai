@@ -507,6 +507,26 @@ export function needsFallbackConversationPersist(
   return !recentForUser.some((r) => r.workspaceId === workspaceId && r.updatedAt >= buildStartedAt);
 }
 
+/**
+ * The terminal ConversationStatus to stamp on the durable record when a build settles — or `undefined` to
+ * leave the record's status untouched. Root cause it fixes (build-report + IMG autopsy 2026-08-02): a
+ * successful build's durable record was left at status:'running' because `persistSessionTimeline` writes
+ * finalState/timeline but NEVER status, and the only status:'complete'/'error' write is the fallback block
+ * that is SKIPPED once a runner has already persisted a turn. So a client that dropped before the terminal
+ * `result` event reopened to a record with no verdict → the UI showed neither success nor fail nor billing,
+ * just "that build isn't running anymore — send your message again". A definitive success → 'complete', a
+ * definitive failure → 'error'. A NULL result (a resumable wall-clock pause, or a still-running/hung build
+ * whose verdict isn't known yet) returns undefined so the caller leaves status:'running' intact — a
+ * resumable pause must never be clobbered into a terminal state (it would block the client auto-continue).
+ * Pure + exported for testing.
+ */
+export function terminalConversationStatus(
+  result: { ok: boolean } | null | undefined,
+): 'complete' | 'error' | undefined {
+  if (!result) return undefined; // no settled verdict → don't clobber a resumable/running record
+  return result.ok ? 'complete' : 'error';
+}
+
 /** A client-supplied session id must be a safe, bounded token (it becomes part of
  *  the workspace id, which is interpolated into sandbox paths/commands).
  *  The single definition lives in the Phase-0 identity policy module (imported at the top). */
@@ -1707,6 +1727,15 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   const balanceOn = (process.env.AGENTV3_FLOOR_BALANCE ?? 'on').trim().toLowerCase() !== 'off';
   const baseOf = (e: NamedRunner): string => e.reportAs ?? e.name;
   const hasBoth = runners.some((e) => baseOf(e) === 'GLM') && runners.some((e) => baseOf(e) === 'KIMI');
+  // FREE-TIER KIMI LEAD (admin 2026-08-02, QR-build autopsy: a free build logged 106 GLM failures vs 2 KIMI
+  // — GLM's free rung glm-4.7-flash is by far the most 429-throttled right now). On a FREE build, KIMI LEADS
+  // outright instead of the 50/50 balance, so the first-attempt call hits the currently-reliable provider;
+  // GLM stays right behind it as the error-fallback, so no capability is lost — only the lead changes. Paid
+  // builds keep the GLM↔KIMI 50/50 alternation unchanged. Kill switch AGENTV3_FREE_KIMI_LEAD=off restores the
+  // balanced order for free builds too.
+  const freeKimiLead = opts?.free === true && hasBoth
+    && (process.env.AGENTV3_FREE_KIMI_LEAD ?? 'on').trim().toLowerCase() !== 'off';
+  if (freeKimiLead) return balanceFloorLead(runners, true);
   return balanceFloorLead(runners, balanceOn && hasBoth && floorLeadCounter++ % 2 === 1);
 }
 
@@ -9731,6 +9760,29 @@ export function registerAgentV3Routes(app: Express): void {
       // also called by the hard-deadline finalizer whose builds never reach this finally). Runs
       // BEFORE the stream ends so Cloud Run cannot throttle the write away.
       await persistSessionTimeline();
+      // TERMINAL STATUS STAMP (build-report + IMG autopsy 2026-08-02): persistSessionTimeline writes the
+      // finalState done-footer + timeline but NEVER the record's `status`, and the only status:'complete'/
+      // 'error' write is the fallback block that is SKIPPED once a runner has persisted a turn — so a normal
+      // build left the durable record at status:'running'. A client that dropped before the `result` event
+      // then reopened/resumed to a verdict-less record and saw neither success nor fail nor billing, just
+      // "that build isn't running anymore — send your message again". Stamp the terminal verdict here so a
+      // reopen always shows the truth. Only when the build DEFINITIVELY settled (buildResultRef set) — a
+      // resumable wall-clock pause leaves buildResultRef null → status stays 'running' (never clobbered).
+      // Best-effort; a store failure never affects the build or the already-emitted result.
+      try {
+        const terminalStatus = terminalConversationStatus(buildResultRef);
+        if (terminalStatus) {
+          const store = getConversationStore();
+          const convId = conversationIdForWorkspace(workspaceId);
+          if (await store.get(convId).catch(() => null)) {
+            await store.update(convId, {
+              status: terminalStatus,
+              ...(typeof buildResultRef?.billedUsd === 'number' ? { billedUsd: buildResultRef.billedUsd } : {}),
+              updatedAt: Date.now(),
+            }).catch(() => {});
+          }
+        }
+      } catch { /* terminal-status stamp is best-effort — never affects the build */ }
       // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
       // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
       if (deadlineTimer) clearTimeout(deadlineTimer);

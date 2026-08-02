@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -99,6 +99,19 @@ describe('needsFallbackConversationPersist (fast-lane "memory gone after reload"
   });
   it('a record updated exactly at buildStartedAt counts as already-persisted (inclusive boundary)', () => {
     expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 1000 }], 'ws-1', 1000)).toBe(false);
+  });
+});
+
+describe('terminalConversationStatus (build-report autopsy 2026-08-02 — "na successful, na fail, na ₹")', () => {
+  it('a definitive SUCCESS stamps status:complete (was left at "running" → reopen showed no verdict)', () => {
+    expect(terminalConversationStatus({ ok: true })).toBe('complete');
+  });
+  it('a definitive FAILURE stamps status:error', () => {
+    expect(terminalConversationStatus({ ok: false })).toBe('error');
+  });
+  it('a NULL/absent verdict leaves status UNTOUCHED — a resumable pause must never be clobbered', () => {
+    expect(terminalConversationStatus(null)).toBeUndefined();
+    expect(terminalConversationStatus(undefined)).toBeUndefined();
   });
 });
 
@@ -473,7 +486,7 @@ describe('parseKeyPool — provider key rotation pool (ROADMAP Tier-4)', () => {
 });
 
 describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admin: 1st call not Claude)', () => {
-  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE'];
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE', 'AGENTV3_FREE_KIMI_LEAD'];
   let saved: Record<string, string | undefined>;
   beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
@@ -547,6 +560,24 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     const names = (rs: typeof first) => rs.map((r) => r.name).sort();
     expect(names(second)).toEqual(names(first));
     expect(names(third)).toEqual(names(first));
+  });
+  it('FREE-TIER KIMI LEAD — a free build leads with KIMI (GLM 429-storm autopsy 2026-08-02); GLM stays as fallback', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    const free = cheapBuildFloorRunners({ free: true });
+    expect(free[0].name).toBe('KIMI');                                     // KIMI leads on a free build
+    expect(cheapBuildFloorRunners({ free: true })[0].name).toBe('KIMI');   // every free construction — no 50/50 flip
+    expect(free.some((r) => r.name === 'GLM')).toBe(true);                 // GLM still present as the error-fallback
+    // Paid build is UNCHANGED — still the GLM↔KIMI 50/50 alternation.
+    _resetFloorLeadCounter();
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('KIMI');
+  });
+  it('FREE-TIER KIMI LEAD — kill switch AGENTV3_FREE_KIMI_LEAD=off restores GLM-first for free too', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    process.env.AGENTV3_FREE_KIMI_LEAD = 'off';
+    expect(cheapBuildFloorRunners({ free: true })[0].name).toBe('GLM'); // off → falls back to the normal balance (GLM first)
   });
   it('FLOOR BALANCE — kill switch AGENTV3_FLOOR_BALANCE=off restores the fixed GLM-first order', () => {
     process.env.AGENTV3_FLOOR_BALANCE = 'off';

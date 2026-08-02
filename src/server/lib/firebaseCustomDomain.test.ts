@@ -133,3 +133,51 @@ describe('firebaseCustomDomain — pure helpers', () => {
 });
 
 // slice 1 — Firebase-native custom-domain primitive (see firebaseCustomDomain.ts)
+
+// ROOT CAUSE regression (admin 2026-08-02 — "Failed to start domain connection" on mitrify.xyz):
+// attachCustomDomain assumed the workspace's dedicated site already existed, but the site is only
+// created by the DEPLOY path. Connecting a domain BEFORE a dedicated-site deploy (e.g. the app was
+// published via instant /pwa hosting) hit customDomains.create on a NONEXISTENT site → 404 → 500.
+// This locks the fix: attach must ENSURE the site first (idempotent), then attach the domain.
+import { vi } from 'vitest';
+import { attachCustomDomain, siteIdForWorkspace as siteIdFor } from './firebaseCustomDomain';
+
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: class {
+    async getAccessToken() { return 'test-token'; }
+  },
+}));
+
+describe('attachCustomDomain — ensures the dedicated site exists BEFORE attaching (2026-08-02 fix)', () => {
+  it('creates the site first (idempotent), then attaches the domain to it', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET' });
+      // Site create → ok; first domain GET → 404 (not attached yet); create → ok; final GET → resource.
+      if (String(url).includes('/customDomains/')) {
+        if (calls.filter((c) => c.url.includes('/customDomains/')).length === 1) {
+          return { ok: false, status: 404, json: async () => ({ error: { message: 'HTTP 404 NOT_FOUND' } }) } as any;
+        }
+        return { ok: true, json: async () => ({ ownershipState: 'OWNERSHIP_PENDING' }) } as any;
+      }
+      return { ok: true, json: async () => ({}) } as any;
+    }));
+    try {
+      const workspaceId = 'agentv3-uid-sessionX';
+      const status = await attachCustomDomain(workspaceId, 'myshop.com');
+      const siteId = siteIdFor(workspaceId);
+      // THE fix: the very first API call must be the idempotent site create — never a domain call
+      // against a site that might not exist.
+      expect(calls[0].url).toContain(`/sites?siteId=${siteId}`);
+      expect(calls[0].method).toBe('POST');
+      // …and the domain operations then target that same site.
+      const domainCalls = calls.filter((c) => c.url.includes('/customDomains'));
+      expect(domainCalls.length).toBeGreaterThan(0);
+      for (const c of domainCalls) expect(c.url).toContain(`/sites/${siteId}/`);
+      expect(status.domain).toBe('myshop.com');
+      expect(status.active).toBe(false); // honest pending state for a fresh attach
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

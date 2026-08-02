@@ -2148,7 +2148,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //   1× the entry-file duplicate-import sweep (duplicate-ErrorBoundary autopsy 2026-08-02) — gated on
     //      `result.ok && expectsArtifacts && writtenFiles.size > 0`, so it NEVER writes on a read-only
     //      import/survey turn (same discipline as the artifact passes above). Considered ✓.
-    expect(count).toBe(11);
+    //   1× the PRE-VERDICT duplicate-import dedupe (duplicate-ErrorBoundary autopsy 2026-08-02, buildId
+    //      a2f32f38) — gated on `expectsArtifacts && writtenFiles.size > 0` (false on every import/survey
+    //      turn, so it never writes on a read-only turn). It intentionally does NOT require result.ok — a
+    //      duplicate import is the fix for a FAILED build, and it runs BEFORE the verdict so the duplicate
+    //      never fails the build in the first place (same "fix a failed build" discipline as vite.config). ✓.
+    expect(count).toBe(12);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

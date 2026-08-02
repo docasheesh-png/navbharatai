@@ -5,6 +5,7 @@ import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
+import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
 import {
@@ -8315,6 +8316,35 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* integrity analysis is best-effort — never blocks a build */ }
+
+      // PRE-VERDICT DUPLICATE-IMPORT DEDUPE (build-report autopsy 2026-08-02, buildId a2f32f38): a weak-tier
+      // build shipped src/main.tsx with BOTH `import ErrorBoundary from './ErrorBoundary'` AND
+      // `import { ErrorBoundary } from "./ErrorBoundary"` → babel "Duplicate declaration ErrorBoundary" → the
+      // in-browser preview would not compile → the build FAILED (readiness 38/100). The existing entry-file
+      // dedupe sweep (#2016) removes exactly this, but it is gated on `result.ok` and runs AFTER the verdict —
+      // so on a build the duplicate itself FAILS, it never fires (chicken-and-egg: the fix is locked behind the
+      // success the bug prevents). Run the deterministic, safe-by-construction dedupe (dedupeDuplicateImports —
+      // drops ONLY a fully-redundant import whose every binding is already bound from the SAME module by an
+      // earlier import; it can never break code, it only removes a binding that already exists) over the written
+      // source files HERE — BEFORE the preview-compile check + reviewer judge the build, and UNGATED by
+      // result.ok — so the duplicate is gone before it can fail the build, and the build passes on its own
+      // instead of needing an LLM heal that the weak tier could not deliver. Persisted to disk + writtenFiles so
+      // the fix ships. Additive + best-effort. Kill switch AGENTV3_PREGATE_DEDUPE=off.
+      if ((process.env.AGENTV3_PREGATE_DEDUPE ?? '').trim().toLowerCase() !== 'off' && expectsArtifacts && writtenFiles.size > 0) {
+        try {
+          for (const [p, c] of Array.from(writtenFiles)) {
+            if (typeof c !== 'string' || !/\.(mjs|cjs|jsx?|tsx?)$/i.test(p) || /\.d\.ts$/i.test(p)) continue;
+            const { content: deduped, removed } = dedupeDuplicateImports(c);
+            if (removed.length > 0 && deduped !== c) {
+              writtenFiles.set(p, deduped);
+              try { await actuator.writeFile(workspaceId, p, deduped); } catch { /* best-effort live write */ }
+              try { getWorkspaceMemory(workspaceId).indexFile(p, deduped); } catch { /* index best-effort */ }
+              await saveWorkspaceFiles(workspaceId, { [p]: deduped }).catch(() => {});
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'DUPLICATE_IMPORT_DEDUPED', message: `Removed ${removed.length} fully-redundant duplicate import(s) from ${p} before the compile check: ${removed.join('; ')}`.slice(0, 400), autoResolved: true });
+            }
+          }
+        } catch { /* pre-verdict dedupe is best-effort — never blocks or fails a build */ }
+      }
 
       // PREVIEW-COMPILE GUARD (autopsy 2026-07-22, buildId 91694679): the in-browser preview transpiles
       // with Babel — a DIFFERENT compiler from both the build's tsc gate AND the E2B/vite (esbuild)

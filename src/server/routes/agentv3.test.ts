@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -99,6 +99,19 @@ describe('needsFallbackConversationPersist (fast-lane "memory gone after reload"
   });
   it('a record updated exactly at buildStartedAt counts as already-persisted (inclusive boundary)', () => {
     expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 1000 }], 'ws-1', 1000)).toBe(false);
+  });
+});
+
+describe('terminalConversationStatus (build-report autopsy 2026-08-02 — "na successful, na fail, na ₹")', () => {
+  it('a definitive SUCCESS stamps status:complete (was left at "running" → reopen showed no verdict)', () => {
+    expect(terminalConversationStatus({ ok: true })).toBe('complete');
+  });
+  it('a definitive FAILURE stamps status:error', () => {
+    expect(terminalConversationStatus({ ok: false })).toBe('error');
+  });
+  it('a NULL/absent verdict leaves status UNTOUCHED — a resumable pause must never be clobbered', () => {
+    expect(terminalConversationStatus(null)).toBeUndefined();
+    expect(terminalConversationStatus(undefined)).toBeUndefined();
   });
 });
 

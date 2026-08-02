@@ -154,6 +154,26 @@ jobs:
           npx cap add ios || echo "ios/ already present — continuing"
           npx cap sync ios
 
+      # Real app icon (Apple App Review Guideline 2.3.8 — iOS v1.0(46) was rejected because the icon was a
+      # PLACEHOLDER: `cap add ios` scaffolds the project with Capacitor's default icon and nothing replaced
+      # it). Capacitor 8's iOS project uses a SINGLE 1024x1024 universal icon, so we overwrite every PNG in
+      # the generated AppIcon.appiconset with our real, verified 1024x1024 no-alpha brand icon
+      # (ios-config/app-icon.png, built by scripts/make-app-icon.py). Fail LOUDLY if the icon set or our
+      # source is missing — never silently ship the placeholder again.
+      - name: Replace placeholder app icon with the real NavBharatAI icon (Apple 2.3.8)
+        run: |
+          set -e
+          SRC="ios-config/app-icon.png"
+          ICONSET="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          test -f "$SRC" || { echo "::error::Missing $SRC (the real app icon source)"; exit 1; }
+          test -d "$ICONSET" || { echo "::error::AppIcon.appiconset not found at $ICONSET"; exit 1; }
+          shopt -s nullglob
+          pngs=("$ICONSET"/*.png)
+          if [ ${#pngs[@]} -eq 0 ]; then echo "::error::No icon PNG found in $ICONSET"; exit 1; fi
+          for f in "${pngs[@]}"; do cp "$SRC" "$f"; done
+          echo "Replaced ${#pngs[@]} icon file(s) in $ICONSET with the real NavBharatAI icon:"
+          ls -la "$ICONSET"
+
       # Firebase iOS config. The @capacitor-firebase/authentication plugin calls FirebaseApp.configure()
       # at launch, which reads GoogleService-Info.plist from the app bundle — WITHOUT it the app CRASHES
       # on launch (TestFlight build #12 did exactly this; Android is fine because it ships

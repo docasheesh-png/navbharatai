@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { AgentProgress, BuildStep } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
@@ -405,12 +406,16 @@ export const AIChat: React.FC<AIChatProps> = ({
   };
 
   // ── Voice Input ──────────────────────────────────────────────────────────
+  // The mic button only renders where the Web Speech API actually exists (desktop Chrome/Edge). On
+  // iOS/iPadOS WKWebView (the Capacitor app) it's absent — never a dead/"unresponsive" button (Apple
+  // App Review 2.1(a), iPad, 2026-08-02). See src/lib/voiceInput.ts.
   const recognitionRef = useRef<any>(null);
   const [isListening, setIsListening] = useState(false);
+  const [voiceSupported] = useState(speechRecognitionSupported);
 
   const startVoice = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { alert('Voice input works on Chrome only. Please use Chrome browser.'); return; }
+    if (!SR) return; // unsupported platforms never render the button; this is a defensive no-op
     const rec = new SR();
     rec.lang = 'en-IN';
     rec.interimResults = true;
@@ -1735,15 +1740,17 @@ export const AIChat: React.FC<AIChatProps> = ({
                       title="Attach (photo, gallery, or file)"
                       buttonClassName="p-2.5 text-gray-500 hover:text-indigo-400 transition-colors"
                     />
-                    <button
-                      type="button"
-                      onClick={isListening ? stopVoice : startVoice}
-                      title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
-                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
-                      className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
-                    >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                    </button>
+                    {voiceSupported && (
+                      <button
+                        type="button"
+                        onClick={isListening ? stopVoice : startVoice}
+                        title={isListening ? 'Stop voice input' : 'Voice input'}
+                        aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                        className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
+                      >
+                        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
+                    )}
                     {isLoading && onStop ? (
                       <button
                         onClick={() => {

@@ -27,6 +27,7 @@ import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -261,9 +262,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const voiceRef = useRef<any>(null);
   const voiceBaseRef = useRef(''); // composer text captured when dictation started (interim appends after it)
   const voiceFinalRef = useRef(''); // finalized transcript accumulated this dictation session
-  const speechSupported = typeof window !== 'undefined'
-    && !!((window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition
-      || (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+  const speechSupported = speechRecognitionSupported();
   // INLINE "Screenshot → App": pick a screenshot from the gallery → build from it, right here (admin
   // 2026-07-22). A hidden gallery input drives BOTH entry points (the glowing template button AND the
   // Attach-menu option) — 2 entries, one system.

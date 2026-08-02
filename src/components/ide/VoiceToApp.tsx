@@ -11,6 +11,7 @@ import {
   Languages,
   Info,
 } from 'lucide-react';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 
 interface VoiceToAppProps {
   /**
@@ -44,13 +45,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
   const [enhancersOpen, setEnhancersOpen] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
-  const [speechSupported] = useState(() =>
-    typeof window !== 'undefined' &&
-    !!(
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition
-    )
-  );
+  const [speechSupported] = useState(speechRecognitionSupported);
 
   const recognitionRef = useRef<any>(null);
 

@@ -16,6 +16,7 @@ import { escapeHtml } from '../../lib/escapeHtml';
 import { newSdaCaseId } from '../../lib/sdaCaseId';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -255,6 +256,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isListening, setIsListening] = useState(false);
+  // Mic renders only where the Web Speech API exists — absent on iOS/iPadOS WKWebView so it is never a
+  // dead "unresponsive" button (Apple App Review 2.1(a), 2026-08-02). See src/lib/voiceInput.ts.
+  const [voiceSupported] = useState(speechRecognitionSupported);
   const [suggestPDF, setSuggestPDF] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
 
@@ -389,10 +393,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   const startVoice = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert('Voice input is not supported in this browser. Please use Chrome.');
-      return;
-    }
+    if (!SR) return; // unsupported platforms never render the button; this is a defensive no-op
     const rec = new SR();
     rec.lang = 'en-IN';
     rec.interimResults = true;
@@ -969,18 +970,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 </button>
                 <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileSelect} className="hidden" />
 
-                {/* Dictation mic — speech → TEXT into the box (you still read + Send). */}
-                <button
-                  onClick={isListening ? stopVoice : startVoice}
-                  disabled={loading}
-                  title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
-                  className={cn(
-                    "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
-                    isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
-                  )}
-                >
-                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </button>
+                {/* Dictation mic — speech → TEXT into the box (you still read + Send). Renders only where
+                    the Web Speech API exists; absent on iOS/iPadOS WKWebView (no dead button). */}
+                {voiceSupported && (
+                  <button
+                    onClick={isListening ? stopVoice : startVoice}
+                    disabled={loading}
+                    title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
+                    className={cn(
+                      "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
+                      isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
+                    )}
+                  >
+                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
+                )}
 
                 {/* Text input */}
                 <textarea

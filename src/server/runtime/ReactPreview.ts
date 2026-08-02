@@ -355,6 +355,13 @@ ${babelTag}
   // flag, so a React library loaded via the fallback may bundle its own React; acceptable only when
   // esm.sh is down anyway, and strictly better than a dead preview.)
   var ESM_ALT = 'https://esm.run/';
+  // Third, GENUINELY-INDEPENDENT host (autopsy ce713a7e, 2026-08-02): the two rungs above collapse to
+  // only TWO real CDN networks — esm.sh (rung 1 + the plain rung) and jsdelivr (esm.run, rung 2). When
+  // BOTH momentarily failed to serve even 'react-dom/client' (esm.sh's most-cached module ever), the
+  // whole in-browser preview blanked. unpkg is a third, infra-independent origin, so a two-host blip on
+  // the FOUNDATIONAL React modules can no longer kill the preview. Purely additive — only tried after
+  // all esm.sh/jsdelivr rungs fail, so it can never regress a currently-working preview.
+  var ESM_ALT2 = 'https://unpkg.com/';
   var cache = {};
   var bareCache = {};
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
@@ -591,6 +598,14 @@ ${babelTag}
     if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(ESM.length + root.length); return ESM_ALT + root + verPart + spec.slice(root.length); }
     return ESM_ALT + spec;
   }
+  // Fourth rung on the INDEPENDENT unpkg origin (pins the importmap version like specUrlAlt). unpkg's
+  // ?module query rewrites bare imports to unpkg URLs, so 'react-dom/client' resolves standalone — the
+  // exact last-resort a two-host esm.sh+jsdelivr blip on the React core needs.
+  function specUrlAlt2(spec) {
+    var root = spec.split('/')[0]; if (spec[0] === '@') root = spec.split('/').slice(0, 2).join('/');
+    if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(ESM.length + root.length); return ESM_ALT2 + root + verPart + spec.slice(root.length) + '?module'; }
+    return ESM_ALT2 + spec + '?module';
+  }
 
   window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
   window.addEventListener('unhandledrejection', function (e) { showError((e && e.reason && e.reason.message) || e.reason || 'Promise rejected'); });
@@ -636,14 +651,23 @@ ${babelTag}
               bareCache[spec] = interop(await import(ESM + spec));
               console.warn('[preview] loaded', spec, 'WITHOUT react-externalization (legacy interop fallback)');
             } catch (e3) {
-              // Record EVERY rung's real failure so the surfaced error names the true causes,
-              // not just the first rung's message.
-              bareLoadErrors[spec] = [
-                (e && e.message) ? e.message : String(e),
-                (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
-                (e3 && e3.message) ? 'plain: ' + e3.message : '',
-              ].filter(Boolean).join(' | ');
-              console.warn('[preview] failed to load', spec, 'on all 3 rungs —', bareLoadErrors[spec]);
+              // FINAL rung on the independent unpkg origin (autopsy ce713a7e): if esm.sh AND jsdelivr both
+              // failed to fetch even the React core, a third, infra-independent CDN is the last line of
+              // defence before the preview blanks.
+              try {
+                bareCache[spec] = interop(await import(specUrlAlt2(spec)));
+                console.warn('[preview] loaded', spec, 'from unpkg (independent CDN) after esm.sh + jsdelivr failed');
+              } catch (e4) {
+                // Record EVERY rung's real failure so the surfaced error names the true causes,
+                // not just the first rung's message.
+                bareLoadErrors[spec] = [
+                  (e && e.message) ? e.message : String(e),
+                  (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
+                  (e3 && e3.message) ? 'plain: ' + e3.message : '',
+                  (e4 && e4.message) ? 'unpkg: ' + e4.message : '',
+                ].filter(Boolean).join(' | ');
+                console.warn('[preview] failed to load', spec, 'on all 4 rungs —', bareLoadErrors[spec]);
+              }
             }
           }
         }

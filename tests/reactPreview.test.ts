@@ -274,6 +274,23 @@ describe('buildReactPreview — legacy react interop fallback (Fix 34b)', () => 
   it('ships the no-external last rung + multi-rung error recording', () => {
     const html = buildReactPreview(reactVfs());
     expect(html).toContain('WITHOUT react-externalization (legacy interop fallback)');
-    expect(html).toContain('on all 3 rungs');
+    expect(html).toContain('on all 4 rungs');
+  });
+});
+
+// Autopsy ce713a7e (2026-08-02): the in-browser preview blanked when esm.sh AND jsdelivr both failed to
+// fetch 'react-dom/client'. The three prior rungs collapse to only two CDN networks; add a genuinely
+// INDEPENDENT origin (unpkg) as the final rung so a two-host blip on the React core can't kill the preview.
+describe('buildReactPreview — independent third CDN origin (autopsy ce713a7e)', () => {
+  it('wires unpkg as a fourth, infra-independent rung after esm.sh + jsdelivr', () => {
+    const html = buildReactPreview(reactVfs());
+    // A third, independent host (unpkg) is present — distinct from esm.sh (rungs 1+3) and jsdelivr (rung 2).
+    expect(html).toContain('unpkg.com');
+    expect(html).toContain('specUrlAlt2');
+    // …and the loader actually tries it before recording a load error.
+    expect(html).toMatch(/import\(specUrlAlt2\(spec\)\)/);
+    expect(html).toContain('from unpkg (independent CDN) after esm.sh + jsdelivr failed');
+    // The unpkg rung records its own real failure reason ('unpkg: …') in the surfaced error.
+    expect(html).toContain("'unpkg: '");
   });
 });

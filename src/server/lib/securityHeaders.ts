@@ -14,6 +14,11 @@ import type { HelmetOptions } from 'helmet';
  *    Babel-standalone fallback): the in-browser preview's <iframe srcDoc> inherits THIS page's CSP,
  *    and a module `import('https://esm.sh/react…')` is governed by script-src — without these hosts
  *    React fails to load and the preview dies with `Missing dependency "react"`.
+ *    The preview's CDN-resilience fallbacks (ReactPreview.ts) MUST all be allow-listed here or they are
+ *    silently CSP-blocked and never fire: `https://esm.run` is rung 2 (jsdelivr's ESM shortcut — it was
+ *    MISSING, so rung 2 was dead: import('https://esm.run/react-dom…') was blocked, never a real
+ *    fallback; autopsy ce713a7e 2026-08-02), and `https://unpkg.com` is rung 4, a genuinely-independent
+ *    origin so a two-host esm.sh+jsdelivr blip on the React core can't blank the preview.
  *  - `crossOriginOpenerPolicy: 'same-origin-allow-popups'` keeps `window.opener` alive so
  *    `signInWithPopup` can deliver the OAuth credential back to the app.
  *  - `scriptSrc` allows `https://sdk.cashfree.com` — the Cashfree v3 checkout SDK (`cashfree.js`) is
@@ -39,7 +44,7 @@ export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://cdn.tailwindcss.com", "https://sdk.cashfree.com"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://esm.run", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com", "https://cdn.tailwindcss.com", "https://sdk.cashfree.com"],
       styleSrc:   ["'self'", "'unsafe-inline'"],
       imgSrc:     ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'", "https:", "wss:"],

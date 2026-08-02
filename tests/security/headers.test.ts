@@ -48,6 +48,12 @@ describe('P-TQA.10 — production security headers', () => {
     expect(csp).toContain('https://esm.sh');
     expect(csp).toContain('https://cdn.jsdelivr.net');
     expect(csp).toContain('https://cdnjs.cloudflare.com');
+    // The preview's CDN-resilience fallback rungs (ReactPreview.ts) are governed by script-src too — if
+    // a rung's host is not allow-listed it is silently CSP-blocked and never fires. esm.run is rung 2
+    // (jsdelivr's ESM shortcut; it was MISSING, so the "fallback" was dead — autopsy ce713a7e) and
+    // unpkg.com is rung 4, the independent origin. Guard both so a CSP tighten can't re-kill resilience.
+    expect(csp).toContain('https://esm.run');
+    expect(csp).toContain('https://unpkg.com');
     // Tailwind apps load the Play CDN (cdn.tailwindcss.com) inside the preview iframe so the no-build
     // preview is STYLED — without this in script-src the preview renders unstyled. Guard it stays.
     expect(csp).toContain('https://cdn.tailwindcss.com');

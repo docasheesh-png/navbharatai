@@ -13,6 +13,7 @@ import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
+import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -2701,6 +2702,24 @@ export class ToolDispatcher {
             extra.push({ severity: c.severity, label: `Dependency conflict (${c.kind}): ${c.detail}` });
           }
         }
+        // PREVIEW-COMPILE HONESTY BLOCKER (readiness-honesty autopsy 2026-08-02): the "Build health"
+        // verdict was computed WITHOUT the in-browser preview compiler, so a build whose ENTRY file will not
+        // compile still scored "READY · 70/100" while the live preview white-screened and the dev server
+        // refused its port. The classic case is the recurring duplicate `ErrorBoundary` import that BABEL
+        // (the in-browser preview's compiler) rejects as "Duplicate declaration" but esbuild — and thus tsc
+        // and vite — silently ACCEPT (a real compiler divergence, verified). So the esbuild/parse gates miss
+        // it. Run the SAME babel dry-compile the preview uses (checkPreviewCompiles) and, when a guaranteed-
+        // reachable ENTRY file (main/App/index) diverges, feed it in as a HARD blocker — the health card can
+        // then never call a white-screening build READY (it now agrees with the route's already-honest
+        // "preview does not compile → not charged" verdict). A non-entry divergence (a possibly-never-
+        // imported file) stays advisory — no false block, matching PreviewCompileCheck's reachability scoping.
+        try {
+          const pc = checkPreviewCompiles(astFiles);
+          if (!pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
+            const entryErr = pc.errors.find((e) => previewDivergenceBlocksDelivery([e]));
+            extra.push({ severity: 'high', label: `the live preview will not compile — ${entryErr?.file ?? 'entry file'}: ${(entryErr?.message ?? 'compile error').slice(0, 160)}` });
+          }
+        } catch { /* the preview-compile gate is best-effort — a compiler failure never fabricates a blocker */ }
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;

@@ -24,7 +24,7 @@ import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterA
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { STARTER_TEMPLATES } from './starterTemplates';
+import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
@@ -2838,11 +2838,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 )}
                 {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
                     composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
-                {chatMode === 'build' && (
+                {chatMode === 'build' && (() => {
+                  // TIER-AWARE starters (admin 2026-08-02): a FREE user (powerUnlocked=false) is only offered
+                  // `simple` apps their weak tier actually ships, so their FIRST build works — plus a curated
+                  // few LOCKED `pro` showcases that open the upgrade surface (the free→paid carrot). An
+                  // unlocked user gets the whole library, tappable, no locks.
+                  const { tappable: starterTappable, locked: starterLocked } = partitionStarters(powerUnlocked);
+                  return (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
                     <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
-                      {STARTER_TEMPLATES.map((t) => (
+                      {starterTappable.map((t) => (
                         <button
                           key={t.id}
                           type="button"
@@ -2854,6 +2860,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         </button>
                       ))}
                     </div>
+                    {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
+                        recharge surface) instead of dropping a prompt the weak tier would flail on. */}
+                    {starterLocked.length > 0 && (
+                      <div className="mt-4">
+                        <div className="text-[11px] uppercase tracking-wide text-indigo-400/70 mb-2 flex items-center justify-center gap-1">
+                          <span aria-hidden>⚡</span> Unlock with Pro
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                          {starterLocked.map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              title={`${t.label} needs a Pro tier — the free tier is tuned for simple apps. Tap to unlock.`}
+                              onClick={() => setSettingsOpen(true)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-indigo-300/80 hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-indigo-200 transition-colors"
+                            >
+                              <span aria-hidden>{t.icon}</span>{t.label}<span aria-hidden className="ml-0.5 opacity-70">🔒</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {/* GLOWING "Screenshot → App" button (admin 2026-07-22) — sits with the templates as a
                         highlighted starter: tap → open the gallery → build an app from that screenshot,
                         inline. Second entry to the SAME flow as the Attach-menu option. */}
@@ -2870,7 +2898,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       </button>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             )}
             {chatBlocks.map((b) => {

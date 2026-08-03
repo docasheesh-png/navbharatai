@@ -222,10 +222,28 @@ jobs:
       - name: Build the web app
         run: npm run build
 
+      # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
+      #
+      # This step used to be:  npx cap add android || echo "already present - continuing"
+      # The intent was "do not fail if the project already exists", but || ignores EVERY error, so a
+      # genuine failure to create the project passed as green in 1 second. Gradle then ran against a
+      # directory that did not exist and died with "chmod: cannot access './gradlew'" - an error three
+      # steps away from its cause, pointing at the wrong thing entirely.
+      #
+      # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
+      # project is what actually broke, it is verified before anything downstream depends on it.
       - name: Generate and sync the Android project
         run: |
-          npx cap add android || echo "android/ already present — continuing"
+          set -e
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
           npx cap sync android
+          if [ ! -f android/gradlew ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The Android project was not created, so there is nothing to compile."
+            exit 1
+          fi
 
       # assembleDebug signs with Android's universal debug key, so no keystore and no secrets are
       # needed — this is what makes the whole flow one click for a non-technical user.
@@ -327,10 +345,28 @@ jobs:
       - name: Build the web app
         run: npm run build
 
+      # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
+      #
+      # This step used to be:  npx cap add android || echo "already present - continuing"
+      # The intent was "do not fail if the project already exists", but || ignores EVERY error, so a
+      # genuine failure to create the project passed as green in 1 second. Gradle then ran against a
+      # directory that did not exist and died with "chmod: cannot access './gradlew'" - an error three
+      # steps away from its cause, pointing at the wrong thing entirely.
+      #
+      # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
+      # project is what actually broke, it is verified before anything downstream depends on it.
       - name: Generate and sync the Android project
         run: |
-          npx cap add android || echo "android/ already present — continuing"
+          set -e
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
           npx cap sync android
+          if [ ! -f android/gradlew ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The Android project was not created, so there is nothing to compile."
+            exit 1
+          fi
 
       # Play REJECTS a re-used versionCode, so stamp it with the always-increasing run number.
       - name: Stamp a unique versionCode
@@ -495,10 +531,28 @@ jobs:
       - name: Build the web app
         run: npm run build
 
+      # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
+      #
+      # This step used to be:  npx cap add ios || echo "already present - continuing"
+      # The intent was "do not fail if the project already exists", but || ignores EVERY error, so a
+      # genuine failure to create the project passed as green in 1 second. Gradle then ran against a
+      # directory that did not exist and died with "chmod: cannot access './gradlew'" - an error three
+      # steps away from its cause, pointing at the wrong thing entirely.
+      #
+      # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
+      # project is what actually broke, it is verified before anything downstream depends on it.
       - name: Generate and sync the iOS project
         run: |
-          npx cap add ios || echo "ios/ already present — continuing"
+          set -e
+          if [ ! -d ios ]; then
+            npx cap add ios
+          fi
           npx cap sync ios
+          if [ ! -f ios/App/App.xcodeproj/project.pbxproj ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The iOS project was not created, so there is nothing to compile."
+            exit 1
+          fi
 
       # Apple rejects a re-used build number, and pre-answering export compliance stops the
       # "App Encryption Documentation" popup on every single upload.

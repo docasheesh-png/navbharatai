@@ -21,6 +21,7 @@ import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import { SHIP_WORKFLOW_FILES, isShipWorkflow, workflowPath, type ShipWorkflowFile } from '../../lib/shipWorkflows';
 import { classifyBuildFailure, normalizeLog, repairFiles } from '../lib/mobileBuildRepair';
 import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
+import { buildPackageJson, detectProjectKind } from '../lib/mobileProjectAssembler';
 
 const githubToken = githubTokenFromRequest;
 
@@ -272,12 +273,21 @@ export function registerMobileShipRoutes(app: Express): void {
 
     try {
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
-      // What the CURRENT kit would write for this workflow. A repository prepared before a fix shipped
-      // still carries the old instructions, so refreshing our own file is often the whole repair — and
-      // it heals every already-pushed repo at once instead of one pattern at a time. appName only
-      // affects comments and the summary text, so the repo's own name is a perfectly good source.
-      const fresh = generateShipKit({ appName: String(repo) }).files[wfPath];
-      const repair = repairFiles(diag, current, wfPath, fresh);
+      // What NavBharatAI would generate for this repository TODAY. A repo prepared before a fix shipped
+      // still carries the old files, so refreshing our own output is often the whole repair — and it
+      // heals every already-pushed repo at once instead of one pattern at a time.
+      //
+      // package.json is regenerated through the SAME merge the setup route uses, which preserves every
+      // dependency the user's app declares and only corrects what NavBharatAI owns (the Capacitor
+      // packages, which must share one major version, and the build script). appName only affects
+      // comments and summary text, so the repository's own name is a perfectly good source.
+      const currentPkg = current['package.json'];
+      const repair = repairFiles(diag, current, wfPath, {
+        workflow: generateShipKit({ appName: String(repo) }).files[wfPath],
+        packageJson: currentPkg
+          ? buildPackageJson(currentPkg, String(repo), detectProjectKind({ 'package.json': currentPkg }))
+          : undefined,
+      });
       // No change means the file is ALREADY what the repair would write, so the failure has a cause we
       // have not actually understood. Re-running would fail identically — say so instead.
       if (!repair || Object.keys(repair.files).length === 0) {

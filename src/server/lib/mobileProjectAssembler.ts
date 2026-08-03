@@ -148,15 +148,60 @@ export function buildPackageJson(
   pkg.scripts = scripts;
 
   const devDeps = { ...((pkg.devDependencies as Record<string, string>) || {}) };
-  devDeps['@capacitor/cli'] = devDeps['@capacitor/cli'] || '^6.2.0';
-  pkg.devDependencies = devDeps;
-
   const deps = { ...((pkg.dependencies as Record<string, string>) || {}) };
-  deps['@capacitor/core'] = deps['@capacitor/core'] || '^6.2.0';
-  deps['@capacitor/android'] = deps['@capacitor/android'] || '^6.2.0';
+
+  // CAPACITOR VERSIONS MUST AGREE (root cause of a real build failure, 2026-08-03).
+  //
+  // The three packages are one product split across three modules, and `cap add android` refuses to run
+  // when the CLI, core and platform are on different majors. The old code filled each one in
+  // independently with `existing || '^6.2.0'`, so an app that already declared `@capacitor/core: ^7`
+  // got `@capacitor/android: ^6.2.0` bolted on beside it. `npx cap add android` then failed in about a
+  // second — and because that failure was being swallowed by `|| echo`, the run marched on and died
+  // three steps later at Gradle with "chmod: cannot access './gradlew'".
+  //
+  // So the major is decided ONCE, from whatever the app already declares, and applied to all three.
+  const major = capacitorMajor({ ...deps, ...devDeps }) ?? DEFAULT_CAPACITOR_MAJOR;
+  const range = `^${major}.0.0`;
+  devDeps['@capacitor/cli'] = alignCapacitor(devDeps['@capacitor/cli'], major, range);
+  deps['@capacitor/core'] = alignCapacitor(deps['@capacitor/core'], major, range);
+  deps['@capacitor/android'] = alignCapacitor(deps['@capacitor/android'], major, range);
+
+  pkg.devDependencies = devDeps;
   pkg.dependencies = deps;
 
   return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+/** The Capacitor line NavBharatAI adds when the app expresses no preference of its own. */
+export const DEFAULT_CAPACITOR_MAJOR = 6;
+
+/** First major version number in a semver range, or null when there is nothing readable in it. */
+export function majorOfRange(range: string): number | null {
+  const m = /(\d+)\s*\./.exec(String(range || ''));
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * The Capacitor major this app is already built around.
+ *
+ * `@capacitor/core` is the authority when present — a plugin can lag a major behind, but core is what
+ * the app's own code is written against. Otherwise any declared `@capacitor/*` package answers it.
+ */
+export function capacitorMajor(all: Record<string, string>): number | null {
+  const core = all['@capacitor/core'] && majorOfRange(all['@capacitor/core']);
+  if (core) return core;
+  for (const [name, range] of Object.entries(all)) {
+    if (!name.startsWith('@capacitor/')) continue;
+    const m = majorOfRange(range);
+    if (m) return m;
+  }
+  return null;
+}
+
+/** Keep what the app already declared when it agrees with the chosen major; otherwise align it. */
+function alignCapacitor(existing: string | undefined, major: number, range: string): string {
+  return existing && majorOfRange(existing) === major ? existing : range;
 }
 
 /** The Capacitor config, pointing at whatever this app actually produces. */

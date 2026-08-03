@@ -23816,3 +23816,106 @@ those tags exist from here would risk breaking every build to silence a warning 
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1015 files / 10670 tests, 0 failures**.
 **Still open:** the actual 36s cause in the admin's repo — needs the run's log, which only they can see.
+
+## 2026-08-03 (later still) — THE 36s/32s FAILURE ROOT-CAUSED FROM THE REAL RUN (admin screenshots)
+
+The admin sent the failed run's step list — the evidence that was missing in the previous entry. It
+answered everything:
+
+```
+build-apk   failed in 32s
+  ✓ Install dependencies                    19s
+  ✓ Build the web app                        5s
+  ✓ Generate and sync the Android project    1s   <- creating an Android project takes ~20s
+  ✗ Build the installable APK                0s
+      chmod: cannot access './gradlew': No such file or directory
+```
+
+### ROOT CAUSE — a swallowed failure, three steps upstream
+The step was `npx cap add android || echo "android/ already present — continuing"`. The intent was "do
+not fail if the project already exists", but `||` ignores EVERY error. `cap add android` failed, the
+echo made it green in 1 second, and Gradle then ran against a directory that did not exist. The error
+the user finally saw — `chmod: cannot access './gradlew'` — is THREE STEPS from its cause and points at
+file permissions, a problem that never existed.
+**Fix (class, not instance):** the correct test for "already there" is to LOOK, not to ignore errors —
+`if [ ! -d android ]; then npx cap add android; fi`, under `set -e`, followed by an explicit check that
+`android/gradlew` really exists before anything downstream depends on it. Applied to android AND ios.
+
+### WHY `cap add android` failed — Capacitor majors were allowed to disagree
+`buildPackageJson` filled each of the three Capacitor packages in independently
+(`existing || '^6.2.0'`), so an app already declaring `@capacitor/core: ^7` got `@capacitor/android:
+^6.2.0` bolted on beside it. `cap add` refuses to run across mismatched majors — a ~1-second failure,
+exactly what the log shows. The major is now decided ONCE (core is authoritative; else any declared
+`@capacitor/*`; else our default) and applied to all three.
+
+### OUR OWN DIAGNOSIS WAS WRONG — the honesty bug (rule 5 step 5)
+The panel told the user: *"The build used a strict install that needs a lock file this app does not
+have."* The install had taken 19 seconds and gone GREEN. `classifyBuildFailure` was matching the WHOLE
+job log, which contains every successful step — and a healthy `npm ci || npm install` always leaves an
+`npm ci` complaint behind. A confident, wrong diagnosis aimed the repair at the wrong file.
+**Fix:** patterns are now matched against `failedStepSection(log)` — the last `##[group]` containing
+`##[error]`, i.e. the step that actually broke. The `NBAI_FAILED_STAGE` marker is still read from the
+FULL log, because the step printing it is by definition not the step that failed.
+
+### `chmod: cannot access` is a MISSING FILE, not a permission problem
+It was about to be claimed by the `GRADLEW_NOT_EXECUTABLE` pattern, whose repair adds a chmod that is
+already there — a wasted attempt fixing nothing. Now classified as `ANDROID_PLATFORM_MISSING`, checked
+BEFORE the permission pattern, and repaired by refreshing the workflow (the new one cannot swallow the
+failure), which heals every already-pushed repository carrying the old version.
+
+### VISIBLE UI BUG — "[object Object], [object Object]"
+The panel read `requiredSecrets.android` as `string[]` when the server sends `RequiredSecret[]`
+(`{name, what, where}`), so real users were told: *"add your signing key to the repository as 4 secrets:
+[object Object], [object Object], …"*. TypeScript believed the wrong declaration and `join()` did
+exactly what it was told. Now typed correctly and rendered as a list of NAME — what it is, which is what
+a non-technical user actually needs.
+
+### What the screenshots also PROVED works
+PR #2053 is live and correct: the button genuinely dispatched, the panel watched the real run, detected
+the failure, called the auto-fix, and reported an honest "could not correct it automatically" instead of
+hanging or faking success. The plumbing is right; these were the remaining defects behind it.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1016 files / 10682 tests, 0 failures**.
+
+### Same day — the gap that would STILL have said "NavBharatAI could not fix this one on its own"
+
+The admin asked the exact right question: *"navbharatai could not fix — yeh to nahi ayega?"* Audited it
+rather than reassuring, and found a real gap.
+
+`ANDROID_PLATFORM_MISSING` declared `needs: [workflowPath]` only, so the auto-fix could read and rewrite
+the WORKFLOW but never `package.json` — which is precisely where the Capacitor-major fix lives. The
+sequence would have been: refresh the workflow (the file that merely EXPOSED the problem) → build fails
+again on the same mismatched majors → the repair now finds the workflow already current and changes
+nothing → loop guard correctly reports it unfixable → **the user is told NavBharatAI cannot fix
+something entirely within our power to fix.**
+
+Closed: `repairFiles` now takes a `FreshFiles` record ({workflow, packageJson}) rather than one
+workflow string, and refreshes every out-of-date NavBharatAI-generated file in ONE commit. The route
+regenerates package.json through the SAME `buildPackageJson` merge the setup route uses, so every
+dependency the user's app declares survives untouched and only what NavBharatAI owns is corrected (the
+Capacitor packages' shared major, and the build script). The loop guard is unchanged and still holds:
+only genuinely-differing files are included, so an already-current repo yields null and the loop stops.
+
+**Where "could not fix" is still the CORRECT answer (by design, never to be papered over):**
+a missing Play Store signing key (it is the user's permanent identity — we must not have it), and the
+user's own app failing to compile (reported precisely, never silently rewritten).
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1016 files / 10685 tests, 0 failures**.
+
+### OPEN ITEM (deliberate, needs a decision) — the Capacitor major NavBharatAI installs by default
+
+`DEFAULT_CAPACITOR_MAJOR = 6` in `mobileProjectAssembler.ts`. When a user's app declares no
+`@capacitor/*` package of its own — which is the normal case for a v5-generated app — all three
+Capacitor packages are installed at `^6.0.0`.
+
+**Why it was NOT bumped in this batch (rule 6 — honest boundary, not an oversight):** Capacitor 6 is
+several majors behind current. `^6.0.0` resolves and works, and it is what already shipped, so leaving
+it cannot regress anything. Raising it, however, cannot be verified from this session: there is no
+`npm install` here, so "does `@capacitor/cli@N` still create a working Android project on the runner
+with Java 21" is unanswerable offline. Bumping it blind would risk breaking EVERY user's build to chase
+a version number — the exact trade safeguard #3 forbids.
+
+**What would settle it:** one real run of the generated `.apk` workflow with the default raised (a
+throwaway app is enough). If green, bump the constant; the alignment logic already handles every major
+uniformly, so it is a one-line change plus the existing tests. Until then this stays deliberate and
+recorded, not silently stale.

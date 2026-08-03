@@ -259,7 +259,7 @@ describe('the workflow tells us which stage died, instead of us guessing', () =>
     const d = classifyBuildFailure('##[error]Process completed with exit code 1.\nNBAI_FAILED_STAGE=install', APK_PATH);
     expect(d.code).toBe('STALE_WORKFLOW');
     expect(d.autoFixable).toBe(true);
-    const repair = repairFiles(d, { [APK_PATH]: '# an old workflow' }, APK_PATH, APK_WORKFLOW);
+    const repair = repairFiles(d, { [APK_PATH]: '# an old workflow' }, APK_PATH, { workflow: APK_WORKFLOW });
     expect(repair?.files[APK_PATH]).toBe(APK_WORKFLOW);
   });
 
@@ -272,7 +272,7 @@ describe('the workflow tells us which stage died, instead of us guessing', () =>
 
   it('THE LOOP GUARD on the refresh: an already-current workflow is not committed again', () => {
     const d = classifyBuildFailure('##[error]exit code 1\nNBAI_FAILED_STAGE=capacitor', APK_PATH);
-    expect(repairFiles(d, { [APK_PATH]: APK_WORKFLOW }, APK_PATH, APK_WORKFLOW)).toBeNull();
+    expect(repairFiles(d, { [APK_PATH]: APK_WORKFLOW }, APK_PATH, { workflow: APK_WORKFLOW })).toBeNull();
   });
 
   it('and with no fresh workflow supplied it simply cannot fix it — never an empty commit', () => {

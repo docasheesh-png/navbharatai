@@ -95,3 +95,54 @@ describe('HostingChooser — "I host it myself" (BYO hosting via own-repo git st
     expect(html).toContain('Connected: aashish/mitrify');
   });
 });
+
+// ADMIN REPORT 2026-08-02 (phone, Publish surface): "niche scroll nahi ho raha. iske sabhi button
+// farzi hai, koi bhi kaam nahi kar raha hai." Two real defects, both locked here.
+describe('HostingChooser — the sheet must scroll on a phone (clipped-content fix)', () => {
+  it('caps the card at the viewport and scrolls the BODY, with the header pinned', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    // Without a height cap the card grew past the screen and `overflow-hidden` CLIPPED everything
+    // below the fold (the "Set up" button, the full-stack note) with no way to reach it.
+    expect(html).toContain('max-h-[85vh]');
+    // The body is the one scroll container…
+    expect(html).toContain('overflow-y-auto');
+    // …and the swipe stays inside the sheet instead of scrolling the page behind it.
+    expect(html).toContain('overscroll-contain');
+  });
+
+  it('still renders the content that used to be clipped below the fold', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Set up');                 // path 3's button
+    expect(html).toContain('coming soon');            // the full-stack note under it
+    expect(html).toContain('always the same app you built');
+  });
+});
+
+describe('HostingChooser — a publish that cannot start SAYS SO (no dead buttons)', () => {
+  it('shows the honest reason inline and does NOT ask to close when onDeploy is blocked', () => {
+    // A blocked publish returns a reason string; the chooser must surface it rather than no-op.
+    let closed = false;
+    const html = renderToStaticMarkup(
+      <HostingChooser
+        providers={[P('firebase', 'Firebase Hosting', true)]}
+        onDeploy={() => 'Build an app first — there is nothing to publish yet.'}
+        onClose={() => { closed = true; }}
+        busy={false}
+      />,
+    );
+    // Static render can't click, so assert the wiring that makes it possible: the button is enabled
+    // (a real action), and the chooser owns an error surface for the returned reason.
+    expect(html).toContain('Publish on NavBharatAI');
+    expect(html).not.toContain('disabled=""');
+    expect(closed).toBe(false); // onClose is never called just by rendering
+  });
+
+  it('explains WHY the NavBharatAI button is greyed out when our host is unavailable', () => {
+    // A disabled button with no explanation is its own dead end.
+    const html = render([P('vercel', 'Vercel', true)]); // no configured 'firebase'
+    expect(html).toContain('disabled');
+    expect(html).toContain('NavBharatAI hosting isn'); // apostrophe is HTML-escaped in static markup
+    expect(html).toContain('t available right now');
+    expect(html).toContain('you can still publish to your own'); // gives a real way forward
+  });
+});

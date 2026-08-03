@@ -5,6 +5,7 @@ import {
   customDomainRecords,
   customDomainStatus,
   firebaseCustomDomainsEnabled,
+  customDomainErrorMessage,
 } from './firebaseCustomDomain';
 
 describe('firebaseCustomDomain — pure helpers', () => {
@@ -179,5 +180,50 @@ describe('attachCustomDomain — ensures the dedicated site exists BEFORE attach
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// HONESTY fix (admin 2026-08-02): every domain failure said "Please try again" — even permanent ones,
+// which loops the user forever on something a retry can never fix.
+describe('customDomainErrorMessage — the right answer per failure class (never a false "try again")', () => {
+  it('a PERMISSION failure says it is our side to enable and that retrying will not help', () => {
+    for (const raw of [
+      'Request had insufficient authentication scopes',
+      'PERMISSION_DENIED: caller lacks firebasehosting.customDomains.create',
+      'Firebase Hosting API error (HTTP 403)',
+    ]) {
+      const m = customDomainErrorMessage(new Error(raw));
+      expect(m).toMatch(/not switched on|enable/i);
+      expect(m).toMatch(/will not help|contact support/i);
+      expect(m).not.toMatch(/please try again in a moment/i);
+    }
+  });
+
+  it('an ALREADY-TAKEN domain tells the user to free it first (a retry cannot fix it)', () => {
+    const m = customDomainErrorMessage(new Error('customDomain already exists on another site'));
+    expect(m).toMatch(/already connected/i);
+    expect(m).toMatch(/remove it there first/i);
+  });
+
+  it('a quota/rate failure is the one case where waiting + retrying IS the advice', () => {
+    const m = customDomainErrorMessage(new Error('RESOURCE_EXHAUSTED: quota exceeded'));
+    expect(m).toMatch(/wait a few minutes/i);
+  });
+
+  it('an invalid/not-found domain points at the input, with a real example', () => {
+    const m = customDomainErrorMessage(new Error('HTTP 400: invalid domain name'));
+    expect(m).toMatch(/check the spelling/i);
+    expect(m).toContain('myshop.com');
+  });
+
+  it('an unknown failure keeps the honest transient default', () => {
+    expect(customDomainErrorMessage(new Error('socket hang up'))).toMatch(/try again in a moment/i);
+    expect(customDomainErrorMessage(undefined)).toMatch(/try again in a moment/i);
+  });
+
+  it('never leaks the raw API text to the user (detail belongs in the server log)', () => {
+    const m = customDomainErrorMessage(new Error('projects/gen-lang-client-0866594388/sites/nbai-abc123 PERMISSION_DENIED'));
+    expect(m).not.toContain('gen-lang-client');
+    expect(m).not.toContain('nbai-abc123');
   });
 });

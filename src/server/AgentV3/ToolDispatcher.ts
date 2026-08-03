@@ -55,7 +55,7 @@ import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
@@ -1870,6 +1870,14 @@ export class ToolDispatcher {
             );
             return { path: file.path, kind, shrink: false, blocked: true };
           }
+          // DUPLICATE-MODULE guard PARITY (admin 2026-08-02: "duplicate file bane hi na"). write_file has
+          // refused a parallel copy under a second convention root (app/ vs src/) since the TaskForge
+          // autopsy — but write_files_batch never did, so the whole guard was one tool call away from being
+          // bypassed and a batch could quietly create the drifting second copy. Same decision, same refusal:
+          // block just this file and let the rest of the batch through.
+          if (kind === 'create' && this.duplicateModuleRefusal(file.path)) {
+            return { path: file.path, kind, shrink: false, blocked: true };
+          }
           // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
           // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
@@ -2030,6 +2038,28 @@ export class ToolDispatcher {
           );
           this.state?.appendTerminal(blockMsg);
           return blockMsg;
+        }
+        // STILL-IMPORTED FILE DELETION — BLOCKED (admin 2026-08-02: "galat tarah se file delete ho hi na").
+        // The bulk guard above deliberately allows deleting ONE stale file by name — right for genuinely
+        // dead code, catastrophic for a module other files still import: it vanishes, every importer breaks
+        // and the app stops building. The project's own import graph already knows who depends on what, so
+        // refuse EXACTLY the deletes that would orphan a live importer and allow the rest. Honest cleanup
+        // keeps working; a build-killing delete becomes impossible. Kill switch AGENTV3_DELETE_GUARD=off.
+        if (process.env.AGENTV3_DELETE_GUARD !== 'off') {
+          for (const target of singleSourceDeleteTargets(command)) {
+            let importers: string[] = [];
+            try { importers = getWorkspaceMemory(this.workspaceId).impactRadius(target).direct; } catch { importers = []; }
+            if (importers.length > 0) {
+              const blockMsg = importedFileDeletionMessage(target, importers);
+              try {
+                getWorkspaceMemory(this.workspaceId).recordAudit(
+                  `[BLOCKED-DESTRUCTIVE] refused delete of still-imported file ${target} (${importers.length} importer(s))`,
+                );
+              } catch { /* audit best-effort */ }
+              this.state?.appendTerminal(blockMsg);
+              return blockMsg;
+            }
+          }
         }
         // DESTRUCTIVE DEPENDENCY MUTATION — BLOCKED (deep-test SaaS dashboard, build 5ed0424a). The
         // preview was LIVE (Vite v5, dev server up), then the agent ran `npm audit fix --force` to "fix

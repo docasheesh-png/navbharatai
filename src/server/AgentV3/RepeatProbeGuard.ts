@@ -14,12 +14,16 @@
 export interface RepeatProbeState {
   /** signature → how many times this exact call has been seen. */
   counts: Map<string, number>;
-  /** signatures already steered once (so the guard advises once, not every turn). */
-  steered: Set<string>;
+  /**
+   * signature → the call-count at which this signature must be steered NEXT. Starts at the threshold and
+   * DOUBLES after each steer, so the guard advises at 3, 6, 12, 24… identical calls: firm enough to break a
+   * real loop, sparse enough never to spam a turn.
+   */
+  steerAt: Map<string, number>;
 }
 
 export function newRepeatProbeState(): RepeatProbeState {
-  return { counts: new Map(), steered: new Set() };
+  return { counts: new Map(), steerAt: new Map() };
 }
 
 export function loopGuardEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -72,21 +76,39 @@ export function recordAndCheckRepeat(
   const sig = probeSignature(toolName, input);
   const n = (state.counts.get(sig) ?? 0) + 1;
   state.counts.set(sig, n);
-  if (n < threshold || state.steered.has(sig)) return null;
-  state.steered.add(sig);
-  return repeatProbeSteer(toolName, n);
+  const due = state.steerAt.get(sig) ?? threshold;
+  if (n < due) return null;
+  // ESCALATE (autopsy 2026-08-02): the guard used to steer ONCE per signature and then stay silent
+  // forever. A build that ignored the single nudge at minute 13 churned on to minute 30+ with the engine
+  // saying nothing more. Now the next steer is scheduled at double the current count, so a model that
+  // keeps repeating the same dead call is told again — louder each time — instead of silently looping.
+  state.steerAt.set(sig, n * 2);
+  return repeatProbeSteer(toolName, n, threshold);
 }
 
-/** The model-facing advice for a detected loop. Pure. */
-export function repeatProbeSteer(toolName: string, times: number): string {
-  return (
-    `[LOOP GUARD] You have issued the SAME \`${toolName}\` call ${times} times and it keeps returning the ` +
-    `same result — repeating it will not make progress. STOP and change approach:\n` +
-    `• If a search (grep/read) keeps finding nothing, what you're looking for does NOT exist there — accept ` +
-    `that and move on, or search differently.\n` +
-    `• If an edit keeps failing, read_file the target FIRST and copy the exact current text before editing.\n` +
-    `• Do not re-issue this identical call again. Take the next concrete step toward finishing the app.`
-  );
+/**
+ * The model-facing advice for a detected loop. ESCALATES with how far past the threshold the repeat has
+ * gone: the first nudge advises a change of approach; a repeat that survived an earlier nudge is told
+ * plainly that the call is now BANNED for the rest of the build and that it must finish with what it has.
+ * Pure.
+ */
+export function repeatProbeSteer(toolName: string, times: number, threshold = 3): string {
+  const escalated = times >= threshold * 2;
+  const head = escalated
+    ? `[LOOP GUARD — FINAL] You have now issued the SAME \`${toolName}\` call ${times} times, INCLUDING after ` +
+      `being told to stop. This call is banned for the rest of this build — issuing it again wastes the ` +
+      `remaining budget and the app will ship unfinished.`
+    : `[LOOP GUARD] You have issued the SAME \`${toolName}\` call ${times} times and it keeps returning the ` +
+      `same result — repeating it will not make progress. STOP and change approach:`;
+  const body = escalated
+    ? `\n• Accept the current result as final and DO NOT verify it again.\n` +
+      `• Move straight to the next unfinished item and complete the app with what you already know.\n` +
+      `• If you believe you are blocked, write what is missing into the summary and finish — do not loop.`
+    : `\n• If a search (grep/read) keeps finding nothing, what you're looking for does NOT exist there — accept ` +
+      `that and move on, or search differently.\n` +
+      `• If an edit keeps failing, read_file the target FIRST and copy the exact current text before editing.\n` +
+      `• Do not re-issue this identical call again. Take the next concrete step toward finishing the app.`;
+  return head + body;
 }
 
 /**

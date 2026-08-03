@@ -6,6 +6,7 @@ import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirement
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -192,7 +193,7 @@ import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptC
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
-import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, formatEta, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -5567,6 +5568,9 @@ export function registerAgentV3Routes(app: Express): void {
     let etaTotalMs = 0;
     let etaStartMs = 0;
     let etaTick = 0;
+    // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
+    // so each re-baseline step stays proportional to the app's real size, not to the growing budget.
+    let etaBaseMs = 0;
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -5580,11 +5584,12 @@ export function registerAgentV3Routes(app: Express): void {
       if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
           const elapsedMs = Date.now() - etaStartMs;
-          const remainingMs = etaTotalMs - elapsedMs;
-          const inTxt = formatEta(elapsedMs).replace('~', '');
-          const text = remainingMs > 45_000
-            ? `⏱️ Still building… ${inTxt} in · ~${formatEta(remainingMs).replace('~', '')} to go`
-            : `⏱️ Still building… ${inTxt} in · wrapping up (a little longer than estimated)`;
+          // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
+          // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
+          // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs);
+          etaTotalMs = tick.totalMs;
+          const text = tick.text;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
           // this ONE transient line the moment the build finishes (it is live status, not chat history).
@@ -5892,6 +5897,7 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const est = estimateBuildTime(complexityFromPrompt(prompt));
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
+          etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ${est.etaText} — I'll keep you posted as I go.`, ts: Date.now() });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
@@ -6812,6 +6818,24 @@ export function registerAgentV3Routes(app: Express): void {
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
             await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
           } catch { /* warming is best-effort — never blocks a build */ }
+          // PROJECT CONTRACT CARD (autopsy 2026-08-02) — PREVENT the two import mistakes this edit
+          // build made and then had to self-heal: it imported shared types from `./storage` (the wrong
+          // owner) and used `nanoid` without declaring it in package.json. The builder had the file
+          // TREE and a few file CONTENTS, but never a compact symbol→module map or the declared-package
+          // list, so it guessed. Hand it both BEFORE it writes a line — a heal that keeps firing is an
+          // unfixed root cause. Runs AFTER warmIndexFiles (the graph is warm) so the card reflects the
+          // real project. Pure + bounded (caps in projectContractCard); best-effort — on any failure
+          // the build proceeds exactly as before. Kill switch AGENTV3_CONTRACT_CARD=off.
+          if (process.env.AGENTV3_CONTRACT_CARD !== 'off') {
+            try {
+              const pkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => '');
+              const card = projectContractCard({
+                symbols: getWorkspaceMemory(workspaceId).graph().symbols,
+                declaredPackages: declaredPackagesFromPackageJson(pkgRaw),
+              });
+              if (card) architectSystem = `${card}\n\n---\n\n${architectSystem}`;
+            } catch { /* the contract card is best-effort — never blocks a build */ }
+          }
           // P-AI.2 retrieval v2 (Mitrify autopsy) — intent-aware grounding: content hits (grep) +
           // structural anchors (package.json/README/entry/routes/schema) + import-graph centrality.
           // Replaces path-token-overlap-only selection, whose zero-overlap tie handed a survey

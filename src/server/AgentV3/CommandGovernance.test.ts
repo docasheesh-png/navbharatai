@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
 
 describe('classifyCommandRisk — HIGH', () => {
   it('flags recursive delete of root/home/wildcard', () => {
@@ -289,3 +289,47 @@ describe('isDestructiveEmptyOverwrite — tool-path self-destruct (StudySync vec
     expect(m).toMatch(/full new content|FULL new content/i);
   });
 });
+
+describe('singleSourceDeleteTargets — the deletes the bulk guard allows, so the caller can check importers', () => {
+  it('returns the single source file an rm/unlink would delete', () => {
+    expect(singleSourceDeleteTargets('rm src/components/Header.tsx')).toEqual(['src/components/Header.tsx']);
+    expect(singleSourceDeleteTargets('unlink src/lib/api.ts')).toEqual(['src/lib/api.ts']);
+    expect(singleSourceDeleteTargets("rm 'src/components/Card.tsx'")).toEqual(['src/components/Card.tsx']);
+  });
+
+  it('finds targets inside chained / multi-segment commands', () => {
+    expect(singleSourceDeleteTargets('npm run build && rm src/old/Legacy.tsx'))
+      .toEqual(['src/old/Legacy.tsx']);
+    expect(singleSourceDeleteTargets('rm src/a.ts; rm src/b.ts').sort()).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('ignores flags, non-source files and regenerable paths', () => {
+    expect(singleSourceDeleteTargets('rm -f dist/bundle.js')).toEqual([]);
+    expect(singleSourceDeleteTargets('rm README.md')).toEqual([]);
+    expect(singleSourceDeleteTargets('rm node_modules/x/index.js')).toEqual([]);
+    expect(singleSourceDeleteTargets('rm -rf node_modules')).toEqual([]);
+  });
+
+  it('never throws on junk', () => {
+    for (const junk of ['', '   ', 'rm', 'rm -rf']) expect(() => singleSourceDeleteTargets(junk)).not.toThrow();
+  });
+});
+
+describe('importedFileDeletionMessage — honest refusal naming the real importers', () => {
+  it('names the file, the count and the importers, and says what to do instead', () => {
+    const msg = importedFileDeletionMessage('src/components/Header.tsx', ['src/App.tsx', 'src/pages/Home.tsx']);
+    expect(msg).toContain('GOVERNANCE BLOCKED');
+    expect(msg).toContain('src/components/Header.tsx');
+    expect(msg).toContain('2 file(s)');
+    expect(msg).toContain('src/App.tsx');
+    expect(msg).toContain('update those importers');
+  });
+
+  it('bounds a long importer list', () => {
+    const many = Array.from({ length: 12 }, (_, i) => `src/f${i}.tsx`);
+    const msg = importedFileDeletionMessage('src/x.tsx', many);
+    expect(msg).toContain('+7 more');
+    expect(msg).not.toContain('src/f11.tsx');
+  });
+});
+

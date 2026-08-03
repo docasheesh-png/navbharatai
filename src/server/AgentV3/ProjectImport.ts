@@ -754,3 +754,47 @@ export function importSummaryLine(extracted: ExtractedProject, framework: string
   if (tail) parts.push(tail);
   return parts.join(' ');
 }
+
+/**
+ * The COMPLETE, durable accounting of an import: every archive entry, accounted for.
+ *
+ * ROOT CAUSE (admin 2026-08-03, mitrify GitHub import): the repo listing said "316 files", the build
+ * then said "166 source files", and NOTHING in the build report explained the gap — so the only
+ * possible conclusion was "10% bhi import nahi ho paya". The engine already COUNTS every dropped
+ * entry by reason (`extracted.dropped`) and then throws those numbers away: the honest note lives
+ * only in an ephemeral chat narration, which is not what the admin diagnoses from. Worse, the
+ * integrity warnings that DO reach the report hedge with "if part of the repo was too large to
+ * import, this may not be accurate" — telling the user something might be missing while withholding
+ * the numbers that would settle it.
+ *
+ * This returns one line where the numbers ADD UP, so "where did my files go?" is always answerable
+ * from the report alone. Pure.
+ */
+export function importAccountingLine(extracted: ExtractedProject): string {
+  const d = extracted.dropped;
+  const source = Object.keys(extracted.files).length;
+  const assets = Object.keys(extracted.assets).length;
+  const sandboxOnly = Object.keys(extracted.sandboxOnly).length;
+  const droppedTotal = d.dir + d.junk + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap + d.outsideAppRoot;
+  const kept: string[] = [`${source} source file${source === 1 ? '' : 's'}`];
+  if (assets) kept.push(`${assets} image/font asset${assets === 1 ? '' : 's'}`);
+  if (sandboxOnly) kept.push(`${sandboxOnly} lockfile${sandboxOnly === 1 ? '' : 's'} (sandbox only)`);
+
+  // Every reason, always — a zero bucket is omitted, but nothing that happened is hidden.
+  const why: string[] = [];
+  if (d.dir) why.push(`${d.dir} dependency/build files (node_modules, dist — re-created by install)`);
+  if (d.junk) why.push(`${d.junk} OS/editor junk`);
+  if (d.secret) why.push(`${d.secret} secret file${d.secret === 1 ? '' : 's'} (.env/keys — never imported, re-enter your own)`);
+  if (d.binary) why.push(`${d.binary} large binaries (images/video over the asset limit)`);
+  if (d.tooLarge) why.push(`${d.tooLarge} over the 900KB per-file limit`);
+  if (d.unsafe) why.push(`${d.unsafe} with unsafe paths`);
+  if (d.overCap) why.push(`${d.overCap} over the import size cap`);
+  if (d.outsideAppRoot) why.push(`${d.outsideAppRoot} outside the app folder`);
+
+  const head = `IMPORT ACCOUNTING — ${extracted.totalEntries} archive entr${extracted.totalEntries === 1 ? 'y' : 'ies'} → KEPT ${kept.join(' + ')}`;
+  const tail = droppedTotal > 0
+    ? `; NOT imported ${droppedTotal} (${why.join(', ')})`
+    : '; nothing was dropped';
+  const root = extracted.appRoot ? ` [app landed from "${extracted.appRoot}/"]` : '';
+  return `${head}${tail}.${root} Source files are what the AI reads and edits; the rest are either re-created by \`npm install\` or not code.`;
+}

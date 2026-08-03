@@ -111,7 +111,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, importAccountingLine, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
 import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFetch';
 import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, materializeRepoViaApi } from '../AgentV3/GithubApiTree';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
@@ -5049,6 +5049,27 @@ export function registerAgentV3Routes(app: Express): void {
     // describe the app immediately (like Claude reading a tree, not bulk-cloning). Injected into the
     // architect prompt below; the full file materialization (zipball) still runs for edit/build.
     let importSurvey: { url: string; fileCount: number; structure: string; keyFiles: Record<string, string>; truncated: boolean } | null = null;
+    /**
+     * DURABLE import accounting (admin 2026-08-03, mitrify): record where every archive entry went,
+     * into the BUILD REPORT — not only the chat narration. The gap between "316 files" (the repo
+     * listing) and "166 source files" (what the AI edits) was never explained anywhere the admin
+     * could read it, so the only possible reading was "10% bhi import nahi ho paya". The numbers
+     * exist (`extracted.dropped`); they were simply thrown away. Best-effort by construction —
+     * accounting must never break an import.
+     */
+    const recordImportAccounting = (
+      extracted: Parameters<typeof importAccountingLine>[0],
+      diag?: { record: (issue: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }) => void },
+    ): void => {
+      try {
+        const line = importAccountingLine(extracted);
+        // Durable: the build report must answer "where did my files go?" on its own.
+        diag?.record({ phase: 'build', severity: 'info', code: 'IMPORT_ACCOUNTING', message: line, autoResolved: true });
+        // …and answer it where the user is actually looking, too.
+        emit({ type: 'narration', agent: 'architect', text: `📊 ${line}`, ts: Date.now() });
+      } catch { /* accounting is best-effort */ }
+    };
+
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
@@ -5221,6 +5242,7 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
         const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
+        recordImportAccounting(extracted);
         const lockKept = Object.keys(extracted.sandboxOnly);
         await landImportedProject(extracted.files, {
           source: zipImports[0].name || 'your zip',
@@ -6148,6 +6170,7 @@ export function registerAgentV3Routes(app: Express): void {
               const zres = await fetchGithubRepoZip({ url: cleanImportUrl, token: githubToken || undefined });
               if (zres.ok && zres.buf) {
                 const extracted = await extractZipProject(zres.buf);
+                recordImportAccounting(extracted, buildDiag);
                 if (Object.keys(extracted.files).length > 0) {
                   const lockKept = Object.keys(extracted.sandboxOnly);
                   serverSideLanded = await landImportedProject(extracted.files, {

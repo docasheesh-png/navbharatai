@@ -276,6 +276,45 @@ export function destructiveSourceDeletionTarget(command: string): string | null 
   return null;
 }
 
+/**
+ * The single source FILES an `rm` command would delete — the deletes the bulk guard deliberately allows
+ * (its own message even says "If ONE file is genuinely stale, delete just that single file by name").
+ *
+ * ROOT CAUSE this enables (admin 2026-08-02: "galat tarah se file delete ho hi na"): allowing every single
+ * delete is right for a genuinely stale file and CATASTROPHIC for a file other modules still import — the
+ * module vanishes, every importer breaks, and the app dies instantly. The caller pairs this list with the
+ * project's real import graph and refuses ONLY the deletes that would orphan a live importer, so honest
+ * cleanup keeps working while a build-killing delete becomes impossible. Pure; never throws.
+ */
+export function singleSourceDeleteTargets(command: string): string[] {
+  const cmd = (command || '').trim();
+  if (!cmd) return [];
+  const out: string[] = [];
+  for (const seg of cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/)) {
+    const m = /^(?:rm|unlink)\s+(.+)$/i.exec(seg.trim());
+    if (!m) continue;
+    for (const raw of m[1].trim().split(/\s+/)) {
+      if (raw.startsWith('-')) continue;
+      const p = cleanPathArg(raw);
+      if (p && classifySourceTarget(p) === 'file' && !out.includes(p)) out.push(p);
+    }
+  }
+  return out;
+}
+
+/** The honest refusal for deleting a source file that other modules still import. Pure. */
+export function importedFileDeletionMessage(target: string, importers: readonly string[]): string {
+  const shown = importers.slice(0, 5);
+  const more = importers.length - shown.length;
+  return (
+    `[GOVERNANCE BLOCKED] Refused to delete "${target}" — ${importers.length} file(s) in this project still ` +
+    `import it: ${shown.join(', ')}${more > 0 ? `, +${more} more` : ''}. Deleting it would break every one of ` +
+    `them instantly and the app would stop building. If this module really must go, FIRST update those ` +
+    `importers to stop using it, then delete it. If you only wanted to change its contents, edit the file ` +
+    `instead of removing it.`
+  );
+}
+
 /** The honest, actionable refusal shown to the build agent when it tries to destroy generated app source. */
 export function destructiveSourceDeletionMessage(target: string): string {
   return (

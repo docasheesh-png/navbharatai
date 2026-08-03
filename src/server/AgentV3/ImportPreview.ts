@@ -218,3 +218,28 @@ export function externalServiceNote(varNames: string[]): string {
   const more = ext.length - shown.length;
   return `🔌 The app boots with a local database + dev config, but ${ext.length} value${ext.length === 1 ? '' : 's'} it expects can't be provisioned in the sandbox (${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}) — set to empty placeholders for now, so features that use them (payments, third-party APIs, external auth) stay inactive until you add real values in Settings → Secrets.`;
 }
+
+/**
+ * EARN the "live preview is up" verdict (admin 2026-08-03, "Cannot GET /customer/home"): a port being
+ * up is NOT the app serving. The boot must actually VISIT the home route and read the rendered HTML;
+ * this turns that (already-classified) result into the honest user-facing narration.
+ *
+ * @param rendered  from analyzePreviewHtml — did the home route serve a real app page?
+ * @param problems  the specific problems it found (e.g. "Cannot GET", build-error overlay) — the WHY.
+ * @param port      the bound port, for the success line.
+ * @param needsDb   full-stack apps: point at the most common real cause + the honest partial state.
+ * PURE.
+ */
+export function previewServeNarration(opts: { rendered: boolean; problems: string[]; port: number; needsDb: boolean }): { ok: boolean; text: string } {
+  if (opts.rendered) {
+    return { ok: true, text: `✅ Live preview is up on port ${opts.port} — open the Preview tab (Live server).` };
+  }
+  const why = opts.problems[0] || 'the server started but is not serving its pages yet';
+  // A full-stack app that serves its API but 404s its client routes is the classic Express-serves-SPA
+  // gap — name it honestly and point at the fix, instead of the old fake "✅ up".
+  const cannotGet = opts.problems.some((p) => /cannot get|404|not serving/i.test(p));
+  const tail = cannotGet && opts.needsDb
+    ? ' Your server started, but it isn\'t serving the app\'s pages (only its API). Tap reload (↻) — a dev server can take a moment — or press Diagnose for the full boot log.'
+    : ' Tap reload (↻) in the Preview tab, or press Diagnose to see the exact boot log.';
+  return { ok: false, text: `⚠️ ${why}.${tail}` };
+}

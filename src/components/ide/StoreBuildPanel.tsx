@@ -38,7 +38,20 @@ interface SetupResult {
   kind: 'built' | 'static';
   webDir: string;
   notes: string[];
-  requiredSecrets: { android: string[]; ios: string[] };
+  // Each secret is an OBJECT, not a string. This was declared as `string[]`, so the panel rendered
+  // "add your signing key as 4 secrets: [object Object], [object Object], …" to real users — the type
+  // said string, TypeScript believed it, and join() did exactly what it was told. Mirrors
+  // RequiredSecret in server/lib/mobileShipKit.ts.
+  requiredSecrets: { android: RequiredSecret[]; ios: RequiredSecret[] };
+}
+
+/** A repository secret only the user can set — their signing identity. */
+interface RequiredSecret {
+  name: string;
+  /** What it is, in plain language. */
+  what: string;
+  /** Exactly where to get it. */
+  where: string;
 }
 
 interface RunInfo {
@@ -451,11 +464,20 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               </p>
               <p className="text-white/60">
                 Play needs a signed bundle, so add your signing key to the repository as
-                {' '}{setup.requiredSecrets.android.length} secrets:
-                {' '}<span className="text-white/80">{setup.requiredSecrets.android.join(', ')}</span>.
-                This key is your app's permanent identity on the Play Store — it must stay with you, and
-                NavBharatAI never sees it. The guide walks through creating it, step by step.
+                {' '}{setup.requiredSecrets.android.length} secrets. This key is your app's permanent
+                identity on the Play Store — it must stay with you, and NavBharatAI never sees it.
               </p>
+              {/* Each secret spelled out: the name to type AND what it is. A bare list of names told a
+                  non-technical user nothing about what to actually put in them. */}
+              <ul className="mt-2 space-y-1.5">
+                {setup.requiredSecrets.android.map((s) => (
+                  <li key={s.name} className="text-white/55">
+                    <span className="text-white/85 font-mono text-[11px]">{s.name}</span>
+                    {s.what ? <> — {s.what}</> : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-white/60 mt-2">The guide walks through creating it, step by step.</p>
               {onOpenGuide && (
                 <button onClick={onOpenGuide} className="mt-2 text-indigo-400 hover:text-indigo-300 font-medium">
                   Show me how, step by step →

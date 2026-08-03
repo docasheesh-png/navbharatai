@@ -76,7 +76,15 @@ export function normalizeLog(raw: string): string {
  * confident wrong commit.
  */
 export function classifyBuildFailure(rawLog: string, workflowPath: string): BuildFailureDiagnosis {
-  const log = normalizeLog(rawLog);
+  const full = normalizeLog(rawLog);
+  // Patterns are matched against the FAILED STEP ONLY. A job log contains every step, including the
+  // ones that succeeded, and successful steps are noisy: the old install ran `npm ci || npm install`,
+  // so a perfectly healthy install left a loud npm-ci complaint in the log. Matching the whole job read
+  // that complaint and reported "the build used a strict install that needs a lock file" for a run
+  // whose install had taken 19 seconds and gone green — a confident, wrong diagnosis pointing the
+  // repair at the wrong file. The stage marker is still read from the FULL log, because the step that
+  // prints it is by definition a different step from the one that broke.
+  const log = failedStepSection(full);
 
   // ── The user's own signing key. Never auto-fixable: we do not have it, and must not have it. ──
   const secretMatch = log.match(/Missing required secret[:\s]+([A-Z_][A-Z0-9_]*)/);
@@ -172,6 +180,18 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
     };
   }
 
+  // "chmod: cannot access './gradlew'" is NOT a permissions problem — the file is not there at all,
+  // because `npx cap add android` never created the project. Checked BEFORE the permission pattern,
+  // which would otherwise claim it and "repair" a chmod that is already correct.
+  if (/chmod:.{0,40}gradlew.{0,60}No such file|gradlew.{0,20}No such file or directory|Could not find or load main class org\.gradle/i.test(log)) {
+    return {
+      code: 'ANDROID_PLATFORM_MISSING',
+      summary: 'The Android project was never created, so there was nothing to compile.',
+      autoFixable: true,
+      needs: [workflowPath],
+    };
+  }
+
   if (/gradlew.{0,40}Permission denied|Permission denied.{0,40}gradlew|\.\/gradlew: not found/i.test(log)) {
     return {
       code: 'GRADLEW_NOT_EXECUTABLE',
@@ -224,7 +244,7 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
   // with the current one is a legitimate, safe repair. It is how a repository created months ago picks
   // up every fix made since, including ones nobody has written a specific pattern for. It cannot loop:
   // once the workflow matches the current kit the repair changes nothing and is reported as unfixable.
-  const stage = failedStage(log);
+  const stage = failedStage(full);
   if (stage && stage !== 'webbuild') {
     return {
       code: 'STALE_WORKFLOW',
@@ -261,6 +281,23 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
 export function failedStage(log: string): 'install' | 'webbuild' | 'capacitor' | 'android' | null {
   const m = normalizeLog(log).match(/NBAI_FAILED_STAGE=(install|webbuild|capacitor|android)\b/);
   return (m?.[1] as 'install' | 'webbuild' | 'capacitor' | 'android') ?? null;
+}
+
+/**
+ * The part of a job log belonging to the step that actually failed.
+ *
+ * GitHub wraps each step in `##[group]…##[endgroup]` and marks a failure with `##[error]`. A successful
+ * step never emits `##[error]`, so the last group that contains one IS the step that broke. Returning
+ * the whole log when nothing matches is deliberate: an older run with no group markers should still be
+ * classified on its full text rather than silently yielding nothing.
+ */
+export function failedStepSection(log: string): string {
+  const parts = log.split(/^##\[group\]/m);
+  if (parts.length < 2) return log;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (/##\[error\]/.test(parts[i])) return parts[i];
+  }
+  return log;
 }
 
 /**
@@ -504,9 +541,11 @@ export function repairFiles(
     case 'NPM_CI_NO_LOCK':
       return one(workflowPath, repairNpmCi(wf), 'NavBharatAI: install the app’s libraries without requiring a lock file') ?? refresh();
     case 'ANDROID_PLATFORM_MISSING':
-      return one(workflowPath, repairAndroidPlatform(wf), 'NavBharatAI: create the Android project before compiling it');
+      // The current workflow no longer swallows a failed `cap add` and verifies the project exists, so
+      // refreshing it IS the fix for any repo still carrying the old swallowing version.
+      return one(workflowPath, repairAndroidPlatform(wf), 'NavBharatAI: create the Android project before compiling it') ?? refresh();
     case 'GRADLEW_NOT_EXECUTABLE':
-      return one(workflowPath, repairGradlewPermission(wf), 'NavBharatAI: allow the Android build tool to run');
+      return one(workflowPath, repairGradlewPermission(wf), 'NavBharatAI: allow the Android build tool to run') ?? refresh();
     case 'SDK_LICENSE_NOT_ACCEPTED':
       return one(workflowPath, repairSdkLicenses(wf), 'NavBharatAI: accept the Android build tool terms on the build machine');
     case 'JAVA_VERSION_TOO_OLD':

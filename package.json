@@ -104,6 +104,7 @@
     "vitest": "^2.1.9"
   },
   "overrides": {
-    "fast-uri": "^3.1.4"
+    "fast-uri": "^3.1.5",
+    "ip-address": "^10.3.1"
   }
 }

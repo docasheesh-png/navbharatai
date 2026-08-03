@@ -4,6 +4,7 @@ import {
   credentialGuardInstruction,
   findBootKillingEnvGuards,
   bootKillingGuardSummary,
+  bootKillerRepairInstruction,
   SECRETS_SETTINGS_PATH,
 } from './missingCredentialGuard';
 
@@ -157,5 +158,49 @@ describe('bootKillingGuardSummary — admin-facing, honest, bounded', () => {
     expect(msg).toContain('11 boot-killing env guard(s)');
     expect(msg).toContain('+3 more');
     expect(msg).not.toContain('f9.ts');
+  });
+});
+
+describe('bootKillerRepairInstruction — focused, safe, non-destructive', () => {
+  const found = findBootKillingEnvGuards({
+    'server/pay.ts': `if (!process.env.RAZORPAY_KEY_SECRET) throw new Error('missing');\n`,
+    'server/db.ts': `if (!process.env.DATABASE_URL) process.exit(1);\n`,
+  });
+  const text = bootKillerRepairInstruction(found);
+
+  it('names every offending file:line and env var so the healer cannot guess', () => {
+    expect(text).toContain('server/pay.ts:1');
+    expect(text).toContain('RAZORPAY_KEY_SECRET');
+    expect(text).toContain('server/db.ts:1');
+    expect(text).toContain('DATABASE_URL');
+  });
+
+  it('asks for the boolean + "Coming soon" shape, not a hidden feature', () => {
+    expect(text).toMatch(/Boolean\(process\.env/);
+    expect(text).toContain('Coming soon');
+    expect(text).toContain(SECRETS_SETTINGS_PATH);
+    expect(text).toMatch(/Do not hide or delete the feature/);
+  });
+
+  it('blocks the two UNSAFE shortcuts (re-adding a throw, or silencing TS with a non-null assertion)', () => {
+    expect(text).toMatch(/do not re-add a top-level throw/i);
+    expect(text).toMatch(/non-null assertion/i);
+  });
+
+  it('keeps the blast radius small — no refactors, no renames, no unrelated changes', () => {
+    expect(text).toMatch(/Fix ONLY this, nothing else/);
+    expect(text).toMatch(/Do not refactor anything else/);
+  });
+
+  it('still forbids faking a result, and requires an honest 503 on the server', () => {
+    expect(text).toMatch(/NEVER fake a result/);
+    expect(text).toContain('503');
+  });
+
+  it('caps the listed items at 20 so a pathological app cannot blow up the prompt', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ file: `f${i}.ts`, line: 1, envVar: `K${i}`, snippet: 'x' }));
+    const msg = bootKillerRepairInstruction(many);
+    expect(msg).toContain('f19.ts');
+    expect(msg).not.toContain('f20.ts');
   });
 });

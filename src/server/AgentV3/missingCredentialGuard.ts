@@ -148,6 +148,48 @@ export function findBootKillingEnvGuards(
 }
 
 /**
+ * The FOCUSED repair instruction handed to the bounded heal pass when the contract was violated anyway.
+ *
+ * Why an LLM pass and not a mechanical rewrite: the obvious textual fix (turn the `throw` into a
+ * `console.warn`) is NOT safe. A `throw` narrows types for everything after it, so removing it can turn a
+ * `string | undefined` into a type error and break the whole app's compile — trading a runtime brick for a
+ * build failure. The correct fix (a boolean flag, a guarded call site, a disabled "Coming soon" control) is
+ * a real code change, so we give the healer the EXACT file:line and the exact shape to produce, the same
+ * way hooksRepairInstruction does. Pure.
+ */
+export function bootKillerRepairInstruction(found: BootKillingGuard[]): string {
+  const list = found
+    .slice(0, 20)
+    .map((g) => `- ${g.file}:${g.line} — kills the app when ${g.envVar} is unset: \`${g.snippet}\``)
+    .join('\n');
+  return [
+    'CRITICAL — the app destroys itself when a credential is missing. Fix ONLY this, nothing else.',
+    '',
+    'These lines throw or exit at module/boot scope because an environment variable is not set:',
+    list,
+    '',
+    'That environment variable is supplied LATER by the end user from their own account, so at startup it',
+    'is legitimately empty — and right now that takes the ENTIRE app down (server refuses to boot / the page',
+    'goes blank). Every unrelated screen is destroyed by one key the user simply has not pasted yet.',
+    '',
+    'For EACH line above:',
+    '1. Delete the boot-time throw / process.exit. Nothing may crash at import or boot scope.',
+    '2. Replace it with a boolean, e.g. `const paymentsEnabled = Boolean(process.env.RAZORPAY_KEY_SECRET);`',
+    '   and export it if other modules need it.',
+    '3. Guard every use of that credential with the boolean. If TypeScript now complains that the value may',
+    '   be undefined, narrow it INSIDE the guarded branch — do not re-add a top-level throw and do not use',
+    '   a non-null assertion to silence it.',
+    '4. In the UI, render the affected control visibly DISABLED with the text "Coming soon" plus the exact',
+    `   key name and "${SECRETS_SETTINGS_PATH}". Do not hide or delete the feature.`,
+    '5. On the server, keep the route registered and answer honestly:',
+    '   `res.status(503).json({ error: "<feature> not configured yet", missing: "<ENV_VAR>" })`.',
+    '6. NEVER fake a result (no mock success response, no OTP that always passes).',
+    '',
+    'Do not refactor anything else, do not rename files, and do not change any unrelated behaviour.',
+  ].join('\n');
+}
+
+/**
  * A one-line, admin-facing summary of the detector's findings for the build report, or `''` when the app is
  * clean. Never user-facing (it names files and variables, which is diagnostics, not product copy).
  */

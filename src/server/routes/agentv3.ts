@@ -131,7 +131,7 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
-import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary } from '../AgentV3/missingCredentialGuard';
+import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -8684,6 +8684,57 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* hooks heal is best-effort — never blocks or fails a build */ }
       }
 
+      // BOOT-KILLER HEAL — the second half of the missing-credential contract (admin 2026-08-03: "us option
+      // ko 'coming soon' likh kar freeze kar do, puri app band na ho"). The contract is injected into the
+      // builder's prompt so the FIRST build is already correct; injecting a rule is NOT proof it was
+      // followed, and the 50/50 law is explicit that if a problem still slips through, the heal must be
+      // REAL, not best-effort cosmetics. So: detect the exact fatal pattern the contract forbids — a
+      // top-level `throw`/`process.exit` gated on a missing env var — and, when found, run ONE bounded,
+      // FOCUSED repair pass with the exact file:line, then RE-DETECT and report the truth either way.
+      //
+      // Deliberately NOT gated on `!result.ok`: this defect ships on a build that looks perfectly
+      // successful — every gate passes because the key is only missing at the USER'S runtime, not ours.
+      // That is precisely why it reached production before. The verdict is never flipped by this heal (a
+      // build that failed stays failed); it only removes the landmine. Weak-tier routed (no Sonnet/Opus on
+      // a free build). Costs an extra pass ONLY when a real boot-killer exists — a clean build pays nothing.
+      // Best-effort + time-budgeted + abortable. Kill switch AGENTV3_CREDENTIAL_GUARD=off.
+      if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted) {
+        try {
+          const killers = findBootKillingEnvGuards(writtenFiles);
+          if (killers.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
+              message: bootKillingGuardSummary(killers).slice(0, 400),
+            });
+            const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+            if (autoFixEnabled() && timeLeft) {
+              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Making sure a missing key freezes just that one feature instead of stopping the whole app…', ts: Date.now() });
+              const guardHealRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                model: resolveModel(powerLevelReqEffective),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await guardHealRunner.run(bootKillerRepairInstruction(killers));
+              // Re-detect over the UPDATED writtenFiles (the heal's writes land there via onFileWrite), so
+              // the report states what is actually true now — never "healed" on the healer's own say-so.
+              const after = findBootKillingEnvGuards(writtenFiles);
+              if (healed.ok && after.length === 0) {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'BOOT_KILLING_ENV_GUARD_HEALED', autoResolved: true,
+                  message: `Removed ${killers.length} boot-killing env guard(s) — a missing key now freezes only that feature ("Coming soon") instead of taking the whole app down.`,
+                });
+              } else {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD_UNRESOLVED', autoResolved: false,
+                  message: `Heal pass did not clear every boot-killing env guard — ${after.length} remain. ${bootKillingGuardSummary(after)}`.slice(0, 400),
+                });
+              }
+            }
+          }
+        } catch { /* the guard heal is best-effort — never blocks or fails a build */ }
+      }
+
       // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v5.0 used to
       // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it
       // actually OPENS the running app in a real browser, READS the rendered DOM + console, and
@@ -10073,23 +10124,6 @@ export function registerAgentV3Routes(app: Express): void {
         } catch {
           // A notice is never worth failing a successful build over — stay silent and ship the app.
         }
-      }
-      // CONTRACT VERIFICATION (honesty layer for the missing-credential contract above). Injecting a rule
-      // into the prompt is not proof it was followed, so we DETECT the exact fatal pattern the contract
-      // forbids — a top-level `throw`/`process.exit` gated on a missing env var — and record it in the
-      // admin build report. This never rewrites the user's code and never fails a build: it makes a
-      // violation VISIBLE so the class can be root-caused, instead of silently shipping an app that a
-      // single unset key would brick. Detector is pure static analysis (zero cost), same kill switch.
-      if (expectsArtifacts && credentialGuardEnabled()) {
-        try {
-          const killers = findBootKillingEnvGuards(writtenFiles);
-          if (killers.length > 0) {
-            buildDiag.record({
-              phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
-              message: bootKillingGuardSummary(killers).slice(0, 400),
-            });
-          }
-        } catch { /* verification is best-effort — never affects the delivered app */ }
       }
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the

@@ -3954,7 +3954,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showFrameworkPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
-          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          {/* Capped + scrollable — an uncapped modal grows past a phone screen and everything below the
+              fold becomes unreachable (see the Import/Push modal below for the reported instance). */}
+          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
@@ -3979,7 +3981,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
-          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          {/* ROOT CAUSE of "PUSH button kaam ka nahi hai" (admin 2026-08-03): this card had NO height cap
+              and NO scroll, so on a phone it grew past the screen. In PUSH mode the commit-message field
+              and — critically — the push RESULT banner render near the BOTTOM, i.e. below the fold with
+              no way to reach them. The push itself ran fine (real blobs → tree → commit → ref); its only
+              feedback was simply off-screen, so the button felt dead. Same class as the Publish sheet
+              (#2037) — this was its surviving sibling. Cap at the viewport and scroll. */}
+          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
@@ -4142,9 +4150,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
 
-            {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason). */}
+            {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason).
+                STICKY: this is the ONLY feedback a push gives, and it lives below the repo list — on a
+                phone that put it off-screen, which is exactly why the button felt dead. Pinned to the
+                bottom of the scroll area so the answer is visible the moment a repo is tapped. */}
             {(pushBusy || pushResult) && (
-              <div className={`flex items-start gap-2 p-3 rounded-xl border text-[11px] ${pushResult && !pushResult.ok ? 'bg-amber-500/10 border-amber-500/20 text-amber-200' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-100'}`}>
+              <div className={`sticky bottom-0 z-10 flex items-start gap-2 p-3 rounded-xl border text-[11px] backdrop-blur-sm ${pushResult && !pushResult.ok ? 'bg-amber-950/80 border-amber-500/30 text-amber-200' : 'bg-indigo-950/80 border-indigo-500/30 text-indigo-100'}`}>
                 {pushBusy ? <TirangaLoader className="w-4 h-4 shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
                 <div className="min-w-0">
                   <p>{pushResult?.text || 'Pushing…'}</p>

@@ -9,6 +9,8 @@
 // never ships node_modules, build output, .git, or live .env secrets; binary and
 // oversized files are skipped (a deploy is source/text).
 
+import { buildTarGz, shouldBulkLand, bulkLandEnabled } from './BulkLanding';
+
 /** The minimal slice of the sandbox actuator this collector needs. */
 export interface WorkspaceFileSource {
   listFiles(workspaceId: string): Promise<string[]>;
@@ -18,6 +20,14 @@ export interface WorkspaceFileSource {
 /** The minimal slice of the sandbox actuator the importer needs. */
 export interface WorkspaceFileSink {
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /**
+   * OPTIONAL bulk-landing capability (see BulkLanding.ts). When a sink can take one binary and run one
+   * command, a whole project lands in TWO round trips instead of one per file. Optional by design: any
+   * sink lacking these (LocalActuator in tests, a stub) transparently keeps the per-file path.
+   */
+  writeBinaryFile?(workspaceId: string, filePath: string, base64: string): Promise<void>;
+  runCommand?(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  readFile?(workspaceId: string, filePath: string): Promise<string>;
 }
 
 export interface CollectedFiles {
@@ -182,6 +192,53 @@ export function selectImportableFiles(files: Record<string, string>): { accepted
  * as before; only the latency-bound writes are parallelised. Ordering between independent file writes
  * carries no meaning, so this is safe by construction.
  */
+/** The archive we upload, inside the workspace root; removed as soon as it is expanded. */
+const LANDING_ARCHIVE = '.nbai-landing.tar.gz';
+/** How many landed files are re-read byte-exact to prove the extraction really happened. */
+const BULK_VERIFY_SAMPLE = 5;
+
+/**
+ * FAST PATH — land every file in TWO round trips (upload one tar.gz, expand it in the sandbox).
+ *
+ * Returns the paths it verifiably landed, or null to mean "fall back to per-file writes". It NEVER
+ * throws and never reports a path it did not prove: `tar` exits non-zero on any extraction error, and
+ * on top of that a bounded SAMPLE is read back and compared byte-exact — which is what catches the
+ * nightmare case of a command that "succeeded" against the wrong directory. Anything unproven ⇒ null ⇒
+ * the slow path runs and the import is still complete. A faster landing must never be a partial one.
+ */
+async function bulkLand(
+  sink: WorkspaceFileSink,
+  workspaceId: string,
+  accepted: Array<[string, string]>,
+): Promise<{ written: string[]; leftover: Array<[string, string]> } | null> {
+  if (!sink.writeBinaryFile || !sink.runCommand) return null;
+  try {
+    const map = Object.fromEntries(accepted);
+    const { gz, included, excluded } = buildTarGz(map);
+    if (included.length === 0) return null;
+    await sink.writeBinaryFile(workspaceId, LANDING_ARCHIVE, gz.toString('base64'));
+    // `--overwrite` matches the proven checkpoint-restore invocation; runCommand's cwd is the
+    // workspace root, so the archive's relative paths land exactly where the per-file writes would.
+    const res = await sink.runCommand(workspaceId, `tar -xzf ${LANDING_ARCHIVE} --overwrite && rm -f ${LANDING_ARCHIVE}`);
+    if (!res || res.exitCode !== 0) {
+      try { await sink.runCommand(workspaceId, `rm -f ${LANDING_ARCHIVE}`); } catch { /* cleanup best-effort */ }
+      return null; // honest: unproven ⇒ the caller writes every file the slow way
+    }
+    // PROOF, not trust: re-read a spread-out sample and compare content byte-exact.
+    if (sink.readFile) {
+      const step = Math.max(1, Math.floor(included.length / BULK_VERIFY_SAMPLE));
+      for (let i = 0; i < included.length && i / step < BULK_VERIFY_SAMPLE; i += step) {
+        const path = included[i];
+        const got = await sink.readFile(workspaceId, path).catch(() => null);
+        if (got !== map[path]) return null; // extraction did not really happen ⇒ fall back
+      }
+    }
+    return { written: included, leftover: excluded.map((p) => [p, map[p]] as [string, string]) };
+  } catch {
+    return null; // any failure at all ⇒ the per-file path, which was already working
+  }
+}
+
 export async function writeWorkspaceFiles(
   sink: WorkspaceFileSink,
   workspaceId: string,
@@ -191,7 +248,21 @@ export async function writeWorkspaceFiles(
   const written: string[] = [];
   const failed: string[] = [];
 
-  await pool(accepted, WRITE_CONCURRENCY, async ([path, content]) => {
+  // BULK LANDING (self-import autopsy 2026-08-03): parallelising per-file writes only divided the
+  // problem — cost stayed LINEAR in file count (2540 files ÷ 12 ≈ 212 sequential round trips, the
+  // dominant cost of a large import). One archive + one extract is O(1) round trips instead. Only for
+  // imports big enough to pay back the two extra calls; a failure or an unproven extraction falls
+  // through to the loop below, so this can never make an import worse.
+  let toWrite = accepted;
+  if (bulkLandEnabled() && shouldBulkLand(accepted.length)) {
+    const bulk = await bulkLand(sink, workspaceId, accepted);
+    if (bulk) {
+      written.push(...bulk.written);
+      toWrite = bulk.leftover; // paths the archive format can't carry (non-ASCII / very long)
+    }
+  }
+
+  await pool(toWrite, WRITE_CONCURRENCY, async ([path, content]) => {
     try {
       await sink.writeFile(workspaceId, path, content);
       written.push(path);

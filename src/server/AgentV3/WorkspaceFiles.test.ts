@@ -203,3 +203,108 @@ describe('writeWorkspaceFiles — concurrent writes, identical selection', () =>
     expect(a).toEqual(b);
   });
 });
+
+// BULK LANDING (self-import autopsy 2026-08-03) — one archive + one extract instead of one round trip
+// per file. The load-bearing requirement is NOT speed, it is that a faster landing can never be a
+// PARTIAL one: every failure path must fall back to per-file writes and still land every file.
+describe('writeWorkspaceFiles — bulk landing falls back rather than ever losing a file', () => {
+  const bigProject = (n: number): Record<string, string> =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [`src/f${i}.ts`, `export const v${i} = ${i};`]));
+
+  /** A sink that records what it was asked to do. */
+  function makeSink(over: Partial<{ extractExit: number; readBack: (p: string) => string | null; failBinary: boolean }> = {}) {
+    const perFile: string[] = [];
+    const commands: string[] = [];
+    let binaryUploads = 0;
+    const sink = {
+      writeFile: async (_w: string, p: string) => { perFile.push(p); },
+      writeBinaryFile: async () => {
+        binaryUploads++;
+        if (over.failBinary) throw new Error('upload failed');
+      },
+      runCommand: async (_w: string, c: string) => {
+        commands.push(c);
+        return { exitCode: over.extractExit ?? 0, stdout: '', stderr: '' };
+      },
+      readFile: async (_w: string, p: string) => {
+        const v = over.readBack ? over.readBack(p) : `export const v${p.match(/f(\d+)/)?.[1]} = ${p.match(/f(\d+)/)?.[1]};`;
+        if (v === null) throw new Error('missing');
+        return v;
+      },
+    };
+    return { sink, perFile, commands, get binaryUploads() { return binaryUploads; } };
+  }
+
+  it('lands a big import in TWO round trips — no per-file writes at all', async () => {
+    const files = bigProject(200);
+    const h = makeSink();
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(200);
+    expect(h.binaryUploads).toBe(1);                       // one archive
+    expect(h.commands[0]).toContain('tar -xzf');           // one extract
+    expect(h.perFile).toHaveLength(0);                     // ZERO per-file round trips
+  });
+
+  it('keeps the per-file path for a SMALL import (the two extra calls would not pay back)', async () => {
+    const h = makeSink();
+    const res = await writeWorkspaceFiles(h.sink, 'ws', bigProject(5));
+    expect(res.written).toHaveLength(5);
+    expect(h.binaryUploads).toBe(0);
+    expect(h.perFile).toHaveLength(5);
+  });
+
+  it('FALLS BACK to per-file when tar exits non-zero — every file still lands', async () => {
+    const files = bigProject(60);
+    const h = makeSink({ extractExit: 2 });
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(60);                  // nothing lost
+    expect(h.perFile).toHaveLength(60);                    // proven by the slow path
+    expect(h.commands.some((c) => c.startsWith('rm -f'))).toBe(true); // archive cleaned up
+  });
+
+  it('FALLS BACK when the verification read-back does not match (extract hit the wrong place)', async () => {
+    const files = bigProject(60);
+    const h = makeSink({ readBack: () => 'WRONG CONTENT' });
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(60);
+    expect(h.perFile).toHaveLength(60);                    // did not trust an unproven extraction
+  });
+
+  it('FALLS BACK when the archive upload itself throws', async () => {
+    const files = bigProject(60);
+    const h = makeSink({ failBinary: true });
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(60);
+    expect(h.perFile).toHaveLength(60);
+  });
+
+  it('uses the per-file path when the sink cannot do bulk at all (no writeBinaryFile/runCommand)', async () => {
+    const written: string[] = [];
+    const plain = { writeFile: async (_w: string, p: string) => { written.push(p); } };
+    const res = await writeWorkspaceFiles(plain, 'ws', bigProject(100));
+    expect(res.written).toHaveLength(100);
+    expect(written).toHaveLength(100);
+  });
+
+  it('writes archive-unrepresentable paths individually so nothing is skipped', async () => {
+    const files = { ...bigProject(60), 'src/日本語.ts': 'export const jp = 1;' };
+    const h = makeSink();
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(61);                  // all 61 landed
+    expect(h.perFile).toEqual(['src/日本語.ts']);           // exactly the one tar can't carry
+  });
+
+  it('respects the AGENTV3_BULK_LAND=off kill switch', async () => {
+    const prev = process.env.AGENTV3_BULK_LAND;
+    process.env.AGENTV3_BULK_LAND = 'off';
+    try {
+      const h = makeSink();
+      const res = await writeWorkspaceFiles(h.sink, 'ws', bigProject(100));
+      expect(res.written).toHaveLength(100);
+      expect(h.binaryUploads).toBe(0);
+      expect(h.perFile).toHaveLength(100);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTV3_BULK_LAND; else process.env.AGENTV3_BULK_LAND = prev;
+    }
+  });
+});

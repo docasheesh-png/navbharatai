@@ -5084,7 +5084,8 @@ export function registerAgentV3Routes(app: Express): void {
 
     const landImportedProject = async (
       importedFiles: Record<string, string>,
-      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string> },
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string>;
+        diag?: { record: (issue: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }) => void } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5096,7 +5097,20 @@ export function registerAgentV3Routes(app: Express): void {
         // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
         // template scaffold files mixed in (mirrors the import-files route).
         try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-        written = (await writeWorkspaceFiles(actuator, workspaceId, importedFiles)).written;
+        const landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        written = landed.written;
+        // HOW the files landed (bulk tar vs per-file) + the count-proof — into the build report, so a
+        // future "files missing after import" report can be diagnosed from evidence instead of guesses
+        // (the #2044→#2046 loss was invisible precisely because this telemetry was thrown away).
+        try {
+          opts.diag?.record({
+            phase: 'build', severity: 'info', code: 'IMPORT_LANDING',
+            message: `Sandbox landing: ${landed.written.length} file(s) via ${landed.landedVia ?? 'per-file'}`
+              + (landed.bulkVerifiedCount !== undefined ? ` (bulk extract count-verified: ${landed.bulkVerifiedCount})` : '')
+              + (landed.skipped.length > 0 ? `; ${landed.skipped.length} skipped` : ''),
+            autoResolved: true,
+          });
+        } catch { /* telemetry is best-effort */ }
         // Sandbox-only extras (big text lockfiles): the live sandbox gets them so `npm install`
         // reproduces the app's exact dependency tree; the durable store skips them by design
         // (over its per-doc cap — the import summary says so honestly). Best-effort.
@@ -6217,6 +6231,7 @@ export function registerAgentV3Routes(app: Express): void {
                     sandboxOnly: extracted.sandboxOnly,
                     sandboxAssets: extracted.sandboxAssets,
                     assets: extracted.assets,
+                    diag: buildDiag,
                   });
                   if (!serverSideLanded) serverFetchReason = 'validate'; // fetched+extracted but not a runnable project
                 } else {
@@ -6252,6 +6267,7 @@ export function registerAgentV3Routes(app: Express): void {
                     source: cleanImportUrl,
                     writeToSandbox: true,
                     droppedNote: mat.skipped ? `— skipped ${mat.skipped} file(s) (dependency/build folders, binaries, secrets, or over the size cap)` : '',
+                    diag: buildDiag,
                   });
                   serverSideLanded = apiMaterialized;
                 }

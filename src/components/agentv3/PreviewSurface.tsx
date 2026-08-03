@@ -234,6 +234,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {
         setFoundUrl(data.previewUrl);
         setMode('live');
+        // A genuinely successful boot resets the watchdog's failure STREAK (the total backstop and
+        // the cooldown still apply) — so the next sandbox death hours later can heal again.
+        healRef.current.streak = 0;
       }
     } catch (e) {
       setDiagResult({ ok: false, reason: e instanceof Error ? e.message : 'Network error — could not reach the server.', detail: '' });
@@ -281,15 +284,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // idle/pause kills the process): a reopened session rendered E2B's "Closed Port Error" page inside
   // the iframe and nothing auto-healed (admin report 2026-07-07). URL presence is NOT liveness — probe
   // the server's REAL preview health and, when it is sleeping/crashed, run the SAME rehydrate-and-
-  // reboot as the Diagnose button. Decision logic is pure + tested (shouldAutoRebootPreview); gated
-  // once per workspace, idle-only, and never on a failed probe.
-  const autoRebootedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!autoResume || mode !== 'live' || !workspaceId || diagnosing) return;
+  // reboot as the Diagnose button.
+  //
+  // V2 — a CONTINUOUS watchdog, not a one-shot (admin 2026-08-03, "preview chal jane ke baad gayab na
+  // ho"): the old once-per-workspace latch healed the FIRST death only; a tab left open past the next
+  // sandbox idle-pause stayed dead forever. Now the health probe re-runs every WATCH_INTERVAL while
+  // the Live tab is visible AND when the window regains focus (the "back from lunch" moment), and the
+  // heal decision is the pure cooldown+bounded-attempts policy (previewAutoReboot.ts) — repeat deaths
+  // self-heal; a boot-crash-boot hammer stays impossible (cooldown, streak cap, absolute total cap).
+  const healRef = useRef<{ ws: string | null; streak: number; total: number; lastAt: number | null }>({ ws: null, streak: 0, total: 0, lastAt: null });
+  const probeInFlight = useRef(false);
+  const probeAndMaybeHeal = useCallback(async () => {
+    if (!autoResume || mode !== 'live' || !workspaceId || diagnosing || probeInFlight.current) return;
     const hasUrl = !!(url || foundUrl);
-    if (!hasUrl || sandbox?.livePreviewAvailable !== true || autoRebootedFor.current === workspaceId) return;
-    let cancelled = false;
-    void (async () => {
+    if (!hasUrl || sandbox?.livePreviewAvailable !== true) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // never boot behind a hidden tab
+    if (healRef.current.ws !== workspaceId) healRef.current = { ws: workspaceId, streak: 0, total: 0, lastAt: null };
+    probeInFlight.current = true;
+    try {
       let status: string | null = null;
       try {
         const res = await fetch('/api/agentv3/preview-health', {
@@ -300,20 +312,39 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const health = await res.json().catch(() => null) as { status?: unknown } | null;
         if (res.ok && health && typeof health.status === 'string') status = health.status;
       } catch { /* probe failed → status stays null → never reboot on a guess */ }
-      if (cancelled) return;
+      const h = healRef.current;
       const decide = shouldAutoRebootPreview({
         autoResume: !!autoResume, liveTabShown: mode === 'live', hasUrl,
         liveBackend: sandbox?.livePreviewAvailable === true, diagnosing,
-        alreadyRebooted: autoRebootedFor.current === workspaceId, healthStatus: status,
+        streak: h.streak, total: h.total,
+        msSinceLastAttempt: h.lastAt === null ? Infinity : Date.now() - h.lastAt,
+        healthStatus: status,
       });
       if (decide) {
-        autoRebootedFor.current = workspaceId; // once per workspace — never a boot loop
-        void runDiagnose();
+        h.streak += 1; h.total += 1; h.lastAt = Date.now();
+        await runDiagnose(); // a SUCCESSFUL diagnose resets the streak (see runDiagnose)
       }
-    })();
-    return () => { cancelled = true; };
+    } finally {
+      probeInFlight.current = false;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox]);
+  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, userId, email, framework, runDiagnose]);
+  /** How often the open Live tab re-checks that its preview is still actually alive. */
+  const WATCH_INTERVAL_MS = 150_000;
+  useEffect(() => {
+    if (!autoResume || mode !== 'live' || !workspaceId) return;
+    void probeAndMaybeHeal(); // immediate check on mount / url / workspace change (the old C1b moment)
+    const timer = setInterval(() => { void probeAndMaybeHeal(); }, WATCH_INTERVAL_MS);
+    const onWake = () => { if (document.visibilityState === 'visible') void probeAndMaybeHeal(); };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoResume, mode, workspaceId, url, foundUrl, sandbox, probeAndMaybeHeal]);
 
   // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
   // while the first is still in flight — the slower response could otherwise clobber the newer one).

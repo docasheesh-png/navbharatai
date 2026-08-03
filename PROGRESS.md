@@ -23629,3 +23629,52 @@ medical classification, move to an **organization account** (needs a D-U-N-S num
 the appeal text once the three answers are known. **Do NOT press "Submit changes for review" before
 the declarations are corrected** — each reject makes the next review slower.
 
+
+---
+
+## 2026-08-03 — Preview hardening: continuous self-heal watchdog + vendored same-origin React (admin: "100% preview guarantee, gayab na ho, in-browser 100x strong")
+
+### 1. Watchdog V2 — a preview that died AGAIN now heals again (previewAutoReboot.ts + PreviewSurface.tsx)
+ROOT CAUSE: the C1b auto-reboot latch was ONCE per workspace per mount — the first sandbox idle-death
+healed, the second stayed dead forever (a tab left open all afternoon died permanently after one heal).
+The once-ever latch is now a cooldown + bounded-attempts policy (`AUTO_HEAL_COOLDOWN_MS` 180s,
+`AUTO_HEAL_MAX_STREAK` 3 consecutive FAILED heals, `AUTO_HEAL_MAX_TOTAL` 10 per mount; a SUCCESSFUL
+heal resets the streak) plus a CONTINUOUS watchdog: re-probe every 150s + on window focus/visibility,
+skipping hidden tabs, one probe in flight at a time. 10/10 unit tests (previewAutoReboot.test.ts).
+
+### 2. Vendored same-origin React 18 — the in-browser preview's FOUNDATION no longer needs any CDN
+ROOT CAUSE (continuation of autopsy ce713a7e): every CDN-resilience rung still fetched React ITSELF
+from third-party CDNs — a multi-host blip on the React core killed the preview regardless of ladder
+depth. Now `public/vendor/react18/` ships the OFFICIAL react/react-dom 18.3.1 UMD builds from OUR
+origin + five tiny same-origin ESM facades (react/react-dom/react-dom-client/jsx-runtime/
+jsx-dev-runtime .mjs) over `window.React`/`window.ReactDOM` (public API only). When an origin is known
+and the app targets React 18 (or pins nothing — the scaffold default), the importmap's five React
+specifiers resolve to the facades, so app code AND every esm.sh `?external=react` package share the
+ONE vendored copy. The 4-rung CDN ladder stays as fallback (a facade throws if the UMD failed →
+ladder fires), now version-guarded: `specUrlAlt`/`specUrlAlt2`/`specUrlPlain` pin `@18` for vendored
+roots instead of parsing a non-esm.sh base (no "latest"/React-19 substitution mid-fallback). React
+19/17 apps keep today's CDN path untouched. Kill switch: `AGENTV3_VENDOR_REACT=off`.
+**PROVEN end-to-end:** headless Chromium with esm.sh + esm.run + jsdelivr + unpkg + cdnjs + Tailwind
+CDN all mapped to a dead IP rendered the scaffold to `<h1 data-nbai-src="src/App.jsx:2:10">Hello from
+App</h1>` — a fully CDN-independent mount, with visual-editor source stamping intact.
+HONEST scope note: "100%" is not literally achievable (the sandbox/network can always fail); what
+shipped is a CDN-independent foundation + ordered fallback + continuous self-heal — the strongest
+honest version of the guarantee.
+FOLLOW-UP (open): the legacy client-side builder (`src/lib/previewUtils.ts`) still builds its own
+esm.sh-only importmap — wire the same vendored runtime there in a later slice.
+
+### Follow-up slices (same 2026-08-03 batch, PR #2049)
+- **Legacy client builder vendored too** (`previewUtils.ts`): same-origin React importmap + UMD scripts,
+  pure-CDN map kept as `window.__CDN_IMAP` with a per-spec retry — a facade failure degrades to exactly
+  the old behaviour. Escape hatch `window.__NBAI_VENDOR_REACT_OFF`.
+- **IMPORT_LANDING telemetry**: `landedVia`/`bulkVerifiedCount` from #2046 are now RECORDED into the
+  build report at both in-build land sites (the #2044 loss was invisible precisely because this was
+  thrown away). Source-contract test locks the wiring.
+- **POSIX bulk-landing**: `set -o pipefail` was a bashism — on a plain-sh sandbox the fast tar landing
+  silently NEVER engaged. Rewritten pure POSIX (tar listing → temp file, tar's own exit status kept,
+  BSD `wc` padding stripped); regression test forbids bashisms in the command.
+- **"511 files" mystery INVESTIGATED, no bug**: the count is `reconcileProjectFileTree`'s deliberate
+  union of durable source paths + sandbox-only content (lockfiles, sandbox-tier images, build outputs)
+  — mitrify's 165 durable + ~346 sandbox-only sums right. The user-facing banner already counts
+  editable source files separately; the union only feeds large-project routing, where over-counting
+  errs SAFE (routes to the strong model sooner). No change made — evidence over guesses.

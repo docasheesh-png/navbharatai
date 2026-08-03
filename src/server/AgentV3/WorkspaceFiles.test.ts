@@ -376,6 +376,28 @@ describe('writeWorkspaceFiles — a SHORT extraction can never pass verification
     expect(res.landedVia).toBe('bulk+per-file');
     expect(h.perFile).toEqual(['src/日本語.ts']);
   });
+
+  it('the extract command is pure POSIX sh — no bashisms, or a plain-sh sandbox silently loses the fast path', async () => {
+    // `set -o pipefail` errors on POSIX sh (dash/ash) → the whole command exits non-zero → bulk
+    // NEVER engages and every import quietly takes the slow per-file path. The count must instead
+    // be captured via a temp list file, keeping tar's own exit status without any pipeline.
+    const commands: string[] = [];
+    const sink = {
+      writeFile: async () => {},
+      writeBinaryFile: async () => {},
+      runCommand: async (_w: string, c: string) => { commands.push(c); return { exitCode: 0, stdout: 'NBAI_EXTRACTED:50\n', stderr: '' }; },
+      readFile: async (_w: string, p: string) => `export const v${p.match(/f(\d+)/)?.[1]} = ${p.match(/f(\d+)/)?.[1]};`,
+    };
+    await writeWorkspaceFiles(sink, 'ws', project(50));
+    const cmd = commands[0];
+    expect(cmd).not.toContain('pipefail');
+    expect(cmd).toContain('>'); // tar's verbose listing goes to a file, not a pipe
+    expect(cmd).toContain('wc -l <');
+    expect(cmd).toMatch(/RC=\$\?/); // tar's exit status captured directly
+    expect(cmd).toContain('NBAI_EXTRACTED:');
+    // Both temp artifacts are removed in the same round trip.
+    expect(cmd).toContain('rm -f .nbai-landing.tar.gz .nbai-landing.tar.gz.list');
+  });
 });
 
 // ROOT CAUSE of the 13-minute post-import gap (admin build report 2026-08-03): collectWorkspaceFiles

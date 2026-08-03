@@ -252,15 +252,19 @@ async function bulkLand(
     await sink.writeBinaryFile(workspaceId, LANDING_ARCHIVE, gz.toString('base64'));
     // `--overwrite` matches the proven checkpoint-restore invocation; runCommand's cwd is the
     // workspace root, so the archive's relative paths land exactly where the per-file writes would.
-    // `-v` makes tar list what it ACTUALLY extracted; piping to `wc -l` turns that into one number
-    // (GNU tar prints to stdout, BSD to stderr — 2>&1 covers both), and `pipefail` keeps tar's own
-    // exit status instead of `wc`'s always-zero.
+    // `-v` makes tar list what it ACTUALLY extracted; redirecting that listing to a temp file (GNU
+    // tar prints to stdout, BSD to stderr — both covered) lets tar's OWN exit status be captured
+    // directly, and `wc -l <file` turns the listing into one number. Pure POSIX sh by construction —
+    // the previous `set -o pipefail` was a bashism, and on a plain-sh sandbox the whole command
+    // errored, so the fast path silently NEVER engaged (every import quietly took the slow per-file
+    // path). `tr -d ' \t'` strips BSD wc's leading padding so the marker regex always matches.
+    const listFile = `${LANDING_ARCHIVE}.list`;
     const res = await sink.runCommand(
       workspaceId,
-      `set -o pipefail; N=$(tar -xzvf ${LANDING_ARCHIVE} --overwrite 2>&1 | wc -l); RC=$?; rm -f ${LANDING_ARCHIVE}; echo "NBAI_EXTRACTED:$N"; exit $RC`,
+      `tar -xzvf ${LANDING_ARCHIVE} --overwrite >${listFile} 2>&1; RC=$?; N=$(wc -l <${listFile} | tr -d ' \t'); rm -f ${LANDING_ARCHIVE} ${listFile}; echo "NBAI_EXTRACTED:$N"; exit $RC`,
     );
     if (!res || res.exitCode !== 0) {
-      try { await sink.runCommand(workspaceId, `rm -f ${LANDING_ARCHIVE}`); } catch { /* cleanup best-effort */ }
+      try { await sink.runCommand(workspaceId, `rm -f ${LANDING_ARCHIVE} ${listFile}`); } catch { /* cleanup best-effort */ }
       return null; // honest: unproven ⇒ the caller writes every file the slow way
     }
     // COUNT PROOF — the one that catches a silently-short extraction.

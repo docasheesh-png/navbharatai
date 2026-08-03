@@ -23901,3 +23901,21 @@ a missing Play Store signing key (it is the user's permanent identity — we mus
 user's own app failing to compile (reported precisely, never silently rewritten).
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1016 files / 10685 tests, 0 failures**.
+
+### OPEN ITEM (deliberate, needs a decision) — the Capacitor major NavBharatAI installs by default
+
+`DEFAULT_CAPACITOR_MAJOR = 6` in `mobileProjectAssembler.ts`. When a user's app declares no
+`@capacitor/*` package of its own — which is the normal case for a v5-generated app — all three
+Capacitor packages are installed at `^6.0.0`.
+
+**Why it was NOT bumped in this batch (rule 6 — honest boundary, not an oversight):** Capacitor 6 is
+several majors behind current. `^6.0.0` resolves and works, and it is what already shipped, so leaving
+it cannot regress anything. Raising it, however, cannot be verified from this session: there is no
+`npm install` here, so "does `@capacitor/cli@N` still create a working Android project on the runner
+with Java 21" is unanswerable offline. Bumping it blind would risk breaking EVERY user's build to chase
+a version number — the exact trade safeguard #3 forbids.
+
+**What would settle it:** one real run of the generated `.apk` workflow with the default raised (a
+throwaway app is enough). If green, bump the constant; the alignment logic already handles every major
+uniformly, so it is a one-line change plus the existing tests. Until then this stays deliberate and
+recorded, not silently stale.

@@ -23747,3 +23747,72 @@ machines and internal paths, so users get NavBharatAI's own summary (White-Label
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1012 files / 10624 tests, 0 failures**
 (44 new).
+
+## 2026-08-03 (later) — the .apk workflow failing at 36s: what the run itself revealed (PR follow-up)
+
+**Admin report:** the generated `.apk` workflow failed on GitHub in 36 seconds. The screenshot showed
+GitHub's annotation saying only *"Process completed with exit code 1"* plus a Node-20 deprecation
+warning — with no indication of WHICH step died.
+
+**Honest boundary first:** the 36s failure itself could NOT be root-caused from that screenshot; the
+run's log lives in the user's own repository, which this session cannot read. Rather than guess a fix
+(rule 4 forbids fixing from guesses), the code was audited for defects that produce exactly this shape —
+and three real, independently fatal ones were found, plus the reason the failure was unreadable at all.
+
+### Defect 1 (CRITICAL) — every SUCCESSFUL .apk build was being reported as FAILED
+The workflow's final `Summary` step was `echo "…run \"Build Android App Bundle (.aab, signed)\"…"`.
+Emitted into YAML the escapes vanish, so bash saw an unquoted `(` and died with
+`syntax error near unexpected token '('`. Summary runs LAST — **after** the artifact upload — so the
+.apk was built, uploaded and sitting there ready, and then the run turned red. Users would conclude the
+build failed and never collect a working app.
+**Why nothing caught it:** every existing test asserted on the workflow as TEXT; none ever asked whether
+it would RUN. New `mobileShipKitShell.test.ts` parses each workflow as YAML, extracts every `run:` block
+and feeds it to `bash -n` — the same parse GitHub's runner does. Class-level: catches this bug and every
+future quoting mistake in any generated script. All Summary steps rewritten as QUOTED HEREDOCs, so the
+prose is literal text with no escaping left to get wrong.
+
+### Defect 2 — a whitelist was silently dropping the user's source files
+`isTextPath` was a whitelist (`html|css|js|jsx|ts|tsx|json|md|txt|svg|xml|yml|env`). Anything unlisted
+was dropped from the pushed repo **without a word**: `App.scss` (imported by a component → "Cannot
+resolve" → build dies), `vite.config.mjs`, `postcss.config.cjs`, `tailwind.config.cjs`, `.npmrc`,
+`App.vue`, `.graphql`. The app compiled perfectly inside NavBharatAI and then failed on the runner,
+because the code that ran there was not the code the user wrote. **Inverted to a blocklist** of what
+genuinely cannot survive as text (binaries, keystores, lock files, junk) — when it is wrong the file is
+INCLUDED, which is the safe direction. Locked by `mobileProjectAssemblerFiles.test.ts`.
+
+### Defect 3 — `npm ci || npm install` poisoned every log
+The kit ships no lock file, so `npm ci` failed on EVERY run and dumped a lock-file complaint that was
+never the real problem — burying the actual error for a human and for the classifier. Replaced with a
+branch on whether a lock file is actually present, plus ONE honest fallback: `--legacy-peer-deps`, which
+is npm's own documented answer to ERESOLVE (a real fix, not silencing).
+
+### Why the failure was unreadable — the missing subsystem (rule 5 step 2)
+Nothing in the generated pipeline reported WHAT stage failed. Added an `if: failure()` step to both
+Android workflows that reports the stage from the runner's **actual filesystem** (did node_modules
+appear, did the web build produce output, was android/ created) — ground truth, not pattern-matching.
+It writes plain language to the GitHub summary AND a machine-readable `NBAI_FAILED_STAGE=` line the
+self-healing classifier reads directly.
+
+### New self-healing capability: STALE_WORKFLOW
+An unnamed failure in a stage NavBharatAI set up (install/capacitor/android, never the user's app code)
+now repairs by **replacing our own workflow with the current kit's version**. This heals every
+already-pushed repository at once — including ones carrying the bash-syntax bug above — instead of one
+pattern at a time. Self-limiting: once the workflow matches, the repair changes nothing and the loop
+guard reports it unfixable. Also added `NPM_PEER_CONFLICT` (auto-fixable) and `NPM_PACKAGE_NOT_FOUND`
+(deliberately NOT auto-fixable — removing the package would leave the import failing with a worse
+message; the cure is upstream in what the builder generates).
+
+### Two bugs found in my OWN new repair code, before shipping
+- `repairNpmCi` was rewriting the workflow's own COMMENT prose ("so npm ci failed on every run"), which
+  would commit a change with nothing executable altered — a wasted attempt, and a file permanently
+  different from the kit so the stale-refresh could never settle. All workflow repairs now skip comment
+  lines; `mobileBuildRepairComments.test.ts` asserts it for every repair at once.
+- The npm-404 package-name extraction captured the words "Not found" from the URL form. The quoted form
+  is now authoritative, with scoped-package-safe version stripping.
+
+**Not changed, and why:** the Node-20 deprecation in the screenshot is a WARNING, not the failure — this
+repo's own CI runs the same `@v4` actions and is green. Bumping to `@v5` without being able to verify
+those tags exist from here would risk breaking every build to silence a warning (safeguard #3).
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1015 files / 10670 tests, 0 failures**.
+**Still open:** the actual 36s cause in the admin's repo — needs the run's log, which only they can see.

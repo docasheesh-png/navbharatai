@@ -54,9 +54,27 @@ export interface AssembledProject {
   notes: string[];
 }
 
+// WHY A BLOCKLIST, NOT A WHITELIST (build-failure autopsy 2026-08-03):
+//
+// This used to be a whitelist of extensions — html/css/js/jsx/ts/tsx/json/md/txt/svg/xml/yml/env. Any
+// file whose extension was not on it was SILENTLY DROPPED from the pushed repository. That is a whole
+// class of mysterious build failures with no message pointing at the cause:
+//   • a component importing `./styles.scss`  → the file is gone → "Cannot resolve" → the build dies
+//   • `vite.config.mjs`, `postcss.config.cjs`, `tailwind.config.cjs` → gone → wrong or unstyled output
+//   • `.npmrc`, `.nvmrc`, `.env.production`, `App.vue`, `route.graphql` → gone
+// The user's app compiled perfectly inside NavBharatAI and then failed on the runner, because the code
+// that ran there was not the code they wrote.
+//
+// A whitelist has to predict every extension an app might ever use, and it silently loses whatever it
+// failed to predict. A blocklist only has to name what genuinely cannot survive as text — and when it is
+// wrong, the file is INCLUDED, which is the safe direction. Every value here is already a string from the
+// workspace store, so "is it text?" is really "is this a binary asset or build junk we should not push?".
+const BINARY_OR_JUNK = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|icns|woff2?|ttf|otf|eot|mp[34]|m4a|wav|ogg|webm|mov|avi|pdf|zip|gz|tgz|bz2|7z|rar|jar|aab|apk|ipa|so|dll|dylib|exe|bin|wasm|db|sqlite3?|psd|ai|sketch|fig|keystore|jks|p12|pem|key)$/i;
+/** Lock files are deliberately not pushed — see the workflow's install step, which handles their absence. */
+const NEVER_PUSH = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|\.DS_Store|Thumbs\.db)$/i;
+
 function isTextPath(path: string): boolean {
-  return /\.(html?|css|js|jsx|ts|tsx|json|md|txt|svg|xml|yml|yaml|env|gitignore)$/i.test(path)
-    || /(^|\/)(\.gitignore|LICENSE|README)$/i.test(path);
+  return !BINARY_OR_JUNK.test(path) && !NEVER_PUSH.test(path);
 }
 
 /** Does this project build itself? Only a real `build` script counts — the workflow runs exactly that. */

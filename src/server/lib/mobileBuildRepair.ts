@@ -22,6 +22,9 @@
 export type RepairCode =
   | 'NPM_LOCK_CACHE'
   | 'NPM_CI_NO_LOCK'
+  | 'NPM_PEER_CONFLICT'
+  | 'NPM_PACKAGE_NOT_FOUND'
+  | 'STALE_WORKFLOW'
   | 'BUILD_SCRIPT_MISSING'
   | 'WEB_DIR_MISSING'
   | 'ANDROID_PLATFORM_MISSING'
@@ -94,6 +97,35 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
     return {
       code: 'NPM_LOCK_CACHE',
       summary: 'The build tried to reuse a saved copy of the app’s libraries that does not exist yet.',
+      autoFixable: true,
+      needs: [workflowPath],
+    };
+  }
+
+  // ── npm could not resolve the app's libraries. ──
+  //
+  // These two are the dominant real-world failure for a generated app, because package.json is written
+  // by the builder: a package name that does not exist on the registry, or two libraries demanding
+  // different versions of the same thing. They are told apart because only ONE of them has a fix that
+  // is always right.
+  const missingPkg = packageNameFromNpm404(log);
+  if (/npm ERR!\s*code\s*E404|404\s+Not Found.*registry\.npmjs\.org/i.test(log)) {
+    return {
+      code: 'NPM_PACKAGE_NOT_FOUND',
+      // NOT auto-fixable on purpose: the cure is to stop generating the bad name, and removing the
+      // package here would leave the code that imports it failing one step later with a worse message.
+      summary: missingPkg
+        ? `Your app asks for a library that does not exist: ${missingPkg}.`
+        : 'Your app asks for a library that does not exist.',
+      autoFixable: false,
+      needs: [],
+      detail: missingPkg ? { package: missingPkg } : undefined,
+    };
+  }
+  if (/npm ERR!\s*code\s*ERESOLVE|unable to resolve dependency tree|ERESOLVE could not resolve/i.test(log)) {
+    return {
+      code: 'NPM_PEER_CONFLICT',
+      summary: 'Two of your app’s libraries wanted different versions of the same thing.',
       autoFixable: true,
       needs: [workflowPath],
     };
@@ -188,12 +220,65 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
     };
   }
 
+  // ── Not named — but if the stage that died is one NavBharatAI set up, replacing our own workflow
+  // with the current one is a legitimate, safe repair. It is how a repository created months ago picks
+  // up every fix made since, including ones nobody has written a specific pattern for. It cannot loop:
+  // once the workflow matches the current kit the repair changes nothing and is reported as unfixable.
+  const stage = failedStage(log);
+  if (stage && stage !== 'webbuild') {
+    return {
+      code: 'STALE_WORKFLOW',
+      summary: stage === 'install'
+        ? 'The build stopped while installing your app’s libraries.'
+        : stage === 'capacitor'
+          ? 'The build stopped while creating the Android project.'
+          : 'The build stopped while building the Android app.',
+      autoFixable: true,
+      needs: [workflowPath],
+      detail: { stage },
+    };
+  }
+
   return {
     code: 'UNKNOWN',
-    summary: 'The build stopped for a reason NavBharatAI could not identify.',
+    summary: stage === 'webbuild'
+      ? 'Your app itself did not compile, so it could not be packaged.'
+      : 'The build stopped for a reason NavBharatAI could not identify.',
     autoFixable: false,
     needs: [],
+    detail: stage ? { stage } : undefined,
   };
+}
+
+/**
+ * Which stage died, read from the marker the generated workflow prints on failure.
+ *
+ * This is GROUND TRUTH, not a pattern match: the workflow inspects the runner's own filesystem (did the
+ * libraries install, did the web build produce output, was the Android project created) and states the
+ * answer. Pattern-matching a megabyte of Gradle output for the same fact is guesswork by comparison.
+ * Older repositories have no marker, so this returns null and the text patterns above still decide.
+ */
+export function failedStage(log: string): 'install' | 'webbuild' | 'capacitor' | 'android' | null {
+  const m = normalizeLog(log).match(/NBAI_FAILED_STAGE=(install|webbuild|capacitor|android)\b/);
+  return (m?.[1] as 'install' | 'webbuild' | 'capacitor' | 'android') ?? null;
+}
+
+/**
+ * The name of the package npm could not find.
+ *
+ * npm reports a 404 twice, in two shapes, and only one of them is safe to read. The quoted form
+ * (`404 'name@range' is not in this registry`) names the package exactly, so it is tried FIRST; the URL
+ * form ends in the words "Not found", which a loose pattern happily captures as the package name. The
+ * trailing version range is stripped without breaking a scoped package, whose name legitimately starts
+ * with '@'.
+ */
+export function packageNameFromNpm404(log: string): string | null {
+  const quoted = log.match(/404\s+'([^']{1,120})'\s+is not in this registry/);
+  const url = log.match(/registry\.npmjs\.org\/((?:@[\w.-]+\/)?[\w.-]+)/);
+  const raw = quoted?.[1] ?? url?.[1];
+  if (!raw) return null;
+  const at = raw.lastIndexOf('@');
+  return (at > 0 ? raw.slice(0, at) : raw) || null;
 }
 
 /**
@@ -228,11 +313,40 @@ export function repairNpmCache(workflow: string): string | null {
   return out === workflow ? null : out;
 }
 
+/**
+ * Only the lines that are actually EXECUTED, never the workflow's own comments.
+ *
+ * Every repair here rewrites shell commands, and a generated workflow is heavily commented — it explains
+ * why each non-obvious step exists. Without this guard a repair happily edits its own explanation: the
+ * comment "so npm ci failed on every run" was being rewritten into "so npm ci || npm install failed on
+ * every run", producing a pointless commit that changed nothing executable and, worse, made the file
+ * differ from the current kit forever after.
+ */
+function mapCommandLines(workflow: string, fn: (line: string) => string): string {
+  return workflow
+    .split('\n')
+    .map((line) => (/^\s*#/.test(line) ? line : fn(line)))
+    .join('\n');
+}
+
 /** A strict install needs a lock file this app has none of — fall back to a plain install. */
 export function repairNpmCi(workflow: string): string | null {
-  if (!/npm ci/.test(workflow)) return null;
-  const out = workflow.replace(/npm ci(?!\s*\|\|)/g, 'npm ci || npm install');
+  const out = mapCommandLines(workflow, (l) => l.replace(/npm ci(?!\s*\|\|)/g, 'npm ci || npm install'));
   return out === workflow ? null : out;
+}
+
+/**
+ * Let the install proceed when two libraries disagree about a shared dependency.
+ *
+ * `--legacy-peer-deps` is npm's own documented answer to ERESOLVE, so this is a real fix rather than a
+ * way of silencing the error: it restores npm 6's resolution, which installs what the app asked for.
+ */
+export function repairPeerConflict(workflow: string): string | null {
+  if (/--legacy-peer-deps/.test(workflow)) return null;
+  const m = workflow.match(/^(?!\s*#)([ \t]*)(run: )?(.*\bnpm (?:ci|install)\b.*)$/m);
+  if (!m || m.index === undefined) return null;
+  const at = m.index + m[0].length;
+  return `${workflow.slice(0, at)} || npm install --legacy-peer-deps${workflow.slice(at)}`;
 }
 
 /** Make sure the Android project is created before anything tries to compile it. */
@@ -251,7 +365,8 @@ export function repairAndroidPlatform(workflow: string): string | null {
 /** Gradle's wrapper script arrives without the executable bit on a fresh checkout. */
 export function repairGradlewPermission(workflow: string): string | null {
   if (/chmod \+x\s+\.?\/?gradlew/.test(workflow)) return null;
-  const out = workflow.replace(/(\.\/gradlew)/g, 'chmod +x ./gradlew && ./gradlew').replace(/chmod \+x \.\/gradlew && chmod \+x/g, 'chmod +x');
+  const out = mapCommandLines(workflow, (l) =>
+    l.replace(/(\.\/gradlew)/g, 'chmod +x ./gradlew && ./gradlew').replace(/chmod \+x \.\/gradlew && chmod \+x/g, 'chmod +x'));
   return out === workflow ? null : out;
 }
 
@@ -282,8 +397,9 @@ export function repairSdkLicenses(workflow: string): string | null {
 
 /** Android Gradle needs a modern JDK; an older `java-version` is a mechanical bump. */
 export function repairJavaVersion(workflow: string, target = 21): string | null {
-  const out = workflow.replace(/(java-version:\s*['"]?)(\d+)(['"]?)/g, (all, pre: string, ver: string, post: string) =>
-    Number(ver) < target ? `${pre}${target}${post}` : all,
+  const out = mapCommandLines(workflow, (l) =>
+    l.replace(/(java-version:\s*['"]?)(\d+)(['"]?)/g, (all, pre: string, ver: string, post: string) =>
+      Number(ver) < target ? `${pre}${target}${post}` : all),
   );
   return out === workflow ? null : out;
 }
@@ -356,16 +472,37 @@ export function repairFiles(
   diag: BuildFailureDiagnosis,
   current: Record<string, string>,
   workflowPath: string,
+  /**
+   * What the CURRENT ship kit would generate for this workflow. Supplying it lets a repository created
+   * before a fix pick that fix up — the single most valuable repair there is, because it heals every
+   * already-pushed repo at once instead of one pattern at a time.
+   */
+  freshWorkflow?: string,
 ): RepairResult | null {
   const wf = current[workflowPath] || '';
+  const refresh = (): RepairResult | null =>
+    freshWorkflow && freshWorkflow.trim() !== wf.trim()
+      ? {
+        files: { [workflowPath]: freshWorkflow },
+        message: 'NavBharatAI: update this app’s build instructions to the current version',
+      }
+      : null;
   const one = (path: string, next: string | null, message: string): RepairResult | null =>
     next === null ? null : { files: { [path]: next }, message };
 
   switch (diag.code) {
+    // Replacing our own workflow with the current one IS the repair here — the failure is in a stage we
+    // set up, and the current kit is by construction our best version of it.
+    case 'STALE_WORKFLOW':
+      return refresh();
+    case 'NPM_PEER_CONFLICT':
+      // A refresh is preferred: the current install step already carries the --legacy-peer-deps
+      // fallback. Only an already-current workflow needs the surgical edit.
+      return refresh() ?? one(workflowPath, repairPeerConflict(wf), 'NavBharatAI: let the app’s libraries install despite a version disagreement');
     case 'NPM_LOCK_CACHE':
-      return one(workflowPath, repairNpmCache(wf), 'NavBharatAI: stop the build looking for a saved library copy that does not exist');
+      return one(workflowPath, repairNpmCache(wf), 'NavBharatAI: stop the build looking for a saved library copy that does not exist') ?? refresh();
     case 'NPM_CI_NO_LOCK':
-      return one(workflowPath, repairNpmCi(wf), 'NavBharatAI: install the app’s libraries without requiring a lock file');
+      return one(workflowPath, repairNpmCi(wf), 'NavBharatAI: install the app’s libraries without requiring a lock file') ?? refresh();
     case 'ANDROID_PLATFORM_MISSING':
       return one(workflowPath, repairAndroidPlatform(wf), 'NavBharatAI: create the Android project before compiling it');
     case 'GRADLEW_NOT_EXECUTABLE':

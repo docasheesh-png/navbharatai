@@ -272,7 +272,12 @@ export function registerMobileShipRoutes(app: Express): void {
 
     try {
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
-      const repair = repairFiles(diag, current, wfPath);
+      // What the CURRENT kit would write for this workflow. A repository prepared before a fix shipped
+      // still carries the old instructions, so refreshing our own file is often the whole repair — and
+      // it heals every already-pushed repo at once instead of one pattern at a time. appName only
+      // affects comments and the summary text, so the repo's own name is a perfectly good source.
+      const fresh = generateShipKit({ appName: String(repo) }).files[wfPath];
+      const repair = repairFiles(diag, current, wfPath, fresh);
       // No change means the file is ALREADY what the repair would write, so the failure has a cause we
       // have not actually understood. Re-running would fail identically — say so instead.
       if (!repair || Object.keys(repair.files).length === 0) {

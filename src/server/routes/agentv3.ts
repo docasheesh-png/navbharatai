@@ -5,6 +5,7 @@ import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -7304,6 +7305,44 @@ export function registerAgentV3Routes(app: Express): void {
       // its own tsc verify-gate + repair, so the post-agentic tsc gate below skips it (no redundant run).
       let fastLaneGated = false;
 
+      // ── GOLDEN SCAFFOLD PRE-SEED (admin 2026-08-02: "starter-template apps must build instantly & correctly") ──
+      // When a NEW build's prompt is EXACTLY one of the simple starter-template chip prompts, pre-seed the
+      // workspace with NavBharatAI's hand-verified golden scaffold for that app — CI-proven to parse under
+      // esbuild AND compile under the in-browser Babel preview, with zero duplicate imports. The builder then
+      // VERIFIES & CUSTOMIZES instead of writing from scratch: first build correct by construction (the 50/50
+      // law's PREVENT half — the weak tier stops generating the very bug classes we keep healing). Fresh
+      // builds only (never clobbers an existing app); an EDITED chip prompt never matches (no surprise
+      // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
+      // AGENTV3_GOLDEN_SCAFFOLD=off.
+      let goldenPreseeded = false;
+      if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
+        try {
+          const golden = goldenScaffoldForPrompt(prompt);
+          if (golden) {
+            const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+              .filter((p) => p.startsWith('src/'));
+            if (existingSrc.length === 0) {
+              const goldenFiles = goldenScaffoldFiles(golden);
+              for (const [gp, gc] of Object.entries(goldenFiles)) {
+                await actuator.writeFile(workspaceId, gp, gc);
+                writtenFiles.set(gp, gc);
+                try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
+              }
+              await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              goldenPreseeded = true;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
+              emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
+              // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
+              // scaffold as ITS OWN finished work to verify — never alien clutter to re-plan or rewrite.
+              buildPrompt =
+                `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
+                `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
+                `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`;
+            }
+          }
+        } catch { /* pre-seed is best-effort — a failure just builds from scratch */ }
+      }
+
       // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
       // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no
       // sub-agents, no per-file round-trips, no Opus, no rebuild loop). On success the build is
@@ -7322,7 +7361,9 @@ export function registerAgentV3Routes(app: Express): void {
       // redefinition this was implicit — the analyzer's 'opus' start tier failed classifyForSimpleLane;
       // 'mini' now resolves to the 'sonnet' start tier, which the lane WOULD accept, so the guard is
       // explicit.)
-      if (oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // `!goldenPreseeded`: a pre-seeded golden app skips the fast lane — regenerating from scratch would
+      // discard the verified template; the agentic loop verifies & customizes the seeded files instead.
+      if (!goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))

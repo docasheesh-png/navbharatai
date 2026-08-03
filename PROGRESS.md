@@ -23596,3 +23596,36 @@ never silently re-kill a fallback rung again.
 ### Verification
 Every PR: frontend/server tsc clean + full `npx vitest run` green before push (suite grew 995 → 998
 files / 10,270 → 10,333 tests across the session) + CI green before every merge.
+
+---
+
+## 2026-08-02 — OPEN ITEM (admin will action): Google Play rejection — Developer Account type
+
+**Status: OPEN — admin-side only, NOT fixable in code. Admin said "mai baad me karunga".**
+
+Google Play **rejected the app update** for `com.navbharat.ai` (NavBharatAI). The previous version
+remains LIVE on Play — only the new update was rejected, so there is no takedown.
+
+**Google's stated issue:** `Violation of Play Console Requirements`, area = **Developer Account**.
+Since 31 Aug 2024, an app must be published from an **organization** account (not a personal one) if
+it provides: financial products/services (banking, loans, trading, **wallets**, crypto), **health
+apps such as medical apps**, VpnService apps, or government apps.
+
+**Likely triggers for NavBharatAI (both plausible, unconfirmed):**
+1. **Doctor AI (SDA)** — presented in-app as *"Senior Doctor Assistant — Clinical Decision Support ·
+   Doctor Use Only"*. Google's "medical apps" bucket plausibly covers this. This is a REAL feature,
+   not a mis-declaration.
+2. **The word "wallet"** — the app has a token wallet + ₹ recharge via Cashfree. These are prepaid
+   credits for our OWN service, NOT a financial product, so the declaration should say so.
+
+**Next step (admin, in Play Console — Claude cannot see it, rule 6):** check three things and report
+back what they currently say:
+1. App content → **Financial features** → should be *"My app doesn't provide any financial features"*.
+2. Store settings → **App category** → should be **Tools** or **Productivity** (NOT Medical/Health/Finance).
+3. App content → any **Health** declaration → what is set.
+
+Then either (A) correct an over-declaration and resubmit (fast, free), or (B) if it is genuinely the
+medical classification, move to an **organization account** (needs a D-U-N-S number). Claude can draft
+the appeal text once the three answers are known. **Do NOT press "Submit changes for review" before
+the declarations are corrected** — each reject makes the next review slower.
+

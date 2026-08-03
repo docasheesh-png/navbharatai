@@ -1637,7 +1637,7 @@ NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
     name: 'IDE / Code Studio',
     path: 'Sidebar → IDE  OR  Header → IDE tab',
     description: `Full in-browser development environment. Panels:
-• FILES — file explorer: browse, create, rename and delete files. Delete one file (trash icon) or use the Select button to multi-select / Select All and delete many at once — always with a confirmation dialog before anything is removed.
+• FILES — file explorer: browse, create, rename and delete files. Tapping a file gives you See · Open · Copy file · Copy path · Delete. "See" opens the file READ-ONLY — you can read and copy it, but nothing there can change it (useful on a phone, where a stray tap in the editor is easy); "Open" opens it in the Code Studio editor to edit. On desktop the same read-only view is the eye icon that appears when you hover a file. Delete one file (trash icon) or use the Select button to multi-select / Select All and delete many at once — always with a confirmation dialog before anything is removed.
 • EDITOR — syntax-highlighted code editor for all file types (TypeScript, React, Python, HTML, CSS, etc.).
 • PREVIEW — live preview of the running app with hot-reload.
 • PROBLEMS — real compile-error panel: when the live preview bundle fails, it lists the actual errors esbuild reported (file · line · message); click a problem to jump to that line in the editor. An empty list means the app genuinely compiled. Open it from the amber problem-count badge (bottom-right) or the "view problems" command.

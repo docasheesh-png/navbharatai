@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { shouldAutoRebootPreview, type AutoRebootSignals } from './previewAutoReboot';
+import {
+  shouldAutoRebootPreview, type AutoRebootSignals,
+  AUTO_HEAL_COOLDOWN_MS, AUTO_HEAL_MAX_STREAK, AUTO_HEAL_MAX_TOTAL,
+} from './previewAutoReboot';
 
 const base: AutoRebootSignals = {
   autoResume: true,
@@ -7,7 +10,9 @@ const base: AutoRebootSignals = {
   hasUrl: true,
   liveBackend: true,
   diagnosing: false,
-  alreadyRebooted: false,
+  streak: 0,
+  total: 0,
+  msSinceLastAttempt: Infinity,
   healthStatus: 'sleeping',
 };
 
@@ -33,12 +38,38 @@ describe('shouldAutoRebootPreview — a dead live preview behind an existing URL
     expect(shouldAutoRebootPreview({ ...base, healthStatus: null })).toBe(false);
   });
 
-  it('respects every gate: idle-only, Live tab only, URL present, backend present, no overlap, once per workspace', () => {
+  it('respects every gate: idle-only, Live tab only, URL present, backend present, no overlap', () => {
     expect(shouldAutoRebootPreview({ ...base, autoResume: false })).toBe(false);      // mid-build
     expect(shouldAutoRebootPreview({ ...base, liveTabShown: false })).toBe(false);    // in-browser tab
     expect(shouldAutoRebootPreview({ ...base, hasUrl: false })).toBe(false);          // C1 auto-resume owns no-URL
     expect(shouldAutoRebootPreview({ ...base, liveBackend: false })).toBe(false);     // nothing to boot
     expect(shouldAutoRebootPreview({ ...base, diagnosing: true })).toBe(false);       // already in flight
-    expect(shouldAutoRebootPreview({ ...base, alreadyRebooted: true })).toBe(false);  // loop guard
+  });
+});
+
+// V2 (admin 2026-08-03, "preview chal jane ke baad gayab na ho"): once-per-workspace healed only the
+// FIRST death — a tab open past the next idle-pause stayed dead forever. The policy is now cooldown +
+// bounded attempts: repeat deaths heal, a boot-crash-boot hammer stays impossible.
+describe('shouldAutoRebootPreview V2 — repeat deaths heal; hammering stays impossible', () => {
+  it('a SECOND death (successful heal reset the streak, cooldown passed) heals again — the old latch could not', () => {
+    expect(shouldAutoRebootPreview({ ...base, streak: 0, total: 1, msSinceLastAttempt: AUTO_HEAL_COOLDOWN_MS + 1 })).toBe(true);
+  });
+
+  it('the cooldown blocks a re-heal fired too soon after the last attempt', () => {
+    expect(shouldAutoRebootPreview({ ...base, total: 1, msSinceLastAttempt: AUTO_HEAL_COOLDOWN_MS - 1 })).toBe(false);
+    expect(shouldAutoRebootPreview({ ...base, total: 1, msSinceLastAttempt: AUTO_HEAL_COOLDOWN_MS })).toBe(true);
+  });
+
+  it('the first-ever heal is instant (Infinity since last attempt passes the cooldown)', () => {
+    expect(shouldAutoRebootPreview({ ...base, msSinceLastAttempt: Infinity })).toBe(true);
+  });
+
+  it('a streak of consecutive FAILED heals stops the hammering', () => {
+    expect(shouldAutoRebootPreview({ ...base, streak: AUTO_HEAL_MAX_STREAK, total: AUTO_HEAL_MAX_STREAK, msSinceLastAttempt: Infinity })).toBe(false);
+    expect(shouldAutoRebootPreview({ ...base, streak: AUTO_HEAL_MAX_STREAK - 1, total: AUTO_HEAL_MAX_STREAK - 1, msSinceLastAttempt: AUTO_HEAL_COOLDOWN_MS })).toBe(true);
+  });
+
+  it('the absolute per-mount total cap holds even when every heal succeeded (streak keeps resetting)', () => {
+    expect(shouldAutoRebootPreview({ ...base, streak: 0, total: AUTO_HEAL_MAX_TOTAL, msSinceLastAttempt: AUTO_HEAL_COOLDOWN_MS * 10 })).toBe(false);
   });
 });

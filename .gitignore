@@ -1,35 +1,12 @@
 node_modules/
-build/
 dist/
+build/
+.next/
+out/
 coverage/
+.venv/
+__pycache__/
+.cache/
+.e-checkpoints/
 .DS_Store
 *.log
-.env*
-!.env.example
-.claude/
-test_environment_debug.json
-
-# Runtime-written artifacts (not source)
-project_memory.json
-test_workspace/
-whereami.txt
-test_environment_debug.json
-
-.boot-check.cjs
-sbom.cdx.json
-
-# Self-hosted Monaco editor assets — copied from node_modules at build time
-# (scripts/copyMonaco.mjs), never committed (16 MB, regenerated on every build).
-public/monaco/
-
-# AgentV3 bake-off run artifacts
-scripts/bakeoff-results-*.json
-
-# Mobile (Capacitor) — native signing secrets and the per-machine iOS project (generated on a Mac).
-# NEVER commit these: losing/leaking the keystore breaks app updates; ios/ is regenerated with `cap add ios`.
-android/keystore.properties
-*.keystore
-*.jks
-/ios/
-# App icon/splash SOURCE files (you drop a 1024 icon here and run `npx @capacitor/assets generate`).
-/assets/

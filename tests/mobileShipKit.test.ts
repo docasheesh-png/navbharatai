@@ -254,3 +254,36 @@ describe('one-click installable APK — the zero-secret path (admin 2026-08-02)'
   });
 });
 
+describe('generated workflows must actually RUN on GitHub (real failure 2026-08-02)', () => {
+  // A user's android-apk.yml died after 18 seconds with "Process completed with exit code 1".
+  // Cause: every generated workflow asked actions/setup-node for cache:'npm', but NavBharatAI pushes
+  // the app source WITHOUT a package-lock.json — and setup-node HARD-FAILS when the lock file it is
+  // told to cache does not exist, before a single line of the app is built.
+  const kit = () => generateShipKit({ appName: 'My App' }).files;
+  const workflows = () => Object.entries(kit()).filter(([p]) => p.startsWith('.github/workflows/'));
+
+  it('no generated workflow asks for an npm cache while no lock file is shipped', () => {
+    const shipsLockFile = Object.keys(kit()).some((p) => /package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$/.test(p));
+    expect(shipsLockFile).toBe(false); // documents WHY the cache must stay off
+    for (const [path, wf] of workflows()) {
+      expect(wf, path).not.toContain("cache: 'npm'");
+      expect(wf, path).not.toContain('cache: npm');
+    }
+  });
+
+  it('every workflow still installs dependencies in a lock-file-free way', () => {
+    for (const [path, wf] of workflows()) {
+      expect(wf, path).toContain('npm ci || npm install'); // ci fails without a lock, install then works
+    }
+  });
+
+  it('covers ALL generated workflows, not just the apk one (the bug was in all three)', () => {
+    const paths = workflows().map(([p]) => p).sort();
+    expect(paths).toEqual([
+      '.github/workflows/android-aab.yml',
+      '.github/workflows/android-apk.yml',
+      '.github/workflows/ios-ipa.yml',
+    ]);
+  });
+});
+

@@ -134,7 +134,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # NO npm cache here on purpose: NavBharatAI pushes the app's source but never a
+          # package-lock.json, and actions/setup-node with cache:'npm' HARD-FAILS when no lock file
+          # exists ("Dependencies lock file is not found") — killing the run ~18s in, before a single
+          # line of the app is built. The install step below already falls back to a plain install.
 
       - uses: actions/setup-java@v4
         with:
@@ -215,7 +218,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # NO npm cache here on purpose: NavBharatAI pushes the app's source but never a
+          # package-lock.json, and actions/setup-node with cache:'npm' HARD-FAILS when no lock file
+          # exists ("Dependencies lock file is not found") — killing the run ~18s in, before a single
+          # line of the app is built. The install step below already falls back to a plain install.
 
       - uses: actions/setup-java@v4
         with:
@@ -370,7 +376,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # NO npm cache here on purpose: NavBharatAI pushes the app's source but never a
+          # package-lock.json, and actions/setup-node with cache:'npm' HARD-FAILS when no lock file
+          # exists ("Dependencies lock file is not found") — killing the run ~18s in, before a single
+          # line of the app is built. The install step below already falls back to a plain install.
 
       - name: Install dependencies
         run: npm ci || npm install

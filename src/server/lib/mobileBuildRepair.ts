@@ -51,6 +51,14 @@ export interface BuildFailureDiagnosis {
   detail?: Record<string, string>;
 }
 
+/** What NavBharatAI would generate for this repository today — the source of a refresh repair. */
+export interface FreshFiles {
+  /** The current kit's version of the failing workflow. */
+  workflow?: string;
+  /** The repo's package.json re-merged through the current rules (Capacitor majors aligned, build script present). */
+  packageJson?: string;
+}
+
 export interface RepairResult {
   /** Only the files that actually changed — an empty object means there was nothing to repair. */
   files: Record<string, string>;
@@ -176,7 +184,7 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       code: 'ANDROID_PLATFORM_MISSING',
       summary: 'The Android part of the project had not been created before the build tried to compile it.',
       autoFixable: true,
-      needs: [workflowPath],
+      needs: [workflowPath, 'package.json'],
     };
   }
 
@@ -188,7 +196,9 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       code: 'ANDROID_PLATFORM_MISSING',
       summary: 'The Android project was never created, so there was nothing to compile.',
       autoFixable: true,
-      needs: [workflowPath],
+      // package.json too: the usual reason the project cannot be created is that the app's Capacitor
+      // packages are on different major versions, and that is fixed there, not in the workflow.
+      needs: [workflowPath, 'package.json'],
     };
   }
 
@@ -254,7 +264,7 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
           ? 'The build stopped while creating the Android project.'
           : 'The build stopped while building the Android app.',
       autoFixable: true,
-      needs: [workflowPath],
+      needs: [workflowPath, 'package.json'],
       detail: { stage },
     };
   }
@@ -510,20 +520,41 @@ export function repairFiles(
   current: Record<string, string>,
   workflowPath: string,
   /**
-   * What the CURRENT ship kit would generate for this workflow. Supplying it lets a repository created
-   * before a fix pick that fix up — the single most valuable repair there is, because it heals every
+   * What NavBharatAI would generate for this repository TODAY. Supplying it lets a repository prepared
+   * before a fix pick that fix up — the most valuable repair there is, because it heals every
    * already-pushed repo at once instead of one pattern at a time.
+   *
+   * It covers package.json as well as the workflow, and that is not optional detail: the reason
+   * `cap add android` fails is almost always that the app's Capacitor packages sit on different major
+   * versions, which lives in package.json. A refresh limited to the workflow would replace the file
+   * that merely EXPOSED the problem and leave the one that CAUSED it — so the build would fail again,
+   * the repair would find nothing left to change, and the user would be told "NavBharatAI could not fix
+   * this one on its own" for something entirely within our power to fix.
    */
-  freshWorkflow?: string,
+  fresh?: FreshFiles,
 ): RepairResult | null {
   const wf = current[workflowPath] || '';
-  const refresh = (): RepairResult | null =>
-    freshWorkflow && freshWorkflow.trim() !== wf.trim()
-      ? {
-        files: { [workflowPath]: freshWorkflow },
-        message: 'NavBharatAI: update this app’s build instructions to the current version',
-      }
-      : null;
+
+  /**
+   * Replace every NavBharatAI-generated file that is out of date, in ONE commit.
+   *
+   * Only files that genuinely differ are included, so an already-current repository yields null and the
+   * loop stops instead of committing nothing and rebuilding forever.
+   */
+  const refresh = (): RepairResult | null => {
+    const files: Record<string, string> = {};
+    if (fresh?.workflow && fresh.workflow.trim() !== wf.trim()) files[workflowPath] = fresh.workflow;
+    if (fresh?.packageJson && fresh.packageJson.trim() !== (current['package.json'] || '').trim()) {
+      files['package.json'] = fresh.packageJson;
+    }
+    if (Object.keys(files).length === 0) return null;
+    return {
+      files,
+      message: files['package.json']
+        ? 'NavBharatAI: bring this app’s build setup up to date so the Android project can be created'
+        : 'NavBharatAI: update this app’s build instructions to the current version',
+    };
+  };
   const one = (path: string, next: string | null, message: string): RepairResult | null =>
     next === null ? null : { files: { [path]: next }, message };
 

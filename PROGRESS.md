@@ -23876,3 +23876,28 @@ the failure, called the auto-fix, and reported an honest "could not correct it a
 hanging or faking success. The plumbing is right; these were the remaining defects behind it.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1016 files / 10682 tests, 0 failures**.
+
+### Same day — the gap that would STILL have said "NavBharatAI could not fix this one on its own"
+
+The admin asked the exact right question: *"navbharatai could not fix — yeh to nahi ayega?"* Audited it
+rather than reassuring, and found a real gap.
+
+`ANDROID_PLATFORM_MISSING` declared `needs: [workflowPath]` only, so the auto-fix could read and rewrite
+the WORKFLOW but never `package.json` — which is precisely where the Capacitor-major fix lives. The
+sequence would have been: refresh the workflow (the file that merely EXPOSED the problem) → build fails
+again on the same mismatched majors → the repair now finds the workflow already current and changes
+nothing → loop guard correctly reports it unfixable → **the user is told NavBharatAI cannot fix
+something entirely within our power to fix.**
+
+Closed: `repairFiles` now takes a `FreshFiles` record ({workflow, packageJson}) rather than one
+workflow string, and refreshes every out-of-date NavBharatAI-generated file in ONE commit. The route
+regenerates package.json through the SAME `buildPackageJson` merge the setup route uses, so every
+dependency the user's app declares survives untouched and only what NavBharatAI owns is corrected (the
+Capacitor packages' shared major, and the build script). The loop guard is unchanged and still holds:
+only genuinely-differing files are included, so an already-current repo yields null and the loop stops.
+
+**Where "could not fix" is still the CORRECT answer (by design, never to be papered over):**
+a missing Play Store signing key (it is the user's permanent identity — we must not have it), and the
+user's own app failing to compile (reported precisely, never silently rewritten).
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1016 files / 10685 tests, 0 failures**.

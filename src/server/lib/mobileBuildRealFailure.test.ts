@@ -88,9 +88,56 @@ describe('the log is read from the step that FAILED, not the whole job', () => {
       /- name: Generate and sync the Android project[\s\S]*?\n\n/,
       '- name: Generate and sync the Android project\n        run: |\n          npx cap add android || echo "continuing"\n          npx cap sync android\n\n',
     );
-    const repair = repairFiles(d, { [APK_PATH]: oldWorkflow }, APK_PATH, APK_WORKFLOW);
+    const repair = repairFiles(d, { [APK_PATH]: oldWorkflow }, APK_PATH, { workflow: APK_WORKFLOW });
     expect(repair?.files[APK_PATH]).toBeTruthy();
     expect(repair!.files[APK_PATH]).not.toContain('|| echo "continuing"');
+  });
+
+  it('THE GAP THAT WOULD STILL HAVE SAID "could not fix": package.json is refreshed too', () => {
+    // Replacing only the workflow swaps the file that EXPOSED the problem and leaves the one that
+    // CAUSED it — mismatched Capacitor majors. The build fails again, the repair then finds nothing
+    // left to change, and the user is told NavBharatAI cannot fix something entirely in our power.
+    const d = classifyBuildFailure(REAL_LOG, APK_PATH);
+    expect(d.needs).toContain('package.json');
+
+    const mismatched = JSON.stringify({
+      scripts: { build: 'vite build' },
+      dependencies: { '@capacitor/core': '^7.0.1', '@capacitor/android': '^6.2.0' },
+      devDependencies: { '@capacitor/cli': '^6.2.0' },
+    }, null, 2);
+    const repair = repairFiles(
+      d,
+      { [APK_PATH]: APK_WORKFLOW, 'package.json': mismatched },  // workflow ALREADY current
+      APK_PATH,
+      { workflow: APK_WORKFLOW, packageJson: buildPackageJson(mismatched, 'app', 'built') },
+    );
+    expect(repair, 'a fixable mismatch must not be reported as unfixable').not.toBeNull();
+    const fixed = JSON.parse(repair!.files['package.json']);
+    expect(majorOfRange(fixed.dependencies['@capacitor/android'])).toBe(7);
+    expect(majorOfRange(fixed.devDependencies['@capacitor/cli'])).toBe(7);
+    expect(fixed.dependencies['@capacitor/core']).toBe('^7.0.1');
+  });
+
+  it('the user’s own dependencies survive the refresh untouched', () => {
+    const pkg = JSON.stringify({
+      scripts: { build: 'vite build', test: 'vitest' },
+      dependencies: { react: '^19.0.0', zustand: '^5.0.0', '@capacitor/core': '^7.0.1' },
+    }, null, 2);
+    const out = JSON.parse(buildPackageJson(pkg, 'app', 'built'));
+    expect(out.dependencies.react).toBe('^19.0.0');
+    expect(out.dependencies.zustand).toBe('^5.0.0');
+    expect(out.scripts.test).toBe('vitest');
+  });
+
+  it('AND STILL STOPS: everything already current changes nothing', () => {
+    const d = classifyBuildFailure(REAL_LOG, APK_PATH);
+    const pkg = buildPackageJson(JSON.stringify({ scripts: { build: 'vite build' } }), 'app', 'built');
+    expect(repairFiles(
+      d,
+      { [APK_PATH]: APK_WORKFLOW, 'package.json': pkg },
+      APK_PATH,
+      { workflow: APK_WORKFLOW, packageJson: pkg },
+    )).toBeNull();
   });
 
   it('a log with no group markers is still classified on its full text', () => {

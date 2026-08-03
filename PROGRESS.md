@@ -23662,3 +23662,19 @@ shipped is a CDN-independent foundation + ordered fallback + continuous self-hea
 honest version of the guarantee.
 FOLLOW-UP (open): the legacy client-side builder (`src/lib/previewUtils.ts`) still builds its own
 esm.sh-only importmap — wire the same vendored runtime there in a later slice.
+
+### Follow-up slices (same 2026-08-03 batch, PR #2049)
+- **Legacy client builder vendored too** (`previewUtils.ts`): same-origin React importmap + UMD scripts,
+  pure-CDN map kept as `window.__CDN_IMAP` with a per-spec retry — a facade failure degrades to exactly
+  the old behaviour. Escape hatch `window.__NBAI_VENDOR_REACT_OFF`.
+- **IMPORT_LANDING telemetry**: `landedVia`/`bulkVerifiedCount` from #2046 are now RECORDED into the
+  build report at both in-build land sites (the #2044 loss was invisible precisely because this was
+  thrown away). Source-contract test locks the wiring.
+- **POSIX bulk-landing**: `set -o pipefail` was a bashism — on a plain-sh sandbox the fast tar landing
+  silently NEVER engaged. Rewritten pure POSIX (tar listing → temp file, tar's own exit status kept,
+  BSD `wc` padding stripped); regression test forbids bashisms in the command.
+- **"511 files" mystery INVESTIGATED, no bug**: the count is `reconcileProjectFileTree`'s deliberate
+  union of durable source paths + sandbox-only content (lockfiles, sandbox-tier images, build outputs)
+  — mitrify's 165 durable + ~346 sandbox-only sums right. The user-facing banner already counts
+  editable source files separately; the union only feeds large-project routing, where over-counting
+  errs SAFE (routes to the strong model sooner). No change made — evidence over guesses.

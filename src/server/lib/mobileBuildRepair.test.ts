@@ -10,7 +10,7 @@ import {
   classifyBuildFailure, extractAppBuildError, normalizeLog, repairFiles,
   repairAndroidPlatform, repairBuildScript, repairGradlewPermission, repairJavaVersion,
   repairNpmCache, repairNpmCi, repairOutOfMemory, repairSdkLicenses, repairWebDir,
-  webDirForPackageJson,
+  webDirForPackageJson, repairPeerConflict, failedStage,
 } from './mobileBuildRepair';
 import { generateShipKit } from './mobileShipKit';
 import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
@@ -217,5 +217,66 @@ describe('what the user is told', () => {
       expect(s).not.toContain('##[error]');
       expect(s.length).toBeGreaterThan(20);
     }
+  });
+});
+
+describe('failures while installing the app’s libraries (the 36s death class)', () => {
+  it('names a package that does not exist, and refuses to "fix" it', () => {
+    const log = [
+      'npm ERR! code E404',
+      "npm ERR! 404 Not Found - GET https://registry.npmjs.org/react-super-charts - Not found",
+      "npm ERR! 404  'react-super-charts@^2.0.0' is not in this registry.",
+    ].join('\n');
+    const d = classifyBuildFailure(log, APK_PATH);
+    expect(d.code).toBe('NPM_PACKAGE_NOT_FOUND');
+    // Deliberately unfixable here: dropping the package would leave the code importing it, failing one
+    // step later with a worse message. The real cure is upstream, in what the builder generates.
+    expect(d.autoFixable).toBe(false);
+    expect(d.detail?.package).toBe('react-super-charts');
+    expect(d.summary).toContain('react-super-charts');
+  });
+
+  it('recovers from a peer-dependency conflict, which npm has an exact fix for', () => {
+    const log = 'npm ERR! code ERESOLVE\nnpm ERR! ERESOLVE unable to resolve dependency tree';
+    const d = classifyBuildFailure(log, APK_PATH);
+    expect(d.code).toBe('NPM_PEER_CONFLICT');
+    expect(d.autoFixable).toBe(true);
+    const old = '      - run: npm install\n';
+    expect(repairPeerConflict(old)).toContain('--legacy-peer-deps');
+    // Already carrying the fallback: nothing to change, so the loop must stop.
+    expect(repairPeerConflict(APK_WORKFLOW)).toBeNull();
+  });
+});
+
+describe('the workflow tells us which stage died, instead of us guessing', () => {
+  it('reads the marker the generated workflow prints', () => {
+    expect(failedStage('2026-08-03T09:00:00.0000000Z NBAI_FAILED_STAGE=install')).toBe('install');
+    expect(failedStage('NBAI_FAILED_STAGE=webbuild')).toBe('webbuild');
+    expect(failedStage('nothing useful here')).toBeNull();
+  });
+
+  it('an unnamed failure in OUR stage becomes a workflow refresh', () => {
+    const d = classifyBuildFailure('##[error]Process completed with exit code 1.\nNBAI_FAILED_STAGE=install', APK_PATH);
+    expect(d.code).toBe('STALE_WORKFLOW');
+    expect(d.autoFixable).toBe(true);
+    const repair = repairFiles(d, { [APK_PATH]: '# an old workflow' }, APK_PATH, APK_WORKFLOW);
+    expect(repair?.files[APK_PATH]).toBe(APK_WORKFLOW);
+  });
+
+  it('an unnamed failure in the USER\'S app code is never "fixed" by touching our files', () => {
+    const d = classifyBuildFailure('##[error]Process completed with exit code 1.\nNBAI_FAILED_STAGE=webbuild', APK_PATH);
+    expect(d.code).toBe('UNKNOWN');
+    expect(d.autoFixable).toBe(false);
+    expect(d.summary).toMatch(/did not compile/i);
+  });
+
+  it('THE LOOP GUARD on the refresh: an already-current workflow is not committed again', () => {
+    const d = classifyBuildFailure('##[error]exit code 1\nNBAI_FAILED_STAGE=capacitor', APK_PATH);
+    expect(repairFiles(d, { [APK_PATH]: APK_WORKFLOW }, APK_PATH, APK_WORKFLOW)).toBeNull();
+  });
+
+  it('and with no fresh workflow supplied it simply cannot fix it — never an empty commit', () => {
+    const d = classifyBuildFailure('##[error]exit code 1\nNBAI_FAILED_STAGE=android', APK_PATH);
+    expect(repairFiles(d, { [APK_PATH]: '# old' }, APK_PATH)).toBeNull();
   });
 });

@@ -130,6 +130,7 @@ import { notifyBuildComplete, notifyLowBalance } from '../lib/PushNotificationSe
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
+import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -10031,6 +10032,32 @@ export function registerAgentV3Routes(app: Express): void {
       if (!result.ok && noClaudeBuild && expectsArtifacts && (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off') {
         const failLang = detectLanguageHint(prompt)?.code ?? null;
         result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${weakTierBuildFailedNotice(failLang)}` };
+      }
+      // "WHAT THIS APP NEEDS FROM YOU" (admin question 2026-08-03: can v5.0 handle DB / multi-feature apps,
+      // and should it tell the user to paste keys in Settings?). A built app can be technically perfect and
+      // STILL have a Pay button that cannot charge, because the gateway key can only come from the user's
+      // OWN account — that is precisely the "looks done but does nothing" state the second absolute rule
+      // forbids. So on a SUCCESSFUL build we read the real output (declared packages + the env-vars the code
+      // actually references), subtract every secret the user has ALREADY saved, and append a SHORT localized
+      // checklist naming the exact key names and the exact settings path.
+      // Deliberately NOT a blocker and NOT a pre-build questionnaire: the app is built and shown first, the
+      // sandbox Postgres is still auto-provisioned silently (kind 'auto' is never surfaced), and a plain app
+      // — the overwhelmingly common case — produces an empty string and no extra line at all. Zero LLM cost:
+      // the detector is pure static analysis. Kill switch AGENTV3_APP_REQUIREMENTS=off.
+      if (result.ok && expectsArtifacts && (process.env.AGENTV3_APP_REQUIREMENTS ?? '').trim().toLowerCase() !== 'off') {
+        try {
+          const missing = unconfiguredRequirements(detectAppRequirements({ files: writtenFiles, prompt }), vaultSecrets);
+          const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
+          if (notice) {
+            result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'APP_REQUIREMENTS_SURFACED', autoResolved: false,
+              message: `Told the user which of their own credentials this app still needs: ${missing.map((r) => r.id).join(', ')}`.slice(0, 400),
+            });
+          }
+        } catch {
+          // A notice is never worth failing a successful build over — stay silent and ship the app.
+        }
       }
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the

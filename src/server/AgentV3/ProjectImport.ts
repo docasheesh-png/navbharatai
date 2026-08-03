@@ -611,14 +611,89 @@ function existingModuleByTail(base: string, paths: Set<string>): string | undefi
   return found.size === 1 ? [...found][0] : undefined;
 }
 
+/**
+ * Blank out everything that only LOOKS like code: line/block comments and template literals.
+ *
+ * ROOT CAUSE (self-import autopsy 2026-08-03): importing NavBharatAI itself reported "This import
+ * looks INCOMPLETE — 20 file(s) its code references are missing", naming things like
+ * `src/server/AgentV3/Missing`, `src/server/AgentV3/b`, `src/lib/App` and `src/components/ide/component`.
+ * NONE of them were real imports:
+ *   • `ArchitectureAnalysis.test.ts` holds FIXTURES — `"import { X } from './Missing';"` inside a string,
+ *     which is the very input that test feeds the analyzer;
+ *   • `AITestingSuite.tsx` holds a TEMPLATE LITERAL of example test code containing `from './component'`;
+ *   • `firebase.ts` mentions ``import { auth } from './App'`` inside a // COMMENT.
+ * So the scanner cried wolf on a perfectly complete repo — and the offer it makes ("say 'create the
+ * missing files' and I'll build them") would have had the AI CREATE `Missing.ts`, `b.ts`, `App.ts`…
+ * i.e. actively pollute the user's codebase on the strength of a false alarm. A warning that fires on
+ * a healthy import is worse than no warning: it burns the trust the real signal depends on.
+ *
+ * Length is preserved (replace with spaces/newlines) so any offset stays meaningful. Deliberately does
+ * NOT touch ordinary '…'/"…" strings: a real import specifier lives in one, and the `import ⟨spec⟩`
+ * grammar the caller matches already requires the import keyword to precede it. Pure.
+ */
+export function maskNonCodeRegions(src: string): string {
+  // ONE left-to-right pass, not a chain of independent regexes. Chained regexes DESYNCHRONISE: a
+  // template literal holding generated code (our own Scaffold/Generator files do exactly this) contains
+  // `/* … */` and `//` comments, so a comment-regex run first eats across the template's boundaries,
+  // its closing backtick disappears, and the template's contents are then scanned AS CODE — which is
+  // how "import App from './App';" inside a scaffold string became a phantom missing file. Scanning
+  // once, honouring whichever region opens first, is the only way the boundaries stay correct.
+  //
+  // Ordinary '…' / "…" strings are TOKENISED but their text is PRESERVED: a real import specifier lives
+  // in one. Skipping over them still matters — a quote-embedded backtick or `//` must not be mistaken
+  // for the start of a template/comment. Length is preserved (newlines kept) so offsets stay meaningful.
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  const blankTo = (from: number, to: number) => {
+    for (let k = from; k < to; k++) out += src[k] === '\n' ? '\n' : ' ';
+  };
+  while (i < n) {
+    const c = src[i];
+    const c2 = src[i + 1];
+    if (c === '/' && c2 === '*') {                      // /* block comment */
+      let j = src.indexOf('*/', i + 2);
+      j = j < 0 ? n : j + 2;
+      blankTo(i, j); i = j; continue;
+    }
+    if (c === '/' && c2 === '/') {                      // // line comment
+      let j = src.indexOf('\n', i);
+      j = j < 0 ? n : j;
+      blankTo(i, j); i = j; continue;
+    }
+    if (c === '`') {                                    // `template literal` (escape-aware)
+      let j = i + 1;
+      while (j < n && src[j] !== '`') j += src[j] === '\\' ? 2 : 1;
+      j = Math.min(j + 1, n);
+      blankTo(i, j); i = j; continue;
+    }
+    if (c === '"' || c === "'") {                       // '…' / "…" — skipped over, text KEPT
+      let j = i + 1;
+      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      j = Math.min(j + 1, n);
+      out += src.slice(i, j); i = j; continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
 export function findUnresolvedLocalImports(files: Record<string, string>): Array<{ missing: string; importedBy: string; existsAt?: string }> {
   const paths = new Set(Object.keys(files));
   const hasSrc = [...paths].some((p) => p === 'src' || p.startsWith('src/'));
   const out: Array<{ missing: string; importedBy: string; existsAt?: string }> = [];
   const seen = new Set<string>();
-  const importRe = /(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"]([^'"\n]+)['"]/g;
-  for (const [path, content] of Object.entries(files)) {
-    if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof content !== 'string') continue;
+  // A REAL import/export is a STATEMENT: it starts its own line. The `^[ \t]*` anchor (with /m) is what
+  // separates it from the same text quoted INSIDE a string — which is how every analyzer test fixture in
+  // a repo is written (`'src/a.ts': "import { b } from './b';\n…"`). Without the anchor, importing a repo
+  // that merely CONTAINS import-parsing tests reported 20 phantom "missing files" (self-import autopsy
+  // 2026-08-03). Combined with maskNonCodeRegions (comments + template literals), only real code is read.
+  const importRe = /^[ \t]*(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"]([^'"\n]+)['"]/gm;
+  for (const [path, rawContent] of Object.entries(files)) {
+    if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof rawContent !== 'string') continue;
+    // Only scan REAL code — comments and template literals routinely contain example/fixture imports
+    // that do not exist and must never be reported as a missing file (see maskNonCodeRegions).
+    const content = maskNonCodeRegions(rawContent);
     let m: RegExpExecArray | null;
     importRe.lastIndex = 0;
     while ((m = importRe.exec(content))) {

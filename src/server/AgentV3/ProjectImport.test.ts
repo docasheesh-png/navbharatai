@@ -9,6 +9,7 @@ import {
   validateImportedProject,
   importSummaryLine,
   importAccountingLine,
+  maskNonCodeRegions,
   droppedDetailNote,
   chooseMonorepoAppRoot,
   envTemplateNote,
@@ -819,5 +820,105 @@ describe('importAccountingLine — every archive entry is accounted for, in the 
     const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 1 }));
     expect(line).toContain('1 archive entry');
     expect(line).toContain('1 source file');
+  });
+});
+
+// ROOT CAUSE (self-import autopsy 2026-08-03): importing NavBharatAI itself warned "This import looks
+// INCOMPLETE — 20 file(s) its code references are missing", naming src/server/AgentV3/Missing,
+// .../b, src/lib/App, src/components/ide/component … NONE were real. They were analyzer TEST FIXTURES,
+// generated-code TEMPLATE LITERALS and a path quoted in a COMMENT. Worse, the warning offers "say
+// 'create the missing files' and I'll build them" — acting on that would have written garbage files
+// (Missing.ts, b.ts, App.ts) into a perfectly healthy repo. These lock the fix.
+describe('maskNonCodeRegions — only REAL code is scanned for imports', () => {
+  it('blanks line + block comments but preserves length and newlines', () => {
+    const src = "import a from './a';\n// import x from './Nope';\nconst b = 1;";
+    const masked = maskNonCodeRegions(src);
+    expect(masked).toHaveLength(src.length);
+    expect(masked.split('\n')).toHaveLength(3);
+    expect(masked).toContain("import a from './a';");
+    expect(masked).not.toContain('./Nope');
+  });
+
+  it('blanks template literals (generated-code samples)', () => {
+    const src = "const sample = `import Component from './component';`;";
+    expect(maskNonCodeRegions(src)).not.toContain('./component');
+  });
+
+  it('does NOT desynchronise on a template that CONTAINS comments (the scaffold-generator case)', () => {
+    // A code generator's template holds generated code WITH its own /* */ and // comments. A chained
+    // comment-then-template regex ate across the template's boundary, exposing its body as real code.
+    const src = [
+      'const TPL = `',
+      '/* generated header */',
+      '// keep this',
+      "import App from './App';",
+      '`;',
+      "import real from './real';",
+    ].join('\n');
+    const masked = maskNonCodeRegions(src);
+    expect(masked).not.toContain('./App');      // template body stayed masked
+    expect(masked).toContain("import real from './real';"); // real code after it survived
+  });
+
+  it('does NOT desynchronise on an ESCAPED backtick inside a template (markdown fence case)', () => {
+    const src = [
+      'const DOC = `',
+      '\\`\\`\\`ts',
+      "import { r } from './server/x/routes';",
+      '\\`\\`\\`',
+      '`;',
+      "import real from './real';",
+    ].join('\n');
+    const masked = maskNonCodeRegions(src);
+    expect(masked).not.toContain('./server/x/routes');
+    expect(masked).toContain("import real from './real';");
+  });
+
+  it('a backtick inside an ordinary string does not open a phantom template', () => {
+    const src = "const tick = '`';\nimport real from './real';";
+    expect(maskNonCodeRegions(src)).toContain("import real from './real';");
+  });
+
+  it('keeps ordinary string text (a real import specifier lives in one)', () => {
+    expect(maskNonCodeRegions("import x from './x';")).toContain("'./x'");
+  });
+});
+
+describe('findUnresolvedLocalImports — no phantom "missing files" from fixtures/templates/comments', () => {
+  const app = { 'src/App.tsx': "import React from 'react';\nexport default function App(){return null;}" };
+
+  it('ignores an import quoted INSIDE a test fixture string (the exact repo case)', () => {
+    // Verbatim shape from ArchitectureAnalysis.test.ts.
+    const files = {
+      ...app,
+      'src/analyze.test.ts': `const g = graphOf({ 'src/App.tsx': "import { X } from './Missing';\\nexport function App(){}" });`,
+    };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('ignores an import inside a generated-code TEMPLATE literal', () => {
+    const files = { ...app, 'src/gen.tsx': "const code = `import { Btn } from './button';`;" };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('ignores an import mentioned in a COMMENT', () => {
+    const files = { ...app, 'src/lib/firebase.ts': "// App.tsx re-exports so `import { auth } from './App'` keeps working.\nexport const x = 1;" };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('STILL reports a genuinely missing import (the real signal is not weakened)', () => {
+    const files = { 'src/App.tsx': "import Header from './components/Header';\nexport default function App(){return null;}" };
+    const out = findUnresolvedLocalImports(files);
+    expect(out).toHaveLength(1);
+    expect(out[0].missing).toBe('src/components/Header');
+    expect(out[0].importedBy).toBe('src/App.tsx');
+  });
+
+  it('still reports a missing import that follows a masked region in the same file', () => {
+    const files = {
+      'src/App.tsx': "const t = `import Fake from './Fake';`;\nimport Real from './Real';\nexport default function App(){return null;}",
+    };
+    const out = findUnresolvedLocalImports(files);
+    expect(out.map((o) => o.missing)).toEqual(['src/Real']); // the fake one is gone, the real one remains
   });
 });

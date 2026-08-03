@@ -130,6 +130,8 @@ import { notifyBuildComplete, notifyLowBalance } from '../lib/PushNotificationSe
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
+import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
+import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -6718,6 +6720,20 @@ export function registerAgentV3Routes(app: Express): void {
           architectSystem = `${paletteBlock}\n\n---\n\n${architectSystem}`;
         }
       } catch { /* palette preset is best-effort — never blocks a build */ }
+      // MISSING-CREDENTIAL CONTRACT (admin spec 2026-08-03: "jab tak user keys na de, us option ko 'coming
+      // soon' likh kar freeze kar do — puri app band na ho"). AppRequirements tells the user WHICH of their
+      // own keys are missing; that message is worthless if the app is already dead by the time they read it.
+      // Generated apps routinely do `if (!process.env.X) throw` at module scope, so ONE unset payment key
+      // white-screens a 12-screen app — a total failure of the one absolute rule, triggered by the user
+      // having done nothing wrong. PREVENTION beats repair (the 50/50 law), so the contract is injected into
+      // the builder's prompt: a missing credential freezes that ONE control in a visible, disabled "Coming
+      // soon" state naming the exact key + settings path, never crashes at boot, and never fakes a result.
+      // Additive + best-effort; AGENTV3_CREDENTIAL_GUARD=off leaves the prompt byte-identical.
+      try {
+        if (credentialGuardEnabled()) {
+          architectSystem = `${credentialGuardInstruction()}\n\n---\n\n${architectSystem}`;
+        }
+      } catch { /* the guard contract is best-effort — never blocks a build */ }
       // Phase S2 — IDE↔v5.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
       // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
@@ -8668,6 +8684,57 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* hooks heal is best-effort — never blocks or fails a build */ }
       }
 
+      // BOOT-KILLER HEAL — the second half of the missing-credential contract (admin 2026-08-03: "us option
+      // ko 'coming soon' likh kar freeze kar do, puri app band na ho"). The contract is injected into the
+      // builder's prompt so the FIRST build is already correct; injecting a rule is NOT proof it was
+      // followed, and the 50/50 law is explicit that if a problem still slips through, the heal must be
+      // REAL, not best-effort cosmetics. So: detect the exact fatal pattern the contract forbids — a
+      // top-level `throw`/`process.exit` gated on a missing env var — and, when found, run ONE bounded,
+      // FOCUSED repair pass with the exact file:line, then RE-DETECT and report the truth either way.
+      //
+      // Deliberately NOT gated on `!result.ok`: this defect ships on a build that looks perfectly
+      // successful — every gate passes because the key is only missing at the USER'S runtime, not ours.
+      // That is precisely why it reached production before. The verdict is never flipped by this heal (a
+      // build that failed stays failed); it only removes the landmine. Weak-tier routed (no Sonnet/Opus on
+      // a free build). Costs an extra pass ONLY when a real boot-killer exists — a clean build pays nothing.
+      // Best-effort + time-budgeted + abortable. Kill switch AGENTV3_CREDENTIAL_GUARD=off.
+      if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted) {
+        try {
+          const killers = findBootKillingEnvGuards(writtenFiles);
+          if (killers.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
+              message: bootKillingGuardSummary(killers).slice(0, 400),
+            });
+            const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+            if (autoFixEnabled() && timeLeft) {
+              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Making sure a missing key freezes just that one feature instead of stopping the whole app…', ts: Date.now() });
+              const guardHealRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                model: resolveModel(powerLevelReqEffective),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await guardHealRunner.run(bootKillerRepairInstruction(killers));
+              // Re-detect over the UPDATED writtenFiles (the heal's writes land there via onFileWrite), so
+              // the report states what is actually true now — never "healed" on the healer's own say-so.
+              const after = findBootKillingEnvGuards(writtenFiles);
+              if (healed.ok && after.length === 0) {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'BOOT_KILLING_ENV_GUARD_HEALED', autoResolved: true,
+                  message: `Removed ${killers.length} boot-killing env guard(s) — a missing key now freezes only that feature ("Coming soon") instead of taking the whole app down.`,
+                });
+              } else {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD_UNRESOLVED', autoResolved: false,
+                  message: `Heal pass did not clear every boot-killing env guard — ${after.length} remain. ${bootKillingGuardSummary(after)}`.slice(0, 400),
+                });
+              }
+            }
+          }
+        } catch { /* the guard heal is best-effort — never blocks or fails a build */ }
+      }
+
       // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v5.0 used to
       // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it
       // actually OPENS the running app in a real browser, READS the rendered DOM + console, and
@@ -10031,6 +10098,32 @@ export function registerAgentV3Routes(app: Express): void {
       if (!result.ok && noClaudeBuild && expectsArtifacts && (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off') {
         const failLang = detectLanguageHint(prompt)?.code ?? null;
         result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${weakTierBuildFailedNotice(failLang)}` };
+      }
+      // "WHAT THIS APP NEEDS FROM YOU" (admin question 2026-08-03: can v5.0 handle DB / multi-feature apps,
+      // and should it tell the user to paste keys in Settings?). A built app can be technically perfect and
+      // STILL have a Pay button that cannot charge, because the gateway key can only come from the user's
+      // OWN account — that is precisely the "looks done but does nothing" state the second absolute rule
+      // forbids. So on a SUCCESSFUL build we read the real output (declared packages + the env-vars the code
+      // actually references), subtract every secret the user has ALREADY saved, and append a SHORT localized
+      // checklist naming the exact key names and the exact settings path.
+      // Deliberately NOT a blocker and NOT a pre-build questionnaire: the app is built and shown first, the
+      // sandbox Postgres is still auto-provisioned silently (kind 'auto' is never surfaced), and a plain app
+      // — the overwhelmingly common case — produces an empty string and no extra line at all. Zero LLM cost:
+      // the detector is pure static analysis. Kill switch AGENTV3_APP_REQUIREMENTS=off.
+      if (result.ok && expectsArtifacts && (process.env.AGENTV3_APP_REQUIREMENTS ?? '').trim().toLowerCase() !== 'off') {
+        try {
+          const missing = unconfiguredRequirements(detectAppRequirements({ files: writtenFiles, prompt }), vaultSecrets);
+          const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
+          if (notice) {
+            result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'APP_REQUIREMENTS_SURFACED', autoResolved: false,
+              message: `Told the user which of their own credentials this app still needs: ${missing.map((r) => r.id).join(', ')}`.slice(0, 400),
+            });
+          }
+        } catch {
+          // A notice is never worth failing a successful build over — stay silent and ship the app.
+        }
       }
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the

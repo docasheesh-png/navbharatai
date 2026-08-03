@@ -97,32 +97,39 @@ export async function collectWorkspaceFiles(
   const skipped: string[] = [];
   const all = await source.listFiles(workspaceId);
 
-  let totalBytes = 0;
-  for (const path of all) {
-    if (Object.keys(files).length >= MAX_FILES) {
-      skipped.push(path);
-      continue;
-    }
-    if (isExcludedPath(path)) {
-      skipped.push(path);
-      continue;
-    }
-    let content: string;
+  // ROOT CAUSE of the 13-minute post-import gap (admin build report 2026-08-03): this used to
+  // `await source.readFile(...)` ONE AT A TIME inside a for-loop. Against the E2B sandbox every read
+  // is a network round trip, so a 2034-file workspace cost ~2034 × ~390ms ≈ 790 SECONDS — which is
+  // exactly the 788s of silence between "import SUCCEEDED" (58s) and the agent starting (868s) in
+  // that report. It runs on EVERY turn (the File Guardian calls it before the agent edits anything),
+  // so this was a per-turn tax on every large app, not just imports.
+  //
+  // This is the THIRD instance of one bug class — serial awaits over a network — after the sandbox
+  // landing (648s incident) and the Firestore merge. Same fix, same discipline: SELECTION stays
+  // sequential and byte-exact (the caps below are applied in the original path order, so the chosen
+  // set is identical to before); only the latency-bound READS are parallelised.
+  const candidates = all.filter((path) => {
+    if (isExcludedPath(path)) { skipped.push(path); return false; }
+    return true;
+  });
+
+  const contents = new Map<string, string | null>();
+  await pool(candidates, READ_CONCURRENCY, async (path) => {
     try {
-      content = await source.readFile(workspaceId, path);
+      contents.set(path, await source.readFile(workspaceId, path));
     } catch {
-      skipped.push(path);
-      continue;
+      contents.set(path, null); // a failed read is a skip, exactly as before
     }
+  });
+
+  let totalBytes = 0;
+  for (const path of candidates) {
+    if (Object.keys(files).length >= MAX_FILES) { skipped.push(path); continue; }
+    const content = contents.get(path);
+    if (typeof content !== 'string') { skipped.push(path); continue; }
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > MAX_FILE_BYTES || looksBinary(content)) {
-      skipped.push(path);
-      continue;
-    }
-    if (totalBytes + bytes > MAX_TOTAL_BYTES) {
-      skipped.push(path);
-      continue;
-    }
+    if (bytes > MAX_FILE_BYTES || looksBinary(content)) { skipped.push(path); continue; }
+    if (totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }
     totalBytes += bytes;
     files[path] = content;
   }
@@ -170,6 +177,13 @@ async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Pro
  * measurement, but 1 (the old behaviour) is provably wrong for a large import.
  */
 const WRITE_CONCURRENCY = Math.max(1, Math.min(64, Number(process.env.AGENTV3_IMPORT_WRITE_CONCURRENCY) || 12));
+
+/**
+ * How many sandbox READS may be in flight at once (collectWorkspaceFiles). Same latency-bound shape as
+ * the writes above: the File Guardian reads the whole workspace on every turn, so this is the knob that
+ * turned a 13-minute stall on a 2000-file app into seconds.
+ */
+const READ_CONCURRENCY = Math.max(1, Math.min(64, Number(process.env.AGENTV3_WORKSPACE_READ_CONCURRENCY) || 16));
 
 /**
  * SELECTION — which files land, and which are skipped. Pure, deterministic, ORDER-DEPENDENT (the

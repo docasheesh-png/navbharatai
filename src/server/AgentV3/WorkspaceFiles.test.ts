@@ -377,3 +377,69 @@ describe('writeWorkspaceFiles — a SHORT extraction can never pass verification
     expect(h.perFile).toEqual(['src/日本語.ts']);
   });
 });
+
+// ROOT CAUSE of the 13-minute post-import gap (admin build report 2026-08-03): collectWorkspaceFiles
+// read every file with a SEQUENTIAL await - 2034 files x ~390ms = ~790s, exactly the observed silence.
+// It runs on EVERY turn (File Guardian), so it taxed every large app. Parallelising must not change
+// WHICH files are chosen - only how fast they are fetched.
+describe('collectWorkspaceFiles - parallel reads, byte-identical selection', () => {
+  function source(files: Record<string, string>, opts: { failOn?: string[] } = {}) {
+    let inFlight = 0, peak = 0, reads = 0;
+    return {
+      peak: () => peak,
+      reads: () => reads,
+      src: {
+        listFiles: async () => Object.keys(files),
+        readFile: async (_w: string, p: string) => {
+          inFlight++; peak = Math.max(peak, inFlight); reads++;
+          await new Promise((r) => setTimeout(r, 2));
+          inFlight--;
+          if (opts.failOn?.includes(p)) throw new Error('read failed');
+          return files[p];
+        },
+      },
+    };
+  }
+
+  it('reads CONCURRENTLY (the fix) instead of one at a time', async () => {
+    const files = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`src/f${i}.ts`, `const v${i}=1;`]));
+    const s = source(files);
+    const out = await collectWorkspaceFiles(s.src, 'ws');
+    expect(Object.keys(out.files)).toHaveLength(50);
+    expect(s.peak()).toBeGreaterThan(1); // sequential would peak at exactly 1
+  });
+
+  it('never READS an excluded path (no wasted round trips on node_modules/.env)', async () => {
+    const s = source({
+      'src/a.ts': 'a',
+      'node_modules/pkg/index.js': 'x',
+      '.env': 'SECRET=1',
+      '.env.example': 'SECRET=',
+    });
+    const out = await collectWorkspaceFiles(s.src, 'ws');
+    expect(Object.keys(out.files).sort()).toEqual(['.env.example', 'src/a.ts']);
+    expect(s.reads()).toBe(2); // only the two keepers were fetched
+    expect(out.skipped.sort()).toEqual(['.env', 'node_modules/pkg/index.js']);
+  });
+
+  it('a failed read is a skip, never fatal (unchanged behaviour)', async () => {
+    const s = source({ 'src/a.ts': 'a', 'src/b.ts': 'b' }, { failOn: ['src/b.ts'] });
+    const out = await collectWorkspaceFiles(s.src, 'ws');
+    expect(Object.keys(out.files)).toEqual(['src/a.ts']);
+    expect(out.skipped).toContain('src/b.ts');
+  });
+
+  it('skips binary content exactly as before', async () => {
+    const s = source({ 'src/a.ts': 'a', 'img.bin': 'has' + String.fromCharCode(0) + 'nul' });
+    const out = await collectWorkspaceFiles(s.src, 'ws');
+    expect(Object.keys(out.files)).toEqual(['src/a.ts']);
+    expect(out.skipped).toContain('img.bin');
+  });
+
+  it('applies the caps in ORIGINAL path order, so the chosen set is deterministic', async () => {
+    const files = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`src/f${i}.ts`, 'x'.repeat(100)]));
+    const a = await collectWorkspaceFiles(source(files).src, 'ws');
+    const b = await collectWorkspaceFiles(source(files).src, 'ws');
+    expect(Object.keys(a.files)).toEqual(Object.keys(b.files));
+  });
+});

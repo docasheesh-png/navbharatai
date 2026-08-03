@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   complexityScore, heuristicEstimateMs, formatEta, estimateBuildTime, predictDeadline,
-  complexityFromPrompt,
+  complexityFromPrompt, liveEtaTick,
   type HistoricalBuild,
 } from './BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, DEEP_TIME_FACTOR } from '../AgentV3/PipelineDepth';
@@ -136,5 +136,60 @@ describe('BuildTimeEstimator (P-PME.4)', () => {
       expect(finishMs).toBe(1_120_000);
       expect(etaText).toBe('~2 min');
     });
+  });
+});
+
+describe('liveEtaTick — the overrun line must keep MOVING (autopsy 2026-08-02: "wrapping up" x12 over 22 min)', () => {
+  const MIN = 60_000;
+
+  it('inside the estimate it counts down normally and never re-baselines', () => {
+    const t = liveEtaTick(2 * MIN, 8 * MIN, 8 * MIN);
+    expect(t.revised).toBe(false);
+    expect(t.totalMs).toBe(8 * MIN);
+    expect(t.text).toContain('2 min in');
+    expect(t.text).toContain('6 min to go');
+  });
+
+  it('THE REAL FAILURE: an 8-min estimate running 30 min never repeats one frozen line', () => {
+    // Replay the exact reported build: estimate ~8 min, ticks every 2 min out to minute 30.
+    const base = 8 * MIN;
+    let total = base;
+    const lines: string[] = [];
+    for (let m = 2; m <= 30; m += 2) {
+      const t = liveEtaTick(m * MIN, total, base);
+      total = t.totalMs;
+      lines.push(t.text);
+    }
+    // Before the fix EVERY line from minute 8 on was byte-identical ("wrapping up (a little longer…)").
+    const overrun = lines.slice(3); // minute 8 onward
+    expect(overrun.length).toBeGreaterThan(8);
+    expect(new Set(overrun).size).toBe(overrun.length); // every line distinct — the number keeps moving
+    expect(lines.join(' ')).not.toContain('wrapping up');
+    // And it stays honest about WHY it is longer.
+    expect(overrun[0]).toContain('bigger than expected');
+  });
+
+  it('on overrun it extends the budget so the NEXT tick shows a fresh countdown', () => {
+    const base = 8 * MIN;
+    const first = liveEtaTick(9 * MIN, base, base);      // just past the estimate
+    expect(first.revised).toBe(true);
+    expect(first.totalMs).toBeGreaterThan(9 * MIN);      // budget re-baselined ahead of now
+    const next = liveEtaTick(10 * MIN, first.totalMs, base);
+    expect(next.revised).toBe(false);                    // back inside the (new) budget
+    expect(next.text).toContain('to go');
+  });
+
+  it('the re-baseline step is proportional to the ORIGINAL estimate, clamped to 3-10 min', () => {
+    expect(liveEtaTick(60 * MIN, 1 * MIN, 2 * MIN).totalMs - 60 * MIN).toBe(3 * MIN);   // tiny app -> min step
+    expect(liveEtaTick(60 * MIN, 1 * MIN, 12 * MIN).totalMs - 60 * MIN).toBe(6 * MIN);  // half of base
+    expect(liveEtaTick(60 * MIN, 1 * MIN, 90 * MIN).totalMs - 60 * MIN).toBe(10 * MIN); // huge app -> max step
+  });
+
+  it('tolerates junk input without throwing or emitting NaN', () => {
+    for (const t of [liveEtaTick(0, 0, 0), liveEtaTick(NaN, NaN, NaN), liveEtaTick(-5, -5, -5)]) {
+      expect(typeof t.text).toBe('string');
+      expect(t.text).not.toContain('NaN');
+      expect(Number.isFinite(t.totalMs)).toBe(true);
+    }
   });
 });

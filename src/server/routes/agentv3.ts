@@ -192,7 +192,7 @@ import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptC
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
-import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, formatEta, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -5567,6 +5567,9 @@ export function registerAgentV3Routes(app: Express): void {
     let etaTotalMs = 0;
     let etaStartMs = 0;
     let etaTick = 0;
+    // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
+    // so each re-baseline step stays proportional to the app's real size, not to the growing budget.
+    let etaBaseMs = 0;
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -5580,11 +5583,12 @@ export function registerAgentV3Routes(app: Express): void {
       if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
           const elapsedMs = Date.now() - etaStartMs;
-          const remainingMs = etaTotalMs - elapsedMs;
-          const inTxt = formatEta(elapsedMs).replace('~', '');
-          const text = remainingMs > 45_000
-            ? `⏱️ Still building… ${inTxt} in · ~${formatEta(remainingMs).replace('~', '')} to go`
-            : `⏱️ Still building… ${inTxt} in · wrapping up (a little longer than estimated)`;
+          // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
+          // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
+          // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs);
+          etaTotalMs = tick.totalMs;
+          const text = tick.text;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
           // this ONE transient line the moment the build finishes (it is live status, not chat history).
@@ -5892,6 +5896,7 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const est = estimateBuildTime(complexityFromPrompt(prompt));
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
+          etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ${est.etaText} — I'll keep you posted as I go.`, ts: Date.now() });
         } catch { /* ETA is best-effort — never affects the build */ }
       }

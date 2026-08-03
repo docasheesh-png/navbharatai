@@ -7,6 +7,7 @@ import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendB
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
+import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -6770,6 +6771,13 @@ export function registerAgentV3Routes(app: Express): void {
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
           const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework), manifestUserPrompt(prompt, scaffold)));
+          // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
+          // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
+          // more files than it should need" is measurable instead of invisible.
+          try {
+            const overNote = overBudgetNote(manifest.length, fileBudgetForPrompt(prompt));
+            if (overNote) buildDiag.record({ phase: 'plan', severity: 'warning', code: 'FILE_BUDGET_EXCEEDED', message: overNote, autoResolved: true });
+          } catch { /* budget telemetry is best-effort */ }
           if (manifest.length >= 2) {
             const contract = ((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim();
             const block = blueprintAdvisoryBlock(manifest, contract);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory } from './ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration } from './ImportPreview';
 
 describe('previewBootFailureAdvisory (honest DB state, admin 2026-07-24) — a failed boot names the real cause', () => {
   it('DB-needed + not provisioned → tells the user to connect their own database', () => {
@@ -161,5 +161,47 @@ describe('persistentDatabaseAdvisory — clear problem → solution, suppressed 
   it('does not bold the generic labels', () => {
     expect(persistentDatabaseAdvisory({ provider: 'a database', connected: false })).toContain('uses a database,');
     expect(persistentDatabaseAdvisory({ provider: 'Neon', connected: false })).toContain('**Neon**');
+  });
+});
+
+// EARN THE PREVIEW VERDICT (admin 2026-08-03, "Cannot GET /customer/home" was shown as ✅ live): a bound
+// port is NOT the app serving. previewServeNarration turns the home-route probe result into an HONEST line.
+describe('previewServeNarration — "✅ up" is EARNED by the home route rendering', () => {
+  it('claims success ONLY when the home route actually rendered', () => {
+    const v = previewServeNarration({ rendered: true, problems: [], port: 5000, needsDb: true });
+    expect(v.ok).toBe(true);
+    expect(v.text).toContain('Live preview is up on port 5000');
+  });
+
+  it('does NOT claim success when the server 404s its own client routes (the reported bug)', () => {
+    const v = previewServeNarration({
+      rendered: false,
+      problems: ['the server returned 404 / "Cannot GET" — the dev server is not serving the app at this path'],
+      port: 5000,
+      needsDb: true,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.text).not.toContain('✅');
+    expect(v.text).not.toMatch(/is up on port/);
+    expect(v.text.toLowerCase()).toContain('cannot get');           // the real WHY is surfaced
+    expect(v.text.toLowerCase()).toContain('only its api');         // full-stack-specific guidance
+    expect(v.text).toMatch(/reload|diagnose/i);                     // an actionable next step
+  });
+
+  it('surfaces a build-error overlay honestly (not a fake up)', () => {
+    const v = previewServeNarration({
+      rendered: false,
+      problems: ['the dev server is showing a build-error overlay (the app failed to compile)'],
+      port: 3000,
+      needsDb: false,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.text.toLowerCase()).toContain('build-error overlay');
+  });
+
+  it('handles an unreachable preview without a fake success', () => {
+    const v = previewServeNarration({ rendered: false, problems: ['the preview could not be reached to verify it'], port: 8080, needsDb: false });
+    expect(v.ok).toBe(false);
+    expect(v.text).toMatch(/could not be reached/i);
   });
 });

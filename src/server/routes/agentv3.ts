@@ -117,7 +117,7 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -3153,12 +3153,24 @@ export function registerAgentV3Routes(app: Express): void {
         sendStage('Resolving the public preview URL', 95);
         let previewUrl: string | undefined;
         try { previewUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, boundPort), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
+        // EARN IT (admin 2026-08-03): a bound port is not the app serving. VISIT the home route and only
+        // report "preview restored" when it renders — otherwise Diagnose was greenlighting a server that
+        // returns "Cannot GET" on its own client routes (the exact full-stack bug).
+        let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
+        if (previewUrl) {
+          try { served = analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, previewUrl), 30_000, 'preview-diagnose-verify')).html); }
+          catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
+        }
         finish({
-          ok: true,
+          ok: served.rendered,
           portListening: true,
           port: boundPort,
           previewUrl,
-          reason: previewUrl ? `Dev server is up on port ${boundPort} — preview restored.` : `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`,
+          reason: !previewUrl
+            ? `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
+            : served.rendered
+              ? `Dev server is up on port ${boundPort} — preview restored.`
+              : `Dev server is up on port ${boundPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
           detail: combined.slice(-4000),
         });
         return;
@@ -5072,7 +5084,7 @@ export function registerAgentV3Routes(app: Express): void {
 
     const landImportedProject = async (
       importedFiles: Record<string, string>,
-      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string> },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5102,6 +5114,13 @@ export function registerAgentV3Routes(app: Express): void {
       if (Object.keys(assets).length > 0) {
         if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
         void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
+      }
+      // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
+      // preview so imported apps aren't full of broken pictures — but do NOT persist them (a cold
+      // restart re-imports, exactly like big lockfiles). admin 2026-08-03.
+      const sandboxAssets = opts.sandboxAssets ?? {};
+      if (opts.writeToSandbox && Object.keys(sandboxAssets).length > 0) {
+        try { await materializeAssets(actuator, workspaceId, sandboxAssets); } catch { /* best-effort — a broken image never blocks the import */ }
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
@@ -5209,8 +5228,21 @@ export function registerAgentV3Routes(app: Express): void {
             if (up) {
               const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
               const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
-              if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
-              emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });
+              // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
+              // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
+              // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
+              // problem analyzePreviewHtml found, e.g. a full-stack app serving its API but 404-ing its
+              // client routes). The URL is still exposed either way so the user can retry from the tab.
+              let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
+              if (bootUrl) {
+                try {
+                  const probe = await withTimeout(actuator.browseUrl(workspaceId, bootUrl), 30_000, 'import-preview-verify');
+                  served = analyzePreviewHtml(probe.html);
+                } catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
+                emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
+              }
+              const verdict = previewServeNarration({ rendered: served.rendered, problems: served.problems, port: bootPort, needsDb });
+              emitLive({ type: 'narration', agent: 'architect', text: verdict.text, ts: Date.now() });
             } else {
               // HONEST DB-AWARE FAILURE (admin 2026-07-24): a full-stack app that crashed on boot almost
               // always needs a real DB and/or external secrets — say so with the exact fix, instead of a
@@ -5253,6 +5285,7 @@ export function registerAgentV3Routes(app: Express): void {
             droppedDetailNote(extracted),
           ].filter(Boolean).join(' '),
           sandboxOnly: extracted.sandboxOnly,
+          sandboxAssets: extracted.sandboxAssets,
           assets: extracted.assets,
         });
       } catch (err) {
@@ -6182,6 +6215,7 @@ export function registerAgentV3Routes(app: Express): void {
                       droppedDetailNote(extracted),
                     ].filter(Boolean).join(' '),
                     sandboxOnly: extracted.sandboxOnly,
+                    sandboxAssets: extracted.sandboxAssets,
                     assets: extracted.assets,
                   });
                   if (!serverSideLanded) serverFetchReason = 'validate'; // fetched+extracted but not a runnable project

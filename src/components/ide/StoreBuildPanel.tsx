@@ -285,8 +285,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white"
             >
               {phase === 'preparing' ? <Loader2 size={17} className="animate-spin" /> : <Github size={17} />}
-              {phase === 'preparing' ? 'Preparing…' : 'Prepare my app for the Play Store'}
+              {phase === 'preparing' ? 'Preparing…' : 'Get my app ready to build'}
             </button>
+            {/* NAMING FIX (admin 2026-08-02): this button used to say "Prepare my app for the Play
+                Store", so a user who only wanted an installable APK read it as "not for me" and never
+                pressed it — the APK button lives on the NEXT screen, so they never reached it. The step
+                is shared by BOTH paths, so it is named neutrally and says what comes next. */}
+            <p className="text-[11px] text-white/45 text-center leading-relaxed">
+              First step for both: your app goes to your own GitHub. Next you can build an
+              installable <span className="text-white/70 font-medium">.apk</span> in one click — no
+              signing key needed — or the Play Store bundle.
+            </p>
             {busyNote && <p className="text-xs text-white/50 text-center">{busyNote}</p>}
           </>
         )}

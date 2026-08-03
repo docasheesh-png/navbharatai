@@ -321,6 +321,37 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     }
   }, [addLog, fetchWallet]);
 
+  /**
+   * On sign-in, ask the server to settle any payment of this user's that never reached their wallet.
+   *
+   * A payment used to arrive by two routes only: the server webhook (which is rejected entirely unless
+   * a webhook secret is configured) and the redirect below (which needs the user to come back to the
+   * app carrying `?payment=…`). Someone who pays by UPI and closes the app — the normal thing on a
+   * phone, since the UPI app is a different app — satisfied neither, and had genuinely paid without
+   * ever being credited.
+   *
+   * Runs once per sign-in and stays SILENT unless money actually arrived: the server returns a message
+   * only when it credited something, so a user who never paid sees nothing at all.
+   */
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.post('/api/payment/reconcile', {});
+        const data = res.data || {};
+        if (cancelled || !data.message) return;
+        addLog(`Recovered ${data.creditedOrders} unsettled payment(s) totalling ₹${data.creditedInr}.`, 'success');
+        fetchWallet();
+        alert(`🎉 ${data.message}`);
+      } catch {
+        // Never surface this — it is a background safety net, and a user who has no pending payment
+        // must not be shown a payment error for simply opening the app.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
   // Handle URL Payment Success/Failure callbacks from Cashfree redirect return url
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

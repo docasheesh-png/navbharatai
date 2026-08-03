@@ -23919,3 +23919,59 @@ a version number — the exact trade safeguard #3 forbids.
 throwaway app is enough). If green, bump the constant; the alignment logic already handles every major
 uniformly, so it is a one-line change plus the existing tests. Until then this stays deliberate and
 recorded, not silently stale.
+## 2026-08-03 — External-service requirements + the "Coming soon" contract (PR #2055)
+
+**Admin question:** *"database wali app ya isi tarah ke 3-4 extra feature wali apps kya NavBharatAI
+handle nahi kar payega? … v5 user ko bole settings me ja kar keys daalo?"* — followed by:
+*"jab tak user keys and secret na de de tab tak, us option ko 'coming soon' likh kar freeze kar do!
+puri app band na ho!"*
+
+**Honest finding (evidence first, per rule 4).** The capability was NOT missing. The sandbox already
+auto-provisions a real PostgreSQL (`postgresProvision.ts`), and a user's own connected DB / auth /
+storage is injected into `.env` AND explicitly taught to the builder (`userDatabaseContext.ts`,
+`userAuthContext.ts`, `userStorageContext.ts`). Two real gaps existed instead:
+
+1. **Nobody told the user which of THEIR OWN keys were missing.** An app could ship a Pay button that
+   could not charge. Only the *database* case ever produced a message, and only on the import path
+   (`ImportPreview.ts`). Exactly the "looks done but does nothing" state rule 2 forbids.
+2. **One missing key could kill the WHOLE app.** Generated apps routinely write
+   `if (!process.env.X) throw new Error(...)` at module scope, so a single unset payment key
+   white-screens a 12-screen app — a total failure of the one absolute rule, triggered by the user
+   having done nothing wrong.
+
+**Shipped — four layers, prevention first (50/50 law):**
+- **`AppRequirements.ts`** (new, 21 tests) — pure static detection over the REAL build output
+  (declared packages + env-vars the code actually references) → curated catalogue of services needing
+  the user's OWN account (payments Razorpay/Cashfree/Stripe, email SMTP/SendGrid/Resend, SMS-OTP
+  Twilio/MSG91, maps Google/Mapbox, the app's own AI key, storage S3/Cloudinary, auth Clerk/Auth0,
+  hosted DB) → minus every secret already in the vault → a SHORT checklist in the user's own language
+  (11 languages) with the exact variable names + exact settings path. `kind: 'auto'` (sandbox
+  Postgres) is provisioned silently and never surfaced. The prompt alone can never conjure a task.
+- **`missingCredentialGuard.ts`** (new, 25 tests) — `credentialGuardInstruction()` injects a hard
+  CONTRACT into the builder's prompt so the FIRST build is correct: never throw/exit at boot scope;
+  resolve to a boolean; render that ONE control visibly disabled as **"Coming soon"** naming the key
+  and path; never hide the feature; never fake a result; honest `503` on the server; everything else
+  keeps working.
+- **`findBootKillingEnvGuards()`** — deterministic detector for the exact forbidden pattern, recorded
+  as `BOOT_KILLING_ENV_GUARD`. Injecting a rule is not proof it was followed. High precision: a throw
+  inside a handler, a warn-only check, and the correct boolean+disabled pattern are all silent.
+- **Bounded heal** (`bootKillerRepairInstruction`) — when a boot-killer survives anyway, ONE focused
+  repair pass with the exact `file:line`/env var, then RE-DETECT and record the truth either way
+  (`_HEALED` / `_UNRESOLVED`). Deliberately NOT gated on `!result.ok` — this defect ships on a build
+  that looks perfectly successful, because the key is missing at the USER's runtime, not ours. That is
+  why it reached production before. The heal never flips a verdict.
+
+**Why an LLM pass and not a mechanical rewrite (recorded so no future session "simplifies" it):** the
+obvious textual fix (`throw` → `console.warn`) is UNSAFE — a `throw` narrows types, so removing it can
+turn `string | undefined` into a compile error, trading a runtime brick for a build failure. The
+instruction asks for the real shape and explicitly forbids the two unsafe shortcuts (re-adding a
+top-level throw; silencing TS with a non-null assertion).
+
+Kill switches: `AGENTV3_APP_REQUIREMENTS=off`, `AGENTV3_CREDENTIAL_GUARD=off` (each reverts to
+byte-identical behaviour). Weak-tier routed (no Sonnet/Opus on a free build). Extra pass costs nothing
+on a clean build. `AppKnowledgeBase.ts` updated for both user-facing capabilities.
+Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest run` → **1011 files / 10,626 tests**.
+
+**OPEN (honest, rule 6):** the contract governs NEW builds. An app built BEFORE this deploy that
+already contains a boot-killer is only repaired when the user next runs an edit/build on it — there is
+no retroactive sweep of existing workspaces.

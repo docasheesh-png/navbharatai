@@ -23678,3 +23678,72 @@ esm.sh-only importmap — wire the same vendored runtime there in a later slice.
   — mitrify's 165 durable + ~346 sandbox-only sums right. The user-facing banner already counts
   editable source files separately; the union only feeds large-project routing, where over-counting
   errs SAFE (routes to the strong model sooner). No change made — evidence over guesses.
+
+---
+
+## 2026-08-03 — "Build my APK now" did nothing: two fatal bugs + self-healing builds (PR #2053)
+
+**Admin report (verbatim):** *"Build my APK now - se build nahi chali. woh maine menually github me
+ja kar chalayi hai. aap isko button se kar do! Build my APK now press kare .apk workflow run ho, ->
+fail ho to v5 dekh ke fix kare, wapas apne aap -> build workflow chale, sab kuch apne aap ho, tab tak,
+user ko bas loading % show ho!!"*
+
+### Autopsy — TWO independent fatal bugs, either one alone enough to kill the button
+
+1. **The server refused the workflow before GitHub ever saw it.** `routes/mobileShip.ts` held a
+   hand-typed allow-list `['android-aab.yml', 'ios-ipa.yml']`. The kit had started generating
+   `android-apk.yml` (PR #2050) and the button asked for it; it was never added. Every press returned
+   **HTTP 400** before a request reached GitHub. The same list gated `/runs`, so even the admin's
+   manually-started run was invisible to the panel.
+2. **The wrong token was being sent to GitHub.** `routes/mobileShip.ts` read the GitHub token from the
+   `Authorization` header — which carries the **Firebase ID token** (`authedHeaders()`), while the
+   GitHub token travels as `X-GitHub-Token` (which `mobileSetup.ts` read correctly). So every dispatch,
+   poll, artifact list and download presented a Firebase JWT to GitHub as a GitHub token → **401**.
+   Because *setup* used the right header the repo really appeared and only the build failed, which made
+   it look like a GitHub problem rather than ours.
+
+**The class behind both (rule 4 step 2):** one fact, several unlinked copies — the workflow filename
+lived in 4 places, "which header?" in 2. Killed at the class level, not patched:
+- `src/lib/shipWorkflows.ts` — the ONE registry the generator, allow-list, setup response and UI read.
+- `src/server/lib/mobileShipAuth.ts` — the ONE answer to which header carries the GitHub token; it also
+  refuses to forward a JWT to GitHub, converting a silent 401 into an honest "connect GitHub".
+- Tests lock it: every workflow the kit generates MUST be dispatchable; neither route file may grow a
+  second copy of the header logic (source-level assertion, like the spaFallback test).
+
+### The 50/50 half — why it arose at all
+The APK workflow was added to the generator and to the button in one PR, and the server allow-list was
+simply not on anyone's checklist because nothing linked it. Nothing failed loudly; a button just went
+dead. The registry + the "generated ⇒ dispatchable" test mean the mismatch now fails CI instead of
+shipping. This is the same shape as the `/pwa/` SPA-fallback bug (2026-08-02): a hand-maintained list
+that drifts from the thing it is supposed to describe.
+
+### Self-healing builds (`mobileBuildRepair.ts` + `POST /api/mobile-ship/autofix`)
+One press runs the whole cycle: start → watch → on failure read the failed job's log → name the failure
+→ repair the file NavBharatAI itself generated → commit it to the user's repo with a plain-language
+message → re-dispatch. Up to 3 attempts. The user sees only a percentage and one line of plain language.
+
+**Deterministic, not model-driven — deliberately.** A heal that runs must be 100% reliable (rule 5 step
+5). Each repair has exactly one correct answer: strip the npm cache, fall back off `npm ci`, add the
+build script matching the app's real bundler, point `webDir` where the app actually builds, `cap add
+android`, `chmod +x gradlew`, accept the SDK terms, bump Java, raise the heap. A model asked to "fix
+this CI log" would be right *most* of the time — and on a self-driving loop that means silently pushing
+a wrong commit into a user's repository.
+
+**The loop guard:** a repair that would change nothing returns `null` and is reported as unfixable.
+Without it, "fix and retry" is an endless loop of empty commits and identical failures. Asserted
+directly, including the subtle case of "fixing" `webDir` to the value it already failed on.
+
+**Boundaries (unchanged, and not to be weakened without admin sign-off):** it never rewrites the user's
+own app code (a compile error is reported precisely, not silently edited), and never creates a signing
+key — that key is the app's permanent Play Store identity. Both are reported honestly in plain language,
+and the missing-key message only ever appears on the Play Store path (the `.apk` build needs no key).
+
+**Honest percentage:** each attempt owns a band (`[3,85] → [85,94] → [94,98]`) so it never goes
+backwards; 100% is earned by a finished build with a downloadable file, never by a timer running out.
+
+Also: `ensureRepo`/`commitFiles` extracted to `githubRepoWrite.ts` (one commit implementation shared by
+setup and the healing loop); `GET /api/mobile-ship/logs` for ADMIN diagnostics only — a build log names
+machines and internal paths, so users get NavBharatAI's own summary (White-Label Law, test-locked).
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1012 files / 10624 tests, 0 failures**
+(44 new).

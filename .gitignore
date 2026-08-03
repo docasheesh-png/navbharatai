@@ -10,3 +10,7 @@ __pycache__/
 .e-checkpoints/
 .DS_Store
 *.log
+
+# Generated runtime/test artifacts (not source) — written to CWD by tests/tools at runtime
+project_memory.json
+test_environment_debug.json

@@ -22,6 +22,11 @@ import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
 import { assembleMobileProject } from '../lib/mobileProjectAssembler';
+// One repository-write implementation, shared with the self-healing build loop so the two can never
+// drift apart on branch handling, blob encoding or ref updates (rule 4).
+import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
+import { githubTokenFromRequest } from '../lib/mobileShipAuth';
+import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
 export function isValidRepoName(name: string): boolean {
@@ -38,90 +43,9 @@ export function repoNameFor(appName: string): string {
   return slug || 'my-app';
 }
 
-/** The user's GitHub token, sent as a second header so it is never confused with the Firebase one. */
-function githubToken(req: Request): string | null {
-  const raw = req.headers['x-github-token'];
-  const token = Array.isArray(raw) ? raw[0] : raw;
-  return typeof token === 'string' && token.trim() ? token.trim() : null;
-}
-
-type GhHeaders = Record<string, string>;
-
-/**
- * Find the repository, creating it when it does not exist yet.
- *
- * `auto_init` matters: a repository with no commits has no branch at all, and every push below needs
- * one to build on. Creating it empty and then discovering that is a confusing failure two steps later.
- */
-async function ensureRepo(
-  headers: GhHeaders,
-  owner: string,
-  repo: string,
-  description: string,
-): Promise<{ created: boolean; defaultBranch: string }> {
-  try {
-    const existing = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, { headers });
-    return { created: false, defaultBranch: existing.data?.default_branch || 'main' };
-  } catch (err) {
-    if ((err as { response?: { status?: number } })?.response?.status !== 404) throw err;
-  }
-  const made = await axios.post(
-    'https://api.github.com/user/repos',
-    { name: repo, description: description.slice(0, 300), private: true, auto_init: true },
-    { headers },
-  );
-  return { created: true, defaultBranch: made.data?.default_branch || 'main' };
-}
-
-/**
- * Commit every file in one go.
- *
- * Text goes straight into the tree, but the tree API's `content` field is text-only — a PNG sent that
- * way arrives corrupted. Binary files therefore become real blobs first (base64) and are referenced by
- * sha, which is the only way an icon survives the trip intact.
- */
-async function commitFiles(
-  headers: GhHeaders,
-  owner: string,
-  repo: string,
-  branch: string,
-  files: Record<string, string>,
-  binaryFiles: Record<string, string>,
-  message: string,
-): Promise<string> {
-  const refRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${branch}`, { headers });
-  const parentSha = refRes.data.object.sha;
-
-  const tree: Array<Record<string, string>> = Object.entries(files).map(([path, content]) => ({
-    path, mode: '100644', type: 'blob', content,
-  }));
-
-  for (const [path, base64] of Object.entries(binaryFiles)) {
-    const blob = await axios.post(
-      `https://api.github.com/repos/${owner}/${repo}/git/blobs`,
-      { content: base64, encoding: 'base64' },
-      { headers },
-    );
-    tree.push({ path, mode: '100644', type: 'blob', sha: blob.data.sha });
-  }
-
-  const treeRes = await axios.post(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees`,
-    { base_tree: parentSha, tree },
-    { headers },
-  );
-  const commitRes = await axios.post(
-    `https://api.github.com/repos/${owner}/${repo}/git/commits`,
-    { message, tree: treeRes.data.sha, parents: [parentSha] },
-    { headers },
-  );
-  await axios.patch(
-    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`,
-    { sha: commitRes.data.sha, force: false },
-    { headers },
-  );
-  return commitRes.data.sha;
-}
+// The GitHub token is read through the ONE shared helper, so this route and the ship/build routes can
+// never again disagree about which header carries it (see lib/mobileShipAuth.ts).
+const githubToken = githubTokenFromRequest;
 
 export function registerMobileSetupRoutes(app: Express): void {
   /**
@@ -163,7 +87,7 @@ export function registerMobileSetupRoutes(app: Express): void {
       });
     }
 
-    const headers: GhHeaders = { Authorization: `token ${ghToken}`, Accept: 'application/vnd.github.v3+json' };
+    const headers: GhHeaders = githubApiHeaders(ghToken);
 
     // Who the token belongs to — never taken from the client, so a token cannot be pointed at
     // somebody else's account.
@@ -205,9 +129,12 @@ export function registerMobileSetupRoutes(app: Express): void {
         webDir: project.webDir,
         notes: project.notes,
         requiredSecrets: kit.requiredSecrets,
+        // Derived from the ONE workflow registry, never re-typed — a hand-written copy here is exactly
+        // how the APK workflow ended up generated-but-not-runnable.
         workflows: {
-          android: '.github/workflows/android-aab.yml',
-          ios: includeIos ? '.github/workflows/ios-ipa.yml' : null,
+          androidApk: workflowPath(SHIP_WORKFLOWS.androidApk),
+          android: workflowPath(SHIP_WORKFLOWS.androidAab),
+          ios: includeIos ? workflowPath(SHIP_WORKFLOWS.iosIpa) : null,
         },
       });
     } catch (err) {

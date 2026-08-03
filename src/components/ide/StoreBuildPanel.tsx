@@ -4,6 +4,10 @@ import {
   Rocket, Key, RefreshCw,
 } from 'lucide-react';
 import { authedHeaders } from '../../App';
+// The workflow filenames come from the ONE shared registry the server's dispatch allow-list also reads.
+// Hand-written copies here and on the server are exactly why "Build my APK now" did nothing: this file
+// asked for android-apk.yml while the server's own list had never heard of it.
+import { SHIP_WORKFLOWS, needsUserSecrets, type ShipWorkflowFile } from '../../lib/shipWorkflows';
 
 // "Build my app and give me the file" — the real pipeline, end to end, inside NavBharatAI.
 //
@@ -63,9 +67,27 @@ export interface StoreBuildPanelProps {
 // TWO Android paths (admin 2026-08-02). The APK one needs NO secrets — Gradle signs a debug build
 // with Android's universal key — so a non-technical user can hold their app today with one click. The
 // AAB one is for Google Play and genuinely needs the user's own signing key.
-const ANDROID_APK_WORKFLOW = 'android-apk.yml';
-const ANDROID_AAB_WORKFLOW = 'android-aab.yml';
 type BuildKind = 'apk' | 'aab';
+const workflowFor = (kind: BuildKind): ShipWorkflowFile =>
+  kind === 'apk' ? SHIP_WORKFLOWS.androidApk : SHIP_WORKFLOWS.androidAab;
+
+// HOW FAR ALONG ARE WE (admin 2026-08-03: "user ko bas loading % show ho").
+//
+// The percentage must never go backwards and must never lie. A build that fails and is repaired is
+// FURTHER along than one still on its first try, so each attempt owns its own band of the bar and the
+// bar only ever moves forward. Within an attempt it tracks elapsed time against how long these builds
+// really take, and it stops just short of the band's end — arriving at 100% is earned by a finished
+// build with a downloadable file in hand, never by a timer running out.
+const ATTEMPT_BANDS: ReadonlyArray<readonly [number, number]> = [[3, 85], [85, 94], [94, 98]];
+const TYPICAL_BUILD_MS = 5 * 60 * 1000;
+/** Attempts NavBharatAI makes on its own before it stops and explains. */
+const MAX_AUTO_ATTEMPTS = ATTEMPT_BANDS.length;
+
+export function buildProgressPercent(attempt: number, elapsedMs: number): number {
+  const [start, end] = ATTEMPT_BANDS[Math.min(attempt, ATTEMPT_BANDS.length - 1)];
+  const share = Math.min(Math.max(elapsedMs, 0) / TYPICAL_BUILD_MS, 1) * 0.97;
+  return Math.round(start + (end - start) * share);
+}
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -84,6 +106,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   const [run, setRun] = useState<RunInfo | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [error, setError] = useState('');
+  // What the user actually watches while everything else happens by itself.
+  const [progress, setProgress] = useState(0);
+  const [progressNote, setProgressNote] = useState('');
+  const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
 
@@ -124,82 +150,161 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     }
   }, [sessionId, appName, appId, iconDataUrl, ghHeaders]);
 
-  /** Poll the run until GitHub finishes, then read what it produced. */
-  const watchRun = useCallback(async (owner: string, repo: string, workflow: string, kind: BuildKind) => {
-    for (let i = 0; i < 120 && liveRef.current; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      if (!liveRef.current) return;
-      try {
-        const res = await fetch(
-          `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
-          { headers: await ghHeaders() },
-        );
-        const data = await res.json().catch(() => null);
-        const latest = data?.runs?.[0] as RunInfo | undefined;
-        if (!latest) continue;
-        setRun(latest);
-        if (latest.status !== 'completed') continue;
+  /**
+   * Start the workflow on GitHub. Returns false when GitHub refused, so the caller can stop the whole
+   * cycle instead of watching for a run that was never created — the exact failure this feature shipped
+   * with, where a rejected dispatch still left the panel spinning.
+   */
+  const dispatch = useCallback(async (workflow: ShipWorkflowFile): Promise<boolean> => {
+    if (!setup) return false;
+    const res = await fetch('/api/mobile-ship/trigger', {
+      method: 'POST',
+      headers: await ghHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ owner: setup.owner, repo: setup.repo, ref: setup.branch, workflow }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      if (liveRef.current) setError(data?.error || 'Could not start the build.');
+      return false;
+    }
+    return true;
+  }, [setup, ghHeaders]);
 
-        if (latest.conclusion !== 'success') {
-          setPhase('failed');
-          setError(
-            latest.conclusion !== 'failure'
-              ? `The build ended as "${latest.conclusion}".`
-              : kind === 'aab'
-                // Only the Play-Store build can fail for missing secrets; saying that on the APK build
-                // (which needs none) would send the user hunting for a problem that does not exist.
-                ? 'The Play Store build failed on GitHub. The usual reason is that the signing secrets are not set yet — open the guide below.'
-                : 'The build failed on GitHub. Open the run there to see the exact step that failed.',
+  /**
+   * THE WHOLE CYCLE, hands-off: start the build, watch it, and when it fails for a reason NavBharatAI
+   * put there itself, fix it and start it again — all the user sees is the percentage climbing.
+   *
+   * It stops on its own in three honest cases: the fix worked and the app is ready; the cause is
+   * something only the user can supply (their signing key); or NavBharatAI genuinely cannot name the
+   * problem. It never loops forever, because a repair that changes nothing is reported as unfixable by
+   * the server rather than committed and retried.
+   */
+  const runCycle = useCallback(async (kind: BuildKind) => {
+    if (!setup) return;
+    const workflow = workflowFor(kind);
+    const { owner, repo } = setup;
+    // Runs that already existed before this press — so we watch OUR run, never an older one whose
+    // result would be reported as if it were this build.
+    let seen = new Set<number>();
+    try {
+      const res = await fetch(
+        `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
+        { headers: await ghHeaders() },
+      );
+      const data = await res.json().catch(() => null);
+      seen = new Set<number>((data?.runs || []).map((r: RunInfo) => r.id));
+    } catch { /* no history readable — every run we see next is new by definition */ }
+
+    for (let attempt = 0; attempt < MAX_AUTO_ATTEMPTS && liveRef.current; attempt++) {
+      setAttempt(attempt);
+      setProgressNote(attempt === 0 ? 'Sending your app to be built…' : 'Starting the build again…');
+      setProgress(ATTEMPT_BANDS[attempt][0]);
+
+      if (!(await dispatch(workflow))) { if (liveRef.current) setPhase('ready'); return; }
+      if (!liveRef.current) return;
+      setProgressNote('Building your app…');
+
+      const startedAt = Date.now();
+      let finished: RunInfo | null = null;
+      for (let i = 0; i < 150 && liveRef.current && !finished; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        if (!liveRef.current) return;
+        setProgress(buildProgressPercent(attempt, Date.now() - startedAt));
+        try {
+          const res = await fetch(
+            `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
+            { headers: await ghHeaders() },
           );
-          return;
+          const data = await res.json().catch(() => null);
+          const ours = ((data?.runs || []) as RunInfo[]).find((r) => !seen.has(r.id));
+          if (!ours) continue;
+          setRun(ours);
+          if (ours.status === 'completed') finished = ours;
+        } catch {
+          // A single failed poll is not a failed build; keep watching.
         }
-        const aRes = await fetch(
-          `/api/mobile-ship/artifacts?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${latest.id}`,
-          { headers: await ghHeaders() },
-        );
-        const aData = await aRes.json().catch(() => null);
-        setArtifacts(Array.isArray(aData?.artifacts) ? aData.artifacts : []);
+      }
+      if (!liveRef.current) return;
+
+      if (!finished) {
+        setPhase('failed');
+        setError('The build is taking longer than usual. It is still running — open it on GitHub to see where it is.');
+        return;
+      }
+      seen.add(finished.id);
+
+      // ── Finished successfully: fetch what it produced ──
+      if (finished.conclusion === 'success') {
+        setProgress(96);
+        setProgressNote('Collecting your app file…');
+        try {
+          const aRes = await fetch(
+            `/api/mobile-ship/artifacts?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${finished.id}`,
+            { headers: await ghHeaders() },
+          );
+          const aData = await aRes.json().catch(() => null);
+          setArtifacts(Array.isArray(aData?.artifacts) ? aData.artifacts : []);
+        } catch { setArtifacts([]); }
+        if (!liveRef.current) return;
+        setProgress(100);
         setPhase('built');
         return;
-      } catch {
-        // A single failed poll is not a failed build; keep watching.
       }
-    }
-    if (liveRef.current) {
-      setPhase('failed');
-      setError('The build is taking longer than expected. Open it on GitHub to see where it is.');
-    }
-  }, [ghHeaders]);
 
-  /** Step 2 — start the real build on GitHub's runners. */
-  const build = useCallback(async (kind: BuildKind = 'apk') => {
+      if (finished.conclusion !== 'failure') {
+        setPhase('failed');
+        setError(`The build ended as "${finished.conclusion}".`);
+        return;
+      }
+
+      // ── Failed: work out why and fix it, rather than handing the user a log ──
+      if (attempt === MAX_AUTO_ATTEMPTS - 1) {
+        setPhase('failed');
+        setError('NavBharatAI fixed what it could and tried again, but the build still did not finish.');
+        return;
+      }
+      setProgressNote('Something went wrong — NavBharatAI is looking at it…');
+      let fix: { fixed?: boolean; summary?: string; code?: string } | null = null;
+      try {
+        const fRes = await fetch('/api/mobile-ship/autofix', {
+          method: 'POST',
+          headers: await ghHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id }),
+        });
+        fix = await fRes.json().catch(() => null);
+      } catch { /* handled as "could not fix" below */ }
+      if (!liveRef.current) return;
+
+      if (!fix?.fixed) {
+        setPhase('failed');
+        setError(
+          // A missing signing key is the ONE failure that is genuinely the user's to resolve, and only
+          // the Play Store path can hit it — the .apk build needs no key at all, so never say this there.
+          fix?.code === 'MISSING_SIGNING_SECRET' && needsUserSecrets(workflow)
+            ? `${fix.summary} It has to stay yours, so NavBharatAI cannot add it for you — the guide below walks through creating it.`
+            : fix?.summary
+              ? `${fix.summary} NavBharatAI could not fix this one on its own.`
+              : 'The build did not finish, and NavBharatAI could not work out why.',
+        );
+        return;
+      }
+      setProgressNote(`${fix.summary} NavBharatAI fixed it and is building again…`);
+    }
+  }, [setup, ghHeaders, dispatch]);
+
+  /** Step 2 — one press, and everything from here on happens on its own. */
+  const build = useCallback((kind: BuildKind = 'apk') => {
     if (!setup) return;
     setBuildKind(kind);
     setPhase('building');
     setError('');
     setArtifacts([]);
     setRun(null);
-    try {
-      const res = await fetch('/api/mobile-ship/trigger', {
-        method: 'POST',
-        headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          owner: setup.owner, repo: setup.repo, ref: setup.branch,
-          workflow: kind === 'apk' ? ANDROID_APK_WORKFLOW : ANDROID_AAB_WORKFLOW,
-        }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!liveRef.current) return;
-      if (!res.ok) {
-        setError(data?.error || 'Could not start the build on GitHub.');
-        setPhase('ready');
-        return;
-      }
-      void watchRun(setup.owner, setup.repo, kind === 'apk' ? ANDROID_APK_WORKFLOW : ANDROID_AAB_WORKFLOW, kind);
-    } catch {
-      if (liveRef.current) { setError('Could not reach the server.'); setPhase('ready'); }
-    }
-  }, [setup, ghHeaders, watchRun]);
+    setAttempt(0);
+    setProgress(ATTEMPT_BANDS[0][0]);
+    setProgressNote('Sending your app to be built…');
+    void runCycle(kind);
+  }, [setup, runCycle]);
 
   /** Step 3 — the actual file, streamed through the server so the browser just gets a download. */
   const download = useCallback(async (artifact: Artifact) => {
@@ -328,7 +433,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           <>
             {/* PRIMARY — the one-click path. No keys, no secrets, nothing for the user to set up. */}
             <button
-              onClick={() => void build('apk')}
+              onClick={() => build('apk')}
               className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-green-600 hover:bg-green-500 transition-colors text-white"
             >
               <Rocket size={17} /> {phase === 'failed' ? 'Try again' : 'Build my APK now'}
@@ -357,7 +462,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 </button>
               )}
               <button
-                onClick={() => void build('aab')}
+                onClick={() => build('aab')}
                 className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-amber-500/40 text-amber-200 hover:bg-amber-500/10 transition-colors"
               >
                 <Rocket size={14} /> Build the Play Store bundle
@@ -376,18 +481,29 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           </>
         )}
 
-        {/* Step 3 — building */}
+        {/* Step 3 — building. One number, one line of plain language, and nothing to do. */}
         {phase === 'building' && (
           <div className="rounded-lg border border-white/10 p-4 text-center" style={{ background: '#0d1117' }}>
-            <Loader2 size={22} className="animate-spin text-indigo-400 mx-auto mb-2" />
-            <p className="text-sm text-white/80 font-medium">Building your app on GitHub…</p>
-            <p className="text-xs text-white/40 mt-1 leading-relaxed">
-              This usually takes 3–6 minutes. You can leave this screen open.
+            <p className="text-3xl font-bold text-white tabular-nums">{progress}%</p>
+            <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden my-3">
+              <div
+                className="h-full rounded-full bg-indigo-500 transition-all duration-700 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="flex items-center justify-center gap-1.5 text-sm text-white/80 font-medium">
+              <Loader2 size={13} className="animate-spin text-indigo-400" />
+              {progressNote || 'Building your app…'}
+            </p>
+            <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+              This takes a few minutes and runs on its own — if anything goes wrong NavBharatAI fixes it
+              and starts again. You can leave this screen open.
+              {attempt > 0 && ` (Attempt ${attempt + 1} of ${MAX_AUTO_ATTEMPTS}.)`}
             </p>
             {run && (
               <a href={run.url} target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1 mt-2 text-xs text-indigo-400 hover:text-indigo-300">
-                <ExternalLink size={11} /> Watch it on GitHub
+                 className="inline-flex items-center gap-1 mt-2 text-xs text-white/35 hover:text-indigo-300">
+                <ExternalLink size={11} /> Watch the details
               </a>
             )}
           </div>
@@ -430,7 +546,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
         {(phase === 'built' || phase === 'failed') && setup && (
           <button
-            onClick={() => { setPhase('ready'); setError(''); setArtifacts([]); }}
+            onClick={() => { setPhase('ready'); setError(''); setArtifacts([]); setProgress(0); setAttempt(0); }}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors text-white/60"
           >
             <RefreshCw size={12} /> Start over

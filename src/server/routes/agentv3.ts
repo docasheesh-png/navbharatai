@@ -5072,7 +5072,7 @@ export function registerAgentV3Routes(app: Express): void {
 
     const landImportedProject = async (
       importedFiles: Record<string, string>,
-      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string> },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5102,6 +5102,13 @@ export function registerAgentV3Routes(app: Express): void {
       if (Object.keys(assets).length > 0) {
         if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
         void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
+      }
+      // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
+      // preview so imported apps aren't full of broken pictures — but do NOT persist them (a cold
+      // restart re-imports, exactly like big lockfiles). admin 2026-08-03.
+      const sandboxAssets = opts.sandboxAssets ?? {};
+      if (opts.writeToSandbox && Object.keys(sandboxAssets).length > 0) {
+        try { await materializeAssets(actuator, workspaceId, sandboxAssets); } catch { /* best-effort — a broken image never blocks the import */ }
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
@@ -5253,6 +5260,7 @@ export function registerAgentV3Routes(app: Express): void {
             droppedDetailNote(extracted),
           ].filter(Boolean).join(' '),
           sandboxOnly: extracted.sandboxOnly,
+          sandboxAssets: extracted.sandboxAssets,
           assets: extracted.assets,
         });
       } catch (err) {
@@ -6182,6 +6190,7 @@ export function registerAgentV3Routes(app: Express): void {
                       droppedDetailNote(extracted),
                     ].filter(Boolean).join(' '),
                     sandboxOnly: extracted.sandboxOnly,
+                    sandboxAssets: extracted.sandboxAssets,
                     assets: extracted.assets,
                   });
                   if (!serverSideLanded) serverFetchReason = 'validate'; // fetched+extracted but not a runnable project

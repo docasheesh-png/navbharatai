@@ -63,10 +63,17 @@ export const IMPORT_MAX_DECOMPRESSED_BYTES = 300 * 1024 * 1024;
  *  only truly enormous ones are dropped. */
 export const IMPORT_MAX_LOCKFILE_BYTES = 3 * 1024 * 1024;
 /** Per-asset RAW-byte cap — a small logo/favicon/icon/font, not a hero video. */
-export const IMPORT_MAX_ASSET_BYTES = 200 * 1024;
+export const IMPORT_MAX_ASSET_BYTES = 640 * 1024; // raised 200KB → 640KB (base64 ~853KB < the 900KB Firestore-doc cap)
 /** Bounds on the kept-asset set so a media-heavy zip can't blow the budget. */
 export const IMPORT_MAX_ASSETS = 200;
-export const IMPORT_MAX_ASSET_TOTAL_BYTES = 20 * 1024 * 1024;
+export const IMPORT_MAX_ASSET_TOTAL_BYTES = 30 * 1024 * 1024;
+/** SANDBOX-ONLY image tier (admin 2026-08-03: "88 large images not imported — will the app break?"):
+ *  images too big for the durable store (>640KB) are still materialized in the LIVE sandbox so the
+ *  preview isn't full of broken pictures — NOT persisted (a cold restart re-imports, exactly like the
+ *  big-lockfile tier). Bounded so a photo/video-heavy repo can't exhaust memory. Non-image binaries
+ *  (video/audio/archives — no image MIME) are never kept either way. */
+export const IMPORT_MAX_SANDBOX_ASSET_BYTES = 5 * 1024 * 1024;
+export const IMPORT_MAX_SANDBOX_ASSET_TOTAL_BYTES = 50 * 1024 * 1024;
 
 export interface ExtractedProject {
   files: Record<string, string>;
@@ -83,6 +90,12 @@ export interface ExtractedProject {
    * Written to the sandbox only — the durable store skips them by design (honest, not silent:
    * the summary says so), and a restore simply re-resolves via install.
    */
+  /**
+   * IMAGES too big for the durable asset store (>640KB) but renderable — materialized in the LIVE
+   * sandbox as real bytes so the preview isn't full of broken pictures, NOT persisted durably (a cold
+   * restart re-imports, like sandboxOnly lockfiles). `data:` URIs, same shape as `assets`.
+   */
+  sandboxAssets: Record<string, string>;
   sandboxOnly: Record<string, string>;
   /** Paths intentionally not imported, grouped by the honest reason. */
   dropped: { dir: number; junk: number; secret: number; binary: number; tooLarge: number; unsafe: number; overCap: number; outsideAppRoot: number };
@@ -188,23 +201,38 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
 
   const files: Record<string, string> = {};
   const assets: Record<string, string> = {};
+  const sandboxAssets: Record<string, string> = {};
   const sandboxOnly: Record<string, string> = {};
   let totalBytes = 0;
   let assetBytes = 0;
+  let sandboxAssetBytes = 0;
   for (const { path, entry } of entries) {
     if (!path) continue; // re-rooted away above (already counted)
     if (SKIP_DIR_RE.test(path)) { dropped.dir++; continue; }
     if (JUNK_FILE_RE.test(path)) { dropped.junk++; continue; }
     if (SECRET_FILE_RE.test(path)) { dropped.secret++; continue; }
     if (BINARY_EXT_RE.test(path)) {
-      // A small image/font asset is KEPT (as a data URI); every other binary is dropped.
+      // IMAGE/FONT assets are KEPT (as data URIs); every other binary (video/audio/archive) is dropped.
       const mime = assetMimeFor(path);
-      if (mime && Object.keys(assets).length < IMPORT_MAX_ASSETS) {
+      // MEMORY GUARD: never DECODE a binary we could not keep anyway — an entry that DECLARES more than
+      // the sandbox cap is dropped without inflating it into memory (protects against a giant image).
+      const declaredBin = zipEntryDeclaredBytes(entry);
+      if (mime && !(declaredBin > IMPORT_MAX_SANDBOX_ASSET_BYTES)) {
         const b64 = await entry.async('base64');
         const rawBytes = Math.floor((b64.length * 3) / 4); // base64 → raw byte estimate
-        if (rawBytes <= IMPORT_MAX_ASSET_BYTES && assetBytes + rawBytes <= IMPORT_MAX_ASSET_TOTAL_BYTES) {
-          assets[path] = `data:${mime};base64,${b64}`;
+        const dataUri = `data:${mime};base64,${b64}`;
+        // TIER 1 — DURABLE: fits the Firestore-backed asset store, within its budget + count.
+        if (rawBytes <= IMPORT_MAX_ASSET_BYTES && Object.keys(assets).length < IMPORT_MAX_ASSETS
+            && assetBytes + rawBytes <= IMPORT_MAX_ASSET_TOTAL_BYTES) {
+          assets[path] = dataUri;
           assetBytes += rawBytes;
+          continue;
+        }
+        // TIER 2 — SANDBOX-ONLY: too big to persist but renderable — materialize for the live preview.
+        if (rawBytes <= IMPORT_MAX_SANDBOX_ASSET_BYTES
+            && sandboxAssetBytes + rawBytes <= IMPORT_MAX_SANDBOX_ASSET_TOTAL_BYTES) {
+          sandboxAssets[path] = dataUri;
+          sandboxAssetBytes += rawBytes;
           continue;
         }
       }
@@ -231,7 +259,7 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
     totalBytes += bytes;
     files[path] = content;
   }
-  return { files, assets, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
+  return { files, assets, sandboxAssets, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
 }
 
 /**
@@ -849,10 +877,12 @@ export function importAccountingLine(extracted: ExtractedProject): string {
   const d = extracted.dropped;
   const source = Object.keys(extracted.files).length;
   const assets = Object.keys(extracted.assets).length;
+  const sandboxAssets = Object.keys(extracted.sandboxAssets ?? {}).length;
   const sandboxOnly = Object.keys(extracted.sandboxOnly).length;
   const droppedTotal = d.dir + d.junk + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap + d.outsideAppRoot;
   const kept: string[] = [`${source} source file${source === 1 ? '' : 's'}`];
   if (assets) kept.push(`${assets} image/font asset${assets === 1 ? '' : 's'}`);
+  if (sandboxAssets) kept.push(`${sandboxAssets} large image${sandboxAssets === 1 ? '' : 's'} (preview only)`);
   if (sandboxOnly) kept.push(`${sandboxOnly} lockfile${sandboxOnly === 1 ? '' : 's'} (sandbox only)`);
 
   // Every reason, always — a zero bucket is omitted, but nothing that happened is hidden.

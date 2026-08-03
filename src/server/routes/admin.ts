@@ -5,6 +5,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
+import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
@@ -750,6 +751,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const newBalance = Math.max(0, (data.tokenBalance || 0) + delta);
       await updateDoc(walletRef, {
         tokenBalance: newBalance,
+        // ROOT-CAUSE FIX (gift-token bug, admin 2026-08-03: "₹0 + 50,000 tokens → app building off"). The
+        // affordability gate reads `remaining_balance` (₹); this path used to bump ONLY tokenBalance, so a
+        // gifted user showed ₹0 and could not build despite the tokens. Keep the ₹ MIRROR in sync (same
+        // rate the welcome bonus + purchases use), so the balance is consistent for the gate AND the UI.
+        remaining_balance: TOKENS_PER_RUPEE > 0 ? newBalance / TOKENS_PER_RUPEE : 0,
         walletLedger: [...(data.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
         updatedAt: new Date().toISOString(),
       });

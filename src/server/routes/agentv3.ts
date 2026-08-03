@@ -6,6 +6,7 @@ import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirement
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -6817,6 +6818,24 @@ export function registerAgentV3Routes(app: Express): void {
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
             await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
           } catch { /* warming is best-effort — never blocks a build */ }
+          // PROJECT CONTRACT CARD (autopsy 2026-08-02) — PREVENT the two import mistakes this edit
+          // build made and then had to self-heal: it imported shared types from `./storage` (the wrong
+          // owner) and used `nanoid` without declaring it in package.json. The builder had the file
+          // TREE and a few file CONTENTS, but never a compact symbol→module map or the declared-package
+          // list, so it guessed. Hand it both BEFORE it writes a line — a heal that keeps firing is an
+          // unfixed root cause. Runs AFTER warmIndexFiles (the graph is warm) so the card reflects the
+          // real project. Pure + bounded (caps in projectContractCard); best-effort — on any failure
+          // the build proceeds exactly as before. Kill switch AGENTV3_CONTRACT_CARD=off.
+          if (process.env.AGENTV3_CONTRACT_CARD !== 'off') {
+            try {
+              const pkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => '');
+              const card = projectContractCard({
+                symbols: getWorkspaceMemory(workspaceId).graph().symbols,
+                declaredPackages: declaredPackagesFromPackageJson(pkgRaw),
+              });
+              if (card) architectSystem = `${card}\n\n---\n\n${architectSystem}`;
+            } catch { /* the contract card is best-effort — never blocks a build */ }
+          }
           // P-AI.2 retrieval v2 (Mitrify autopsy) — intent-aware grounding: content hits (grep) +
           // structural anchors (package.json/README/entry/routes/schema) + import-graph centrality.
           // Replaces path-token-overlap-only selection, whose zero-overlap tie handed a survey

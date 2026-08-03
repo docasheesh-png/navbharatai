@@ -31,6 +31,9 @@ import { generateMobileExport, type MobileExportResult } from './MobileExportGen
 // The publishing walkthrough is embedded from the ONE structured source that also drives the in-app
 // checklist and the AI's answers, so the three can never drift (rule 4).
 import { renderPublishGuideText } from './storePublishGuide';
+// The workflow FILENAMES come from the one shared registry the dispatch allow-list also reads, so a
+// workflow can never be generated into a user's repo that the server then refuses to start.
+import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 
 /** A repository secret the USER must set — we can never set these for them (they are their identity). */
 export interface RequiredSecret {
@@ -622,12 +625,12 @@ export function generateShipKit(opts: ShipKitOptions = {}): ShipKitResult {
   const files: Record<string, string> = {
     ...base.files,
     // The zero-secret, one-click installable apk comes FIRST — it is the path almost every user wants.
-    '.github/workflows/android-apk.yml': ANDROID_APK_WORKFLOW(appName),
-    '.github/workflows/android-aab.yml': ANDROID_WORKFLOW(appName),
+    [workflowPath(SHIP_WORKFLOWS.androidApk)]: ANDROID_APK_WORKFLOW(appName),
+    [workflowPath(SHIP_WORKFLOWS.androidAab)]: ANDROID_WORKFLOW(appName),
     'SHIPPING.md': SHIPPING_MD(appName, base.appId, includeIos),
   };
   if (includeIos) {
-    files['.github/workflows/ios-ipa.yml'] = IOS_WORKFLOW(appName);
+    files[workflowPath(SHIP_WORKFLOWS.iosIpa)] = IOS_WORKFLOW(appName);
     files['fastlane/Fastfile'] = FASTFILE(base.appId);
   }
 

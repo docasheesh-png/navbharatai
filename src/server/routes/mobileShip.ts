@@ -12,14 +12,17 @@ import type { Express, Request, Response } from 'express';
 import axios from 'axios';
 import { generateShipKit } from '../lib/mobileShipKit';
 import { getAllPublishGuides, getPublishGuide, renderPublishGuideText, type StorePlatform } from '../lib/storePublishGuide';
+// ONE declaration of which header carries the GitHub token — this module used to read the Authorization
+// header, which carries the FIREBASE token, so every call here reached GitHub with the wrong credential
+// and came back 401. See lib/mobileShipAuth.ts for the full autopsy.
+import { githubTokenFromRequest } from '../lib/mobileShipAuth';
+// ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
+// never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
+import { SHIP_WORKFLOW_FILES, isShipWorkflow, workflowPath, type ShipWorkflowFile } from '../../lib/shipWorkflows';
+import { classifyBuildFailure, normalizeLog, repairFiles } from '../lib/mobileBuildRepair';
+import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
 
-/** Pull the GitHub token off the Authorization header, accepting both `Bearer` and `token` schemes. */
-function githubToken(req: Request): string | null {
-  const raw = req.headers.authorization;
-  if (!raw) return null;
-  const t = raw.replace(/^(bearer|token)\s+/i, '').trim();
-  return t || null;
-}
+const githubToken = githubTokenFromRequest;
 
 /** A repo slug must look like `owner/name` with GitHub's own character rules — never interpolate blindly. */
 export function isValidRepoRef(owner: unknown, repo: unknown): boolean {
@@ -27,10 +30,16 @@ export function isValidRepoRef(owner: unknown, repo: unknown): boolean {
   return ok(owner) && ok(repo);
 }
 
-/** Only the two workflows this feature generates may be dispatched — never an arbitrary caller-supplied file. */
-export const DISPATCHABLE_WORKFLOWS = ['android-aab.yml', 'ios-ipa.yml'] as const;
-export function isDispatchableWorkflow(file: unknown): file is (typeof DISPATCHABLE_WORKFLOWS)[number] {
-  return typeof file === 'string' && (DISPATCHABLE_WORKFLOWS as readonly string[]).includes(file);
+/**
+ * Only the workflows this feature GENERATES may be dispatched — never an arbitrary caller-supplied file.
+ *
+ * Derived from the shared registry rather than re-typed: the previous hand-written copy listed only the
+ * .aab and .ipa workflows, so the .apk workflow the kit had started generating was permanently
+ * un-runnable. A test now asserts this list equals what the kit actually writes.
+ */
+export const DISPATCHABLE_WORKFLOWS: readonly ShipWorkflowFile[] = SHIP_WORKFLOW_FILES;
+export function isDispatchableWorkflow(file: unknown): file is ShipWorkflowFile {
+  return isShipWorkflow(file);
 }
 
 /** A GitHub artifact id is numeric — never interpolate a caller-supplied string into the API path. */
@@ -216,4 +225,139 @@ export function registerMobileShipRoutes(app: Express): void {
       res.status(status === 500 ? 502 : status).json({ error: hint, detail: detail || undefined });
     }
   });
+
+  /**
+   * SELF-HEALING BUILD — read why a run failed, repair what NavBharatAI generated, and start it again.
+   *
+   * WHY (admin 2026-08-03, verbatim): "fail ho to v5 dekh ke fix kare, wapas apne aap build workflow
+   * chale, sab kuch apne aap ho, tab tak user ko bas loading % show ho". A non-technical user cannot read
+   * a Gradle stack trace, and "open the run on GitHub" hands them our problem.
+   *
+   * WHAT IT WILL AND WILL NOT TOUCH — this boundary is the whole safety model:
+   *   • REPAIRS the files NavBharatAI itself wrote (the workflow, capacitor.config.ts, the package.json
+   *     wrapper). Fixing those is fixing our own output.
+   *   • NEVER rewrites the user's app source, and NEVER invents a signing key. A key is the app's
+   *     permanent Play Store identity; the honest answer there is to say what to add.
+   *   • NEVER commits when the repair changes nothing — that is what stops an endless fix/rebuild loop.
+   * Every repair lands as a real, named commit in the user's own repository, so nothing happens
+   * invisibly and anything can be reverted.
+   */
+  app.post('/api/mobile-ship/autofix', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+
+    const { owner, repo, workflow, runId, ref = 'main' } = (req.body || {}) as Record<string, unknown>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    if (!isDispatchableWorkflow(workflow)) return res.status(400).json({ error: 'Unknown build workflow.' });
+    if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
+    if (typeof ref !== 'string' || !ref.trim()) return res.status(400).json({ error: 'A branch name is required.' });
+
+    const headers = githubApiHeaders(token);
+    const wfPath = workflowPath(workflow);
+
+    let log: string;
+    try {
+      log = await failedJobLog(headers, String(owner), String(repo), String(runId));
+    } catch {
+      return res.status(502).json({ error: 'Could not read why the build stopped.' });
+    }
+    if (!log.trim()) {
+      return res.json({ fixed: false, code: 'UNKNOWN', summary: 'The build stopped without leaving a reason NavBharatAI could read.' });
+    }
+
+    const diag = classifyBuildFailure(log, wfPath);
+    if (!diag.autoFixable) {
+      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
+    }
+
+    try {
+      const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
+      const repair = repairFiles(diag, current, wfPath);
+      // No change means the file is ALREADY what the repair would write, so the failure has a cause we
+      // have not actually understood. Re-running would fail identically — say so instead.
+      if (!repair || Object.keys(repair.files).length === 0) {
+        return res.json({
+          fixed: false,
+          code: diag.code,
+          summary: `${diag.summary} NavBharatAI could not correct it automatically.`,
+        });
+      }
+      await commitFiles(headers, String(owner), String(repo), ref, repair.files, {}, repair.message);
+      await axios.post(
+        `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
+        { ref },
+        { headers },
+      );
+      return res.json({
+        fixed: true,
+        code: diag.code,
+        summary: diag.summary,
+        changed: Object.keys(repair.files),
+        commitMessage: repair.message,
+      });
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      return res.status(status === 403 || status === 401 ? 403 : 502).json({
+        error: status === 403 || status === 401
+          ? 'GitHub would not let NavBharatAI update the build files. Reconnect GitHub and allow the "workflow" permission.'
+          : 'Could not apply the fix on GitHub. Nothing was changed.',
+      });
+    }
+  });
+
+  /**
+   * The raw failure text of a run, for the admin diagnostics view.
+   *
+   * Deliberately NOT what the panel shows a user: a build log names providers, machines and internal
+   * paths, so a user sees NavBharatAI's own plain-language summary from /autofix instead.
+   */
+  app.get('/api/mobile-ship/logs', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+    const { owner, repo, runId, workflow } = req.query as Record<string, string>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
+
+    try {
+      const log = await failedJobLog(githubApiHeaders(token), owner, repo, runId);
+      const diag = classifyBuildFailure(log, workflowPath(isShipWorkflow(workflow) ? workflow : SHIP_WORKFLOW_FILES[0]));
+      // Bounded on purpose: a Gradle log runs to megabytes and the cause is always at the end.
+      res.json({ diagnosis: diag, log: normalizeLog(log).slice(-20000) });
+    } catch {
+      res.status(502).json({ error: 'Could not read the build log from GitHub.' });
+    }
+  });
+}
+
+/**
+ * The log text of the step that actually failed.
+ *
+ * A run has several jobs and only one of them broke; concatenating all of them would bury the real cause
+ * under thousands of lines of successful output and let the classifier match the wrong pattern.
+ */
+async function failedJobLog(
+  headers: Record<string, string>,
+  owner: string,
+  repo: string,
+  runId: string,
+): Promise<string> {
+  const jobsRes = await axios.get(
+    `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs?per_page=20`,
+    { headers },
+  );
+  const jobs = (jobsRes.data?.jobs || []) as Array<{ id: number; conclusion: string | null }>;
+  const failed = jobs.filter((j) => j.conclusion && j.conclusion !== 'success' && j.conclusion !== 'skipped');
+  const parts: string[] = [];
+  for (const job of failed.slice(0, 3)) {
+    try {
+      const logRes = await axios.get(
+        `https://api.github.com/repos/${owner}/${repo}/actions/jobs/${job.id}/logs`,
+        { headers, responseType: 'text', maxRedirects: 5, transformResponse: [(d) => d] },
+      );
+      if (typeof logRes.data === 'string') parts.push(logRes.data);
+    } catch {
+      // One unreadable job must not hide the others.
+    }
+  }
+  return parts.join('\n');
 }

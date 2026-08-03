@@ -8,6 +8,7 @@ import {
   detectImportedFramework,
   validateImportedProject,
   importSummaryLine,
+  importAccountingLine,
   droppedDetailNote,
   chooseMonorepoAppRoot,
   envTemplateNote,
@@ -764,5 +765,59 @@ describe('frameworkCoherenceGuidance', () => {
     expect(g).toContain('ONE framework');
     expect(g).toMatch(/do NOT mass-rewrite/i);
     expect(frameworkCoherenceGuidance(checkFrameworkCoherence({ 'package.json': REACT_PKG, 'src/App.tsx': 'export default () => <div/>;' }))).toBe('');
+  });
+});
+
+// ROOT CAUSE (admin 2026-08-03, mitrify GitHub import): the repo listing said "316 files", the build
+// said "166 source files", and NOTHING in the build report explained the gap — so the only reading
+// available was "10% bhi import nahi ho paya". These lock the durable accounting that answers it.
+describe('importAccountingLine — every archive entry is accounted for, in the report', () => {
+  it('states the total, what was KEPT, and what was NOT imported with a reason for each', () => {
+    const line = importAccountingLine(extracted({
+      files: Object.fromEntries(Array.from({ length: 165 }, (_, i) => [`src/f${i}.ts`, 'x'])),
+      assets: { 'logo.png': 'data:image/png;base64,AA' },
+      dropped: { binary: 138, junk: 6, secret: 2, dir: 4 },
+      totalEntries: 316,
+    }));
+    expect(line).toContain('316 archive entries');
+    expect(line).toContain('165 source files');
+    expect(line).toContain('1 image/font asset');
+    // every drop reason is named, with its count
+    expect(line).toContain('138 large binaries');
+    expect(line).toContain('6 OS/editor junk');
+    expect(line).toContain('2 secret files');
+    expect(line).toContain('4 dependency/build files');
+    expect(line).toContain('NOT imported 150'); // 138+6+2+4 — the numbers ADD UP
+  });
+
+  it('says plainly when nothing was dropped (never a silent "maybe something is missing")', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 1 }));
+    expect(line).toContain('nothing was dropped');
+    expect(line).not.toContain('NOT imported');
+  });
+
+  it('names the monorepo app root when the import was re-rooted', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 2, appRoot: 'apps/web' }));
+    expect(line).toContain('apps/web');
+  });
+
+  it('mentions sandbox-only lockfiles as KEPT, not lost', () => {
+    const line = importAccountingLine(extracted({
+      files: { 'a.ts': 'x' }, sandboxOnly: { 'package-lock.json': '{}' }, totalEntries: 2,
+    }));
+    expect(line).toContain('1 lockfile');
+    expect(line).toContain('sandbox only');
+  });
+
+  it('explains that source-file count is what matters (the exact confusion in the report)', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, dropped: { binary: 9 }, totalEntries: 10 }));
+    expect(line).toMatch(/npm install/);
+    expect(line).toMatch(/what the AI reads and edits/i);
+  });
+
+  it('singularises correctly for a one-entry archive', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 1 }));
+    expect(line).toContain('1 archive entry');
+    expect(line).toContain('1 source file');
   });
 });

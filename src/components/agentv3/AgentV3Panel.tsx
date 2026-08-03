@@ -27,6 +27,7 @@ import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { historyOpen404Action } from './historyOpenPolicy';
@@ -2210,8 +2211,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
   // deploy tool, publishing to the CHOSEN provider's permanent public URL). Routed through the normal
   // stream so the user watches real progress; the live URL is then refreshed from the server.
-  const deployLive = (providerOverride?: string) => {
-    if (running || !state.workspaceId) return;
+  /**
+   * Start a real publish. Returns an HONEST reason when it could NOT start, null when it did.
+   *
+   * ROOT CAUSE (admin 2026-08-02): this used to be `if (running || !state.workspaceId) return;` — a
+   * SILENT no-op. The Publish modal closed itself first, so the user tapped a button, the sheet
+   * vanished, and nothing happened: "sabhi button farzi hai". The precondition is now a reported
+   * value (src/lib/deployGuard.ts) that every caller must surface — never a hidden branch.
+   */
+  const deployLive = (providerOverride?: string): string | null => {
+    const prov0 = providerOverride || deployProvider;
+    const blocked = deployBlockedReason({
+      running,
+      workspaceId: state.workspaceId,
+      providerConfigured: configuredProviders.some((p) => p.id === prov0),
+      providerName: providers.find((p) => p.id === prov0)?.name,
+    });
+    if (blocked) return blocked;
     // When triggered from the Git panel a specific provider is passed; otherwise use the picker.
     const prov = providerOverride || deployProvider;
     if (providerOverride) setDeployProvider(providerOverride);
@@ -2225,6 +2241,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
       { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, deployProvider: prov, appSignature: appSignaturePref() },
     );
+    // Show the live progress the publish is now producing — on mobile the user was left staring at
+    // whatever surface they came from, which is half of why the button felt like it did nothing.
+    setShowWorkspace(false); // the chat surface, where the deploy narration streams
+    return null;
   };
 
   // "Restore all files" — genuinely bring the whole project back into the workspace (the server
@@ -2403,11 +2423,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // Deploy requested from the Git panel (sidebar) for a specific real provider — run v5's REAL
   // build+deploy pipeline for that provider (the actual, tested deploy engine). Fires on each new
-  // pendingDeploy (nonce change). If there is no app in the workspace yet, deployLive no-ops safely.
+  // pendingDeploy (nonce change). If it CAN'T start, say why in the chat — this path used to drop
+  // deployLive's silent no-op on the floor too (same dead-button class, admin 2026-08-02).
   useEffect(() => {
     if (!pendingDeploy?.provider) return;
     setShowWorkspace(false);
-    deployLive(pendingDeploy.provider);
+    const reason = deployLive(pendingDeploy.provider);
+    if (reason) {
+      setAgentHistory((h) => [...h, { role: 'agent' as const, agent: 'architect', text: `⚠️ ${reason}`, ts: Date.now() }]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingDeploy?.nonce]);
 
@@ -2625,7 +2649,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           githubConnected={!!ghToken()}
           onConnectGitHub={() => void connectGitHub()}
           onClose={() => setShowHostingChooser(false)}
-          onDeploy={(id) => { setShowHostingChooser(false); deployLive(id); }}
+          // Close ONLY when the publish genuinely started; otherwise hand the reason back so the
+          // chooser shows it inline (never a modal that vanishes with nothing happening).
+          onDeploy={(id) => {
+            const reason = deployLive(id);
+            if (!reason) setShowHostingChooser(false);
+            return reason;
+          }}
         />
       )}
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}

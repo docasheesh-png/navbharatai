@@ -131,6 +131,7 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
+import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -6719,6 +6720,20 @@ export function registerAgentV3Routes(app: Express): void {
           architectSystem = `${paletteBlock}\n\n---\n\n${architectSystem}`;
         }
       } catch { /* palette preset is best-effort — never blocks a build */ }
+      // MISSING-CREDENTIAL CONTRACT (admin spec 2026-08-03: "jab tak user keys na de, us option ko 'coming
+      // soon' likh kar freeze kar do — puri app band na ho"). AppRequirements tells the user WHICH of their
+      // own keys are missing; that message is worthless if the app is already dead by the time they read it.
+      // Generated apps routinely do `if (!process.env.X) throw` at module scope, so ONE unset payment key
+      // white-screens a 12-screen app — a total failure of the one absolute rule, triggered by the user
+      // having done nothing wrong. PREVENTION beats repair (the 50/50 law), so the contract is injected into
+      // the builder's prompt: a missing credential freezes that ONE control in a visible, disabled "Coming
+      // soon" state naming the exact key + settings path, never crashes at boot, and never fakes a result.
+      // Additive + best-effort; AGENTV3_CREDENTIAL_GUARD=off leaves the prompt byte-identical.
+      try {
+        if (credentialGuardEnabled()) {
+          architectSystem = `${credentialGuardInstruction()}\n\n---\n\n${architectSystem}`;
+        }
+      } catch { /* the guard contract is best-effort — never blocks a build */ }
       // Phase S2 — IDE↔v5.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
       // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
@@ -10058,6 +10073,23 @@ export function registerAgentV3Routes(app: Express): void {
         } catch {
           // A notice is never worth failing a successful build over — stay silent and ship the app.
         }
+      }
+      // CONTRACT VERIFICATION (honesty layer for the missing-credential contract above). Injecting a rule
+      // into the prompt is not proof it was followed, so we DETECT the exact fatal pattern the contract
+      // forbids — a top-level `throw`/`process.exit` gated on a missing env var — and record it in the
+      // admin build report. This never rewrites the user's code and never fails a build: it makes a
+      // violation VISIBLE so the class can be root-caused, instead of silently shipping an app that a
+      // single unset key would brick. Detector is pure static analysis (zero cost), same kill switch.
+      if (expectsArtifacts && credentialGuardEnabled()) {
+        try {
+          const killers = findBootKillingEnvGuards(writtenFiles);
+          if (killers.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
+              message: bootKillingGuardSummary(killers).slice(0, 400),
+            });
+          }
+        } catch { /* verification is best-effort — never affects the delivered app */ }
       }
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the

@@ -127,10 +127,12 @@ describe('appRequirementsNotice — short, localized, honest', () => {
     expect(appRequirementsNotice(three, null).split('\n')).toHaveLength(5);
   });
 
-  it('is honest: it says the app works and only those parts are inactive — never a fake success', () => {
+  it('is honest: the app works, only those buttons are frozen — never a fake success', () => {
     const msg = appRequirementsNotice(razorpay, null);
-    expect(msg).toMatch(/demo mode/i);
+    // Matches what the generated UI really renders (missingCredentialGuard's "Coming soon" contract).
+    expect(msg).toMatch(/Coming soon/i);
     expect(msg).toMatch(/built/i);
+    expect(msg).toMatch(/rest of the app works/i);
   });
 
   it('speaks the user language, falling back to English for unknown scripts', () => {

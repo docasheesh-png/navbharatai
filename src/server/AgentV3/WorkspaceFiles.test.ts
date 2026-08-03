@@ -212,19 +212,34 @@ describe('writeWorkspaceFiles — bulk landing falls back rather than ever losin
     Object.fromEntries(Array.from({ length: n }, (_, i) => [`src/f${i}.ts`, `export const v${i} = ${i};`]));
 
   /** A sink that records what it was asked to do. */
-  function makeSink(over: Partial<{ extractExit: number; readBack: (p: string) => string | null; failBinary: boolean }> = {}) {
+  function makeSink(over: Partial<{ extractExit: number; readBack: (p: string) => string | null; failBinary: boolean; extractedCount: number }> = {}) {
     const perFile: string[] = [];
     const commands: string[] = [];
     let binaryUploads = 0;
+    let lastArchiveCount = 0;
     const sink = {
       writeFile: async (_w: string, p: string) => { perFile.push(p); },
-      writeBinaryFile: async () => {
+      writeBinaryFile: async (_w: string, _p: string, b64: string) => {
         binaryUploads++;
         if (over.failBinary) throw new Error('upload failed');
+        // Count what the archive really holds, so the fake extract reports the truth by default.
+        const { gunzipSync } = await import('zlib');
+        const tar = gunzipSync(Buffer.from(b64, 'base64'));
+        let n = 0;
+        for (let off = 0; off + 512 <= tar.length; ) {
+          const name = tar.toString('ascii', off, off + 100).replace(/\0.*$/, '');
+          if (!name) break;
+          const size = parseInt(tar.toString('ascii', off + 124, off + 135).trim(), 8) || 0;
+          n++;
+          off += 512 + Math.ceil(size / 512) * 512;
+        }
+        lastArchiveCount = n;
       },
       runCommand: async (_w: string, c: string) => {
         commands.push(c);
-        return { exitCode: over.extractExit ?? 0, stdout: '', stderr: '' };
+        // Mimic the real command: it echoes how many entries tar actually extracted.
+        const n = over.extractedCount !== undefined ? over.extractedCount : lastArchiveCount;
+        return { exitCode: over.extractExit ?? 0, stdout: `NBAI_EXTRACTED:${n}\n`, stderr: '' };
       },
       readFile: async (_w: string, p: string) => {
         const v = over.readBack ? over.readBack(p) : `export const v${p.match(/f(\d+)/)?.[1]} = ${p.match(/f(\d+)/)?.[1]};`;
@@ -241,7 +256,7 @@ describe('writeWorkspaceFiles — bulk landing falls back rather than ever losin
     const res = await writeWorkspaceFiles(h.sink, 'ws', files);
     expect(res.written).toHaveLength(200);
     expect(h.binaryUploads).toBe(1);                       // one archive
-    expect(h.commands[0]).toContain('tar -xzf');           // one extract
+    expect(h.commands[0]).toContain('tar -xzvf');          // one extract, verbose so it can be COUNTED
     expect(h.perFile).toHaveLength(0);                     // ZERO per-file round trips
   });
 
@@ -306,5 +321,59 @@ describe('writeWorkspaceFiles — bulk landing falls back rather than ever losin
     } finally {
       if (prev === undefined) delete process.env.AGENTV3_BULK_LAND; else process.env.AGENTV3_BULK_LAND = prev;
     }
+  });
+});
+
+// DATA-LOSS AUTOPSY (admin build report 2026-08-03): a live import ended with the sandbox holding
+// 2034 of 2543 files — a 20% SHORT landing. Whatever caused it, the verification I shipped could not
+// have caught it: a 5-file sample passes easily when 80% of files are present. The count check below
+// is the fix, and these tests are its proof.
+describe('writeWorkspaceFiles — a SHORT extraction can never pass verification', () => {
+  const project = (n: number): Record<string, string> =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [`src/f${i}.ts`, `export const v${i} = ${i};`]));
+
+  function sinkReporting(extractedCount: number) {
+    const perFile: string[] = [];
+    const sink = {
+      writeFile: async (_w: string, p: string) => { perFile.push(p); },
+      writeBinaryFile: async () => {},
+      runCommand: async () => ({ exitCode: 0, stdout: `NBAI_EXTRACTED:${extractedCount}\n`, stderr: '' }),
+      readFile: async (_w: string, p: string) => `export const v${p.match(/f(\d+)/)?.[1]} = ${p.match(/f(\d+)/)?.[1]};`,
+    };
+    return { sink, perFile };
+  }
+
+  it('falls back when tar reports FEWER files than we archived (the exact 2034-of-2543 shape)', async () => {
+    const files = project(100);
+    const h = sinkReporting(80); // 20% short — a sample check would have sailed straight past this
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(100);   // nothing lost — the slow path landed everything
+    expect(h.perFile).toHaveLength(100);
+    expect(res.landedVia).toBe('per-file');  // and the report says so honestly
+  });
+
+  it('falls back when the count cannot be read at all (never trusts an unparseable result)', async () => {
+    const h = sinkReporting(NaN as unknown as number);
+    const res = await writeWorkspaceFiles({ ...h.sink, runCommand: async () => ({ exitCode: 0, stdout: 'no marker here', stderr: '' }) }, 'ws', project(100));
+    expect(res.written).toHaveLength(100);
+    expect(res.landedVia).toBe('per-file');
+  });
+
+  it('accepts only an EXACT count match, and records how many were verified', async () => {
+    const h = sinkReporting(100);
+    const res = await writeWorkspaceFiles(h.sink, 'ws', project(100));
+    expect(res.written).toHaveLength(100);
+    expect(h.perFile).toHaveLength(0);
+    expect(res.landedVia).toBe('bulk');
+    expect(res.bulkVerifiedCount).toBe(100);
+  });
+
+  it('reports bulk+per-file when tar could not carry some paths (telemetry stays truthful)', async () => {
+    const files = { ...project(100), 'src/日本語.ts': 'export const jp = 1;' };
+    const h = sinkReporting(100); // the 100 ASCII paths; the unicode one goes per-file
+    const res = await writeWorkspaceFiles(h.sink, 'ws', files);
+    expect(res.written).toHaveLength(101);
+    expect(res.landedVia).toBe('bulk+per-file');
+    expect(h.perFile).toEqual(['src/日本語.ts']);
   });
 });

@@ -7,6 +7,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
+import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
@@ -466,13 +467,12 @@ setInterval(() => {
         // GET APIs) and return index.html with a 200 — which is exactly why the
         // preview silently "worked" in audits but showed the main app. Let those
         // paths fall through to their real handlers.
-        if (
-          req.path.startsWith('/api/') ||
-          req.path.startsWith('/preview-app/') ||
-          req.path.startsWith('/preview/') ||
-          req.path === '/guide' || req.path === '/guide/' || // U-9 — auto-generated docs site
-          req.path === '/status' || req.path === '/status/' // U-15 — public status page
-        ) {
+        // ONE source of truth for this decision (src/server/lib/spaFallback.ts). The list used to live
+        // inline here and drifted twice: the live preview once, and then DEPLOYED USER APPS (/pwa/<id>)
+        // — a user's deployed app link opened NavBharatAI instead of their own app, because /pwa/ was
+        // never added. A test now reads the real route modules and fails if any server route is missing
+        // from the list, so the next added route cannot silently return index.html.
+        if (spaFallbackShouldDefer(req.path)) {
           return next();
         }
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

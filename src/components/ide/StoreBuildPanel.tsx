@@ -60,7 +60,12 @@ export interface StoreBuildPanelProps {
   onOpenGuide?: () => void;
 }
 
-const ANDROID_WORKFLOW = 'android-aab.yml';
+// TWO Android paths (admin 2026-08-02). The APK one needs NO secrets — Gradle signs a debug build
+// with Android's universal key — so a non-technical user can hold their app today with one click. The
+// AAB one is for Google Play and genuinely needs the user's own signing key.
+const ANDROID_APK_WORKFLOW = 'android-apk.yml';
+const ANDROID_AAB_WORKFLOW = 'android-aab.yml';
+type BuildKind = 'apk' | 'aab';
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -73,6 +78,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [setup, setSetup] = useState<SetupResult | null>(null);
+  // Which of the two Android builds is running — the UI must never claim a missing-signing-key problem
+  // on the APK path, which needs no keys at all.
+  const [buildKind, setBuildKind] = useState<BuildKind>('apk');
   const [run, setRun] = useState<RunInfo | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [error, setError] = useState('');
@@ -117,13 +125,13 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }, [sessionId, appName, appId, iconDataUrl, ghHeaders]);
 
   /** Poll the run until GitHub finishes, then read what it produced. */
-  const watchRun = useCallback(async (owner: string, repo: string) => {
+  const watchRun = useCallback(async (owner: string, repo: string, workflow: string, kind: BuildKind) => {
     for (let i = 0; i < 120 && liveRef.current; i++) {
       await new Promise((r) => setTimeout(r, 5000));
       if (!liveRef.current) return;
       try {
         const res = await fetch(
-          `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${ANDROID_WORKFLOW}`,
+          `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
           { headers: await ghHeaders() },
         );
         const data = await res.json().catch(() => null);
@@ -135,9 +143,13 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         if (latest.conclusion !== 'success') {
           setPhase('failed');
           setError(
-            latest.conclusion === 'failure'
-              ? 'The build failed on GitHub. The usual reason is that the signing secrets are not set yet — open the guide below.'
-              : `The build ended as "${latest.conclusion}".`,
+            latest.conclusion !== 'failure'
+              ? `The build ended as "${latest.conclusion}".`
+              : kind === 'aab'
+                // Only the Play-Store build can fail for missing secrets; saying that on the APK build
+                // (which needs none) would send the user hunting for a problem that does not exist.
+                ? 'The Play Store build failed on GitHub. The usual reason is that the signing secrets are not set yet — open the guide below.'
+                : 'The build failed on GitHub. Open the run there to see the exact step that failed.',
           );
           return;
         }
@@ -160,8 +172,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }, [ghHeaders]);
 
   /** Step 2 — start the real build on GitHub's runners. */
-  const build = useCallback(async () => {
+  const build = useCallback(async (kind: BuildKind = 'apk') => {
     if (!setup) return;
+    setBuildKind(kind);
     setPhase('building');
     setError('');
     setArtifacts([]);
@@ -170,7 +183,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       const res = await fetch('/api/mobile-ship/trigger', {
         method: 'POST',
         headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ owner: setup.owner, repo: setup.repo, workflow: ANDROID_WORKFLOW, ref: setup.branch }),
+        body: JSON.stringify({
+          owner: setup.owner, repo: setup.repo, ref: setup.branch,
+          workflow: kind === 'apk' ? ANDROID_APK_WORKFLOW : ANDROID_AAB_WORKFLOW,
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!liveRef.current) return;
@@ -179,7 +195,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         setPhase('ready');
         return;
       }
-      void watchRun(setup.owner, setup.repo);
+      void watchRun(setup.owner, setup.repo, kind === 'apk' ? ANDROID_APK_WORKFLOW : ANDROID_AAB_WORKFLOW, kind);
     } catch {
       if (liveRef.current) { setError('Could not reach the server.'); setPhase('ready'); }
     }
@@ -201,7 +217,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         return;
       }
       const blob = await res.blob();
-      const name = /apk/i.test(artifact.name) ? 'app-release.apk' : 'app-release.aab';
+      const name = /apk/i.test(artifact.name)
+        ? (buildKind === 'apk' ? 'app-debug.apk' : 'app-release.apk')
+        : 'app-release.aab';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -299,13 +317,27 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
         {setup && (phase === 'ready' || phase === 'failed') && (
           <>
+            {/* PRIMARY — the one-click path. No keys, no secrets, nothing for the user to set up. */}
+            <button
+              onClick={() => void build('apk')}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-green-600 hover:bg-green-500 transition-colors text-white"
+            >
+              <Rocket size={17} /> {phase === 'failed' ? 'Try again' : 'Build my APK now'}
+            </button>
+            <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
+              Installs straight onto any Android phone. Nothing to set up — no signing key needed.
+              (This file cannot go on Google Play; for that, use the option below.)
+            </p>
+
+            {/* SECONDARY — Google Play. This is the only path that genuinely needs the user's own key. */}
             <div className="rounded-lg border border-amber-500/25 p-3 text-xs leading-relaxed"
                  style={{ background: 'rgba(245,158,11,0.07)' }}>
               <p className="flex items-center gap-1.5 text-amber-300 font-semibold mb-1.5">
-                <Key size={13} /> One thing only you can do
+                <Key size={13} /> Publishing on Google Play? One thing only you can do
               </p>
               <p className="text-white/60">
-                Add your signing key to the repository, as {setup.requiredSecrets.android.length} secrets:
+                Play needs a signed bundle, so add your signing key to the repository as
+                {' '}{setup.requiredSecrets.android.length} secrets:
                 {' '}<span className="text-white/80">{setup.requiredSecrets.android.join(', ')}</span>.
                 This key is your app's permanent identity on the Play Store — it must stay with you, and
                 NavBharatAI never sees it. The guide walks through creating it, step by step.
@@ -315,14 +347,23 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   Show me how, step by step →
                 </button>
               )}
+              <button
+                onClick={() => void build('aab')}
+                className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-amber-500/40 text-amber-200 hover:bg-amber-500/10 transition-colors"
+              >
+                <Rocket size={14} /> Build the Play Store bundle
+              </button>
             </div>
 
-            <button
-              onClick={() => void build()}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-green-600 hover:bg-green-500 transition-colors text-white"
+            {/* Second route to the same file — straight to their own repo on GitHub. */}
+            <a
+              href={`https://github.com/${setup.owner}/${setup.repo}/actions`}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors text-white/60"
             >
-              <Rocket size={17} /> {phase === 'failed' ? 'Try the build again' : 'Build my app now'}
-            </button>
+              <ExternalLink size={12} /> Open this app's builds on GitHub
+            </a>
           </>
         )}
 
@@ -363,8 +404,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 </button>
               ))}
               <p className="text-[11px] text-white/40 leading-relaxed">
-                The .aab is what Google Play wants. The .apk is the one you can send to someone to
-                install directly. GitHub keeps both for 14 days — after that, just build again.
+                {buildKind === 'apk'
+                  ? 'Copy this .apk to an Android phone and open it — allow "install from unknown sources" when asked. It is for installing and sharing; Google Play needs the signed bundle instead.'
+                  : 'The .aab is what Google Play wants. The .apk beside it is the one you can send to someone to install directly.'}
+                {' '}GitHub keeps the file for 14 days — after that, just build again.
               </p>
             </div>
           ) : (

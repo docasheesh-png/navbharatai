@@ -198,7 +198,7 @@ import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration 
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
-import { planAppDefaults } from '../AgentV3/appDefaults';
+import { planAppDefaults, defaultAssetPath } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -9831,16 +9831,22 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* one write failing must not block the rest */ }
           }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
+          // FRAMEWORK-AWARE PATH (deploy-report autopsy 2026-08-03): a Vite app ships ONLY what's under
+          // public/, so these must land in public/ or `npm run build` drops them from dist/ and the deploy
+          // 404s them (which made a real build grind 7 rebuilds copying them by hand). defaultAssetPath →
+          // public/<file> for a Vite framework, root otherwise. Kill switch AGENTV3_VITE_PUBLIC_ASSETS=off.
+          const publicAssets = (process.env.AGENTV3_VITE_PUBLIC_ASSETS ?? '').trim().toLowerCase() !== 'off';
           for (const [rel, content] of Object.entries(defaults.files)) {
-            if (writtenFiles.has(rel)) continue;
+            const target = publicAssets ? defaultAssetPath(rel, framework) : rel;
+            if (writtenFiles.has(target)) continue;
             let exists = false;
-            try { await actuator.readFile(workspaceId, rel); exists = true; } catch { exists = false; }
+            try { await actuator.readFile(workspaceId, target); exists = true; } catch { exists = false; }
             if (exists) continue;
             try {
-              await actuator.writeFile(workspaceId, rel, content);
-              writtenFiles.set(rel, content);
-              try { getWorkspaceMemory(workspaceId).indexFile(rel, content); } catch { /* index best-effort */ }
-              savedDefaults[rel] = content;
+              await actuator.writeFile(workspaceId, target, content);
+              writtenFiles.set(target, content);
+              try { getWorkspaceMemory(workspaceId).indexFile(target, content); } catch { /* index best-effort */ }
+              savedDefaults[target] = content;
             } catch { /* best-effort per file */ }
           }
           if (Object.keys(savedDefaults).length > 0) {

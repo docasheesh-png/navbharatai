@@ -13,6 +13,7 @@
 import type { AgentEvent } from './types';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
+import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 
@@ -221,6 +222,14 @@ export interface BuildDiagnosticsReport {
   /** Per-provider REAL token spend for this build (reconciled to the billed total; 'other' = aux
    *  calls). The report-level view of the Billing-Phase-3 ledger. */
   providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /**
+   * ADMIN-ONLY infrastructure cost: how long this build held a real E2B VM, and our estimated spend on
+   * it. Billed by WALL-CLOCK, so it is a completely different cost shape from token spend — a build
+   * that used almost no tokens but sat on a VM for forty minutes still cost real money, and nothing in
+   * this report used to show it. Never part of the user's bill (White-Label Law §3); absent when the
+   * time was not measured on this instance. See sandboxCost.ts.
+   */
+  sandboxCost?: { seconds: number; usd: number; estimated: true };
   /** Fix 66 — total prefix-cache HIT input tokens (GLM/Kimi auto-cache). Compare against providerTokens'
    *  input total for the real cache-hit rate on this build. Absent/0 when nothing was cache-served. */
   cacheReadInputTokens?: number;
@@ -332,6 +341,7 @@ export class BuildDiagnostics {
   private readonly providerDelivery = new Map<string, number>();
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
   private reviewText?: string;
@@ -807,6 +817,16 @@ export class BuildDiagnostics {
     if (u && Object.keys(u).length > 0) this.providerTokens = u;
   }
 
+  /**
+   * Record the build's sandbox wall-clock. Pass the seconds the actuator actually held the VM; a null
+   * or unmeasurable value records NOTHING, so the report says "not measured" instead of showing a zero
+   * that reads like a fact.
+   */
+  setSandboxSeconds(seconds: number | null | undefined): void {
+    const cost = sandboxCost(seconds);
+    if (cost) this.sandboxCostRecord = cost;
+  }
+
   /** Fix 66 (measure-first) — the total prefix-cache HIT input tokens the cheap-floor providers
    *  (GLM/Kimi) served this build. Purely observational: reveals the real cache-hit rate against
    *  providerTokens' input total, so we can see whether the big cheap-floor input is cache-served. */
@@ -908,6 +928,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerTokens: this.providerTokens,
+      sandboxCost: this.sandboxCostRecord,
       cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,
       review: this.reviewText,
@@ -1188,8 +1209,16 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   if (r.manifest) lines.push(`Manifest : ${manifestSummaryLine(r.manifest)}`); // U-1 signed determinism-audit manifest
   // Which provider(s) actually drove the build turns — the real "kaun sa reply kis provider se aaya".
   const deliveredBy = formatProviderDelivery(r.providerDelivery);
+  // Infrastructure cost sits beside the model cost, because "why is the E2B bill this size?" had no
+  // answer in the product before. The idle split is the actionable part: a VM that outlived its build
+  // is a reaper/idle problem, not a model problem.
+  const sandboxLine = describeSandboxCost(
+    r.sandboxCost ?? null,
+    r.endedAt && r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : undefined, // epoch ms, not ISO
+  );
   if (r.builtBy) lines.push(`Built by : ${r.builtBy}${deliveredBy ? ` — full split: ${deliveredBy}` : ''}`);
   else if (deliveredBy) lines.push(`Built by : ${deliveredBy}`);
+  lines.push(sandboxLine);
   lines.push(`Outcome  : ${r.ok === undefined ? '(n/a)' : r.ok ? 'SUCCESS' : 'FAILED'}`);
   // PROVIDER USAGE + BILLING (admin 2026-07-11 / expanded 2026-07-12: "kitne token API call me
   // provider ne use kiya + user se kitna charge kiya") — the report answers, per provider: how many
@@ -1449,7 +1478,8 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
       : {}),
   };
   // Explicitly OMITTED (admin-only / provider-identifying): model, providerDelivery, builtBy, providerFailures,
-  // providerTokens, cacheReadInputTokens, llmCalls, commands, billing, manifest. Because `out` is built by
+  // providerTokens, cacheReadInputTokens, llmCalls, commands, billing, manifest, sandboxCost (our own
+  // infrastructure spend — never any part of what the user is charged). Because `out` is built by
   // allow-list, they are absent by construction — the user-facing billing surface is userCostBreakdown, not this.
   return out;
 }

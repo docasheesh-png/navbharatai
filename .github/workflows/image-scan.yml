@@ -23,7 +23,11 @@ jobs:
         run: docker build -t navbharatai:scan .
 
       - name: Trivy scan — FAIL on CRITICAL
-        uses: aquasecurity/trivy-action@0.28.0
+        # The old pin `@0.28.0` no longer resolves — upstream removed that tag, so the job died at
+        # "Unable to resolve action" and the image was NEVER scanned. A security gate that cannot start
+        # is worse than no gate: it shows a red X that looks like a finding, so nobody reads it. v0.33.1
+        # was verified to exist before pinning (2026-08-04); note upstream's newer tags carry a `v` prefix.
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: 'navbharatai:scan'
           format: 'table'
@@ -33,7 +37,7 @@ jobs:
 
       - name: Trivy scan — report HIGH (non-blocking)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: 'navbharatai:scan'
           format: 'table'

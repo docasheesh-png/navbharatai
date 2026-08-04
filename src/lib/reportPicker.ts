@@ -21,6 +21,13 @@
 export interface ReportPickerItem {
   /** History id — what the submit call sends back so the RIGHT report is delivered. */
   id: string;
+  /**
+   * The build's own id, when it has one. Carried ONLY so the client can key "already sent" counts on
+   * the same identity the header button uses — the history id is the build's `startedAt`, so without
+   * this the same build would be counted under two different keys and the duplicate-report guard
+   * would miss. Never used to fetch: the submit call always sends the history `id`.
+   */
+  buildId?: string;
   startedAt: number;
   endedAt?: number;
   /** Whether that build succeeded. A plain fact the user watched happen. */
@@ -32,6 +39,7 @@ export interface ReportPickerItem {
 /** What the picker is built from. A subset of DiagnosticsHistoryEntry, so the server can pass one straight in. */
 export interface ReportPickerSource {
   id: string;
+  buildId?: string;
   startedAt: number;
   endedAt?: number;
   ok?: boolean;
@@ -65,6 +73,7 @@ export function reportLabel(prompt: string | undefined | null): string {
 export function toPickerItem(entry: ReportPickerSource): ReportPickerItem {
   return {
     id: entry.id,
+    buildId: entry.buildId,
     startedAt: entry.startedAt,
     endedAt: entry.endedAt,
     ok: entry.ok,

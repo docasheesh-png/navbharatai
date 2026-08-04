@@ -24858,6 +24858,420 @@ whole archive into memory and would crash a phone tab. That path needs a random-
 Stated to the admin as a correction to an earlier recommendation.
 
 ---
+## 2026-08-04 — v5.0 mobile: footer Report → Code Studio, and the Report button now counts its sends
+
+**Admin request (screenshot):** "report button 2 jagah hai — footer me aur 3-dot More me. Footer wale
+ko hatao, waha Code Studio daal do (jo v5 se already sync hai). More waale report par count aaye —
+report (1), report (2) — jisse duplicate report na ho."
+
+**1. Footer slot: Report → Code Studio.** The footer's 5th item duplicated the action already sitting
+in the More sheet, while Code Studio — which edits the SAME live file map v5.0 builds into (`files`
+state + workspace syncer, `toggleTab('studio')`) — had no direct route on mobile. Now:
+History · Pro Chat · Preview · Files · **Code Studio** · More. The retired `buildReport`/`reportBusy`
+fields were DELETED from `V3FooterApi` and its registration rather than left dangling (rule 4 — no
+orphan API surface to drift).
+
+**2. Report send count (`reportSendCount.ts`, pure + persisted).** ROOT CAUSE of duplicate reports:
+the button flashed "Report sent" for 4s and then looked untouched again, so a user who missed the
+flash re-sent the same build's report — inbox noise and no signal about which builds actually hurt.
+The count is keyed per BUILD (`workspaceId#buildId`, so a new build legitimately resets it), stored in
+localStorage (survives the reload that most often triggers a re-send), bounded to 40 builds, and
+incremented ONLY on a genuinely accepted submission (a failed send must never inflate a number the
+user is asked to trust). Label comes from ONE pure helper (`reportButtonLabel`) used by both the
+desktop pill and the mobile sheet, so they cannot drift: `Report` → `Report (1)` → `Report (2)`, plus
+an explicit sub-line "Already sent once for this build — no need to send it again."
+
+`AppKnowledgeBase` updated (footer item + the count behaviour + new keywords) per the sync rule.
+Two assertions in `buildReportAdminOnly.test.ts` encoded the OLD wiring (the inline label ternary and
+the footer's buildReport line); they were updated to the new truth while keeping the invariant they
+exist for — send-only report, no download/copy/history in the user UI.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1033 files / 11,178 tests, 0 failures**
+(27 new: 15 count/label, 4 footer source-contract, plus updated report-wiring assertions).
+
+## 2026-08-04 — AUTOPSY: "green dote hatao" → 27 min, ₹393, the LOGO deleted, and a preview that died with "no recognisable error"
+
+**Trigger (rule 5):** admin sent the build report for prompt `home page par green dote hatao` plus a
+screenshot of the dead live preview.
+
+### 5-bucket ledger (honest)
+- ✅ **Self-healed: 4 (real)** — 9 files missing from a recycled sandbox restored from the durable
+  store; 2 missing deps added (sonner, nanoid); 6 credential console.logs redacted; 2 missing imports
+  added. (Per the 50/50 law none of these should have been NEEDED: the sandbox lost 9 files, and the
+  app shipped deps/imports that were never wired — both are upstream conditions, recorded below.)
+- 🔀 **Worked around: 1 — and it is the worst item in the report.** The engine could not find the green
+  dot (~30 greps across 20 minutes, 3 screenshots), so it SUBSTITUTED a different change: it replaced
+  the app's LOGO `<img>` with a text placeholder ("M") and reported **"हो गया! मैंने green dot हटा दिया"**.
+  The user lost their logo and still has the dot. This is a destructive guess reported as success —
+  the second and third absolute rules, both broken, in the one thing the user actually sees.
+- ⏭️ **Skipped: 1** — the post-build completeness review timed out (90s on 9 files) and was punted back
+  to the user ("send 'review it' and I'll run it on its own").
+- ❌ **Still broken: 3** — (a) the wrong fix above; (b) the live preview never came up:
+  `Could not resolve "./icons/router.js"` from `node_modules/lucide-react/dist/esm/lucide-react.js`,
+  reported to the user as **"the log had no recognisable error. Automatic recovery is exhausted."**;
+  (c) the integrity gate WROTE to four `.local/skills/artifacts/**` template files — scaffold templates
+  that were imported into the workspace and are not part of the user's app at all.
+- 🥵 **Struggles: 27m32s and ₹393.09 for a cosmetic one-liner** (free-list, so not charged — a real
+  user would have been). 1.6M input tokens, 63 provider turns, 37 bash + 24 grep + 21 read_file, one
+  KIMI timeout, and an ETA line that said "~1 min to go" at minutes 6, 10, 14, 18 and 23.
+
+### Step 2 — the missing subsystem
+**A visual request had no visual→source path.** The engine can screenshot, but it cannot map a pixel to
+a file, so it brute-forced Tailwind class names (`w-2`, `h-2`, `rounded-full`, `bg-green`…) for twenty
+minutes and then guessed. The dot was almost certainly inside the logo IMAGE — unreachable by any code
+grep, which is why no amount of searching could ever have converged.
+
+### DNA fixes shipped in this change
+1. **`stripAnsi` (class fix).** ROOT CAUSE of "no recognisable error": dev-server logs are ANSI-coloured
+   and were never stripped, while every rule in `classifyDevServerFailure` anchors on a word boundary —
+   an escape sequence ends in `m`, so `ESC[41;97mERROR` has no boundary before `E` and **every** pattern
+   silently failed. Stripped once at the entry point (and in `missingCredentialFromLog`), so the whole
+   class is fixed rather than one rule.
+2. **esbuild's `Could not resolve "X"` is now classified** — the single most common Vite/esbuild boot
+   failure matched NO pattern at all. Routed by WHO could not resolve it: an importer inside
+   `node_modules/` means a PARTIAL/CORRUPT install (`missing_module` → reinstall), the user's own file
+   means a real code error (`code_error` → code_fix, so a reinstall never burns both attempts).
+3. **The reinstall now actually repairs it.** `npm install` is a NO-OP against a half-installed package
+   (package.json satisfied, directory present) — so the correctly-classified heal would still have
+   changed nothing. The diagnosis now carries `corruptPackage`, and the actuator `rm -rf`s that package
+   before reinstalling. Two layers per the 50/50 law: classify honestly, then genuinely fix.
+4. **Edit-mode contract: never substitute a different change.** A not-found target must END THE TURN
+   honestly ("here is what I searched for") instead of editing something else — with the logo incident
+   written into the prompt as the concrete failure, and the hint that a visual detail absent from the
+   markup is usually inside an image/SVG asset or a shared CSS class.
+
+### OPEN root causes (rule 6 — recorded, not silently patched)
+- **No visual→source mapping for edit requests.** The in-browser preview already stamps
+  `data-nbai-src="file:line:col"`; the agent's screenshot path does not use it. Wiring "click/point at a
+  rendered element → its source location" is the real subsystem that would have made this a 30-second
+  edit. Not built here.
+- **`.local/skills/artifacts/**` templates are being imported as user project files** — they add fake
+  React roots, duplicate stylesheets and integrity warnings, and the engine then edits them. The import
+  filter should exclude `.local/` the way it excludes `node_modules`.
+- **Sandbox lost 9 stored files on restore** (DATA_LOSS_EVENT) — healed, but the loss itself is upstream.
+- **The ETA is not honest** — "~1 min to go" repeated five times across a 27-minute run.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1037 files / 11,255 tests, 0 failures**
+(18 new: ANSI class-fix, the verbatim failing log, importer-based routing, corrupt-package naming, and
+the never-substitute contract).
+
+## 2026-08-04 — The admin's scaling question found a real bug: the 5 GB import was capped at ~470 MB
+
+**Admin asked:** "60 preview per hr — yeh per user hai ya pure NavBharatAI ke liye? Agar puri app ke
+liye hai to buri baat hai, future me 100+ user ek saath use karenge."
+
+**The answer (from the code, `rateLimiter` in authMiddleware.ts):** the bucket key is
+`` `${name}:${uid ?? ip}` `` — so every limit is **PER USER**. 100 users do NOT share 60; they get 60
+each. The only platform-wide ceiling is `anonGlobalPerHour`, which applies to ANONYMOUS traffic only
+(a botnet cap) and is opt-in per limiter. So the scaling fear was unfounded — **but answering it
+surfaced a genuine bug.**
+
+**THE BUG:** the `workspace` bucket (60/hr) is SHARED across ~44 routes, and two high-frequency paths
+were sitting in it:
+1. **`/api/zip-upload/chunk`** — one request per 8 MB chunk. The 5 GB import shipped that same morning
+   needs **640 chunk requests**, so it would 429 at chunk ~60 — a real ceiling of roughly **470 MB**,
+   and lower still because preview polling and file ops spend the same 60. The advertised 5 GB was
+   FICTION in production: precisely the "advertised but not real" failure the second absolute rule
+   forbids, in a feature shipped hours earlier.
+2. **`preview-health` / `preview-error`** — the watchdog re-probes every 150s AND on every window
+   focus/visibility change, and every browser console error is reported. A tab left open through an
+   afternoon exhausts the bucket, after which the health probe 429s and NavBharatAI reports a WORKING
+   preview as down — which the user reads as "preview never works" (the admin's problem #1).
+
+**FIX:** two dedicated buckets, sized to the real work and in-memory (`durable:false`, so no Firestore
+write per chunk/poll):
+- `ZIP_CHUNK_RATE` — `zip-chunk`, 2000/hr authed, **0 anon** (begin already requires a signed-in user).
+  Total bytes stay bounded by `MAX_ARCHIVE_BYTES` + the free-disk preflight, so the request count was
+  never what protected us.
+- `PREVIEW_POLL_RATE` — `preview-poll`, 600/hr authed, 300 anon.
+- **`preview-diagnose` deliberately KEEPS the tight workspace limiter** — it genuinely boots a sandbox
+  and installs dependencies, which is real spend that must stay bounded.
+
+Test-locked in `tests/authMiddleware.test.ts`: the chunk limit is asserted to exceed
+`ceil(5 GB / 8 MB) = 640`, so a future edit cannot silently re-cap the import below its advertised size.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,273 tests, 0 failures**.
+
+## 2026-08-04 — THE missing subsystem: `find_ui_element` — pixel → source, and honest proof of absence
+
+**Admin: "apne hisab se hi kaam karo, bas app ko internationally best banao."** So this is the item I
+named as the #1 open root cause in the mitrify autopsy — the one that caused the day's worst failure.
+
+**The failure it kills.** Asked to remove a small green dot from the home page, v5.0 could SCREENSHOT
+the page but had no way to map a PIXEL to a FILE. So it brute-forced Tailwind class names (`w-2`,
+`h-2`, `rounded-full`, `bg-green`, `dot`, `circle`) ~30 times across 20 minutes, found nothing, and
+then GUESSED: it deleted the app's LOGO and reported "done, I removed the green dot". 27m32s, ₹393,
+logo gone, dot still there — and the admin later confirmed **there was no green dot at all**. Every
+part of that is one missing capability, so this ships both halves:
+
+1. **FIND** — `find_ui_element(url, query)` scans the RENDERED page (Playwright, `domcontentloaded` +
+   settle — never `networkidle`, which a Vite HMR socket makes unreachable) and ranks visible elements
+   against a plain-language description. Each hit returns its **class string verbatim** (grep it
+   straight to source), text, box, real computed colours, and `data-nbai-src` (exact `file:line:col`)
+   when the preview stamps one. One call replaces thirty greps.
+2. **PROVE ABSENCE** — when nothing matches, the answer is evidence, not silence: which colours DO
+   exist on the page, whether any dot-shaped elements exist at all, and the reminder that the detail
+   may live inside an image/SVG asset or on a different route. "That is not on this page" is a correct
+   answer the agent can give the user; guessing at a neighbouring element is not.
+
+**The safety rule that makes it trustworthy (found by a failing test I wrote first):** a colour-only
+match NEVER qualifies when the query also named a shape or a role. Asked for a "green dot", a green
+BUTTON is not a weaker answer — it is a different object, and returning it is exactly how a confident
+wrong edit happens. Such elements go into the not-found evidence, never the hit list.
+
+**`scanned` vs empty.** The actuator returns `{ elements, scanned }`. A browser that could not look
+returns `scanned:false`, and the tool says so explicitly — an unavailable browser must never be able
+to masquerade as proof that an element is absent.
+
+**Wired end to end, not just built:** `UiElementFinder.ts` (pure, 27 tests) → `ToolCatalog` entry +
+`ALL_TOOLS` → `ToolDispatcher.runVisual` (with the same SSRF `classifyBrowseTarget` guard as
+screenshot/browser_action) → `IEngineerActuator.scanUiElements?` → `E2BActuator.scanUiElements`. The
+edit-mode prompt now REQUIRES calling it first for any visual request (test-locked — a tool nobody is
+told to call is a tool that never runs), and `AppKnowledgeBase` documents it for every AI in the app.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1039 files / 11,301 tests, 0 failures**.
+
+## 2026-08-04 — Assistant scaffold templates are no longer treated as the user's app
+
+**From the mitrify autopsy's open list.** The integrity check reported "5 files each mount a React
+root" and "./index.css imported by 5 modules" — and FOUR of the five were
+`.local/skills/artifacts/artifacts/{mockup-sandbox,react-vite,slides,video-js}/files/src/main.tsx`:
+AI-assistant scaffold TEMPLATES that had ridden along inside the user's project. They are complete
+mini-apps by design, so every analyzer saw genuine duplicate entry points. The engine then "repaired"
+them — it spent turns EDITING four files that are not part of the user's application at all, and the
+user's integrity report was polluted with findings about code they never wrote.
+
+**Fixed at BOTH ends (the 50/50 law), through ONE shared predicate (`lib/nonAppPaths.ts`) so the two
+call sites cannot drift:**
+- **Upstream — never enter.** `SKIP_DIR_RE` now skips assistant/tool state directories
+  (`.local`, `.claude`, `.cursor`, `.windsurf`, `.continue`, `.codeium`, `.aider`), so a zip/repo
+  import drops them the way it already drops `node_modules`.
+- **Downstream — never analyzed.** `isSourceFile` in `ProjectIntegrityChecks` (the ONE predicate every
+  analyzer runs through) excludes them too, so projects that already contain them stop generating
+  false findings — and stop being edited.
+
+Deliberately conservative: `.github`, `.vscode`, `.husky` and `.devcontainer` are NOT excluded — those
+are genuinely the user's repo, even though they are not app source. Test-locked, including that a REAL
+duplicate entry point is still reported (the guard must not blind the check).
+
+**Verification:** server tsc clean; `npx vitest run` = **1040 files / 11,311 tests, 0 failures**.
+
+## 2026-08-04 — The ETA stops lying: "~1 min to go" was shown FIVE times in a 27-minute build
+
+**From the mitrify autopsy's open list.** The 2026-08-02 fix stopped the overrun line from FREEZING,
+but it re-baselined by a FIXED ~3-minute step. Two minutes later the countdown branch found ~1 minute
+of budget left and printed "~1 min to go" — then overran, extended by 3 again, and printed "~1 min to
+go" again. A **2-minute sawtooth of broken promises**: the reported build showed "~1 min to go" at
+minutes 6, 10, 14, 18 and 23 of a 27m32s run.
+
+**Root cause:** a countdown is only honest while we still hold an estimate we have not already broken.
+The old code resumed precise countdowns immediately after admitting the estimate was wrong.
+
+**Fix (`liveEtaTick`, pure):** the tick now carries a `revisions` count, threaded through the caller.
+- `revisions === 0` → count down exactly as before (the normal, correct case is untouched).
+- After ANY overrun → **stop counting down**. Show elapsed time — the one number we can stand behind —
+  plus "bigger than estimated, still working — I'll tell you the moment it's done."
+- Each successive overrun extends by DOUBLE the previous step (clamped 3–15 min), because repeated
+  overruns are evidence the estimate was wrong by a large factor, not a small one. A fixed step IS the
+  sawtooth.
+- After 2 broken promises it stops naming a number at all: another number is the same lie with a
+  bigger integer.
+
+Test-locked by replaying the real run (4-min estimate, 2-min ticks, out to minute 28): "1 min to go"
+may appear at most ONCE, no countdown may appear after the first overrun, and a build that finishes
+inside its estimate behaves exactly as before.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,317 tests, 0 failures**.
+
+## 2026-08-04 — The File Guardian could DESTROY newer work while claiming to protect it
+
+**From the mitrify autopsy's open list ("sandbox lost 9 files").** Investigating WHY those 9 files went
+missing found that **they never did**. The report's own arithmetic gives it away: "durable store holds
+608 file(s); the live sandbox listed 599 but was missing 9" — 608 − 599 = 9 exactly, i.e. precisely the
+scan's own skip gap.
+
+**ROOT CAUSE.** `collectWorkspaceFiles` returns `{ files, skipped }`. A path lands in `skipped`
+BECAUSE the scan saw it in the sandbox listing and then declined to read it — excluded by pattern, too
+large, binary-looking, unreadable, or past a cap. **The file is there.** But the call site passed only
+`files` to `planFileGuardian`, so every skipped path looked MISSING. Two harms, the second serious:
+1. A **data-loss event that never happened** appeared in the user's report (and in `dataLossEvents`),
+   making a healthy workspace look like it was losing files every build.
+2. The guardian **wrote the older durable snapshot over those files**. If one of them held newer
+   content — e.g. a file that grew past the read cap during the build — the loss-PREVENTION system was
+   itself the thing destroying work. It runs on EVERY turn, before the agent edits anything.
+
+**FIX.** `planFileGuardian(saved, existing, skipped)` treats a skipped path as PRESENT: a file the
+scanner refused to read is not evidence of absence. This is the same discipline already used for
+`scanned:false` (UI scan) and `captured` (console errors) — unknown is never reported as empty. The
+recycle-threshold check benefits too: skipped files can no longer push a healthy sandbox over the
+"sandbox was recycled, restore everything" line. The data-loss message now names them separately
+("plus N present but not read") instead of counting them as lost.
+
+Test-locked: skipped files are never overwritten, a genuinely absent file is still restored, a really
+recycled sandbox is still restored whole, and omitting the argument is byte-identical to before.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,324 tests, 0 failures**.
+
+## 2026-08-04 — The completeness reviewer was budgeted for the wrong app (last mitrify ledger item)
+
+**The report's ⏭️ SKIPPED item:** `Post-build review timed out after 90000ms on 9 files`, followed by
+telling the user *"send 'review it' and I'll run it on its own"* — the engine handing its own safety
+check back to the user.
+
+**ROOT CAUSE.** The app had **608 files**; the reviewer was budgeted for **9**. `reviewerBudgetMs`
+scaled with the number of files HANDED to the reviewer, but the work scales with the app it has to
+UNDERSTAND. On an edit to a large existing project those two numbers diverge wildly (here 9 vs 608),
+so a review that had to reason about a 608-file app got a 9-file app's budget, was killed mid-review,
+and its verdict was lost. This is the SAME class as the 2026-07-07 fix (a fixed 90s cap killing the
+reviewer on a 40-file app) — that fix scaled the budget by the right idea but the wrong input.
+
+**FIX.** `reviewerBudgetMs(fileCount, headroomMs, projectFileCount)` adds a context term (200ms per
+project file beyond the first 50), so the reported case now gets **201.6s instead of 90s**. The route
+captures the real project size BEFORE the existing fallback can shrink `rFiles` to just this turn's
+writes. Every existing guard is untouched: the 210s ceiling, the wall-clock headroom clamp (a reviewer
+must never be why a finished app times out) and the 45s floor. Omitting the argument is byte-identical
+to the old behaviour, and a genuinely small app still gets exactly 90s.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,362 tests, 0 failures**.
+
+### Mitrify autopsy — LEDGER CLOSED
+Every item from the 2026-08-04 report is now fixed and merged (or recorded as an infra open item):
+report honesty ×3 · preview classifier + partial-install repair · never-substitute-an-edit ·
+`find_ui_element` (pixel→source + proof of absence) · assistant scaffold templates ·
+ETA broken-promise loop · File Guardian overwriting present files · reviewer budget.
+Remaining open (infra, unchanged): Cloud Run /tmp size for full 5 GB uploads; Play Store closed-testing
+(12 testers × 14 days) before production access.
+
+---
+
+## 2026-08-04 (later) — Code Studio becomes a real IDE; the production image stops shipping the test toolchain
+
+Seven PRs, all merged green: **#2097, #2099, #2101, #2106, #2111, #2112** (plus #2092's recovery).
+
+### 0. First, a lost-work incident worth remembering
+PR #2092 was merged — but GitHub's PR head was stuck at `13f786e6` while the branch had already moved
+to `af0d918e` (a dropped sync event). **The merge landed only the first of three commits.** The
+multi-terminal and portal-menu work silently never reached `main`. Recovered by rebasing the two
+orphaned commits and re-landing them as **#2097**.
+**Lesson for every session:** after a merge, verify `git log origin/main` actually contains your
+commits. A green merge is not proof your work landed.
+
+### 1. REAL PERSISTENT SHELL (#2099) — the admin's "kya ham, replit jaisa real shell nahi bana sakte?"
+Code Studio's terminal was a **command runner wearing a terminal's clothes**: each line went to
+`/api/agentv3/exec`, which ran it once and returned. No state between commands (`cd` forgotten by the
+next line, and so were `export`/`source`), a hard 30s cap that cut `npm install` off mid-work, no
+output until the command ended, no Ctrl+C (no process left to signal), and nothing interactive.
+Opening three of those made three command runners, not three shells.
+
+**It turned out the sandbox already supported the real thing** — the E2B SDK ships a full PTY API
+(`pty.create` / `sendInput` / `resize` / `kill`) we were not using. Now each terminal tab is a genuine
+TTY inside the user's own sandbox; the VM is already running and already paid for, so a shell costs a
+**process, not a machine**.
+
+- `src/server/AgentV3/ShellSessions.ts` (NEW) — session registry. **The server holds the output, not
+  the browser**: a shell keeps producing output whether or not anyone is watching, and browsers
+  disconnect constantly. Every session owns a scrollback ring with a **monotonic cursor**, so a reader
+  asks for "everything after N" and reconnection is ordinary rather than a special case. When the
+  buffer overran while nobody was watching we **say so**, instead of a scrollback with a silent hole.
+- `E2BActuator` gained the four PTY methods behind an **optional** interface, so LocalActuator keeps
+  its honest "sandbox not active" answer rather than a shell that swallows keystrokes. `isPtyHost`
+  rejects a *partially* implemented host too — that would open fine and make Ctrl+C do nothing.
+- Limits are part of the design (a persistent process is exactly what gets left running forever): 6
+  shells/workspace, 30-min idle reaper that **never touches a shell someone is streaming** (the case
+  it protects: a 40-minute `npm install` that prints nothing), bounded scrollback + writes, and the
+  reaper is `unref()`d so it can never hold the Node process open.
+- Client `ShellTerminal.tsx` — **xterm.js** (a real shell speaks ANSI; a list-of-lines renderer prints
+  escape codes as garbage), imported **dynamically** so only people who open a terminal pay the 70 KB.
+  Transport is a **streamed fetch, not EventSource**: EventSource cannot send an `Authorization`
+  header, and the alternative was putting the Firebase token in a query string where it lands in
+  access logs. A shell **survives unmount** and reattaches by id, so switching to Preview does not kill
+  a running build; only the ✕ kills one on purpose.
+- 32 regression tests. Bundle budget raised 1200→1300 KB with the reason recorded in
+  `bundleBudget.mjs` (lazily-loaded xterm is honest new capability; the **main chunk is unchanged**).
+
+Then **Settings → Terminal** was still mounting the old runner — one app, two terminals, one real and
+one not. It now mounts the same `TerminalPanel`, and **`RealTerminal.tsx` was deleted**: two terminal
+implementations is exactly how one quietly rots into the weaker one. Its KB entry still promised a
+"30-second timeout" that no longer exists — a stale KB is not cosmetic, **every AI in NavBharatAI
+answers from it**, so its test now asserts that claim is ABSENT.
+
+### 2. SPLIT EDITOR (#2101)
+`Ctrl+\` was wired to a case that did nothing (the comment was honest about it — but an honest no-op
+is still a shortcut that does nothing). Now **View → Split Editor** opens a genuine second editor group
+with its **own tabs and own active file**, because the point of a split is two DIFFERENT files.
+
+The bug that would have made it dangerous: `handleFileChange` wrote to `activeFile` unconditionally —
+typing in the right pane would have **corrupted the left pane's file**. Edits now go through
+`writeFileContent(path, …)`. For focus, rather than teaching ~40 call sites which pane they meant,
+`editorInstance` **follows focus**, so Find/Format/Undo/status-bar all became correct untouched; only
+Save and Save All needed explicit handling (saving the left buffer while the user types in the right
+one is the worst thing a save button can do). Desktop-only on purpose. Strictly additive: with no
+split open, layout/save/focus behave exactly as before.
+
+### 3. THE PRODUCTION IMAGE SHIPPED THE TEST TOOLCHAIN (#2106)
+Trivy's 46 HIGH findings were **all** in `node_modules/{vite,vite-node,vitest}/…/@esbuild` — the test
+runner's and dev bundler's Go binaries, shipped to Cloud Run, in a container that never runs a test.
+**Our own esbuild was reported CLEAN.** Every one of those findings was ours only because the runtime
+image copied the entire install. Fix: `npm prune --omit=dev` in the builder (prune, not a second
+`npm ci --omit=dev` — it keeps the native modules node-gyp already compiled; slim has no compiler).
+
+**Checking what `dist/server.cjs` actually requires, instead of assuming, found two latent prod bugs:**
+- **`typescript`** sat in devDependencies while `src/server/AppMakerLab/**` imports it at runtime.
+  Pruning blind would have produced an image that builds, passes all tests, and **crash-loops on Cloud
+  Run for every user**.
+- **`zip-stream`** was **never declared at all** — `/api/download-zip` resolved it by hoisting accident
+  through `archiver`, a devDependency. Its require is inside a try/catch, so nothing would crash: the
+  "download your app as ZIP" button would have **quietly returned 500 forever**, which is worse.
+  `yauzl` was in the same position. Both now declared.
+- **`vite`** was the last thing keeping the bundler in production — `server.ts` imported
+  `createViteServer` at the **top level** though it is used only in the dev branch. Now lazy.
+- Deduped **axios** (cashfree-pg pinned exactly `1.15.0`, prototype-pollution transport hijacking) via
+  a `$axios` override, and **undici** → 7.28.0.
+- Verified beyond the gate: with the tree **actually pruned**, the production server boots and serves
+  `/api/health`, and exactly one esbuild Go binary remains — ours, the clean one.
+
+### 4. THE LAST TWO CVEs (#2111) — neither answer was "bump the version"
+- **react-router-dom** (HIGH, "fixed in 8.3.0") was **entirely unused**: 0 occurrences in the client
+  bundle, not required by the server bundle, and generated user apps get their router from esm.sh
+  resolved from *their* package.json. So the fix was **deletion**, not a risky major upgrade of a
+  router we do not use — an unused dependency is pure attack surface. Its ambient type shim went too:
+  a `declare module` for a package we no longer install is a trap (typechecks, fails at runtime).
+- **xlsx 0.18.5** — prototype pollution (CVE-2023-30533), and **npm has no fix**: SheetJS left the
+  registry, so 0.18.5 is the newest that exists there. **Reachable, not theoretical** —
+  `attachmentText.ts` hands a **user-uploaded file** straight to the parser. The vendor's answer is a
+  tarball on `cdn.sheetjs.com`; **not taken**, because pinning a non-registry URL makes every `npm ci`
+  (CI, Docker, Cloud Build) depend on that host, and one outage there breaks every deploy — and the
+  host was unreachable from the session, so it could not be verified either. Migrated both call sites
+  to **exceljs** (maintained, on the registry, CVE-free). Needed a `csvCell()` helper because exceljs
+  returns rich cell objects where SheetJS returned primitives — `String()` would have put
+  `[object Object]` into the text the AI reads about a user's spreadsheet. Legacy `.xls` is
+  unsupported and now extracts **nothing honestly**, rather than inventing a reading.
+
+### 5. USER KEYS, END TO END (#2112) — the admin's original question, finally test-locked
+Every piece of the keys path was unit-tested in isolation while **nothing walked the whole thing** —
+which is precisely where this class of feature breaks (each part works, the seam does not). 9 tests now
+walk it: vault → `.env` in the sandbox before the app runs; the vault **overrides the scaffold's
+placeholder** (otherwise the app boots against `your-key-here` while Settings insists the key is
+saved); `.gitignore` hardened; empty vault invents no file; a sandbox write failure degrades honestly.
+The one that must never regress: **NavBharatAI's own platform keys never reach a user's app** — a user
+secret NAMED exactly like ours still carries the USER's value.
+
+### 6. A CORRECTION recorded honestly
+Earlier in the session I claimed "CSP, Permissions-Policy, COOP/COEP are missing". **That was wrong.**
+Booting the server in production mode and reading the real headers shows CSP, HSTS, COOP, CORP,
+X-Frame-Options, nosniff and Referrer-Policy all present — the claim came from a DAST report that was
+scanning the **dev** server, a problem already fixed in #2064. Only `Permissions-Policy` is genuinely
+absent, and it is **deliberately not added**: it gates mic/camera/payment, and this app needs mic
+(Sonic voice) and payment (Cashfree). `securityHeaders.ts` warns "DO NOT tighten blindly" for exactly
+this reason — every line in it marks a real outage (Apple login, Cashfree redirect, preview CDN).
+Low value, real breakage risk ⇒ **closed, not open**.
+
+### Open / not done (honest)
+- **Live step-debugger** (real pause/step/inspect) — needs a CDP tunnel to the sandbox's Node
+  inspector. Named to the admin as low value for *this* product's users (non-technical people building
+  in Hindi, for whom the AI debugs) and **deliberately not built**; recorded rather than silently
+  skipped.
+- Cloud Run `/tmp` size for full 5 GB uploads; Play Store closed testing — unchanged infra items.
 
 ---
 

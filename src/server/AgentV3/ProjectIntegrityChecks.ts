@@ -15,6 +15,8 @@
 // sandbox). Designed to feed the existing fast-lane repair gate: each finding carries a precise,
 // actionable instruction the repair pass can act on, so these defects self-heal before a build ships.
 
+import { isNonAppPath } from '../lib/nonAppPaths';
+
 export interface FocusOwner {
   /** The component file that grabs initial focus. */
   file: string;
@@ -80,7 +82,14 @@ export interface ProjectIntegrityReport {
   ok: boolean;
 }
 
-const isSourceFile = (path: string): boolean => /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path);
+// isNonAppPath: a tool/assistant scratch directory is not the user's source. Excluded HERE — the one
+// predicate every analyzer below runs through — so a single edit keeps `.local/skills/**` scaffold
+// templates out of ALL of them (duplicate entry points, duplicate stylesheets, focus owners, …), and
+// out of the repairs those findings trigger. Mitrify autopsy 2026-08-04: four such templates were
+// reported as duplicate React roots and then actually EDITED by the integrity repair, in an app they
+// have no part in. See lib/nonAppPaths.ts.
+const isSourceFile = (path: string): boolean =>
+  /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path) && !isNonAppPath(path);
 
 /** Strip line and block comments so a commented-out `.focus()` / import never counts. Best-effort. */
 function stripComments(src: string): string {

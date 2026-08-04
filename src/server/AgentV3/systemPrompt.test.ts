@@ -220,6 +220,32 @@ describe('editModePrefix', () => {
     expect(p).toContain('glob');
   });
 
+  // MITRIFY AUTOPSY 2026-08-04 — the worst outcome in the report: asked to remove a small green dot
+  // from the home page, the engine searched ~30 times, never found it, then DELETED the app's LOGO and
+  // reported "done — I removed the green dot". The user lost their logo AND still had the dot. A
+  // not-found target must end the turn honestly, never be swapped for a different (destructive) edit.
+  it('forbids substituting a different change when the named target cannot be found', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('NEVER SUBSTITUTE A DIFFERENT CHANGE');
+    expect(p).toContain('STOP');
+    expect(p).toMatch(/could not find/i);
+  });
+
+  it('points a not-found VISUAL detail at image/CSS assets instead of the nearest element', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toMatch(/IMAGE\/SVG\s+ASSET/i);
+    expect(p).toMatch(/stylesheet|CSS class/i);
+  });
+
+  // The tool that removes the NEED to guess: without this instruction find_ui_element exists but is
+  // never reached, and the engine goes back to ~30 blind class-name greps (mitrify, 27 min / ₹393).
+  it('directs a visual request to find_ui_element FIRST, not to hand-guessed class names', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('find_ui_element');
+    expect(p).toMatch(/visual request/i);
+    expect(p).toMatch(/Do not start guessing Tailwind class names/i);
+  });
+
   it('forbids rebuilding from scratch and demands minimum changes', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('NEVER REBUILD FROM SCRATCH');

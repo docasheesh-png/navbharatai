@@ -19,7 +19,12 @@
 // mobile/Expo, PHP) — all re-created by the stack's own install/build, never worth importing.
 // Exported (2026-07-24) so the api.github.com repo materializer (GithubApiTree.materializeRepoViaApi)
 // filters files with the EXACT same rules as the zip path — ONE source of truth, no drift.
-export const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea)(\/|$)/;
+// `.local|.claude|.cursor|…` (via NON_APP_DIR_RE) are AI-assistant/tool state directories. They are
+// never part of the running app, and `.local/skills/**` in particular ships COMPLETE app scaffolds —
+// importing them gave one project five React roots and five copies of index.css, which the integrity
+// gate then reported as the user's defects and "repaired" by editing template files the user never
+// wrote (mitrify autopsy 2026-08-04). Dropped at the import boundary so they never enter at all.
+export const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea|\.local|\.claude|\.cursor|\.windsurf|\.continue|\.codeium|\.aider)(\/|$)/;
 // OS/editor junk files that ride along in almost every user-made zip.
 export const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 // Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep.

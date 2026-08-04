@@ -21,8 +21,15 @@ describe('User UI — single Report button, no report content shown', () => {
     expect(panel).toContain('method: \'POST\'');
   });
 
-  it('renders a "Report" button with a sent acknowledgement (no download/copy label)', () => {
-    expect(panel).toMatch(/reportSent \? 'Report sent' : 'Report'/);
+  // Label wiring UPDATED 2026-08-04 (admin: "report (1), report (2) aise — jisse duplicate report na
+  // ho"): the inline ternary became the shared pure `reportButtonLabel`, so the desktop pill and the
+  // mobile More sheet cannot drift. The invariant this test exists for is unchanged and still checked
+  // below: one send-only Report button, no download/copy/history anywhere in the user UI.
+  it('renders the Report button through the shared label helper (send-only, never download/copy)', () => {
+    expect(panel).toContain('reportButtonLabel');
+    expect(panel).toContain("from './reportSendCount'");
+    expect(panel).not.toContain('Download report');
+    expect(panel).not.toContain('Copy report');
   });
 
   it('no user-facing button downloads, copies, or opens report history anymore', () => {
@@ -31,9 +38,11 @@ describe('User UI — single Report button, no report content shown', () => {
     expect(panel).not.toContain("onClick={() => downloadDiagnostics('copy')}");
     expect(panel).not.toContain('onClick={toggleHistoryReport}');
     expect(panel).not.toContain('onClick={() => void toggleHistoryReport()}');
-    // The mobile footer report action submits to admin instead of downloading. Since 2026-08-04 it
-    // opens the "which build?" picker first — still a submit path, still no report content shown.
-    expect(panel).toContain("buildReport: () => { setMobileSheet(null); void openReportPicker('sheet'); }");
+    // The report action lives in the mobile More sheet (the footer slot it also occupied was a
+    // duplicate and now opens Code Studio — see v3FooterApi.test.ts) and still SENDS, never downloads.
+    // Since 2026-08-04 it opens the "which build?" picker first — still a submit path, still no
+    // report content shown.
+    expect(panel).toContain("setMobileSheet(null); void openReportPicker('sheet');");
   });
 });
 
@@ -57,12 +66,19 @@ describe('Report picker — choose the build, still never see the report', () =>
   });
 
   it('a picked build is submitted by id, and a missing one fails honestly', () => {
-    expect(panel).toContain('if (pickedBuildId) body.buildId = pickedBuildId;');
+    expect(panel).toContain('if (picked) body.buildId = picked.id;');
     expect(agentv3).toContain("please pick another build");
   });
 
   it('one build in the chat stays one click — the picker never blocks reporting', () => {
     expect(panel).toContain('if (builds.length < 2) { void sendReportToAdmin(); return; }');
+  });
+
+  it('the send count follows the build that was REPORTED, not the one on screen', () => {
+    // Reporting a past build must not inflate the current build's tally, or the number the
+    // duplicate-report guard depends on stops being true.
+    expect(panel).toContain('const countKeyFor = (picked?: ReportPickerItem): string =>');
+    expect(panel).toContain('bumpReportSendCount(countKeyFor(picked))');
   });
 
   it('the submit path validates the active build, like the download path always did', () => {

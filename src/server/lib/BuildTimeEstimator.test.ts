@@ -169,20 +169,24 @@ describe('liveEtaTick — the overrun line must keep MOVING (autopsy 2026-08-02:
     expect(overrun[0]).toContain('bigger than expected');
   });
 
-  it('on overrun it extends the budget so the NEXT tick shows a fresh countdown', () => {
+  it('on overrun it extends the budget, and the NEXT tick no longer promises a countdown', () => {
     const base = 8 * MIN;
     const first = liveEtaTick(9 * MIN, base, base);      // just past the estimate
     expect(first.revised).toBe(true);
     expect(first.totalMs).toBeGreaterThan(9 * MIN);      // budget re-baselined ahead of now
-    const next = liveEtaTick(10 * MIN, first.totalMs, base);
+    expect(first.revisions).toBe(1);
+    // Threading the revision count is what changed (mitrify 2026-08-04): once an estimate has been
+    // broken, the next tick reports elapsed time and honest status — never a fresh "~N min to go".
+    const next = liveEtaTick(10 * MIN, first.totalMs, base, first.revisions);
     expect(next.revised).toBe(false);                    // back inside the (new) budget
-    expect(next.text).toContain('to go');
+    expect(next.text).not.toContain('to go');
+    expect(next.text).toContain('still working');
   });
 
-  it('the re-baseline step is proportional to the ORIGINAL estimate, clamped to 3-10 min', () => {
+  it('the re-baseline step is proportional to the ORIGINAL estimate, clamped to 3-15 min', () => {
     expect(liveEtaTick(60 * MIN, 1 * MIN, 2 * MIN).totalMs - 60 * MIN).toBe(3 * MIN);   // tiny app -> min step
     expect(liveEtaTick(60 * MIN, 1 * MIN, 12 * MIN).totalMs - 60 * MIN).toBe(6 * MIN);  // half of base
-    expect(liveEtaTick(60 * MIN, 1 * MIN, 90 * MIN).totalMs - 60 * MIN).toBe(10 * MIN); // huge app -> max step
+    expect(liveEtaTick(60 * MIN, 1 * MIN, 90 * MIN).totalMs - 60 * MIN).toBe(15 * MIN); // huge app -> max step
   });
 
   it('tolerates junk input without throwing or emitting NaN', () => {
@@ -190,6 +194,77 @@ describe('liveEtaTick — the overrun line must keep MOVING (autopsy 2026-08-02:
       expect(typeof t.text).toBe('string');
       expect(t.text).not.toContain('NaN');
       expect(Number.isFinite(t.totalMs)).toBe(true);
+    }
+  });
+});
+
+// MITRIFY AUTOPSY 2026-08-04 — "~1 min to go" FIVE times across a 27-minute build.
+// The 2026-08-02 fix made the overrun line keep moving, but it re-baselined by a FIXED 3-minute step,
+// so two minutes later the countdown branch cheerfully printed "~1 min to go" again — then overran,
+// extended, and promised "~1 min" again. A 2-minute sawtooth of broken promises. The countdown is only
+// honest while we still hold an estimate we have not already broken.
+describe('liveEtaTick — a broken estimate must stop making fresh promises (mitrify 2026-08-04)', () => {
+  const MIN = 60_000;
+
+  /** Replay the real run: ~4 min estimate, a tick every 2 minutes, out to minute 28. */
+  function replay(baseMin: number, untilMin: number): string[] {
+    const base = baseMin * MIN;
+    let total = base;
+    let revisions = 0;
+    const lines: string[] = [];
+    for (let m = 2; m <= untilMin; m += 2) {
+      const t = liveEtaTick(m * MIN, total, base, revisions);
+      total = t.totalMs;
+      revisions = t.revisions;
+      lines.push(t.text);
+    }
+    return lines;
+  }
+
+  it('never promises "1 min to go" more than once in a 28-minute build', () => {
+    const lines = replay(4, 28);
+    const oneMin = lines.filter((l) => /\b1 min to go\b/.test(l));
+    expect(oneMin.length).toBeLessThanOrEqual(1); // was 5 in the reported build
+  });
+
+  it('stops counting down entirely once the estimate has been broken', () => {
+    const lines = replay(4, 28);
+    const firstOverrun = lines.findIndex((l) => l.includes('bigger than expected'));
+    expect(firstOverrun).toBeGreaterThanOrEqual(0);
+    for (const line of lines.slice(firstOverrun + 1)) {
+      expect(line).not.toMatch(/~?\d+ (?:min|s) to go/);
+    }
+  });
+
+  it('after a couple of broken promises it stops naming a number at all, and says so plainly', () => {
+    const lines = replay(4, 28);
+    const tail = lines[lines.length - 1];
+    expect(tail).toMatch(/taking longer than estimated|still working/i);
+    expect(tail).toMatch(/\b\d+ min in\b/); // elapsed time — the one number we can stand behind
+  });
+
+  it('each successive overrun extends by MORE — a repeated small step IS the sawtooth', () => {
+    const base = 8 * MIN;
+    const first = liveEtaTick(9 * MIN, base, base, 0);
+    const second = liveEtaTick(20 * MIN, 1 * MIN, base, 1);
+    const third = liveEtaTick(40 * MIN, 1 * MIN, base, 2);
+    expect(second.totalMs - 20 * MIN).toBeGreaterThan(first.totalMs - 9 * MIN);
+    expect(third.totalMs - 40 * MIN).toBeGreaterThan(second.totalMs - 20 * MIN);
+  });
+
+  it('a build that finishes INSIDE its estimate is untouched — the normal case still counts down', () => {
+    const t = liveEtaTick(2 * MIN, 8 * MIN, 8 * MIN, 0);
+    expect(t.text).toContain('6 min to go');
+    expect(t.revisions).toBe(0);
+    expect(t.revised).toBe(false);
+  });
+
+  it('junk input still never throws or emits NaN, with revisions carried', () => {
+    for (const t of [liveEtaTick(0, 0, 0, 0), liveEtaTick(NaN, NaN, NaN, NaN), liveEtaTick(-5, -5, -5, -9)]) {
+      expect(typeof t.text).toBe('string');
+      expect(t.text).not.toContain('NaN');
+      expect(Number.isFinite(t.revisions)).toBe(true);
+      expect(t.revisions).toBeGreaterThanOrEqual(0);
     }
   });
 });

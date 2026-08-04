@@ -1,5 +1,95 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog } from './DevServerRecovery';
+
+// MITRIFY AUTOPSY 2026-08-04 — "The app didn't finish starting… its log had no recognisable error."
+// The log was FULL of recognisable errors; two defects hid them:
+//   1. ANSI colour codes were never stripped, and every rule in the classifier anchors on a word
+//      boundary — an escape sequence ends in `m`, so `ESC[41;97mERROR` has no boundary before `E` and
+//      NOTHING matched. A class bug: it can defeat any rule in that file, and it defeated all of them.
+//   2. esbuild's own phrasing, `Could not resolve "X"`, appeared in no pattern at all — the single most
+//      common Vite/esbuild boot failure fell straight through to 'unknown' → "restart once" → give up.
+// The fixture is the verbatim failing log from the reported build (ESC written as ).
+const ESC = '\u001b';
+const MITRIFY_LOG = [
+  `${ESC}[31m✘ ${ESC}[41;31m[${ESC}[41;97mERROR${ESC}[41;31m]${ESC}[0m ${ESC}[1mCould not resolve "./icons/router.js"${ESC}[0m`,
+  '',
+  '    node_modules/lucide-react/dist/esm/lucide-react.js:1042:82:',
+  `${ESC}[37m      1042 │ ...ult as Router, default as RouterIcon } from ${ESC}[32m'./icons/router.js'${ESC}[37m;`,
+  '',
+  '    at failureErrorWithLog (/home/user/workspace/node_modules/vite/node_modules/esbuild/lib/main.js:1467:15)',
+].join('\n');
+
+describe('stripAnsi — a coloured log must not defeat every classifier rule (mitrify 2026-08-04)', () => {
+  it('removes colour codes so word-boundary patterns can match', () => {
+    expect(stripAnsi(`${ESC}[31m✘ ${ESC}[41;97mERROR${ESC}[0m`)).toContain('ERROR');
+    expect(stripAnsi(`${ESC}[1mCould not resolve "x"${ESC}[0m`)).toBe('Could not resolve "x"');
+  });
+
+  it('leaves an uncoloured log byte-identical', () => {
+    expect(stripAnsi("Error: Cannot find module 'x'")).toBe("Error: Cannot find module 'x'");
+    expect(stripAnsi('')).toBe('');
+  });
+
+  it('a credential name hidden behind colour codes is now found', () => {
+    expect(missingCredentialFromLog(`${ESC}[31mError: Missing STRIPE_SECRET_KEY${ESC}[0m`)).toBe('STRIPE_SECRET_KEY');
+  });
+});
+
+describe('the reported failure is now classified, not called "no recognisable error"', () => {
+  it('the verbatim mitrify log → missing_module → reinstall (was: unknown → plain_retry)', () => {
+    const d = classifyDevServerFailure(MITRIFY_LOG);
+    expect(d.cause).toBe('missing_module');
+    expect(d.recovery).toBe('reinstall');
+    expect(d.detail).not.toContain('no recognisable error');
+  });
+
+  it('names the package that installed only partially, so the repair can remove it', () => {
+    const d = classifyDevServerFailure(MITRIFY_LOG);
+    expect(d.corruptPackage).toBe('lucide-react');
+    expect(d.detail).toContain('lucide-react');
+    expect(d.detail).toContain('incomplete');
+  });
+
+  it('a scoped package keeps its @scope/name shape (rm -rf must target the right directory)', () => {
+    const log = 'Could not resolve "./chunk.js"\n\n    node_modules/@tanstack/react-query/build/index.js:12:9:';
+    expect(classifyDevServerFailure(log).corruptPackage).toBe('@tanstack/react-query');
+  });
+
+  it('the terminal (give-up) line states the real cause, not "no recognisable error"', () => {
+    const p = planDevServerRecovery(MITRIFY_LOG, 3, 3);
+    expect(p.recovery).toBe('give_up');
+    expect(p.detail).not.toContain('no recognisable error');
+    expect(p.detail).toContain('partially');
+  });
+});
+
+describe('unresolvedImportFromLog — WHO could not resolve it decides the recovery', () => {
+  it("an unresolved import from the USER's own file is a code error, never a reinstall", () => {
+    const log = 'Could not resolve "./components/Missing"\n\n    client/src/App.tsx:4:19:';
+    const d = classifyDevServerFailure(log);
+    expect(d.cause).toBe('code_error');
+    expect(d.recovery).toBe('code_fix'); // reinstalling would burn both attempts and fix nothing
+    expect(d.detail).toContain('./components/Missing');
+    expect(d.corruptPackage).toBeUndefined();
+  });
+
+  it('reads the specifier and the importing file out of an esbuild error', () => {
+    const r = unresolvedImportFromLog(MITRIFY_LOG);
+    expect(r?.specifier).toBe('./icons/router.js');
+    expect(r?.importer).toContain('lucide-react');
+    expect(r?.inNodeModules).toBe(true);
+  });
+
+  it('returns null when the log has no resolution error at all', () => {
+    expect(unresolvedImportFromLog('Error: listen EADDRINUSE')).toBeNull();
+    expect(unresolvedImportFromLog('')).toBeNull();
+  });
+
+  it('a more specific cause still wins — a busy port is not a resolution problem', () => {
+    const log = 'Error: listen EADDRINUSE: address already in use :::5173\nCould not resolve "./x.js"\n\n    node_modules/a/b.js:1:1:';
+    expect(classifyDevServerFailure(log).cause).toBe('port_in_use');
+  });
+});
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {

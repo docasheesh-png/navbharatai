@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from 'express';
+import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
-import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
 import { loadWorkspaceFiles, listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { scanFilesStatic } from '../lib/appStaticScan';
 import { scanAppGraph } from '../lib/appGraphScan';
@@ -87,7 +88,7 @@ export function registerAppDebugRoutes(app: Express): void {
   });
 
   // ── Run a whole-app scan (NDJSON stream) ────────────────────────────────────────────────────────
-  app.post('/api/app-debug/run', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/app-debug/run', workspaceRateLimiter(), inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op). Checked BEFORE anything is loaded or
     // streamed, so a blocked caller gets a clean JSON paywall rather than a half-open stream.
     const identity = await verifyFirebaseIdentity(req);
@@ -221,16 +222,17 @@ export function registerAppDebugRoutes(app: Express): void {
       });
       // A completed scan spends one allowance. A scan that errored below never does.
       if (gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
+      chargeToolAction(gate); // ONE WALLET — a batched scan bills ALL its model calls, not one
       res.end();
     } catch {
       // Stream already started → emit an honest error event and close (no fake result).
       send({ type: 'error', message: 'NavBharatAI hit a brief hiccup while scanning. Please try again in a minute.' });
       try { res.end(); } catch { /* already closed */ }
     }
-  });
+  }));
 
   // ── Deep-dive: investigate ONE finding → root cause + full fix (interactive) ────────────────────
-  app.post('/api/app-debug/investigate', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/app-debug/investigate', workspaceRateLimiter(), inAiSpendZone(async (req: Request, res: Response) => {
     const investigateIdentity = await verifyFirebaseIdentity(req);
     const investigateGate = await gateToolAction(investigateIdentity?.uid || null, investigateIdentity?.email || null, 'ai_tool');
     if (!investigateGate.allow) {
@@ -273,9 +275,10 @@ export function registerAppDebugRoutes(app: Express): void {
       }
       // Only a genuinely-answered investigation spends an allowance.
       if (investigateGate.countsAgainstFree) burnToolAction(investigateGate.uid, 'ai_tool');
+      chargeToolAction(investigateGate); // ONE WALLET
       res.json(parseDebugResponse(content));
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s engine is briefly busy — please try again in a minute.' });
     }
-  });
+  }));
 }

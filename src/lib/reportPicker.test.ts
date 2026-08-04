@@ -27,8 +27,11 @@ describe('toPickerItem — a picker row must not become a peek at the report', (
   // The build report is ADMIN-ONLY (admin 2026-07-29): the user submits it, never reads it. A row
   // may therefore only carry what the user already watched happen.
   it('carries exactly when / what-they-asked / did-it-work, and nothing else', () => {
-    const item = toPickerItem({ id: 'b1', startedAt: 10, endedAt: 20, ok: true, prompt: 'build a todo app' });
-    expect(Object.keys(item).sort()).toEqual(['endedAt', 'id', 'label', 'ok', 'startedAt']);
+    // `buildId` is the one addition, and it is an IDENTITY, not content: it lets the client count
+    // "already sent" against the same build the header button does. Adding anything else to this
+    // list has to be argued for — that is what the assertion is here to force.
+    const item = toPickerItem({ id: 'b1', buildId: 'build-1', startedAt: 10, endedAt: 20, ok: true, prompt: 'build a todo app' });
+    expect(Object.keys(item).sort()).toEqual(['buildId', 'endedAt', 'id', 'label', 'ok', 'startedAt']);
     expect(item.label).toBe('build a todo app');
   });
 

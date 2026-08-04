@@ -22,6 +22,7 @@ import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSe
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
+import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
@@ -2163,7 +2164,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [reportPickerOpen, setReportPickerOpen] = useState(false);
   const [reportPickerItems, setReportPickerItems] = useState<ReportPickerItem[]>([]);
   const [reportPickerLoading, setReportPickerLoading] = useState(false);
-  const sendReportToAdmin = useCallback(async (pickedBuildId?: string) => {
+  // SEND COUNT (admin 2026-08-04, "report (1), report (2) aise — jisse duplicate report na ho"): the
+  // old button flashed "Report sent" for 4s and then looked untouched again, so a user who missed the
+  // flash re-sent the same build's report. The count is per BUILD and persisted, so the button tells
+  // the truth after a reload too. See reportSendCount.ts.
+  const reportIdKey = reportKey(state.workspaceId, state.buildId);
+  const [reportCount, setReportCount] = useState(0);
+  useEffect(() => { setReportCount(reportSendCount(reportIdKey)); }, [reportIdKey]);
+  // The count belongs to the build that was actually REPORTED. A picked past build carries its own
+  // `buildId`, so choosing it from the list counts against THAT build — not the one on screen — and
+  // the header button keeps telling the truth about the current build.
+  const countKeyFor = (picked?: ReportPickerItem): string =>
+    reportKey(state.workspaceId, picked ? (picked.buildId || picked.id) : state.buildId);
+  const sendReportToAdmin = useCallback(async (picked?: ReportPickerItem) => {
     if (reportSending) return;
     setReportSending(true);
     try {
@@ -2171,7 +2184,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       if (state.workspaceId) body.workspaceId = state.workspaceId;
       // A picked past build resolves to exactly that report; without one the server falls back to the
       // latest, guarded by the active build's identity so it can't be a different app's report.
-      if (pickedBuildId) body.buildId = pickedBuildId;
+      if (picked) body.buildId = picked.id;
       if (state.buildId) body.activeBuildId = state.buildId;
       if (state.promptHash) body.promptHash = state.promptHash;
       const res = await fetch('/api/agentv3/report-to-admin', {
@@ -2182,6 +2195,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) {
         setReportPickerOpen(false);
+        // Count ONLY a genuinely accepted submission — a failed send must never inflate the tally
+        // (the whole point of the number is that the user can trust it).
+        const bumped = bumpReportSendCount(countKeyFor(picked));
+        // Only move the HEADER's number when the header's build is the one that was reported.
+        if (!picked || (picked.buildId || picked.id) === state.buildId) setReportCount(bumped);
         setReportSent(true);
         setTimeout(() => setReportSent(false), 4000);
       } else {
@@ -2223,22 +2241,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // One list, rendered by both surfaces — so the desktop popover and the mobile sheet can never drift
   // into showing different things (the drift that lets a field leak on one surface only).
-  const reportPickerRows = (onPick: (id: string) => void, mobile: boolean) => reportPickerItems.map((b, i) => (
-    <button
-      key={b.id}
-      onClick={() => onPick(b.id)}
-      disabled={reportSending}
-      className={`w-full text-left hover:bg-zinc-800 disabled:opacity-40 border-b border-zinc-800/60 last:border-b-0 ${mobile ? 'px-4 py-3 touch-manipulation' : 'px-3 py-2'}`}
-    >
-      <div className="flex items-center gap-2">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${b.ok === false ? 'bg-rose-400' : 'bg-emerald-400'}`} />
-        <span className={`text-zinc-200 truncate ${mobile ? 'text-sm' : 'text-xs'}`}>{b.label}</span>
-      </div>
-      <div className="mt-0.5 pl-3.5 text-[10px] text-zinc-500">
-        {i === 0 ? 'Latest · ' : ''}{new Date(b.startedAt).toLocaleString()}
-      </div>
-    </button>
-  ));
+  const reportPickerRows = (onPick: (b: ReportPickerItem) => void, mobile: boolean) => reportPickerItems.map((b, i) => {
+    // Each row carries its OWN send count, so the duplicate-report guard works per build — the
+    // reason the picker exists is that different builds are different problems.
+    const sent = reportSendCount(countKeyFor(b));
+    return (
+      <button
+        key={b.id}
+        onClick={() => onPick(b)}
+        disabled={reportSending}
+        className={`w-full text-left hover:bg-zinc-800 disabled:opacity-40 border-b border-zinc-800/60 last:border-b-0 ${mobile ? 'px-4 py-3 touch-manipulation' : 'px-3 py-2'}`}
+      >
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${b.ok === false ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+          <span className={`text-zinc-200 truncate ${mobile ? 'text-sm' : 'text-xs'}`}>{b.label}</span>
+        </div>
+        <div className="mt-0.5 pl-3.5 text-[10px] text-zinc-500">
+          {i === 0 ? 'Latest · ' : ''}{new Date(b.startedAt).toLocaleString()}
+          {sent > 0 && <span className="text-emerald-400/80"> · already sent{sent > 1 ? ` (${sent})` : ''}</span>}
+        </div>
+      </button>
+    );
+  });
 
   // ── Mobile footer API (admin 2026-07-07): registration moved BELOW the workspaceFiles state
   // declaration (it feeds the Files count + green-dot signal) — see the effect after it.
@@ -2378,8 +2402,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
-      buildReport: () => { setMobileSheet(null); void openReportPicker('sheet'); },
-      reportBusy: reportSending,
       openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
       // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
@@ -2567,6 +2589,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const planDone = state.todos.filter((t) => t.status === 'done').length;
   const currentTodo = state.todos.find((t) => t.status === 'in_progress')
     ?? state.todos.find((t) => t.status !== 'done');
+  // "Plan complete" = every step is done. Once a build finishes, the whole 9/9 checklist kept sitting
+  // expanded above the composer forever (admin: "jab plan pura ho gaya … bas 'done' likh kar aaye,
+  // hamesha plan show ho aisa zaroori nahi"). So on the transition to complete we collapse it to a compact
+  // "✓ Done" line; on the transition back to incomplete (a new/continued build) we reopen it. The user can
+  // still expand/collapse manually in between — this only drives the two transitions, never every render.
+  const planComplete = state.todos.length > 0 && state.todos.every((t) => t.status === 'done');
+  const prevPlanCompleteRef = useRef(false);
+  useEffect(() => {
+    if (planComplete && !prevPlanCompleteRef.current) setPlanCollapsed(true);
+    else if (!planComplete && prevPlanCompleteRef.current) setPlanCollapsed(false);
+    prevPlanCompleteRef.current = planComplete;
+  }, [planComplete]);
 
   // Shared session-history list — rendered by BOTH the desktop ☰ dropdown and the mobile footer's
   // History sheet, so there is exactly ONE history UI (same data, same live dots, same actions).
@@ -2851,11 +2885,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             <button
               onClick={() => void openReportPicker()}
               disabled={reportSending || reportPickerLoading || !state.workspaceId}
-              title="Send a build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)"
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
+              title={`Send a build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)${reportCount > 0 ? ` ${reportAlreadySentHint(reportCount)}` : ''}`}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent || reportCount > 0 ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
             >
-              {reportSending || reportPickerLoading ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
-              {reportSending ? 'Sending…' : reportSent ? 'Report sent' : 'Report'}
+              {reportSending || reportPickerLoading ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent || reportCount > 0 ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+              {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
             </button>
             {reportPickerOpen && (
               <>
@@ -2865,7 +2899,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="px-3 py-2 text-[11px] text-zinc-400 border-b border-zinc-800">
                     Which build had the problem?
                   </div>
-                  {reportPickerRows((id) => void sendReportToAdmin(id), false)}
+                  {reportPickerRows((b) => void sendReportToAdmin(b), false)}
                 </div>
               </>
             )}
@@ -3461,10 +3495,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   title={planCollapsed ? 'Expand plan' : 'Minimize plan'}
                 >
                   {planCollapsed ? <ChevronRight className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
-                  <span>Plan</span>
-                  <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
-                  {planCollapsed && currentTodo && (
-                    <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                  {planComplete ? (
+                    <span className="text-emerald-500 font-semibold flex items-center gap-1">✓ Done</span>
+                  ) : (
+                    <>
+                      <span>Plan</span>
+                      <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
+                      {planCollapsed && currentTodo && (
+                        <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                      )}
+                    </>
                   )}
                 </button>
                 {!planCollapsed && (
@@ -3967,7 +4007,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {mobileSheet === 'history' ? (
               <div className="py-1.5">{historyListBody}</div>
             ) : mobileSheet === 'report' ? (
-              <div>{reportPickerRows((id) => { setMobileSheet(null); void sendReportToAdmin(id); }, true)}</div>
+              <div>{reportPickerRows((b) => { setMobileSheet(null); void sendReportToAdmin(b); }, true)}</div>
             ) : (
               <div className="py-1.5">
                 {/* Framework — moved here from the header (admin: "React + Vite ko More me bhej do") */}
@@ -3998,10 +4038,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button
                   onClick={() => { setMobileSheet(null); void openReportPicker('sheet'); }}
                   disabled={reportSending || !state.workspaceId}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                  className="w-full flex items-start gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
-                  {reportSent ? <Check className="w-4 h-4 shrink-0 text-emerald-400" /> : <FileText className="w-4 h-4 shrink-0 text-zinc-400" />}
-                  <span className="flex-1 text-left">{reportSending ? 'Sending report…' : reportSent ? 'Report sent' : 'Report'}</span>
+                  {reportSent || reportCount > 0
+                    ? <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                    : <FileText className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />}
+                  <span className="flex-1 text-left">
+                    {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
+                    {/* The count alone answers "did mine go through?"; this line says outright that a
+                        second send adds nothing — the actual ask behind "duplicate report na ho". */}
+                    {reportCount > 0 && !reportSending && (
+                      <span className="block text-[11px] text-zinc-500 leading-snug">{reportAlreadySentHint(reportCount)}</span>
+                    )}
+                  </span>
                 </button>
                 {state.repoUrl && (
                   <a

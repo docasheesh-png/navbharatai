@@ -392,6 +392,8 @@ export interface DiagnosticsHistoryEntry {
   summary?: string;
   rootCause?: string;
   counts: BuildDiagnosticsReport['counts'];
+  /** The build's own id (the history doc is keyed by `startedAt`, which is not the same thing). */
+  buildId?: string;
   /**
    * The user's OWN build request. Carried so the report picker can label each past build with what
    * the user asked for — the only field on this entry a non-admin is ever shown, because it is the
@@ -509,7 +511,7 @@ export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HI
     return snap.docs.map((d) => {
       const r = d.data().report as BuildDiagnosticsReport;
       return {
-        id: d.id, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok,
+        id: d.id, buildId: r.buildId, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok,
         summary: r.summary, rootCause: r.rootCause, counts: r.counts,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
       };

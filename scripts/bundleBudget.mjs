@@ -19,6 +19,14 @@
 // client-navigation KB entries to the browser and keep the server-only build-recipe entries
 // out of the client bundle, or lazy-load them) is a separate, carefully-tested change — see
 // PROGRESS.md open root cause. Until then this budget tracks the honest current size.
+//
+// SECOND TOTAL-JS DRIVER (2026-08-04, bump 1200→1300): Code Studio's real persistent shell needs a
+// real terminal emulator — xterm.js, ~70 KB gzipped — because a genuine TTY speaks ANSI (colours,
+// cursor movement, in-place progress bars, `top`, `vim`) that no list-of-lines renderer can display.
+// It is imported DYNAMICALLY (`ShellTerminal.tsx`), so it is its own chunk and only downloads for
+// someone who actually opens a terminal; nobody pays for it on first paint. That is why the LARGEST
+// CHUNK budget is untouched — this is not main-bundle growth. Total JS counts every chunk including
+// lazy ones, so the total budget absorbs the honest new capability instead of the gate being skipped.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,8 +36,9 @@ import { pathToFileURL } from 'node:url';
 export const BUDGETS = {
   /** Largest single JS chunk, gzipped. Current main ≈ 590 KB. */
   largestChunkGzipKB: 650,
-  /** Sum of all JS chunks, gzipped. Current ≈ 1050 KB (grows with the client-bundled feature KB — see header). */
-  totalJsGzipKB: 1200,
+  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Current ≈ 1231 KB (feature KB + the lazily
+   *  loaded xterm terminal emulator — see header). */
+  totalJsGzipKB: 1300,
   /** Sum of all CSS, gzipped. Current ≈ 33 KB. */
   totalCssGzipKB: 50,
 };

@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from 'express';
+import { inAiSpendZone } from '../lib/aiSpendZone';
 import { rateLimiter } from '../lib/authMiddleware';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
-import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
 import { validateBody, vobject, vstring, vboolean } from '../lib/validate';
 import { runVisionChain } from '../lib/visionChain';
 
@@ -94,7 +95,7 @@ const s2pLimiter = () => rateLimiter({
 });
 
 export function registerScreenshotToPromptRoutes(app: Express): void {
-  app.post('/api/screenshot/to-prompt', s2pLimiter(), validateBody(schema), async (req: Request, res: Response) => {
+  app.post('/api/screenshot/to-prompt', s2pLimiter(), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
     const body = req.body as { image?: string; imageType?: string; style?: string; framework?: string; includeJs?: boolean };
     const image = typeof body.image === 'string' ? body.image.trim() : '';
     if (!image) { res.status(400).json({ error: 'A screenshot image is required.' }); return; }
@@ -132,9 +133,10 @@ export function registerScreenshotToPromptRoutes(app: Express): void {
       const prompt = `${visionSpec}\n\n${cloneGuardrailsBlock()}`;
       // Only a screenshot we genuinely read spends an allowance.
       if (gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
+      chargeToolAction(gate); // ONE WALLET
       res.json({ prompt });
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s vision engine is briefly busy — please try again.' });
     }
-  });
+  }));
 }

@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
@@ -75,6 +75,7 @@ import {
   restoreSession,
   gitStatusForSession,
   execInSession,
+  ptyHostForSession,
   agentLifecycle,
   getWorkspaceMemory,
   warmIndexFiles,
@@ -142,6 +143,16 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import {
+  openShell,
+  readShell,
+  subscribeShell,
+  writeShell,
+  resizeShell,
+  closeShell,
+  getShell,
+  MAX_SHELLS_PER_WORKSPACE,
+} from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, renderConfigured } from '../AgentV3/renderDeploy';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
@@ -2962,7 +2973,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
-  app.post('/api/agentv3/preview-error', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/preview-error', previewPollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3251,7 +3262,7 @@ export function registerAgentV3Routes(app: Express): void {
   // crashed / inbrowser_only / empty. Deliberately does NOT create a sandbox just to check (that would
   // be wasteful and slow) — a cold workspace reports `sleeping` (rebootable from saved files), which is
   // exactly the "reopen an old chat years later" case: files are safe, the live preview boots on demand.
-  app.post('/api/agentv3/preview-health', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/preview-health', previewPollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3889,6 +3900,209 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     res.json(execResult);
+  });
+
+  // ===============================================================================================
+  // REAL PERSISTENT SHELLS (admin 2026-08-04: "kya ham, replit jaisa real shell nahi bana sakte?")
+  //
+  // /exec above runs ONE bounded command and returns — no state, no live output, no Ctrl+C, 30s cap.
+  // These five give Code Studio a genuine TTY per terminal tab, living in the user's own sandbox:
+  // `cd` persists, output streams as it happens, Ctrl+C interrupts, interactive prompts answer.
+  // See ShellSessions.ts for the design and its limits. Every route is ownership-checked with the
+  // same strict verification /exec uses, because a shell runs arbitrary commands.
+  // ===============================================================================================
+
+  /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
+  app.post('/api/agentv3/shell/open', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const host = ptyHostForSession(workspaceId, userId ?? undefined);
+    const result = await openShell(workspaceId, host, {
+      userId: userId ?? undefined,
+      cols: Number(req.body?.cols),
+      rows: Number(req.body?.rows),
+    });
+    if (result.ok) {
+      res.json({ available: true, shellId: result.shell.shellId, cursor: result.shell.cursor });
+      return;
+    }
+    if (result.reason === 'too_many') {
+      res.status(429).json({
+        available: true,
+        error: `You already have ${MAX_SHELLS_PER_WORKSPACE} terminals open in this workspace. Close one to open another.`,
+      });
+      return;
+    }
+    if (result.reason === 'failed') {
+      // A real sandbox that refused to start a TTY — say so, never pretend a shell exists.
+      res.status(502).json({ available: true, error: 'The sandbox could not start a shell. Try again in a moment.' });
+      return;
+    }
+    // no_sandbox — the same honest dormant answer /exec gives.
+    const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
+    res.json({
+      available: false,
+      reason: fileCount > 0 ? 'dormant' : 'not_started',
+      savedFileCount: fileCount,
+    });
+  });
+
+  /**
+   * Live output as Server-Sent Events.
+   *
+   * SSE rather than WebSocket deliberately: it is plain HTTP, so it inherits this app's auth, proxy
+   * and Cloud Run behaviour with no new transport to secure, and it reconnects on its own. The
+   * terminal's input is a separate POST, which is fine — a person types far slower than HTTP.
+   *
+   * `cursor` makes reconnection ordinary instead of a special case: the client sends the last offset
+   * it rendered and gets exactly what it missed, so a locked phone or a dropped network resumes with
+   * no gap and no duplicated output.
+   */
+  app.get('/api/agentv3/shell/stream', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    const shellId = typeof req.query.shellId === 'string' ? req.query.shellId : '';
+    if (!workspaceId || !shellId) {
+      res.status(400).json({ error: 'workspaceId and shellId are required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const from = Number(req.query.cursor);
+    const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, userId ?? undefined);
+    if (!backlog) {
+      res.status(404).json({ error: 'This terminal is no longer open.' });
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no', // proxies must not buffer a terminal — that is the whole point
+    });
+
+    const send = (event: string, payload: unknown) => {
+      try { res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`); } catch { /* client gone */ }
+    };
+
+    // Anything produced before this connection attached, plus an honest note if scrollback was
+    // trimmed while nobody was watching — a silent gap would read as corrupted output.
+    send('output', { data: backlog.data, cursor: backlog.cursor, truncated: backlog.truncated });
+
+    const unsubscribe = subscribeShell(
+      shellId,
+      (chunk, cursor) => send('output', { data: chunk, cursor }),
+      userId ?? undefined,
+    );
+    if (!unsubscribe) { res.end(); return; }
+
+    // Heartbeat: keeps intermediaries from closing an idle stream, and lets the client notice a dead
+    // connection while a long build produces nothing for minutes.
+    const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* client gone */ } }, 20_000);
+    // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
+    const watch = setInterval(() => {
+      const s = getShell(shellId, userId ?? undefined);
+      if (!s || !s.alive) { send('exit', { exitCode: s?.exitCode ?? null }); cleanup(); res.end(); }
+    }, 1000);
+
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      clearInterval(beat);
+      clearInterval(watch);
+      unsubscribe();
+    };
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+  });
+
+  /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
+  app.post('/api/agentv3/shell/input', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const shellId = typeof req.body?.shellId === 'string' ? req.body.shellId : '';
+    const data = typeof req.body?.data === 'string' ? req.body.data : '';
+    if (!workspaceId || !shellId) {
+      res.status(400).json({ error: 'workspaceId and shellId are required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const ok = await writeShell(shellId, data, userId ?? undefined);
+    res.json({ ok });
+  });
+
+  /** New window size → the TTY, so column-drawn output (top, vim, progress bars) wraps correctly. */
+  app.post('/api/agentv3/shell/resize', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const shellId = typeof req.body?.shellId === 'string' ? req.body.shellId : '';
+    if (!workspaceId || !shellId) {
+      res.status(400).json({ error: 'workspaceId and shellId are required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), userId ?? undefined);
+    res.json({ ok });
+  });
+
+  /** Kill the shell. Idempotent — closing an already-closed terminal is a success, not an error. */
+  app.post('/api/agentv3/shell/close', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const shellId = typeof req.body?.shellId === 'string' ? req.body.shellId : '';
+    if (!workspaceId || !shellId) {
+      res.status(400).json({ error: 'workspaceId and shellId are required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    await closeShell(shellId, userId ?? undefined);
+    res.json({ ok: true });
   });
 
   // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).
@@ -5773,6 +5987,9 @@ export function registerAgentV3Routes(app: Express): void {
     // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
     // so each re-baseline step stays proportional to the app's real size, not to the growing budget.
     let etaBaseMs = 0;
+    // How many times the budget has been re-baselined. Threaded through liveEtaTick so a build that
+    // has already broken its estimate stops making fresh countdown promises.
+    let etaRevisions = 0;
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -5789,8 +6006,11 @@ export function registerAgentV3Routes(app: Express): void {
           // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
           // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
           // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
-          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs);
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
           etaTotalMs = tick.totalMs;
+          // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
+          // go" promise after the estimate has already been broken (mitrify autopsy 2026-08-04).
+          etaRevisions = tick.revisions;
           const text = tick.text;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
@@ -6505,7 +6725,11 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const saved = await loadWorkspaceFiles(workspaceId);
           const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-          const plan = planFileGuardian(saved, existing.files);
+          // `existing.skipped` MUST be passed: those paths ARE in the sandbox, the scan just declined
+          // to read them (excluded/too large/binary/unreadable/past a cap). Judged without it, they
+          // looked missing — a false data-loss report AND an overwrite of possibly-newer content by an
+          // older snapshot (mitrify autopsy 2026-08-04). See planFileGuardian's header.
+          const plan = planFileGuardian(saved, existing.files, existing.skipped);
           if (plan.count > 0) {
             // Fix 37c (admin: "data kyu udha, report me likh kar aaye"): record the OBSERVED cause of
             // the loss the guardian is about to repair — an empty sandbox listing means the ephemeral
@@ -6517,9 +6741,13 @@ export function registerAgentV3Routes(app: Express): void {
               // listed 27 — restoring 1" read as self-contradictory. The listings are SETS, not just
               // counts — the sandbox can list N files while still MISSING some stored ones (it may
               // hold different extras). Say the missing count in plain words.
+              // Honest arithmetic (mitrify autopsy 2026-08-04): the scan's SKIPPED paths are present in
+              // the sandbox, so they are named separately instead of silently inflating the "missing"
+              // number — the old line reported the scan's own skip gap as if it were lost data.
+              const skippedCount = existing.skipped.length;
               buildDiag.recordDataLoss(
                 existingCount === 0 ? 'sandbox recycled/empty' : 'files missing from sandbox',
-                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox listed ${existingCount} but was missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
+                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox read ${existingCount}${skippedCount > 0 ? ` (plus ${skippedCount} present but not read — excluded/too large/binary)` : ''} and was genuinely missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
               );
             } catch { /* diagnostics are best-effort */ }
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
@@ -9437,6 +9665,11 @@ export function registerAgentV3Routes(app: Express): void {
       if (result.ok && reviewHeadroomOk && reviewerAllowed) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+          // The REAL project size, captured before the fallback below can shrink rFiles to just this
+          // turn's writes. The reviewer's budget must reflect the app it has to understand, not only
+          // the handful of files handed to it (mitrify autopsy 2026-08-04: 90s granted "on 9 files"
+          // for a 608-file app, killed mid-review, and the user asked to re-run it by hand).
+          const projectFileCount = rFiles.length;
           // If sandbox listFiles came back empty but the build wrote real files, use the
           // captured write-time paths as a fallback so the reviewer is never skipped after
           // a successful build due to a transient sandbox read hiccup.
@@ -9455,7 +9688,7 @@ export function registerAgentV3Routes(app: Express): void {
           // reviewer mid-review on a 40-file app and silently lost its completeness verdict. Bigger apps
           // get more time, never past the wall-clock safety margin. Honest note on timeout, not silence.
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
-          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs);
+          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
           let review;
           try {
             review = await raceTimeout(reviewBuild({
@@ -10401,6 +10634,16 @@ export function registerAgentV3Routes(app: Express): void {
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
       }
+      // ADMIN-ONLY infra cost: how long this build held a real VM. A build is billed by WALL-CLOCK as
+      // well as by tokens, and until now only the token half was visible — so "why is the E2B bill this
+      // size?" had no answer in the product. Never part of the user's charge; omitted by construction
+      // from the user-facing report (allow-list). Best-effort, and honestly absent when unmeasurable.
+      try {
+        const held = typeof (actuator as any).sandboxHeldSeconds === 'function'
+          ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null
+          : null;
+        buildDiagRef?.setSandboxSeconds(held);
+      } catch { /* a cost measurement must never affect a build */ }
       // A zip/GitHub import's background preview boot must finish BEFORE the response ends — Cloud
       // Run throttles CPU after the stream closes, which would silently kill npm install mid-way.
       // Bounded + best-effort. The cap covers a HEAVY full-stack app: up to ~130s to provision a

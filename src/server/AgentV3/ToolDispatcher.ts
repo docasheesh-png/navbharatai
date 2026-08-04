@@ -173,6 +173,7 @@ import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
 import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
+import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -310,6 +311,7 @@ import { redactSecrets, redactDeep } from './SecretRedactor';
 // infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
+import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -357,6 +359,11 @@ export interface ActuatorPort {
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
+  /**
+   * Scan the rendered page for visible elements + where they come from (see find_ui_element).
+   * `scanned:false` means the browser could not look — never treat it as "the element is absent".
+   */
+  scanUiElements?(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }>;
   /**
    * Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`.
    * `captured` reports whether a real browser session was actually read: `true` = the console was
@@ -1486,7 +1493,7 @@ export class ToolDispatcher {
     });
     try {
       // Browser tools return a screenshot image alongside their text; everything else is text.
-      const visual = call.name === 'screenshot' || call.name === 'browser_action'
+      const visual = call.name === 'screenshot' || call.name === 'browser_action' || call.name === 'find_ui_element'
         ? await this.runVisual(call)
         : null;
       const content = visual ? visual.content : await this.run(call, agent);
@@ -1520,6 +1527,22 @@ export class ToolDispatcher {
    */
   private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
     const input = call.input;
+    if (call.name === 'find_ui_element') {
+      if (!this.actuator.scanUiElements) {
+        return { content: 'find_ui_element requires a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+      }
+      const url = reqStr(input, 'url');
+      const query = reqStr(input, 'query');
+      const target = classifyBrowseTarget(url);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
+      const scan = await this.actuator.scanUiElements(this.workspaceId, url);
+      // A FAILED scan and an EMPTY page are different facts, and conflating them would manufacture a
+      // false "it is not there" — the opposite of what this tool exists to guarantee.
+      if (!scan.scanned) {
+        return { content: `Could not scan ${url} — the headless browser was unavailable or the page did not load. This is NOT evidence that the element is absent; say so honestly and try the preview URL again, rather than concluding anything about the element.` };
+      }
+      return { content: formatUiFindings(scan.elements as ScannedElement[], query) };
+    }
     if (call.name === 'screenshot') {
       if (!this.actuator.screenshot) {
         return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
@@ -3940,6 +3963,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('recruitment starter');
         const rcDeps = rccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Recruitment / job-board backend:\n${rcWritten.join('\n')}\nAdd the dependencies: ${rcDeps}\n\n${rccfg.instructions}`;
+      }
+
+      case 'generate_invoicing': {
+        // Breadth recipe (domain vertical) — Invoicing / billing (server/invoicing/): a real InvoicingService
+        // with an invoice STATE-MACHINE (invalid jumps → 409), an exact payment ledger (no overpay → 409,
+        // auto-paid at zero), and a DERIVED overdue status, plus an Express router. Pure gen in InvoicingGenerator.ts.
+        const invcfg = generateInvoicingIntegration();
+        const invWritten: string[] = [];
+        for (const [path, content] of Object.entries(invcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          invWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('invoicing starter');
+        const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an Invoicing / billing backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
       }
 
       case 'generate_events': {

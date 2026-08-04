@@ -18,6 +18,7 @@ import {
   AgentEventStream,
   WorkspaceState,
   ToolDispatcher,
+  ALWAYS_WRITE_SECRETS,
   ClaudeClient,
   sanitizeApiKey,
   AgentRunner,
@@ -233,7 +234,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
-import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
@@ -3181,8 +3182,14 @@ export function registerAgentV3Routes(app: Express): void {
         ok: false,
         portListening: false,
         port: boundPort,
-        reason: `The dev server did not come up on port ${boundPort} after installing dependencies and one restart attempt. The exact cause is in the detail log below (a crash on boot, a missing dependency, or a port conflict).`,
-        detail: combined.slice(-4000),
+        // HONEST, ACTIONABLE HEADLINE (mitrify autopsy 2026-08-04). This used to GUESS — "the exact cause
+        // is in the detail log below (a crash on boot, a missing dependency, or a port conflict)" — while
+        // classifyDevServerFailure already knew the answer deterministically. Worse, a user was made to
+        // read a raw log to learn something we had computed. Now the panel states the real cause in plain
+        // language, and for the two causes the user can genuinely resolve — a missing key of theirs, or a
+        // database — it names the exact screen to go to.
+        reason: userFacingPreviewFailure(classifyDevServerFailure(combined), boundPort, combined),
+        detail: cleanPreviewLogForUser(combined).slice(-4000),
       });
     } catch (err) {
       if (heartbeat) clearInterval(heartbeat);
@@ -6674,6 +6681,12 @@ export function registerAgentV3Routes(app: Express): void {
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from
+          // inside run_command, so any path that starts a dev server through the ACTUATOR instead — an
+          // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
+          // user saved in Settings. Write them now, before anything can run, so the keys the user entered
+          // are genuinely readable by the app v5.0 built. No-op when the vault is empty; best-effort.
+          await dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {});
         }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint

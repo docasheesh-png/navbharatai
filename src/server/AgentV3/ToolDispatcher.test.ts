@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ToolDispatcher, applyEdit, boundedWholeFileDiff, nearestEditRegion, type ActuatorPort } from './ToolDispatcher';
+import { ToolDispatcher, applyEdit, boundedWholeFileDiff, nearestEditRegion, type ActuatorPort, ALWAYS_WRITE_SECRETS } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -1798,5 +1798,64 @@ describe('bash — prisma client-not-generated self-heal (generate + one retry)'
     const out = await d.dispatch(call('bash', { command: 'cd backend && npx tsx prisma/seed.ts' }), 'backend');
     expect(String(out.content)).toContain('exit=1');
     expect(act.commands.filter((c) => c.includes('prisma generate'))).toHaveLength(0);
+  });
+});
+
+describe('user vault secrets reach the app (mitrify autopsy 2026-08-04)', () => {
+  // The admin's question: "agar user keys daal bhi de, to kya app un keys ko padh payega?"
+  // The keys were stored correctly and the dev server sources .env correctly — but on a managed-preview
+  // path the .env was never written, so the two were never introduced.
+  let act: FakeActuator;
+  let dd: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    dd = new ToolDispatcher(act, 'ws-1', new WorkspaceState(), new AgentEventStream());
+  });
+
+  it('writes the saved keys into .env when explicitly driven — no run_command needed', async () => {
+    dd.setUserSecrets({ RAZORPAY_KEY_ID: 'rzp_live_x', SMTP_HOST: 'smtp.gmail.com' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    const env = act.files.get('.env') ?? '';
+    expect(env).toContain('RAZORPAY_KEY_ID=rzp_live_x');
+    expect(env).toContain('SMTP_HOST=smtp.gmail.com');
+  });
+
+  it('keeps .env out of git, so the user keys can never reach their repo', async () => {
+    dd.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_x' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.gitignore') ?? '').toMatch(/(^|\n)\.env/);
+  });
+
+  it('preserves the app\'s existing .env lines and lets the vault win on a conflict', async () => {
+    act.files.set('.env', 'PORT=3000\nRAZORPAY_KEY_ID=placeholder\n');
+    dd.setUserSecrets({ RAZORPAY_KEY_ID: 'rzp_live_real' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    const env = act.files.get('.env') ?? '';
+    expect(env).toContain('PORT=3000');               // untouched
+    expect(env).toContain('RAZORPAY_KEY_ID=rzp_live_real');
+    expect(env).not.toContain('placeholder');
+  });
+
+  it('an empty vault writes nothing at all (no stray .env on a keyless app)', async () => {
+    dd.setUserSecrets({});
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.has('.env')).toBe(false);
+  });
+
+  it('still ignores a command that is not an app command (the lazy gate is intact)', async () => {
+    dd.setUserSecrets({ API_TOKEN: 't' });
+    await dd.ensureUserSecretsEnvFile('ls -la');
+    expect(act.files.has('.env')).toBe(false);
+    await dd.ensureUserSecretsEnvFile('npm run dev');
+    expect(act.files.get('.env') ?? '').toContain('API_TOKEN=t');
+  });
+
+  it('a NEW secret set can still reach disk after an earlier write', async () => {
+    dd.setUserSecrets({ A_KEY: '1' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    dd.setUserSecrets({ A_KEY: '1', B_KEY: '2' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.env') ?? '').toContain('B_KEY=2');
   });
 });

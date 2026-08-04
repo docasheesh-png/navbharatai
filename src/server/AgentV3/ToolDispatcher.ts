@@ -1,4 +1,18 @@
 import type { AgentEventStream } from './AgentEventStream';
+
+/**
+ * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
+ * command?" gate.
+ *
+ * ROOT CAUSE it closes (mitrify autopsy 2026-08-04, and the admin's direct question — "agar user keys daal
+ * bhi de, to kya app un keys ko padh payega?"): the secrets `.env` was written LAZILY, from inside
+ * `run_command`, the first time a command looked like npm/node/vite. But a managed preview — an import
+ * turn, the Diagnose button, `update_preview` — starts the dev server through the ACTUATOR, never through
+ * `run_command`. On those paths no `.env` was ever written, so the app booted with none of the keys the
+ * user had carefully saved in Settings. The keys were stored correctly, the app read `.env` correctly, and
+ * the two were never introduced. Now the write is also driven explicitly, before any dev server can start.
+ */
+export const ALWAYS_WRITE_SECRETS = '__navbharatai_always_write_secrets__';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
@@ -480,6 +494,7 @@ export class ToolDispatcher {
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
+    this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
     this.userSecretsEnv = env && typeof env === 'object' ? env : {};
   }
 
@@ -493,12 +508,15 @@ export class ToolDispatcher {
    * vault OVERRIDES any generated placeholder (mergeDotEnv), and existing .env lines are preserved.
    * Never throws — a failure just means the app runs without the injected keys (honest degradation).
    */
-  private async ensureUserSecretsEnvFile(command: string): Promise<void> {
+  async ensureUserSecretsEnvFile(command: string): Promise<void> {
     if (this.secretsEnvWritten) return;
     const names = Object.keys(this.userSecretsEnv);
     if (names.length === 0) return;
     // Only right before the app actually installs/builds/runs — that is when a .env must be on disk.
-    if (!/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
+    // `ALWAYS` is the explicit bypass used by the pre-flight write below and by update_preview, where a
+    // dev server is about to start WITHOUT any run_command having gone through this gate.
+    if (command !== ALWAYS_WRITE_SECRETS
+      && !/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
     this.secretsEnvWritten = true; // attempt once regardless of outcome — never rewrite on every command
     try {
       let existing = '';
@@ -6581,6 +6599,10 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
+        // The user's own keys MUST be on disk before a dev server starts. This path can start one via the
+        // actuator without any run_command having gone through the lazy gate, which is how an imported app
+        // booted with none of the keys its owner had saved in Settings (mitrify autopsy 2026-08-04).
+        await this.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
         // LOOP-BREAKER (build-diagnostics root cause): once preview has DEFINITIVELY failed —
         // including a managed dev-server start — stop the retry loop cold. Without this the model
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported

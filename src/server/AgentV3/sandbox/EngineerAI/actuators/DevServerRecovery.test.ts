@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser } from './DevServerRecovery';
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {
@@ -369,5 +369,121 @@ describe('planDevServerRecovery — every code_fix cause keeps its detail on the
     const oom = 'FATAL ERROR: JavaScript heap out of memory';
     expect(planDevServerRecovery(oom, 1, 2).recovery).toBe('plain_retry');
     expect(planDevServerRecovery(oom, 2, 2).recovery).toBe('give_up');
+  });
+});
+
+describe('terminalDetail — give_up must never promise an action we are not taking (mitrify 2026-08-04)', () => {
+  // The reported build printed "provisioning PostgreSQL, writing DATABASE_URL, and retrying" at the exact
+  // moment it stopped trying, and provisioned nothing. The cause survives; the promise must not.
+  it('a db_unreachable give-up stops claiming a database is being provisioned', () => {
+    const d = planDevServerRecovery('Error: connect ECONNREFUSED 127.0.0.1:5432', 2, 2);
+    expect(d.recovery).toBe('give_up');
+    expect(d.detail).not.toMatch(/provisioning PostgreSQL/i);
+    expect(d.detail).not.toMatch(/and retrying/i);
+    expect(d.detail).toMatch(/could not be started/i);
+    expect(d.detail).toContain('Settings → App Settings → Database'); // what the user can actually do
+    expect(d.cause).toBe('db_unreachable'); // the real cause is still reported
+  });
+
+  it('every other restartable cause also drops its "about to" promise', () => {
+    const reinstall = planDevServerRecovery("Cannot find module 'left-pad'", 2, 2);
+    expect(reinstall.detail).not.toMatch(/reinstalling dependencies and restarting/i);
+    expect(reinstall.detail).toMatch(/still missing/i);
+
+    const port = planDevServerRecovery('Error: listen EADDRINUSE :::5000', 2, 2);
+    expect(port.detail).not.toMatch(/freeing it and restarting/i);
+    expect(port.detail).toMatch(/stayed occupied/i);
+
+    const oom = planDevServerRecovery('FATAL ERROR: JavaScript heap out of memory', 2, 2);
+    expect(oom.detail).toMatch(/ran out of memory/i);
+  });
+
+  it('every terminal detail says recovery is exhausted, so the state is unambiguous', () => {
+    for (const log of [
+      'Error: connect ECONNREFUSED 127.0.0.1:5432',
+      "Cannot find module 'x'",
+      'Error: listen EADDRINUSE :::5000',
+      'FATAL ERROR: JavaScript heap out of memory',
+      'npm ERR! ELIFECYCLE',
+      '',
+    ]) {
+      expect(planDevServerRecovery(log, 2, 2).detail).toMatch(/exhausted/i);
+    }
+  });
+
+  it('BEFORE the attempts run out, the detail still describes the action being taken', () => {
+    const d = planDevServerRecovery('Error: connect ECONNREFUSED 127.0.0.1:5432', 1, 2);
+    expect(d.recovery).toBe('reprovision_db');
+    expect(d.detail).toMatch(/provisioning PostgreSQL/i); // the loop is genuinely about to do this
+  });
+});
+
+describe('userFacingPreviewFailure — plain language, real cause, one action (admin 2026-08-04)', () => {
+  const of = (log: string, port = 5000) => userFacingPreviewFailure(classifyDevServerFailure(log), port, log);
+
+  it('a missing key of the USER\'S OWN names the key and the exact screen', () => {
+    const msg = of('Error: Missing RAZORPAY_KEY_SECRET');
+    expect(msg).toContain('RAZORPAY_KEY_SECRET');
+    expect(msg).toContain('Settings → App Settings → Secrets & API Keys');
+    expect(msg).toMatch(/Everything else in the app is ready/);
+  });
+
+  it('a database failure points at the Database screen and reassures about ownership', () => {
+    const msg = of('Error: connect ECONNREFUSED 127.0.0.1:5432');
+    expect(msg).toContain('Settings → App Settings → Database');
+    expect(msg).toMatch(/your own account/i);
+  });
+
+  it('never leaks developer instructions or file paths to the user', () => {
+    for (const log of [
+      'Error: Missing STRIPE_SECRET_KEY',
+      'Error: connect ECONNREFUSED 127.0.0.1:5432',
+      "Cannot find module 'left-pad'",
+      'SyntaxError: Unexpected token } at /app/src/App.tsx:12',
+      'Error: listen EADDRINUSE :::5000',
+      'FATAL ERROR: JavaScript heap out of memory',
+      'npm ERR! ELIFECYCLE',
+      '',
+    ]) {
+      const msg = of(log);
+      expect(msg).not.toMatch(/process\.env|Boolean\(|throw|\.tsx|\.ts:|node_modules|stack/i);
+      expect(msg.length).toBeLessThan(320); // short enough to actually read
+    }
+  });
+
+  it('the agent instruction and the user message are DIFFERENT strings', () => {
+    const log = 'Error: Missing RAZORPAY_KEY_SECRET';
+    const agent = classifyDevServerFailure(log).detail;
+    const user = of(log);
+    expect(agent).toMatch(/Coming soon/);   // written for the model
+    expect(user).not.toMatch(/Coming soon/); // written for the human
+    expect(user).not.toBe(agent);
+  });
+
+  it('a port conflict names the real port', () => {
+    expect(of('Error: listen EADDRINUSE :::5000', 5000)).toContain('5000');
+  });
+});
+
+describe('cleanPreviewLogForUser — no git noise in the panel a user reads', () => {
+  it('drops the `?? path` untracked-file lines that leaked into the detail box', () => {
+    const raw = [
+      '[health-check] The app needs a database…',
+      '?? .gitignore',
+      '?? DEPLOY_NOW.md',
+      '?? attached_assets/',
+      '5:06:31 AM [express] serving on port 5000',
+    ].join('\n');
+    const clean = cleanPreviewLogForUser(raw);
+    expect(clean).not.toContain('?? .gitignore');
+    expect(clean).not.toContain('DEPLOY_NOW.md');
+    expect(clean).toContain('[health-check] The app needs a database…');
+    expect(clean).toContain('serving on port 5000'); // the real signal survives
+  });
+
+  it('leaves an ordinary log completely untouched', () => {
+    const raw = 'Error: connect ECONNREFUSED 127.0.0.1:5432\n    at foo (bar.js:1:1)';
+    expect(cleanPreviewLogForUser(raw)).toBe(raw);
+    expect(cleanPreviewLogForUser('')).toBe('');
   });
 });

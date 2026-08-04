@@ -20,6 +20,8 @@ import { proUiTsx, proStoreTs } from './proShell';
 import { saasDashboardAppTsx, crmAppTsx, storeAppTsx } from './proApps';
 import { restaurantAppTsx, socialFeedAppTsx } from './proAppsB';
 import { invoicingAppTsx, bookingsAppTsx, kanbanAppTsx } from './proAppsC';
+import { notesAppTsx, expenseAppTsx, fitnessAppTsx, portfolioAppTsx } from './proAppsD';
+import { communityAppTsx, eventsAppTsx, lmsAppTsx } from './proAppsE';
 
 export interface GoldenScaffold {
   /** Must equal the matching StarterTemplate id (the CI lockstep test enforces this). */
@@ -67,6 +69,13 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'invoicing', label: 'Invoicing app', title: 'Invoicing', appTsx: invoicingAppTsx, tier: 'pro' },
   { id: 'bookings', label: 'Booking / appointments', title: 'Appointments', appTsx: bookingsAppTsx, tier: 'pro' },
   { id: 'kanban', label: 'Project board', title: 'Project Board', appTsx: kanbanAppTsx, tier: 'pro' },
+  { id: 'notes', label: 'Notes / docs', title: 'Notes', appTsx: notesAppTsx, tier: 'pro' },
+  { id: 'expense', label: 'Expense tracker', title: 'Expense Tracker', appTsx: expenseAppTsx, tier: 'pro' },
+  { id: 'fitness', label: 'Fitness tracker', title: 'Fitness Tracker', appTsx: fitnessAppTsx, tier: 'pro' },
+  { id: 'portfolio', label: 'Portfolio site', title: 'Portfolio', appTsx: portfolioAppTsx, tier: 'pro' },
+  { id: 'community', label: 'Community forum', title: 'Community Forum', appTsx: communityAppTsx, tier: 'pro' },
+  { id: 'events', label: 'Event platform', title: 'Events', appTsx: eventsAppTsx, tier: 'pro' },
+  { id: 'lms', label: 'Learning platform', title: 'Learning Platform', appTsx: lmsAppTsx, tier: 'pro' },
 ];
 
 /**

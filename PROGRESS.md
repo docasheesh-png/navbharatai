@@ -24482,3 +24482,39 @@ by design.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 11003 tests, 0 failures**.
 All three parse under esbuild and compile under the in-browser Babel preview.
+
+## 2026-08-04 — ✅ FULL SCAFFOLD COVERAGE: every starter chip now begins from a proven app
+
+The last seven pro chips shipped — notes, expense tracker, fitness, portfolio (batch D) and community
+forum, events platform, learning platform (batch E). **All 25 starter chips (10 simple + 15 pro) now
+pre-seed a hand-written app that CI proves parses under esbuild AND compiles under the in-browser Babel
+preview.** No chip on the start screen can hand someone a broken first build.
+
+Each was written to be honest about the thing it models rather than to look busy:
+- **Notes** — folders, pinning, full-text search, autosave, pinned-then-recent ordering;
+- **Expense tracker** — income vs expense, a spend-by-category bar breakdown, category filter;
+- **Fitness** — sets/reps/weight logging, volume (sets × reps × weight) as the progress metric,
+  personal bests, and goals measured against the real best rather than a typed-in number;
+- **Portfolio** — hero, project gallery with detail, skills, and a contact form that honestly says the
+  message is stored in the browser until an email service is connected (never a fake "sent");
+- **Community forum** — topics/replies/upvotes/tags/locking, and **reputation DERIVED from real votes,
+  never stored** so it cannot drift from what actually happened;
+- **Events** — ticket types with capacity, registration issuing a real check-in code, an organiser
+  check-in that refuses a duplicate, and **seats-left computed from registrations** rather than a
+  counter that can drift;
+- **Learning platform** — lessons with per-lesson completion, a real auto-graded quiz that marks right
+  and wrong answers, and progress measured from lessons actually completed.
+
+**LOCKSTEP TIGHTENED, now that it can be:** the test asserts FULL coverage — every starter chip has a
+scaffold and nothing extra. A new chip added without one now fails CI **in the same PR**, instead of
+reaching a user. The safety property that made partial coverage acceptable is asserted separately and
+survives: an unknown or EDITED prompt still falls through to a normal from-scratch build — never the
+nearest template.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 11075 tests, 0 failures**
+(211 in the scaffold suite alone).
+
+**OPEN, and deliberately NOT done without the admin:** the scaffolds only fire on an EXACT chip prompt. A
+user who types "mujhe CRM banao" in their own words gets nothing. Fuzzy/domain matching would extend the
+benefit to every complex build, but it carries a real "wrong template" risk that the exact-match rule was
+written to avoid — so it is the admin's call, not an auto-adopted default.

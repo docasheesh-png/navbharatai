@@ -446,7 +446,7 @@ jobs:
           fastlane ios beta
 
       - name: Upload the .ipa artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: navbharatai-release-ipa
           path: ${{ runner.temp }}/NavBharatAI.ipa

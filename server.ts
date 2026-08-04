@@ -20,6 +20,8 @@ import { registerSecretsRoutes } from './src/server/routes/secrets';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
+import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
+import { verifyFirebaseToken as verifyFirebaseTokenForIntegrations } from './src/server/lib/authMiddleware';
 import { registerNavigateRoutes } from './src/server/routes/navigate';
 import { registerWebhookRoutes } from './src/server/routes/webhooks';
 import { registerBotRoutes } from './src/server/routes/bots';
@@ -612,6 +614,8 @@ setInterval(() => {
   registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);
   registerBuildAnalyticsRoutes(app);
+  // ROADMAP #1 Phase 1 — one-click database (connect the user's OWN Supabase account).
+  registerSupabaseIntegrationRoutes(app, verifyFirebaseTokenForIntegrations);
   registerNavigateRoutes(app);
   registerWebhookRoutes(app);
   registerBotRoutes(app); // Hosted chat bots — real Telegram/WhatsApp connectors for the Bot Builder

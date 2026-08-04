@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
+import { SupabaseConnectCard } from './SupabaseConnectCard';
 
 type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
 
@@ -205,6 +206,11 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
         <h2 className="text-2xl font-black text-white tracking-tight">Database</h2>
         <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Connect your own database provider</p>
       </div>
+
+      {/* ONE-TAP path (ROADMAP #1 Phase 1). Renders nothing when this deployment has no Supabase OAuth
+          app configured, so the manual form below stays the whole screen rather than sitting under a
+          button that cannot work. Users who already have a project keep using the form unchanged. */}
+      <SupabaseConnectCard onProvisioned={() => setActiveMarker({ provider: 'supabase' })} />
 
       <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl">
         <div className="flex items-center gap-4">

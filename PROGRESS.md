@@ -24462,3 +24462,23 @@ Both new scaffolds parse under esbuild and compile under the in-browser Babel pr
 
 **Remaining pro chips (next batches, no longer blocking):** invoicing, bookings, community, events,
 kanban, notes, lms, portfolio, fitness, expense — each falls through to a normal build until it has one.
+
+### Same day — pro scaffolds batch C: invoicing, bookings, project board (8 of 15 pro chips now covered)
+
+The three most-asked BUSINESS apps after the showcase set. Two lean on the India-first edge deliberately
+— getting these right out of the box is a moat a generic builder does not have:
+- **Invoicing** — clients with optional GSTIN, invoices with line items and a REAL GST slab picker
+  (0/5/12/18/28), draft → sent → paid, print-to-PDF, and an **overdue flag that is COMPUTED from the due
+  date, never stored** — a stored "overdue" boolean goes stale the moment the clock passes it.
+- **Bookings** — a day/slot grid for a salon, clinic or consultant, where a taken slot is genuinely
+  disabled, a cancelled booking FREES its slot again, and `confirm()` re-checks the slot before writing
+  (the slot can be taken while the form sits open — a booking app that double-books is worse than none).
+- **Project board** — kanban across To do / In progress / Review / Done, with assignee filtering,
+  priorities, due dates and a list view over the same data.
+
+**Coverage now 8 of 15 pro chips** (all 5 showcase + these 3). Remaining: community, events, notes, lms,
+portfolio, fitness, expense — each still falls through to a normal build, which the lockstep test allows
+by design.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 11003 tests, 0 failures**.
+All three parse under esbuild and compile under the in-browser Babel preview.

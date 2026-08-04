@@ -511,3 +511,62 @@ describe('buildHttpLivenessCommand (Fix 42) — a REAL HTTP check, not just TCP-
     expect(cmd).toContain('HTTP_DOWN');
   });
 });
+
+describe('detectDevPort — a connection ERROR must never answer "which port is the server on?"', () => {
+  // The exact log from the mitrify autopsy (buildId ca5a4ca8, 2026-08-04). The app announced port 5000;
+  // the old detector returned 5432 from the ECONNREFUSED dump, so the health check probed a Postgres
+  // port, found nothing, and reported a WORKING app as "did not come up on port 5432".
+  const mitrifyLog = [
+    '5:06:31 AM [express] serving on port 5000',
+    'UNHANDLED REJECTION — server kept alive: AggregateError [ECONNREFUSED]: ',
+    '    at /home/user/workspace/node_modules/pg-pool/index.js:45:11',
+    '    at async ensureSchema (/home/user/workspace/server/ensureSchema.ts:15:18)',
+    "  code: 'ECONNREFUSED',",
+    '    Error: connect ECONNREFUSED ::1:5432',
+    '    Error: connect ECONNREFUSED 127.0.0.1:5432',
+    '      errno: -111,',
+    "      syscall: 'connect',",
+    "      address: '127.0.0.1',",
+    '      port: 5432',
+  ].join('\n');
+
+  it('reports the port the app really announced, not the database it failed to reach', () => {
+    expect(detectDevPort(mitrifyLog, 3000)).toBe(5000);
+  });
+
+  it('recognises the common listening phrasings', () => {
+    expect(detectDevPort('[express] serving on port 4000', 3000)).toBe(4000);
+    expect(detectDevPort('Server running on port 8080', 3000)).toBe(8080);
+    expect(detectDevPort('Server is listening on http://localhost:7000', 3000)).toBe(7000);
+    expect(detectDevPort('  ➜  Local:   http://localhost:5174/', 3000)).toBe(5174);
+    expect(detectDevPort('listening on 0.0.0.0:9100', 3000)).toBe(9100);
+  });
+
+  it('a real announcement BEATS a loose "port: N" that appears earlier in the log', () => {
+    const log = 'config { port: 9999 }\n[express] serving on port 5000';
+    expect(detectDevPort(log, 3000)).toBe(5000);
+  });
+
+  it('never adopts a datastore port from a weak signal', () => {
+    for (const p of [5432, 3306, 27017, 6379]) {
+      expect(detectDevPort(`connecting to db at 127.0.0.1:${p}`, 3000)).toBe(3000);
+    }
+    // …unless it IS the port we asked for — the caller knows better than the log does.
+    expect(detectDevPort('connecting to 127.0.0.1:5432', 5432)).toBe(5432);
+  });
+
+  it('ignores stack frames and error-object dumps entirely', () => {
+    expect(detectDevPort('    at Server.listen (net.js:1234:5)', 3000)).toBe(3000);
+    expect(detectDevPort("Error: connect ETIMEDOUT 10.0.0.1:8125", 3000)).toBe(3000);
+    expect(detectDevPort('could not connect to localhost:4444', 3000)).toBe(3000);
+  });
+
+  it('still falls back cleanly with no usable signal', () => {
+    expect(detectDevPort('', 3000)).toBe(3000);
+    expect(detectDevPort('nothing useful here', 3000)).toBe(3000);
+  });
+
+  it('a plain address with no announcement is still accepted (non-infra port)', () => {
+    expect(detectDevPort('open http://localhost:5173/ in your browser', 3000)).toBe(5173);
+  });
+});

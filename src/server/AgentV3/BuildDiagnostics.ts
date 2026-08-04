@@ -32,6 +32,19 @@ export interface BuildIssue {
   message: string;
   /** True if v5.0 recovered on its own; false if it remained a problem in the final build. */
   autoResolved: boolean;
+  /**
+   * True when this entry is an OBSERVATION about the user's pre-existing code rather than a defect of
+   * ours — nothing was broken by us and nothing was fixed by us (mitrify autopsy 2026-08-04).
+   *
+   * Why it exists: an import/survey turn records advisory notes (unused deps, focus conflicts) that must
+   * not count as OUR unresolved defects, so `importTurnObservation` set `autoResolved: true`. That
+   * silenced the false-defect count but created a false SELF-HEAL count instead — the reported build
+   * claimed "32 auto-resolved" when it had healed essentially nothing; 14 of those were notes about code
+   * it never touched. A self-heal tally that inflates itself is exactly the dishonest reporting the
+   * fifth absolute rule forbids, because it is the number the autopsy reads to judge the engine.
+   * Observations are now their OWN bucket: neither auto-resolved nor unresolved.
+   */
+  observation?: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
   /** Set when the SAME code+message repeated back-to-back (e.g. many identical "▶ write_file" tool
@@ -184,6 +197,8 @@ export interface BuildDiagnosticsReport {
     warnings: number;
     autoResolved: number;
     unresolved: number;
+    /** Advisory notes about the user's PRE-EXISTING code — not our defects and not our fixes. */
+    observations?: number;
   };
   issues: BuildIssue[];
   /** AI Diagnosis Bundle — sandbox command raw logs (#3), LLM I/O (#4), full errors+stack (#1). */
@@ -843,7 +858,10 @@ export class BuildDiagnostics {
     this.resolveRecoveredOnSuccess();
     const errors = this.issues.filter((i) => i.severity === 'error').length;
     const warnings = this.issues.filter((i) => i.severity === 'warning').length;
-    const autoResolved = this.issues.filter((i) => i.autoResolved).length;
+    // Observations are neither ours to have healed nor ours to still owe — they get their own bucket, so
+    // the auto-resolved tally means "v5.0 genuinely fixed this" and nothing else (mitrify 2026-08-04).
+    const observations = this.issues.filter((i) => i.observation === true).length;
+    const autoResolved = this.issues.filter((i) => i.autoResolved && i.observation !== true).length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,
@@ -870,7 +888,8 @@ export class BuildDiagnostics {
         errors,
         warnings,
         autoResolved,
-        unresolved: this.issues.filter((i) => !i.autoResolved).length,
+        unresolved: this.issues.filter((i) => !i.autoResolved && i.observation !== true).length,
+        ...(observations > 0 ? { observations } : {}),
       },
       issues: [...this.issues],
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
@@ -1073,10 +1092,13 @@ export function honestModelLabel(
 export function importTurnObservation(
   isImportTurn: boolean,
   message: string,
-): { autoResolved: boolean; message: string } {
+): { autoResolved: boolean; observation?: boolean; message: string } {
   if (!isImportTurn) return { autoResolved: false, message };
   return {
+    // `autoResolved: true` keeps it out of the "problems we still owe" bucket; `observation: true` keeps
+    // it out of the SELF-HEAL bucket too, so neither count lies about what v5.0 actually did.
     autoResolved: true,
+    observation: true,
     message: `[observation about your existing code — nothing was changed] ${message} (Noted from the files that were imported; if part of the repo was too large to import, this may not be accurate.)`,
   };
 }
@@ -1216,7 +1238,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   if (typeof r.startedAt === 'number' && typeof r.endedAt === 'number') {
     lines.push(`Duration : ${Math.max(0, Math.round((r.endedAt - r.startedAt) / 1000))}s`);
   }
-  lines.push(`Issues   : ${r.counts.total} total — ${r.counts.errors} error(s), ${r.counts.warnings} warning(s), ${r.counts.autoResolved} auto-resolved, ${r.counts.unresolved} unresolved`);
+  lines.push(`Issues   : ${r.counts.total} total — ${r.counts.errors} error(s), ${r.counts.warnings} warning(s), ${r.counts.autoResolved} auto-resolved, ${r.counts.unresolved} unresolved${r.counts.observations ? `, ${r.counts.observations} observation(s) about your existing code` : ''}`);
   lines.push('');
   // ROOT CAUSE first — the single most important line, so nobody has to read the whole timeline
   // to find out WHY the build struggled.

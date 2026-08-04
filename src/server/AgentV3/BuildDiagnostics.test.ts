@@ -1288,3 +1288,43 @@ describe('honestModelLabel (autopsy 2026-07-27)', () => {
     expect(honestModelLabel(undefined, [])).toBeUndefined();
   });
 });
+
+describe('counts — an OBSERVATION is neither a self-heal nor an unresolved defect (mitrify 2026-08-04)', () => {
+  it('importTurnObservation marks the entry as an observation on an import turn', () => {
+    const o = importTurnObservation(true, 'x is unused');
+    expect(o.autoResolved).toBe(true);
+    expect(o.observation).toBe(true);
+    expect(o.message).toContain('nothing was changed');
+  });
+
+  it('leaves a real build turn untouched — no observation flag, not auto-resolved', () => {
+    const o = importTurnObservation(false, 'x is unused');
+    expect(o.autoResolved).toBe(false);
+    expect(o.observation).toBeUndefined();
+    expect(o.message).toBe('x is unused');
+  });
+
+  it('does not inflate the auto-resolved tally — the reported build claimed 32 self-heals for ~0 fixes', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'import my repo' });
+    // one genuine self-heal …
+    d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed it', autoResolved: true });
+    // … and three advisory notes about the user's pre-existing code
+    for (const dep of ['stripe', 'ws', 'date-fns']) {
+      d.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...importTurnObservation(true, `"${dep}" is declared but unused`) });
+    }
+    // … and one thing genuinely still owed
+    d.record({ phase: 'build', severity: 'warning', code: 'COMPLIANCE_LOG_LEAK_FOUND', message: 'credential in a console log', autoResolved: false });
+
+    const c = d.report().counts;
+    expect(c.total).toBe(5);
+    expect(c.autoResolved).toBe(1);   // NOT 4 — the notes are not fixes
+    expect(c.unresolved).toBe(1);     // NOT 4 — the notes are not our defects either
+    expect(c.observations).toBe(3);
+  });
+
+  it('omits the observations key entirely when there are none (no change to a normal build report)', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'build me an app' });
+    d.record({ phase: 'build', severity: 'warning', code: 'X', message: 'y', autoResolved: true });
+    expect(d.report().counts.observations).toBeUndefined();
+  });
+});

@@ -24360,3 +24360,40 @@ decision to take deliberately if it is ever wanted.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1023 files / 10812 tests, 0 failures**
 (34 new).
+
+## 2026-08-04 — PREVENTION: every generated artifact is now parsed in its own language
+
+**The lesson of this whole session, turned into a gate.** The APK pipeline produced SEVEN fatal defects
+that all reached a live user and that NO test caught: a workflow the server refused to dispatch, the
+wrong token header, a whitelist silently dropping the user's source files, a swallowed `cap add`
+failure, mismatched Capacitor majors, "[object Object]" on screen, and a bash syntax error in the
+generated workflow's LAST step that marked every SUCCESSFUL build as failed — after the .apk had already
+been built and uploaded.
+
+**The common thread is not seven mistakes. It is ONE structural gap:** NavBharatAI generates files in
+YAML, bash, JSON and TypeScript, and **nothing ever parsed them**. Every existing test asserted on those
+files as TEXT (`expect(wf).toContain('assembleDebug')`), which cannot tell a working workflow from one
+bash refuses to run. The moment a `bash -n` check was added it found a live bug immediately.
+
+**`generatedArtifacts.test.ts`** now walks every file the four user-facing kits emit (`generateShipKit`,
+`generateMobileExport`, `generateExtensionExport`, `assembleMobileProject`) and parses each one AS THE
+LANGUAGE IT WILL BE INTERPRETED AS:
+- `.yml` → YAML parse, **plus `bash -n` on every `run:` block** (the same parse GitHub's runner does);
+- `.json` → JSON parse + shape;
+- `.ts/.tsx/.js/.jsx/.mjs/.cjs` → esbuild parse (`capacitor.config.ts` is read by the Capacitor CLI —
+  if it does not parse, `cap add android` fails, which is exactly the class that cost a full day);
+- every file → non-empty, and free of `[object Object]` / literal `undefined` / `NaN` (the first of
+  which was a REAL user-visible bug this session);
+- **plus a hostile app name** (`Ravi's "Chai" & Co <Test>`) run through every kit, so quoting bugs are
+  caught by construction rather than by a user with an apostrophe in their app name.
+
+These kits BYPASS the build engine's own syntax gate (they are pushed straight to the user's GitHub or
+handed over as a kit), so this is their only line of defence. It is written generically — it walks what
+the generators emit rather than naming files — so a NEW generated file is covered the day it is added.
+
+**PROVED, not assumed:** the historical bash bug was deliberately re-injected and the suite failed
+immediately, naming the exact file and step (`shipKit: android-apk.yml → step "Summary" is not valid
+shell`); removing it returned to green. A net that has never caught anything is not known to work.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 10919 tests, 0 failures**
+(24 new).

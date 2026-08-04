@@ -24573,3 +24573,56 @@ teaches the fix (delete node_modules/dist/.git, re-zip — usually lands under 1
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1028 files / 11093 tests, 0 failures**
 (parity suite builds real zips and runs both extractors; a 360 MB-declaring archive is proven to import
 via streaming while the buffer path refuses it).
+
+## 2026-08-04 — Mitrify build-report autopsy: the report was BLIND to its own #1 failure (report honesty x3)
+
+**Trigger (rule 5):** admin sent the mitrify import build report + a screenshot of the live-server
+preview showing **"Cannot GET /customer/home"** — the exact failure class the 2026-08-03 "EARN THE
+VERDICT" boot-verify was built to catch and name.
+
+**5-bucket ledger (honest tally):**
+- ✅ Self-healed: **0 real heals** — while the report CLAIMED `healCount: 32`. Every heartbeat, tool
+  call and narration line is recorded `severity:'info', autoResolved:true`, and all of them were being
+  counted as "self-heals". A green number wearing a lie (fifth-rule violation in the reporting itself).
+- 🔀 Worked around: 1 — the in-browser preview could not load the app's packages, so the user was
+  switched to the live server… which then showed "Cannot GET /customer/home". The switch narration
+  called it "your app really running" while the page 404'd.
+- ⏭️ Skipped: 0.
+- ❌ Still broken: 2 — (a) the live preview 404s on client routes (Express app serving its API but not
+  the SPA — vite-middleware/NODE_ENV/static-build class); (b) the report contained **ZERO preview-phase
+  entries**, so (a) could not be root-caused from evidence: the honest boot-verify shipped 2026-08-03
+  ran (or was skipped) invisibly, because `emitLive` drops narrations after the reply stream ends (by
+  design) and NOTHING recorded the verdict into buildDiag. The skip-gate's reason was recorded nowhere.
+- 🥵 Struggles: header said "I changed 1 file in your project" on a do-not-change survey turn (it was
+  the pipeline's own dev `.env` from key-provisioning — read by the admin as a broken promise);
+  minutes 1–6 of heartbeats stuck on "Connected…"; `Done` at t+8:46 but endedAt t+11:02 (2m16s silent
+  tail — the background preview boot, invisible for the same no-trail reason).
+
+**Step-2 missing subsystem:** the background import-preview boot had no forensic channel that survives
+the stream closing. Everything it learned (skip reason, boot verdict, serve verdict, failure advisory)
+lived only in `emitLive` narrations — dropped the moment `rb.ended`. The build report is the channel
+that does not depend on the stream; the boot never wrote to it.
+
+**DNA fixes shipped (this PR):**
+1. **healCount honesty** (`BuildDiagnostics.ts`): info-severity events excluded from
+   `counts.autoResolved` — only a WARNING/ERROR v5 genuinely resolved counts. Test-locked (a heartbeat+
+   tool-call+narration run with one real heal reports 1, not 5).
+2. **"WHICH file changed" honesty** (`ProjectSummary.ts` + caller): the edit header now NAMES the
+   changed files (≤3), and a change-set that is ONLY engine-written setup config (`.env*`, `.npmrc`,
+   `.nvmrc`) says exactly that: "Your source files are untouched — I only wrote a setup file (.env)".
+   6 new tests incl. mixed-set and >3-files behavior.
+3. **Import-preview forensic trail** (`agentv3.ts` landImportedProject): every lifecycle branch now
+   records into buildDiag (stream-independent): `IMPORT_PREVIEW_SKIPPED` (with the REAL reason: no
+   package.json vs sandbox preview unavailable), `IMPORT_PREVIEW_BOOT_STARTED`,
+   `IMPORT_PREVIEW_SERVING`/`IMPORT_PREVIEW_NOT_SERVING` (the earned serve-verdict incl. the exact
+   analyzePreviewHtml problems), and `IMPORT_PREVIEW_BOOT_FAILED` on BOTH failure branches (clean
+   did-not-boot AND the exception/timeout catch, which was silent). Source-contract tests lock all
+   branches.
+
+**OPEN root cause (rule 6, honest):** the actual "Cannot GET /customer/home" 404 (why THIS app's dev
+server serves the API but not the client routes) is NOT root-causable from today's report — that is
+precisely the blindness fixed above. The NEXT import of this app will carry the full preview trail
+(verdict + named problems), making the 404 diagnosable from evidence; alternatively the Preview tab's
+Diagnose boot log shows it live.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1029 files / 11125 tests, 0 failures**.

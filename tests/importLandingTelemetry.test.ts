@@ -24,3 +24,29 @@ describe('import landing telemetry — landedVia/bulkVerifiedCount reach the bui
     expect(diagArgs.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// Mitrify autopsy 2026-08-04 ("Cannot GET /customer/home" again): the honest boot-verify shipped
+// 2026-08-03 produced ZERO preview entries in the report, because narrations after the reply stream
+// closes are dropped by design (emitLive) and the skip-gate's reason was never recorded anywhere.
+// Source contract: every branch of the background import-preview boot leaves a buildDiag record —
+// skipped (with why), started, serving/not-serving (the earned verdict), failed (both the clean-fail
+// branch AND the exception/timeout catch).
+describe('import preview boot — every lifecycle branch leaves a forensic record', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('../src/server/routes/agentv3.ts', import.meta.url)), 'utf8');
+
+  it('the skip-gate records WHY the boot was not attempted', () => {
+    expect(SRC).toContain("code: 'IMPORT_PREVIEW_SKIPPED'");
+    expect(SRC).toContain('no package.json');
+    expect(SRC).toContain('live preview is unavailable');
+  });
+
+  it('the boot start and the earned serve-verdict are recorded', () => {
+    expect(SRC).toContain("code: 'IMPORT_PREVIEW_BOOT_STARTED'");
+    expect(SRC).toContain("'IMPORT_PREVIEW_SERVING' : 'IMPORT_PREVIEW_NOT_SERVING'");
+  });
+
+  it('BOTH failure branches record — the clean did-not-boot path and the exception/timeout catch', () => {
+    const fails = SRC.match(/code: 'IMPORT_PREVIEW_BOOT_FAILED'/g) || [];
+    expect(fails.length).toBeGreaterThanOrEqual(2);
+  });
+});

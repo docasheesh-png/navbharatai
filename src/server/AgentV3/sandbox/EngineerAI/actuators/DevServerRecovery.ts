@@ -290,6 +290,38 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
  * @param attempt    1-based attempt number that just failed
  * @param maxAttempts total recovery attempts allowed
  */
+/**
+ * Rewrite a diagnosis's detail for the GIVE-UP verdict, so it states what IS true instead of what we were
+ * about to do.
+ *
+ * ROOT CAUSE (mitrify autopsy 2026-08-04): every `detail` is written in the present-progressive voice of a
+ * recovery that is about to run — "provisioning PostgreSQL, writing DATABASE_URL, and retrying",
+ * "reinstalling dependencies and restarting", "freeing it and restarting". When attempts ran out, the
+ * caller printed that SAME text as the terminal message, so the user was told a database was being
+ * provisioned at the exact moment we stopped trying. Announcing an action we do not take is fake success.
+ *
+ * The terminal line keeps the real CAUSE (which is genuinely useful) and replaces the promise with the
+ * honest outcome plus, where one exists, what the user can actually do. PURE.
+ */
+export function terminalDetail(d: DevServerDiagnosis): string {
+  const tail = 'Automatic recovery is exhausted.';
+  switch (d.cause) {
+    case 'db_unreachable':
+      return `The app needs a database and one could not be started in the sandbox. ${tail} Connect your own database in Settings → App Settings → Database, then press Diagnose to boot it.`;
+    case 'missing_module':
+      return `A dependency the app needs is still missing after reinstalling. ${tail} Check that it is listed in package.json and installs cleanly.`;
+    case 'port_in_use':
+      return `The port stayed occupied by another process. ${tail}`;
+    case 'out_of_memory':
+      return `The dev server ran out of memory and was killed. ${tail} A smaller build or fewer watchers may be needed.`;
+    case 'crash':
+      return `The dev server kept crashing on startup. ${tail} ${d.detail}`.slice(0, 400);
+    case 'unknown':
+    default:
+      return `The dev server did not start and its log had no recognisable error. ${tail}`;
+  }
+}
+
 export function planDevServerRecovery(log: string, attempt: number, maxAttempts: number): DevServerDiagnosis {
   const d = classifyDevServerFailure(log);
   // Anything whose ONLY cure is a source change fails identically on every restart — stop and surface it
@@ -299,7 +331,7 @@ export function planDevServerRecovery(log: string, attempt: number, maxAttempts:
   // fixed them (the actionable detail telling the agent exactly what to change). Fix the class, not the
   // instance: every `code_fix` recovery short-circuits with its detail intact.
   if (d.recovery === 'code_fix') return d;
-  if (attempt >= Math.max(1, maxAttempts)) return { ...d, recovery: 'give_up' };
+  if (attempt >= Math.max(1, maxAttempts)) return { ...d, recovery: 'give_up', detail: terminalDetail(d) };
   return d;
 }
 

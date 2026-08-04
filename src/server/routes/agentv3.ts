@@ -18,6 +18,7 @@ import {
   AgentEventStream,
   WorkspaceState,
   ToolDispatcher,
+  ALWAYS_WRITE_SECRETS,
   ClaudeClient,
   sanitizeApiKey,
   AgentRunner,
@@ -6674,6 +6675,12 @@ export function registerAgentV3Routes(app: Express): void {
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from
+          // inside run_command, so any path that starts a dev server through the ACTUATOR instead — an
+          // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
+          // user saved in Settings. Write them now, before anything can run, so the keys the user entered
+          // are genuinely readable by the app v5.0 built. No-op when the vault is empty; best-effort.
+          await dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {});
         }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint

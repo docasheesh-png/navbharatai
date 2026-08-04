@@ -883,11 +883,19 @@ export class E2BActuator implements IEngineerActuator {
       const MAX_RECOVERY = 2;
       for (let attempt = 1; !portUp && attempt <= MAX_RECOVERY; attempt++) {
         devLog = await readDevLog();
-        const diag = planDevServerRecovery(devLog, attempt, MAX_RECOVERY);
+        // ROOT CAUSE (mitrify autopsy 2026-08-04, buildId ca5a4ca8): this used to call
+        // planDevServerRecovery(devLog, attempt, MAX_RECOVERY), which escalates to `give_up` as soon as
+        // `attempt >= maxAttempts`. With MAX_RECOVERY = 2 that made the LAST attempt do NOTHING: it was
+        // diagnosed, then broke out before the recovery ran. So "2 recovery attempts" only ever performed
+        // ONE action — and worse, the give_up branch printed the diagnosis detail verbatim, which for a
+        // db_unreachable reads "provisioning PostgreSQL, writing DATABASE_URL, and retrying". The user was
+        // told we were provisioning a database while we provisioned nothing. Announcing an action we do
+        // not take is exactly the fake-success the second absolute rule forbids.
+        // The escalation is now decided AFTER the loop (below), so every attempt inside it performs a real
+        // recovery. `code_fix` still short-circuits — a source error fails identically on every restart.
+        const diag = classifyDevServerFailure(devLog);
         lastDiagnosis = diag;
-        if (diag.recovery === 'code_fix' || diag.recovery === 'give_up') {
-          // A syntax/transform error fails identically on every restart, and give_up means attempts are
-          // spent — surface the real cause and stop wasting the build budget on restarts.
+        if (diag.recovery === 'code_fix') {
           stdout += `\n[health-check] ${diag.detail}`;
           break;
         }
@@ -924,6 +932,11 @@ export class E2BActuator implements IEngineerActuator {
         // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).
         await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 }).catch(() => {});
         portUp = await launchAndWait(20);
+      }
+      // Attempts are spent and the server is still down: NOW escalate to give_up, with a detail that
+      // states the terminal truth instead of the "here is what I am about to do" text the loop used.
+      if (!portUp && lastDiagnosis && lastDiagnosis.recovery !== 'code_fix') {
+        lastDiagnosis = planDevServerRecovery(devLog, MAX_RECOVERY + 1, MAX_RECOVERY);
       }
 
       // The dev server's output goes to a FILE (redirectDevServerOutput), so read it for drift detection

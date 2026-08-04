@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail } from './DevServerRecovery';
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {
@@ -369,5 +369,51 @@ describe('planDevServerRecovery — every code_fix cause keeps its detail on the
     const oom = 'FATAL ERROR: JavaScript heap out of memory';
     expect(planDevServerRecovery(oom, 1, 2).recovery).toBe('plain_retry');
     expect(planDevServerRecovery(oom, 2, 2).recovery).toBe('give_up');
+  });
+});
+
+describe('terminalDetail — give_up must never promise an action we are not taking (mitrify 2026-08-04)', () => {
+  // The reported build printed "provisioning PostgreSQL, writing DATABASE_URL, and retrying" at the exact
+  // moment it stopped trying, and provisioned nothing. The cause survives; the promise must not.
+  it('a db_unreachable give-up stops claiming a database is being provisioned', () => {
+    const d = planDevServerRecovery('Error: connect ECONNREFUSED 127.0.0.1:5432', 2, 2);
+    expect(d.recovery).toBe('give_up');
+    expect(d.detail).not.toMatch(/provisioning PostgreSQL/i);
+    expect(d.detail).not.toMatch(/and retrying/i);
+    expect(d.detail).toMatch(/could not be started/i);
+    expect(d.detail).toContain('Settings → App Settings → Database'); // what the user can actually do
+    expect(d.cause).toBe('db_unreachable'); // the real cause is still reported
+  });
+
+  it('every other restartable cause also drops its "about to" promise', () => {
+    const reinstall = planDevServerRecovery("Cannot find module 'left-pad'", 2, 2);
+    expect(reinstall.detail).not.toMatch(/reinstalling dependencies and restarting/i);
+    expect(reinstall.detail).toMatch(/still missing/i);
+
+    const port = planDevServerRecovery('Error: listen EADDRINUSE :::5000', 2, 2);
+    expect(port.detail).not.toMatch(/freeing it and restarting/i);
+    expect(port.detail).toMatch(/stayed occupied/i);
+
+    const oom = planDevServerRecovery('FATAL ERROR: JavaScript heap out of memory', 2, 2);
+    expect(oom.detail).toMatch(/ran out of memory/i);
+  });
+
+  it('every terminal detail says recovery is exhausted, so the state is unambiguous', () => {
+    for (const log of [
+      'Error: connect ECONNREFUSED 127.0.0.1:5432',
+      "Cannot find module 'x'",
+      'Error: listen EADDRINUSE :::5000',
+      'FATAL ERROR: JavaScript heap out of memory',
+      'npm ERR! ELIFECYCLE',
+      '',
+    ]) {
+      expect(planDevServerRecovery(log, 2, 2).detail).toMatch(/exhausted/i);
+    }
+  });
+
+  it('BEFORE the attempts run out, the detail still describes the action being taken', () => {
+    const d = planDevServerRecovery('Error: connect ECONNREFUSED 127.0.0.1:5432', 1, 2);
+    expect(d.recovery).toBe('reprovision_db');
+    expect(d.detail).toMatch(/provisioning PostgreSQL/i); // the loop is genuinely about to do this
   });
 });

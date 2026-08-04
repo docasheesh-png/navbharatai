@@ -24991,3 +24991,42 @@ Test-locked in `tests/authMiddleware.test.ts`: the chunk limit is asserted to ex
 `ceil(5 GB / 8 MB) = 640`, so a future edit cannot silently re-cap the import below its advertised size.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,273 tests, 0 failures**.
+
+## 2026-08-04 — THE missing subsystem: `find_ui_element` — pixel → source, and honest proof of absence
+
+**Admin: "apne hisab se hi kaam karo, bas app ko internationally best banao."** So this is the item I
+named as the #1 open root cause in the mitrify autopsy — the one that caused the day's worst failure.
+
+**The failure it kills.** Asked to remove a small green dot from the home page, v5.0 could SCREENSHOT
+the page but had no way to map a PIXEL to a FILE. So it brute-forced Tailwind class names (`w-2`,
+`h-2`, `rounded-full`, `bg-green`, `dot`, `circle`) ~30 times across 20 minutes, found nothing, and
+then GUESSED: it deleted the app's LOGO and reported "done, I removed the green dot". 27m32s, ₹393,
+logo gone, dot still there — and the admin later confirmed **there was no green dot at all**. Every
+part of that is one missing capability, so this ships both halves:
+
+1. **FIND** — `find_ui_element(url, query)` scans the RENDERED page (Playwright, `domcontentloaded` +
+   settle — never `networkidle`, which a Vite HMR socket makes unreachable) and ranks visible elements
+   against a plain-language description. Each hit returns its **class string verbatim** (grep it
+   straight to source), text, box, real computed colours, and `data-nbai-src` (exact `file:line:col`)
+   when the preview stamps one. One call replaces thirty greps.
+2. **PROVE ABSENCE** — when nothing matches, the answer is evidence, not silence: which colours DO
+   exist on the page, whether any dot-shaped elements exist at all, and the reminder that the detail
+   may live inside an image/SVG asset or on a different route. "That is not on this page" is a correct
+   answer the agent can give the user; guessing at a neighbouring element is not.
+
+**The safety rule that makes it trustworthy (found by a failing test I wrote first):** a colour-only
+match NEVER qualifies when the query also named a shape or a role. Asked for a "green dot", a green
+BUTTON is not a weaker answer — it is a different object, and returning it is exactly how a confident
+wrong edit happens. Such elements go into the not-found evidence, never the hit list.
+
+**`scanned` vs empty.** The actuator returns `{ elements, scanned }`. A browser that could not look
+returns `scanned:false`, and the tool says so explicitly — an unavailable browser must never be able
+to masquerade as proof that an element is absent.
+
+**Wired end to end, not just built:** `UiElementFinder.ts` (pure, 27 tests) → `ToolCatalog` entry +
+`ALL_TOOLS` → `ToolDispatcher.runVisual` (with the same SSRF `classifyBrowseTarget` guard as
+screenshot/browser_action) → `IEngineerActuator.scanUiElements?` → `E2BActuator.scanUiElements`. The
+edit-mode prompt now REQUIRES calling it first for any visual request (test-locked — a tool nobody is
+told to call is a tool that never runs), and `AppKnowledgeBase` documents it for every AI in the app.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1039 files / 11,301 tests, 0 failures**.

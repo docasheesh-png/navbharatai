@@ -72,6 +72,16 @@ export interface IEngineerActuator {
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
   /**
+   * Scan the RENDERED page and return each visible element with what is needed to locate it in source
+   * (class string, text, box, computed colours, and the `data-nbai-src` stamp when present).
+   *
+   * `scanned` distinguishes "the browser really looked and this is the page" from "the browser could
+   * not look" — conflating them would let an unavailable browser masquerade as proof that an element
+   * is absent, which is exactly the false confidence the find_ui_element tool exists to remove.
+   * Optional: only sandboxes with a real browser implement it.
+   */
+  scanUiElements?(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }>;
+  /**
    * Return runtime browser errors (console.error, uncaught exceptions, failed
    * requests) captured since `sinceMs`. Lets the agent — and the user — see
    * runtime failures that a successful build would never reveal. Returns an

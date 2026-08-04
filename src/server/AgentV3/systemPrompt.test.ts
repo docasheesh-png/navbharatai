@@ -237,6 +237,15 @@ describe('editModePrefix', () => {
     expect(p).toMatch(/stylesheet|CSS class/i);
   });
 
+  // The tool that removes the NEED to guess: without this instruction find_ui_element exists but is
+  // never reached, and the engine goes back to ~30 blind class-name greps (mitrify, 27 min / ₹393).
+  it('directs a visual request to find_ui_element FIRST, not to hand-guessed class names', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('find_ui_element');
+    expect(p).toMatch(/visual request/i);
+    expect(p).toMatch(/Do not start guessing Tailwind class names/i);
+  });
+
   it('forbids rebuilding from scratch and demands minimum changes', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('NEVER REBUILD FROM SCRATCH');

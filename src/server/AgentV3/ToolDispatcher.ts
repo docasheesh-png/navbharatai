@@ -310,6 +310,7 @@ import { redactSecrets, redactDeep } from './SecretRedactor';
 // infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
+import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -357,6 +358,11 @@ export interface ActuatorPort {
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
+  /**
+   * Scan the rendered page for visible elements + where they come from (see find_ui_element).
+   * `scanned:false` means the browser could not look — never treat it as "the element is absent".
+   */
+  scanUiElements?(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }>;
   /**
    * Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`.
    * `captured` reports whether a real browser session was actually read: `true` = the console was
@@ -1486,7 +1492,7 @@ export class ToolDispatcher {
     });
     try {
       // Browser tools return a screenshot image alongside their text; everything else is text.
-      const visual = call.name === 'screenshot' || call.name === 'browser_action'
+      const visual = call.name === 'screenshot' || call.name === 'browser_action' || call.name === 'find_ui_element'
         ? await this.runVisual(call)
         : null;
       const content = visual ? visual.content : await this.run(call, agent);
@@ -1520,6 +1526,22 @@ export class ToolDispatcher {
    */
   private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
     const input = call.input;
+    if (call.name === 'find_ui_element') {
+      if (!this.actuator.scanUiElements) {
+        return { content: 'find_ui_element requires a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+      }
+      const url = reqStr(input, 'url');
+      const query = reqStr(input, 'query');
+      const target = classifyBrowseTarget(url);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
+      const scan = await this.actuator.scanUiElements(this.workspaceId, url);
+      // A FAILED scan and an EMPTY page are different facts, and conflating them would manufacture a
+      // false "it is not there" — the opposite of what this tool exists to guarantee.
+      if (!scan.scanned) {
+        return { content: `Could not scan ${url} — the headless browser was unavailable or the page did not load. This is NOT evidence that the element is absent; say so honestly and try the preview URL again, rather than concluding anything about the element.` };
+      }
+      return { content: formatUiFindings(scan.elements as ScannedElement[], query) };
+    }
     if (call.name === 'screenshot') {
       if (!this.actuator.screenshot) {
         return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };

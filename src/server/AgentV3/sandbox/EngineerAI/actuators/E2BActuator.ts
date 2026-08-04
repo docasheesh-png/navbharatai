@@ -1081,6 +1081,80 @@ const {chromium}=require('playwright');
     return `https://${sandbox.getHost(port)}`;
   }
 
+  /**
+   * Scan the RENDERED page and return every visible element with the facts needed to locate it in the
+   * source: its class string (greppable verbatim), text, position, computed colours, and the
+   * `data-nbai-src` stamp when the preview provides one.
+   *
+   * WHY (mitrify autopsy 2026-08-04): the agent could screenshot a page but had no pixel→file path, so
+   * a request to remove a small green dot became ~30 blind greps over 20 minutes and then a destructive
+   * guess. This is the missing half — see UiElementFinder.ts for the matching + the honest
+   * proof-of-absence. Bounded and best-effort: an unavailable browser returns an empty list, and the
+   * caller reports that honestly rather than pretending the element is absent.
+   */
+  async scanUiElements(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    if (!this._playwrightReady.has(workspaceId)) this._kickoffPlaywright(sandbox, workspaceId);
+    const ready = await Promise.race([
+      this._playwrightReady.get(workspaceId)!,
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 60_000)),
+    ]).catch(() => false);
+    // NO BROWSER ⇒ scanned:false, NOT "no elements". The difference matters: an empty list from a real
+    // scan is evidence the thing is absent; an empty list from a failed scan is evidence of nothing.
+    if (!ready) return { elements: [], scanned: false };
+
+    // domcontentloaded + settle, never networkidle: a Vite dev server's HMR socket never goes idle, so
+    // networkidle times out and captures the un-hydrated shell (the exact false-negative that made the
+    // preview self-check report "Present: none" for every React build).
+    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
+const {chromium}=require('playwright');
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+  await p.setViewportSize({width:1280,height:800});
+  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+  await p.waitForTimeout(1800);
+  const out=await p.evaluate(()=>{
+    var res=[];
+    var all=document.querySelectorAll('body *');
+    for(var i=0;i<all.length && res.length<600;i++){
+      var e=all[i];
+      var r=e.getBoundingClientRect();
+      if(r.width<=0||r.height<=0) continue;              // invisible: no box
+      var cs=getComputedStyle(e);
+      if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0) continue;
+      var host=e.closest?e.closest('[data-nbai-src]'):null;
+      var own=e.children.length===0?(e.textContent||'').trim():'';
+      res.push({
+        tag:e.tagName.toLowerCase(),
+        className:typeof e.className==='string'?e.className.slice(0,240):'',
+        id:e.id||undefined,
+        text:own?own.slice(0,120):undefined,
+        selector:(e.id?('#'+e.id):(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
+        source:host?(host.getAttribute('data-nbai-src')||undefined):undefined,
+        rect:{x:r.x,y:r.y,w:r.width,h:r.height},
+        bg:cs.backgroundColor,
+        color:cs.color,
+        borderRadius:cs.borderRadius,
+        src:e.tagName==='IMG'?(e.getAttribute('src')||undefined):undefined
+      });
+    }
+    return res;
+  }).catch(function(){return [];});
+  process.stdout.write(JSON.stringify(out));
+  await b.close();
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
+" 2>/dev/null`;
+    const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 }).catch(() => null);
+    if (!run || run.exitCode !== 0 || !run.stdout.trim()) return { elements: [], scanned: false };
+    try {
+      const parsed = JSON.parse(run.stdout.trim());
+      return Array.isArray(parsed) ? { elements: parsed, scanned: true } : { elements: [], scanned: false };
+    } catch {
+      return { elements: [], scanned: false };
+    }
+  }
+
   async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     const sandbox = await this.getSandbox(workspaceId);
     usageTracker.record(workspaceId, 'screenshot');

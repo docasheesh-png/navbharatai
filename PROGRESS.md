@@ -24015,3 +24015,44 @@ ceiling, and this closes it.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1017 files / 10704 tests, 0 failures**
 (19 new gates on the AI tier).
+
+## 2026-08-04 — COMPILE PRE-FLIGHT: the app is verified and healed BEFORE GitHub ever sees it (admin: "v5 live banaye, fix kare — GitHub par bas download ho")
+
+**Admin report + directive:** another real run failed, but with the NEW honest diagnosis — *"Your app
+itself did not compile, so it could not be packaged"* — i.e. packaging is now clean and the remaining
+failure class is the app's own code (which v5 generated). The admin's directive: the build/fix should
+live with Pro v5 ("waha se apk/aab v5 live banaye, fix kare"), and the GitHub side should just hand back
+the file ("yaha bas download ho") — with "aapko jo theek lage" discretion on execution.
+
+**The architectural read (stated as the assumption, 60-second rule):** the root cause is not the
+button's location — it is that a non-compiling app reaches GitHub at all. A compile error on the runner
+costs 5 minutes/attempt, an unreadable remote log, and repair-by-commit. The same error caught on OUR
+server costs seconds and can be fixed in the user's actual v5 workspace. So the substance of the
+directive shipped as: **`/api/mobile-ship/setup` now runs a compile pre-flight + heal BEFORE pushing.**
+
+**`mobileShipPreflight.ts` — three checks, each a real runner death:**
+1. SYNTAX — `findSyntaxErrors` (esbuild parse, the exact parser `vite build` runs first);
+2. UNRESOLVED LOCAL IMPORTS — the shared `resolveLocalImport` resolver (extensions, index files, `@/`
+   alias, `.js`→`.ts`), plus exact-path for asset imports; type-only imports correctly exempt;
+3. MISSING NPM PACKAGES — `findMissingDependencies` against package.json.
+Checks 2–3 only for apps that BUILD themselves; a static app has no bundler to die in.
+
+**Healing order (same tiering as the GitHub loop, one repair engine — rule 4):** deterministic first
+(`applyWellKnownMissingDeps` — allowlisted packages, pinned ranges, zero AI cost), then the SAME AI
+repair tier (`runAiRepair`, flagship GLM→Kimi, never Sonnet/Opus), bounded 2 rounds, **each round
+RE-VERIFIED** — success means "preflightVerify passes after the fix", never "the model said it fixed
+it". A repaired file is written back via `mergeWorkspaceFiles` into the user's V5 WORKSPACE — the app
+inside NavBharatAI is healed too, not a shadow copy (this is what makes it "v5 fixes it live").
+
+**Outcomes:** heal succeeds → push proceeds, panel shows the plain-language heal notes. Heal fails →
+HONEST 422 naming the exact file/line + "open this app in NavBharatAI Pro chat, ask it to fix this exact
+error" — and NOTHING is pushed (a repo that cannot build is never created). `callRepairModel` extracted
+to `mobileBuildAiRepairClient.ts` (was private in routes/mobileShip.ts) so both routes share one client.
+
+**Deliberately NOT done in this change (recorded, not hidden):** physically relocating the build button
+into the Pro v5 chat UI. The APKBuilder screen already drives the whole flow end-to-end; moving the
+mount is UI surgery with breakage risk and zero effect on build success. If the admin still wants the
+button inside the v5 screen after seeing the pre-flight work, that is a clean follow-up phase.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1020 files / 10764 tests, 0 failures**
+(14 new pre-flight tests, including "an AI fix that does not re-verify is a miss").

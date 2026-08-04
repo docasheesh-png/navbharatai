@@ -24397,3 +24397,47 @@ shell`); removing it returned to green. A net that has never caught anything is 
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 10919 tests, 0 failures**
 (24 new).
+
+## 2026-08-04 — PRO-TIER GOLDEN SCAFFOLDS (the phase recorded in PR #2035, now shipped)
+
+Three pro chips — **SaaS dashboard, CRM/pipeline, Online store** — now pre-seed a hand-written,
+CI-proven app instead of building from nothing.
+
+**Pro scaffolds are shaped DIFFERENTLY from simple ones, deliberately.** For a simple chip ("to-do
+list") the scaffold essentially IS the finished app: one `App.tsx` and it is done. A pro chip is not one
+screen and never will be — a single 800-line `App.tsx` would be exactly the monolith the
+EDIT-RESILIENCE rule forbids, and the builder's first edit would put the whole app at risk. So a pro
+scaffold ships an ARCHITECTURE:
+- `src/lib/ui.tsx` — the shared visual language (Shell/Card/StatTile/Badge/Button/Field/Select/Modal/Empty),
+  plain React + the base index.css variables: no UI library to install, nothing that can fail the first
+  `npm install`, light/dark inherited for free;
+- `src/lib/store.ts` — `useCollection` persistent CRUD, so data survives a reload on the FIRST build (a
+  first build whose data vanishes on refresh reads as broken however correct the code is), with a
+  corrupted/absent localStorage falling back to the seed rather than throwing during render;
+- `src/App.tsx` — this app's screens, composed from the two above.
+Small, single-purpose, decoupled — the shape the system prompt demands of every build, handed over
+already correct instead of merely hoped for.
+
+**They are REAL apps, not mockups:** the store decrements stock when an order is placed, the CRM moves
+deals between stages and stores notes, the dashboard switches plans and invites members — every button
+does what it says.
+
+**THE BUG THIS PHASE ALMOST SHIPPED (caught before merge):** the golden-scaffold handoff told the builder
+*"It already compiles cleanly and FULLY IMPLEMENTS the request below — make at most SMALL polish edits
+and finish quickly."* That is TRUE for a simple scaffold and FALSE for a pro one: the CRM chip also asks
+for activity history, tasks and a pipeline dashboard that the foundation does not contain. Left as-is,
+every pro build would have shipped a skeleton and declared success — precisely the fake completion the
+second absolute rule forbids, and it would have made pro builds WORSE than no scaffold at all. The
+framing is now tier-aware: `pro` gets an EXTEND instruction naming the shared files and demanding the
+existing patterns be reused; `simple` keeps the FINISH instruction.
+
+**Lockstep rules relaxed correctly, not loosened:** every SIMPLE chip must still have a scaffold (the free
+tier's first build must never regress) and every scaffold id must be a real chip whose tier matches — but
+a PRO chip WITHOUT a scaffold now falls through to a normal build instead of failing CI, so the remaining
+pro chips (invoicing, restaurant, bookings, social-feed, community, events, kanban, notes, lms, portfolio,
+fitness, expense) can be added one at a time. That is the next batch.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 10952 tests, 0 failures**.
+Every pro scaffold is proven to parse under esbuild AND compile under the in-browser Babel preview — the
+same white-screen proof the simple ones carry — plus new tests that it stays multi-file, uses the shared
+foundation instead of duplicating it, persists data, and cannot white-screen on bad localStorage.

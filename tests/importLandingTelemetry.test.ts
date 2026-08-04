@@ -50,3 +50,52 @@ describe('import preview boot — every lifecycle branch leaves a forensic recor
     expect(fails.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ADMIN REPORT 2026-08-04: "puri build report save hi nahi hoti hai."
+//
+// He was right, and it invalidated part of an autopsy. recordCommand was wired ONLY into the
+// ToolDispatcher (agentv3.ts ~6701), so the report captured commands the AGENT ran and NOTHING from
+// the import preview boot — the phase that takes minutes and produces the recurring "Cannot GET".
+// The autopsy of build cb03bdde consequently found a 238-second window with no events at all and
+// could not attribute it. That was never a hole in TIME; it was a hole in the RECORDING.
+//
+// Rule 5 calls the build report "the single highest-signal evidence we will ever get". A report that
+// is silently blind on the phase that fails most often makes every autopsy of that class a guess.
+describe('import preview boot leaves a forensic trail (the report must not be blind)', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('../src/server/routes/agentv3.ts', import.meta.url)), 'utf8');
+
+  it('records the boot command itself — the npm install + dev server launch', () => {
+    expect(SRC).toContain('opts.diag?.recordCommand?.({');
+    expect(SRC).toContain('command: bootCommand');
+    expect(SRC).toContain("durationMs: Date.now() - bootStartedAt");
+  });
+
+  it('captures the boot log, which is the key artefact for the "Cannot GET" class', () => {
+    const boot = SRC.slice(SRC.indexOf('const bootCommand ='));
+    expect(boot).toContain('stdout: result.stdout');
+    expect(boot).toContain('stderr: result.stderr');
+    expect(boot).toContain('exitCode:');
+  });
+
+  it('no longer swallows the database provision outcome', () => {
+    // It used to be a bare `catch {}`: a report could never say whether the database the app needs
+    // actually came up, so an autopsy had to guess — which is how a wrong root cause gets shipped.
+    expect(SRC).toContain("code: 'IMPORT_DB_PROVISIONED'");
+    expect(SRC).toContain("code: 'IMPORT_DB_PROVISION_FAILED'");
+  });
+
+  it('a failed database provision is a WARNING that stays unresolved, not an info line', () => {
+    // Window STARTS BEFORE the code marker: severity sits on the same line but ahead of it, so
+    // slicing forward from the marker would silently cut the very field being asserted.
+    const at = SRC.indexOf("code: 'IMPORT_DB_PROVISION_FAILED'");
+    expect(at).toBeGreaterThan(-1);
+    const block = SRC.slice(at - 200, at + 600);
+    expect(block).toContain("severity: 'warning'");
+    expect(block).toContain('autoResolved: false');
+  });
+
+  it('diagnostics never break a boot — every recording call is guarded', () => {
+    const boot = SRC.slice(SRC.indexOf('const bootCommand ='), SRC.indexOf('const bootCommand =') + 1600);
+    expect(boot).toContain('catch { /* diagnostics are best-effort and must never break a boot */ }');
+  });
+});

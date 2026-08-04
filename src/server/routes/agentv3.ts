@@ -5094,7 +5094,12 @@ export function registerAgentV3Routes(app: Express): void {
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string>;
-        diag?: { record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }) => void } },
+        // `detail` carries the provider's/boot's own words for the ADMIN report; `recordCommand` is what
+        // lets this path leave the same forensic trail the agent's own commands already leave.
+        diag?: {
+          record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }) => void;
+          recordCommand?: (rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }) => void;
+        } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5242,10 +5247,28 @@ export function registerAgentV3Routes(app: Express): void {
             const provided: Record<string, string> = {};
             if (needsDb && typeof actuator.provisionBackend === 'function') {
               emitLive({ type: 'narration', agent: 'architect', text: '🗄️ Your app needs a database — provisioning a local PostgreSQL in the sandbox so it can boot…', ts: Date.now() });
+              const dbStartedAt = Date.now();
               try {
                 const prov = await withTimeout(actuator.provisionBackend(workspaceId, ['db']), 130_000, 'import-db-provision');
                 Object.assign(provided, prov.envVars ?? {}); // DATABASE_URL
-              } catch { /* DB provision is best-effort — the boot still tries without it */ }
+                // FORENSIC TRAIL (admin 2026-08-04): this outcome used to be swallowed entirely, so a
+                // report could never say whether the database the app needs actually came up. An
+                // autopsy of the "Cannot GET" class then has to GUESS, which is how a plausible-but-
+                // wrong root cause gets shipped.
+                opts.diag?.record({
+                  phase: 'preview', severity: 'info', code: 'IMPORT_DB_PROVISIONED',
+                  message: `Sandbox database provisioned for the preview in ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${Object.keys(prov.envVars ?? {}).join(', ') || 'no env vars returned'}).`,
+                  autoResolved: true,
+                });
+              } catch (e) {
+                // Still best-effort — the boot continues without a database — but NEVER silent again.
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_PROVISION_FAILED',
+                  message: `The sandbox database did NOT come up in ${Math.round((Date.now() - dbStartedAt) / 1000)}s. The app will boot without DATABASE_URL, so anything that queries on startup may fail.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
             }
             // P3 (admin 2026-07-05): CONJURE the app's own local secrets — SESSION_SECRET/JWT_SECRET
             // etc. get REAL random values, because an empty placeholder is itself a boot-killer
@@ -5263,8 +5286,26 @@ export function registerAgentV3Routes(app: Express): void {
             // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
             // start → serve), never a hardcoded `npm run dev` — CoreUI's script is `start`, so the
             // blind command failed with `Missing script: "dev"` and the live preview never booted.
-            const result = await withTimeout(actuator.runCommand(workspaceId, resolveDevRunCommand(importedFiles['package.json'] ?? null)), 240_000, 'import-preview-boot');
+            const bootCommand = resolveDevRunCommand(importedFiles['package.json'] ?? null);
+            const bootStartedAt = Date.now();
+            const result = await withTimeout(actuator.runCommand(workspaceId, bootCommand), 240_000, 'import-preview-boot');
             const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+            // THE REPORT'S BIGGEST BLIND SPOT, closed (admin 2026-08-04: "puri build report save hi
+            // nahi hoti hai"). recordCommand was wired ONLY into the ToolDispatcher, so it captured
+            // commands the AGENT ran and NOTHING from this path — yet this is the phase that takes
+            // minutes and produces the recurring "Cannot GET". An autopsy of build cb03bdde therefore
+            // found a 238-second window with no events at all; that was never a hole in TIME, it was
+            // a hole in the RECORDING. The boot's own log is the single most useful artefact for that
+            // failure class, so it now rides in the report like any other command.
+            try {
+              opts.diag?.recordCommand?.({
+                command: bootCommand,
+                exitCode: typeof result.exitCode === 'number' ? result.exitCode : null,
+                stdout: result.stdout ?? '',
+                stderr: result.stderr ?? '',
+                durationMs: Date.now() - bootStartedAt,
+              });
+            } catch { /* diagnostics are best-effort and must never break a boot */ }
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
               const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);

@@ -52,10 +52,8 @@
     "@google/genai": "^2.2.0",
     "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
-    "@tailwindcss/vite": "^4.1.14",
     "@types/dockerode": "^4.0.1",
-    "@vitejs/plugin-react": "^5.0.4",
-    "axios": "^1.16.1",
+    "axios": "^1.18.1",
     "cashfree-pg": "^6.0.4",
     "cheerio": "^1.2.0",
     "clsx": "^2.1.1",
@@ -81,30 +79,35 @@
     "simple-git": "^3.36.0",
     "tailwind-merge": "^3.6.0",
     "ts-morph": "^28.0.0",
+    "typescript": "~5.8.2",
     "uuid": "^14.0.0",
-    "vite": "^6.2.3",
     "xlsx": "^0.18.5",
     "xterm": "^5.3.0",
-    "xterm-addon-fit": "^0.8.0"
+    "xterm-addon-fit": "^0.8.0",
+    "yauzl": "^2.10.0",
+    "zip-stream": "^6.0.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
+    "@tailwindcss/vite": "^4.3.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.21",
     "firebase-tools": "^15.18.0",
     "postcss": "^8.5.23",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "vitest": "^2.1.9"
   },
   "overrides": {
     "fast-uri": "^3.1.5",
-    "ip-address": "^10.3.1"
+    "ip-address": "^10.3.1",
+    "axios": "$axios",
+    "undici": "^7.28.0"
   }
 }

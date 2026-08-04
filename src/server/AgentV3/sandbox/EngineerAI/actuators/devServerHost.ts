@@ -463,6 +463,12 @@ export function detectDevPort(output: string, fallback: number): number {
     || /\bError\b\s*[:[]/.test(line)          // "Error: connect …", "AggregateError [ECONNREFUSED]:"
     || /^\s*at\s/.test(line)                   // stack frame
     || /\b(?:errno|syscall|address)\s*:/i.test(line) // the error object's own dump
+    // ...and the dump's `port:` field, which is the port we FAILED to bind, not one we are serving on.
+    // REPRODUCED (mitrify autopsy 2026-08-04): a log containing ONLY a Node EADDRINUSE dump made
+    // detectDevPort(log, 3000) return 5000 — scraped straight out of the crash — because every other
+    // field of that dump was filtered here and `port:` was not. Matched narrowly, as a bare field line
+    // (`  port: 5000`), so a real announcement like "listening on port 3000" is untouched.
+    || /^\s*port\s*:\s*\d{1,5},?\s*$/i.test(line)
     || /UNHANDLED REJECTION|unhandledRejection|\bwarn(?:ing)?\b/i.test(line)
     || /failed to (?:connect|reach)|could not connect|connection refused/i.test(line);
 
@@ -481,6 +487,13 @@ export function detectDevPort(output: string, fallback: number): number {
     /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{2,5})/i,
     /port[:\s]+(\d{2,5})\b/i,
   ];
+
+  // A launch that died with EADDRINUSE bound NOTHING. Any port in that log is the port we collided
+  // with, so adopting it is how a dead relaunch gets reported as a live server: the port probe then
+  // finds the ORPHANED earlier process still holding it, upgrades the verdict to "up", and a 404ing
+  // corpse is published as the user's live preview ("Cannot GET /..."). Fall back to what the caller
+  // asked for instead of trusting a number that only appears because we failed.
+  if (/EADDRINUSE/i.test(output)) return fallback;
 
   const lines = output.split('\n').filter((l) => !isErrorLine(l));
   const pick = (patterns: RegExp[], rejectInfra: boolean): number | null => {

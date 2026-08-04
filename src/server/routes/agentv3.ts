@@ -5684,6 +5684,9 @@ export function registerAgentV3Routes(app: Express): void {
     // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
     // so each re-baseline step stays proportional to the app's real size, not to the growing budget.
     let etaBaseMs = 0;
+    // How many times the budget has been re-baselined. Threaded through liveEtaTick so a build that
+    // has already broken its estimate stops making fresh countdown promises.
+    let etaRevisions = 0;
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -5700,8 +5703,11 @@ export function registerAgentV3Routes(app: Express): void {
           // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
           // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
           // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
-          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs);
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
           etaTotalMs = tick.totalMs;
+          // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
+          // go" promise after the estimate has already been broken (mitrify autopsy 2026-08-04).
+          etaRevisions = tick.revisions;
           const text = tick.text;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop

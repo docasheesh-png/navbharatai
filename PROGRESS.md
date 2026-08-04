@@ -25055,3 +25055,30 @@ are genuinely the user's repo, even though they are not app source. Test-locked,
 duplicate entry point is still reported (the guard must not blind the check).
 
 **Verification:** server tsc clean; `npx vitest run` = **1040 files / 11,311 tests, 0 failures**.
+
+## 2026-08-04 — The ETA stops lying: "~1 min to go" was shown FIVE times in a 27-minute build
+
+**From the mitrify autopsy's open list.** The 2026-08-02 fix stopped the overrun line from FREEZING,
+but it re-baselined by a FIXED ~3-minute step. Two minutes later the countdown branch found ~1 minute
+of budget left and printed "~1 min to go" — then overran, extended by 3 again, and printed "~1 min to
+go" again. A **2-minute sawtooth of broken promises**: the reported build showed "~1 min to go" at
+minutes 6, 10, 14, 18 and 23 of a 27m32s run.
+
+**Root cause:** a countdown is only honest while we still hold an estimate we have not already broken.
+The old code resumed precise countdowns immediately after admitting the estimate was wrong.
+
+**Fix (`liveEtaTick`, pure):** the tick now carries a `revisions` count, threaded through the caller.
+- `revisions === 0` → count down exactly as before (the normal, correct case is untouched).
+- After ANY overrun → **stop counting down**. Show elapsed time — the one number we can stand behind —
+  plus "bigger than estimated, still working — I'll tell you the moment it's done."
+- Each successive overrun extends by DOUBLE the previous step (clamped 3–15 min), because repeated
+  overruns are evidence the estimate was wrong by a large factor, not a small one. A fixed step IS the
+  sawtooth.
+- After 2 broken promises it stops naming a number at all: another number is the same lie with a
+  bigger integer.
+
+Test-locked by replaying the real run (4-min estimate, 2-min ticks, out to minute 28): "1 min to go"
+may appear at most ONCE, no countdown may appear after the first overrun, and a build that finishes
+inside its estimate behaves exactly as before.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,317 tests, 0 failures**.

@@ -40,9 +40,10 @@ describe('User UI — single Report button, no report content shown', () => {
     expect(panel).not.toContain('onClick={() => void toggleHistoryReport()}');
     // The report action lives in the mobile More sheet (the footer slot it also occupied was a
     // duplicate and now opens Code Studio — see v3FooterApi.test.ts) and still SENDS, never downloads.
-    // Since 2026-08-04 it opens the "which build?" picker first — still a submit path, still no
-    // report content shown.
+    // Since 2026-08-04 it opens the "which build?" picker first, which itself ends in
+    // sendReportToAdmin — same invariant (submit-only), one step earlier in the path.
     expect(panel).toContain("setMobileSheet(null); void openReportPicker('sheet');");
+    expect(panel).toContain('sendReportToAdmin');
   });
 });
 

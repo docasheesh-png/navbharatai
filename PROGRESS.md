@@ -24858,6 +24858,63 @@ whole archive into memory and would crash a phone tab. That path needs a random-
 Stated to the admin as a correction to an earlier recommendation.
 
 ---
+
+
+---
+
+---
+
+## 2026-08-04 (cont.) — ROADMAP #1 Phase 1.1 + 1.2: one-click database is REAL
+
+The admin registered a Supabase OAuth app and set `SUPABASE_OAUTH_CLIENT_ID` / `_SECRET` in Cloud Run,
+which unlocked the #1 lever from `CAPABILITY_AUDIT.md` (Database 15/20 — "connect" was solid,
+"provision" was missing). Shipped in PR #2069 (cores) and #2079 (chain + UI + refresh).
+
+**The rule this had to respect:** `CLAUDE.md` forbids user apps running on NavBharatAI's billing. So we
+do NOT host their data — the project is created INSIDE the user's own Supabase account with a token
+THEY granted. Their data, their bill, their account; we only do the work.
+
+**The chain:** `status → start → callback → provision → the build uses it automatically`.
+
+- `supabaseOAuth.ts` (23 tests) — PKCE S256 (test asserts the authorize URL carries NO `code_verifier`);
+  signed expiring state binding the flow to the uid that STARTED it, with a test for the tampering that
+  would otherwise let an attacker attach their own Supabase account to a victim's apps; constant-time
+  compare with expiry checked AFTER the signature; exactly five scopes + a test on the ones we refuse.
+- `supabaseProvision.ts` (29 tests) — the hard part was honesty, not HTTP. Free-plan cap (2 projects/org)
+  is the most likely real failure so it is its own outcome with an actionable message, never "access
+  denied". **Created ≠ usable**: readiness is EARNED by polling to `ACTIVE_HEALTHY` and a timeout is
+  reported AS a timeout — the same lie class as announcing "provisioning PostgreSQL…" while nothing was
+  (autopsy ca5a4ca8). Only the anon key is fetched; the service-role key bypasses RLS, so not fetching
+  it means we cannot leak it (test asserts it never appears in the result).
+- `supabaseConnectionStore.ts` (6 tests) — encrypted with the platform's key-versioned AES-GCM. ONE
+  connection per USER (per-workspace would force consent for every app — the exact friction we removed).
+  "Never connected" / "row gone" / "cannot decrypt" all return null because the right answer to all
+  three is identical. 60s refresh skew: a token expiring in 4s passes a naive check then dies mid-request.
+- `routes/supabaseIntegration.ts` — user from the VERIFIED token and the signed state must match it;
+  PKCE verifier stays server-side, single-use, swept on insert; without `SECRET_ENCRYPTION_KEY` the
+  feature reports itself unavailable rather than signing with a guessable constant; popup posts to the
+  exact origin. Organization resolved at CONNECT time so "your account has no organization" appears on
+  the connect screen, not halfway through building an app. Keys land in the SAME vault, SAME names as
+  the manual form, so the builder inherits a path that already works.
+- **Phase 1.2 — silent renewal.** An access token lives ~1 hour but a user connects once and builds for
+  weeks; without renewal their SECOND app would meet "please connect again". `refreshAccessToken`
+  distinguishes REVOKED (400/401 → reconnect) from TRANSIENT (5xx/429/network → retry, never drag them
+  through consent), and persists a ROTATED refresh token before spending the access token — dropping a
+  rotation silently breaks the connection an hour later where the cause is very hard to find.
+- `SupabaseConnectCard.tsx` — above the manual form, which is untouched. Renders NOTHING when no OAuth
+  app is configured (never a button that would 503). Server messages pass through verbatim because they
+  are written to tell the user what to do. "Creating…" holds until real readiness. Disconnect repeats
+  that Supabase must be told separately — implying we revoked it would be a lie about a security action.
+- `authHeaders` centralized into `lib/authedFetch` the moment a second caller needed it (this repo has
+  already paid for that lesson with four copies of one path helper); timeout is now a parameter because
+  a vault write must not hang 20s while creating a database legitimately takes minutes.
+- `AppKnowledgeBase` entry `settings_database_oneclick` added in the same commit, including the honest
+  limits (2-project free cap, the wait, and that disconnect does not revoke).
+
+**Still open in Phase 1:** sandbox→production data migration (1.2 remainder), zero-setup Auth (1.3),
+per-app secrets vault polish (1.4).
+
+---
 ## 2026-08-04 — v5.0 mobile: footer Report → Code Studio, and the Report button now counts its sends
 
 **Admin request (screenshot):** "report button 2 jagah hai — footer me aur 3-dot More me. Footer wale
@@ -25326,3 +25383,5 @@ THEY granted. Their data, their bill, their account; we only do the work.
 
 **Still open in Phase 1:** sandbox→production data migration (1.2 remainder), zero-setup Auth (1.3),
 per-app secrets vault polish (1.4).
+
+

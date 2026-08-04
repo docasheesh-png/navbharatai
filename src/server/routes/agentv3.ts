@@ -8700,7 +8700,23 @@ export function registerAgentV3Routes(app: Express): void {
       // Best-effort + time-budgeted + abortable. Kill switch AGENTV3_CREDENTIAL_GUARD=off.
       if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted) {
         try {
-          const killers = findBootKillingEnvGuards(writtenFiles);
+          // RETROACTIVE SWEEP (admin 2026-08-03, "han karo"): on a FRESH build `writtenFiles` IS the whole
+          // app, but on an EDIT of an app built BEFORE the contract shipped, it holds only the handful of
+          // files this turn touched — so a boot-killer sitting in an untouched file (the common case for an
+          // OLD app) was invisible and shipped again. Scan the STORED workspace too, with this turn's
+          // writes layered on top (newer wins), so every pre-existing boot-killer is found the next time
+          // that app is built. Bounded to edit mode (a fresh build needs no extra read) and best-effort —
+          // a store failure falls back to writtenFiles alone rather than skipping the check.
+          let scanFiles: Map<string, string> | Record<string, string> = writtenFiles;
+          if (isEditMode) {
+            const stored = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+            if (Object.keys(stored).length > 0) {
+              const merged = new Map<string, string>(Object.entries(stored));
+              for (const [p, c] of writtenFiles) merged.set(p, c); // this turn's writes are the newer truth
+              scanFiles = merged;
+            }
+          }
+          const killers = findBootKillingEnvGuards(scanFiles);
           if (killers.length > 0) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
@@ -8716,9 +8732,14 @@ export function registerAgentV3Routes(app: Express): void {
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
               const healed = await guardHealRunner.run(bootKillerRepairInstruction(killers));
-              // Re-detect over the UPDATED writtenFiles (the heal's writes land there via onFileWrite), so
-              // the report states what is actually true now — never "healed" on the healer's own say-so.
-              const after = findBootKillingEnvGuards(writtenFiles);
+              // Re-detect over the SAME file set, with the heal's writes layered on (they land in
+              // writtenFiles via onFileWrite), so the report states what is actually true now — never
+              // "healed" on the healer's own say-so. Re-layering matters for the retroactive sweep: the
+              // untouched old files are still in `scanFiles`, so a heal that fixed only some of them
+              // honestly reports the rest as UNRESOLVED instead of vanishing with the stale snapshot.
+              const afterFiles = new Map<string, string>(scanFiles instanceof Map ? scanFiles : Object.entries(scanFiles));
+              for (const [p, c] of writtenFiles) afterFiles.set(p, c);
+              const after = findBootKillingEnvGuards(afterFiles);
               if (healed.ok && after.length === 0) {
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'BOOT_KILLING_ENV_GUARD_HEALED', autoResolved: true,

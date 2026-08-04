@@ -162,7 +162,7 @@ function isSafeImportPath(path: string): boolean {
  * Bounded-concurrency runner. Same shape as GithubApiTree's `pool` — kept local so this module has no
  * new dependency, and small enough that duplicating it beats coupling two unrelated files.
  */
-async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+export async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
   let idx = 0;
   const runners = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
     while (idx < items.length) await worker(items[idx++]);

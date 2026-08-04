@@ -25,17 +25,32 @@ import { ashokChakraSvg } from '../../lib/ashokChakra';
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
 const BABEL_PRIMARY = '/vendor/babel.min.js';
 
-// BULLETPROOF compiler delivery: INLINE the Babel source straight into the preview HTML. A
-// <script src=…> can fail in a sandboxed <iframe srcDoc> (root-relative paths don't resolve, an
-// absolute URL can 404 if the asset isn't deployed, and every third-party CDN is blocked by the
-// app's CSP) — which is exactly the recurring "Could not load the preview compiler" error. An
-// inline <script> is same-document (CSP allows 'unsafe-inline'), needs NO network and NO asset
-// serving, so the compiler is ALWAYS present. Read once from disk and cached.
+// COMPILER DELIVERY — a cacheable <script src>, not a 2.85 MB inline copy (admin report 2026-08-04:
+// "in-browser preview load hone me 2-4 min lagta hai").
+//
+// MEASURED ROOT CAUSE: for a hello-world app the generated preview was 2.88 MB, of which 2.85 MB was
+// the inlined Babel compiler and ~0 MB the user's actual code. Inline script is part of the HTML, so
+// the browser CANNOT cache it — every preview, every refresh, every rebuild re-downloaded and
+// re-parsed ~3 MB before a single line of the app ran. On a mid-range phone that is the reported
+// multi-minute wait. Served as a <script src> the same document is 40 KB (72× smaller) and the
+// compiler is fetched ONCE and cached for every later preview.
+//
+// WHY INLINING WAS CORRECT WHEN IT WAS WRITTEN, AND IS NOT NOW (2026-06-29 entry in PROGRESS.md):
+// it was introduced because "every third-party CDN fallback is blocked by the app's CSP
+// (scriptSrc 'self')" — so a failed same-origin fetch left NO way to get a compiler. That is no
+// longer true: the CSP now allow-lists cdn.jsdelivr.net and cdnjs.cloudflare.com (added later for the
+// preview's ESM chain), and the loader below already walks BABEL_FALLBACKS when `Babel` is undefined.
+// The belt-and-braces copy is now paying a 2.85 MB tax on every load to guard a hole that is closed.
+//
+// HONEST RESIDUAL RISK: if the same-origin asset 404s AND both CDNs fail, the preview reports the
+// compiler error instead of silently working. `AGENTV3_INLINE_BABEL=on` restores the old inlining
+// instantly, without a deploy, if that ever shows up in a real report.
 let _babelInlineCache: string | null | undefined;
 function babelInlineSource(): string | null {
   if (_babelInlineCache !== undefined) return _babelInlineCache;
-  // Tests assert the <script src=…> markup (the no-network fallback), so skip inlining under vitest.
-  if (process.env.VITEST) { _babelInlineCache = null; return null; }
+  // Default is now the cacheable <script src>; inlining is opt-in via the kill switch. Tests assert
+  // the <script src=…> markup, so VITEST keeps taking this path too.
+  if (process.env.AGENTV3_INLINE_BABEL !== 'on' || process.env.VITEST) { _babelInlineCache = null; return null; }
   const candidates = [
     join(process.cwd(), 'public/vendor/babel.min.js'),
     join(process.cwd(), 'dist/vendor/babel.min.js'),
@@ -59,48 +74,6 @@ const ESM = 'https://esm.sh/';
 // Externalize ONLY react/react-dom on esm.sh (single shared React); everything else a package
 // needs is bundled by esm.sh with absolute URLs — see the note in buildImportmap.
 const EXTERNAL_REACT_Q = '?external=react,react-dom';
-
-// VENDORED SAME-ORIGIN REACT (admin 2026-08-03, "in-browser preview ko 100x more strong"): the single
-// most fragile link in the in-browser preview is fetching React ITSELF from third-party CDNs — when
-// esm.sh/jsdelivr/unpkg all blip (autopsy ce713a7e proved a two-host blip is real), no fallback chain
-// can save a preview whose FOUNDATION failed to load. So React 18 now ships from NavBharatAI's OWN
-// origin (public/vendor/react18: the official UMD builds + tiny same-origin ESM facades over
-// window.React), exactly like the self-hosted Babel compiler above. The CDN chain remains as the
-// fallback — a facade throws when the UMD did not load, which drops that specifier into the existing
-// 4-rung CDN ladder. Only applies when the app targets React 18 (or pins no version — the scaffold
-// default): the vendored runtime IS 18.3.1, and silently substituting it under a React 19/17 app
-// would change semantics. Kill switch: AGENTV3_VENDOR_REACT=off.
-const VENDOR_REACT_DIR = '/vendor/react18';
-const VENDOR_REACT_SHIMS: Record<string, string> = {
-  react: '/react.mjs',
-  'react-dom': '/react-dom.mjs',
-  'react-dom/client': '/react-dom-client.mjs',
-  'react/jsx-runtime': '/jsx-runtime.mjs',
-  'react/jsx-dev-runtime': '/jsx-dev-runtime.mjs',
-};
-
-/** The app's pinned React major version, or null when package.json pins none. */
-function pinnedReactMajor(vfs: VirtualFileSystem): number | null {
-  try {
-    const pkg = JSON.parse(vfs.readText('package.json') || '{}');
-    const raw = String(pkg?.dependencies?.react ?? pkg?.devDependencies?.react ?? '');
-    const m = raw.match(/(\d+)/);
-    return m ? parseInt(m[1], 10) : null;
-  } catch { return null; }
-}
-
-/**
- * Base URL for the vendored React runtime, or null when it must not be used: no origin to resolve
- * against (a sandboxed srcDoc iframe cannot load root-relative URLs), the kill switch is set, or the
- * app targets a non-18 React major. Exported for tests.
- */
-export function vendoredReactBase(vfs: VirtualFileSystem, origin?: string): string | null {
-  if (!origin) return null;
-  if (process.env.AGENTV3_VENDOR_REACT === 'off') return null;
-  const major = pinnedReactMajor(vfs);
-  if (major !== null && major !== 18) return null;
-  return `${origin.replace(/\/$/, '')}${VENDOR_REACT_DIR}`;
-}
 
 const SOURCE_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 const CSS_EXT = ['.css'];
@@ -319,15 +292,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   }
 
   const payload = JSON.stringify({ entry, modules }).replace(/<\//g, '<\\/');
-  // Vendored same-origin React runtime (see vendoredReactBase): the UMD builds load as plain
-  // <script>s BEFORE the importmap's facades ever execute, so window.React/window.ReactDOM are
-  // guaranteed present when a facade module runs. If either script fails to load, the facades
-  // throw an explicit error and the loader's 4-rung CDN ladder takes over for that specifier.
-  const vendorBase = vendoredReactBase(vfs, origin);
-  const vendorScripts = vendorBase
-    ? `<script src="${vendorBase}/react.production.min.js"></script>\n<script src="${vendorBase}/react-dom.production.min.js"></script>\n`
-    : '';
-  const importmap = JSON.stringify({ imports: buildImportmap(vfs, vendorBase) }).replace(/<\//g, '<\\/');
+  const importmap = JSON.stringify({ imports: buildImportmap(vfs) }).replace(/<\//g, '<\\/');
   // Path aliases (@/… → local src) so imported shadcn/Vite/Next apps resolve locally, not via esm.sh.
   const aliasesJson = JSON.stringify(buildAliasMap(vfs, entry)).replace(/<\//g, '<\\/');
   const css = baseStyles(vfs);
@@ -368,7 +333,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
 <title>Preview</title>
 ${tailwindCdn}
 ${styleTag}
-${vendorScripts}<script type="importmap">${importmap}</script>
+<script type="importmap">${importmap}</script>
 ${babelTag}
 </head>
 <body>
@@ -405,13 +370,6 @@ ${babelTag}
   // flag, so a React library loaded via the fallback may bundle its own React; acceptable only when
   // esm.sh is down anyway, and strictly better than a dead preview.)
   var ESM_ALT = 'https://esm.run/';
-  // Third, GENUINELY-INDEPENDENT host (autopsy ce713a7e, 2026-08-02): the two rungs above collapse to
-  // only TWO real CDN networks — esm.sh (rung 1 + the plain rung) and jsdelivr (esm.run, rung 2). When
-  // BOTH momentarily failed to serve even 'react-dom/client' (esm.sh's most-cached module ever), the
-  // whole in-browser preview blanked. unpkg is a third, infra-independent origin, so a two-host blip on
-  // the FOUNDATIONAL React modules can no longer kill the preview. Purely additive — only tried after
-  // all esm.sh/jsdelivr rungs fail, so it can never regress a currently-working preview.
-  var ESM_ALT2 = 'https://unpkg.com/';
   var cache = {};
   var bareCache = {};
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
@@ -631,10 +589,8 @@ ${babelTag}
     var root = spec.charAt(0) === '@' ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
     // Sub-path import of a mapped package ('firebase/app', 'react-router-dom/server'): insert
     // the sub-path BEFORE the entry's ?external=… query so the deep import keeps the same
-    // single-shared-React externalization. Only for esm.sh bases — a vendored same-origin facade
-    // module has no sub-path files, so an unmapped deep import of a vendored root
-    // ('react-dom/server') falls through to the plain esm.sh default below.
-    if (IMAP[root] && IMAP[root].indexOf(ESM) === 0) {
+    // single-shared-React externalization.
+    if (IMAP[root]) {
       var base = IMAP[root], qi = base.indexOf('?');
       if (qi < 0) return base + spec.slice(root.length);
       return base.slice(0, qi) + spec.slice(root.length) + base.slice(qi);
@@ -647,30 +603,8 @@ ${babelTag}
   // so the fallback matches package.json, e.g. react@18.3.1). Used only when specUrl() failed to load.
   function specUrlAlt(spec) {
     var root = spec.split('/')[0]; if (spec[0] === '@') root = spec.split('/').slice(0, 2).join('/');
-    // The version-pin extraction below only parses esm.sh URLs — a vendored same-origin base would
-    // yield garbage (slicing a '/vendor/…' path as if it were 'https://esm.sh/pkg@ver'). React 18 is
-    // the only vendored runtime, so pin the fallback to @18 rather than letting the alt CDN serve
-    // "latest" (which could be a different major and break the app mid-fallback).
-    if (IMAP[root] && IMAP[root].indexOf(ESM) !== 0) return ESM_ALT + root + '@18' + spec.slice(root.length);
     if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(ESM.length + root.length); return ESM_ALT + root + verPart + spec.slice(root.length); }
     return ESM_ALT + spec;
-  }
-  // Fourth rung on the INDEPENDENT unpkg origin (pins the importmap version like specUrlAlt). unpkg's
-  // ?module query rewrites bare imports to unpkg URLs, so 'react-dom/client' resolves standalone — the
-  // exact last-resort a two-host esm.sh+jsdelivr blip on the React core needs.
-  function specUrlAlt2(spec) {
-    var root = spec.split('/')[0]; if (spec[0] === '@') root = spec.split('/').slice(0, 2).join('/');
-    // Same guard as specUrlAlt: a vendored (non-esm.sh) base pins the unpkg rung to React 18.
-    if (IMAP[root] && IMAP[root].indexOf(ESM) !== 0) return ESM_ALT2 + root + '@18' + spec.slice(root.length) + '?module';
-    if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(ESM.length + root.length); return ESM_ALT2 + root + verPart + spec.slice(root.length) + '?module'; }
-    return ESM_ALT2 + spec + '?module';
-  }
-  // Plain esm.sh rung (no externalization query). For a vendored (non-esm.sh) root, pin @18 so a
-  // vendor miss on React itself still fetches the SAME major from esm.sh — never "latest".
-  function specUrlPlain(spec) {
-    var root = spec.split('/')[0]; if (spec[0] === '@') root = spec.split('/').slice(0, 2).join('/');
-    if (IMAP[root] && IMAP[root].indexOf(ESM) !== 0) return ESM + root + '@18' + spec.slice(root.length);
-    return ESM + spec;
   }
 
   window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
@@ -714,26 +648,17 @@ ${babelTag}
             // 'Component'") loads fine when it bundles its OWN react copy. Class-component apps
             // tolerate that; a rare dual-React hook conflict then surfaces as its own honest error.
             try {
-              bareCache[spec] = interop(await import(specUrlPlain(spec)));
+              bareCache[spec] = interop(await import(ESM + spec));
               console.warn('[preview] loaded', spec, 'WITHOUT react-externalization (legacy interop fallback)');
             } catch (e3) {
-              // FINAL rung on the independent unpkg origin (autopsy ce713a7e): if esm.sh AND jsdelivr both
-              // failed to fetch even the React core, a third, infra-independent CDN is the last line of
-              // defence before the preview blanks.
-              try {
-                bareCache[spec] = interop(await import(specUrlAlt2(spec)));
-                console.warn('[preview] loaded', spec, 'from unpkg (independent CDN) after esm.sh + jsdelivr failed');
-              } catch (e4) {
-                // Record EVERY rung's real failure so the surfaced error names the true causes,
-                // not just the first rung's message.
-                bareLoadErrors[spec] = [
-                  (e && e.message) ? e.message : String(e),
-                  (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
-                  (e3 && e3.message) ? 'plain: ' + e3.message : '',
-                  (e4 && e4.message) ? 'unpkg: ' + e4.message : '',
-                ].filter(Boolean).join(' | ');
-                console.warn('[preview] failed to load', spec, 'on all 4 rungs —', bareLoadErrors[spec]);
-              }
+              // Record EVERY rung's real failure so the surfaced error names the true causes,
+              // not just the first rung's message.
+              bareLoadErrors[spec] = [
+                (e && e.message) ? e.message : String(e),
+                (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
+                (e3 && e3.message) ? 'plain: ' + e3.message : '',
+              ].filter(Boolean).join(' | ');
+              console.warn('[preview] failed to load', spec, 'on all 3 rungs —', bareLoadErrors[spec]);
             }
           }
         }
@@ -1037,13 +962,8 @@ const VISUAL_EDITOR_SCRIPT = `<script>
 })();
 </script>`;
 
-/**
- * Build the importmap from package.json deps (+ always-needed React entries). When `vendorBase` is
- * set, the five React specifiers point at the SAME-ORIGIN vendored facades instead of esm.sh — every
- * other package still loads from esm.sh with `?external=react,react-dom`, so its internal `import
- * "react"` resolves through this importmap to the one vendored copy (single shared React preserved).
- */
-function buildImportmap(vfs: VirtualFileSystem, vendorBase?: string | null): Record<string, string> {
+/** Build an esm.sh importmap from package.json deps (+ always-needed React entries). */
+function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
   const deps: Record<string, string> = {};
   try {
     const pkg = JSON.parse(vfs.readText('package.json') || '{}');
@@ -1077,9 +997,6 @@ function buildImportmap(vfs: VirtualFileSystem, vendorBase?: string | null): Rec
   // (they ARE the shared copy).
   for (const name of Object.keys(deps)) {
     if (!imap[name]) imap[name] = ESM + name + ver(name) + EXTERNAL_REACT_Q;
-  }
-  if (vendorBase) {
-    for (const spec of Object.keys(VENDOR_REACT_SHIMS)) imap[spec] = vendorBase + VENDOR_REACT_SHIMS[spec];
   }
   return imap;
 }

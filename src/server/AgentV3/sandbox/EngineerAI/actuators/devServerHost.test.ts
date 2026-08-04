@@ -570,3 +570,54 @@ describe('detectDevPort — a connection ERROR must never answer "which port is 
     expect(detectDevPort('open http://localhost:5173/ in your browser', 3000)).toBe(5173);
   });
 });
+
+// REPRODUCED DEFECT (mitrify autopsy 2026-08-04, build cb03bdde → "Cannot GET /customer/home").
+//
+// detectDevPort scraped a port out of a Node EADDRINUSE CRASH DUMP. `isErrorLine` filtered every other
+// field of that dump (errno / syscall / address) but not `port:`, so the weak `/port[:\s]+(\d{2,5})/`
+// pattern matched `  port: 5000` — a port we FAILED to bind — and reported it as the port we were
+// serving on. Verified by running it: detectDevPort(<EADDRINUSE-only log>, 3000) returned 5000.
+//
+// Why that is user-visible and not cosmetic: the adopted port gets re-probed, the probe finds the
+// ORPHANED earlier process still holding it, the verdict is upgraded to "up", and a 404ing corpse is
+// published as the live preview URL — which is exactly the "Cannot GET" the user sees.
+describe('detectDevPort — a crash dump is not an announcement', () => {
+  const EADDRINUSE_LOG = [
+    '> rest-express@1.0.0 dev',
+    '> NODE_ENV=development tsx server/index.ts',
+    '',
+    'Error: listen EADDRINUSE: address already in use 0.0.0.0:5000',
+    '    at Server.setupListenHandle [as _listen2] (node:net:1898:16)',
+    "  code: 'EADDRINUSE',",
+    '  errno: -98,',
+    "  syscall: 'listen',",
+    "  address: '0.0.0.0',",
+    '  port: 5000',
+    '}',
+  ].join('\n');
+
+  it('never adopts the port out of an EADDRINUSE failure', () => {
+    // The exact regression: this returned 5000 before the fix.
+    expect(detectDevPort(EADDRINUSE_LOG, 3000)).toBe(3000);
+  });
+
+  it('ignores a bare `port:` field line, which only ever appears inside an error dump', () => {
+    expect(detectDevPort('  port: 4321\n', 3000)).toBe(3000);
+  });
+
+  it('still reads a REAL announcement that happens to say "port"', () => {
+    // The narrow filter must not cost us the signal it looks like: this is the normal success line.
+    expect(detectDevPort('[express] serving on port 5000', 3000)).toBe(5000);
+    expect(detectDevPort('Server listening on port 4000', 3000)).toBe(4000);
+  });
+
+  it('still reads Vite\'s Local: line', () => {
+    expect(detectDevPort('  ➜  Local:   http://localhost:5173/', 3000)).toBe(5173);
+  });
+
+  it('a log with a real announcement AND a later EADDRINUSE still refuses the port', () => {
+    // The log is TRUNCATED on relaunch, so in practice only the failure survives — but if both are
+    // present the launch still ended in a collision, and the safe answer is what the caller asked for.
+    expect(detectDevPort(`serving on port 5000\n${EADDRINUSE_LOG}`, 3000)).toBe(3000);
+  });
+});

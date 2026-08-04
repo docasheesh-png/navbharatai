@@ -51,25 +51,25 @@ export function isDispatchableWorkflow(file: unknown): file is ShipWorkflowFile 
   return isShipWorkflow(file);
 }
 
-/** A GitHub artifact id is numeric — never interpolate a caller-supplied string into the API path. */
-export function isValidArtifactId(id: unknown): boolean {
-  return (typeof id === 'string' || typeof id === 'number') && /^\d{1,20}$/.test(String(id));
-}
+// Artifact fetching/unwrapping moved to lib/buildArtifact when the Nav App Store needed the SAME
+// bytes. Re-exported here so existing importers and tests are untouched — one implementation, no
+// second copy to drift (this repo has already paid for that with four copies of one path helper).
+export { isValidArtifactId, pickBinaryName } from '../lib/buildArtifact';
+import { fetchBuildArtifact, isValidArtifactId, type ArtifactFetcher } from '../lib/buildArtifact';
 
-/**
- * Pick the real binary out of a GitHub artifact zip. GitHub always wraps artifacts in a zip, but a
- * non-technical user asked for the app file itself — so we unwrap it and hand back the .aab/.apk/.ipa.
- * Returns null when the zip holds nothing app-shaped, so the caller can fail honestly instead of
- * serving a confusing archive.
- */
-export function pickBinaryName(names: string[]): string | null {
-  const order = ['.aab', '.apk', '.ipa'];
-  for (const ext of order) {
-    const hit = names.find((n) => n.toLowerCase().endsWith(ext) && !n.startsWith('__MACOSX/'));
-    if (hit) return hit;
-  }
-  return null;
-}
+/** The real HTTP call, kept at the edge so the fetching logic itself stays testable without a network. */
+const githubZipFetcher: ArtifactFetcher = async (url, token) => {
+  const r = await axios.get(url, {
+    headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5,
+  });
+  return { status: r.status, data: r.data as ArrayBuffer };
+};
+
+/** JSZip is imported lazily — it is only needed on the download path. */
+const jsZipLoader = async (buf: Buffer) => {
+  const JSZip = (await import('jszip')).default;
+  return await JSZip.loadAsync(buf) as unknown as { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
+};
 
 export function registerMobileShipRoutes(app: Express): void {
   /** The step-by-step, non-technical publishing walkthrough (pure data — also feeds the AIs). */
@@ -151,29 +151,14 @@ export function registerMobileShipRoutes(app: Express): void {
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
     if (!isValidArtifactId(artifactId)) return res.status(400).json({ error: 'A valid file id is required.' });
 
-    try {
-      const zipRes = await axios.get(
-        `https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`,
-        { headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5 },
-      );
-      const JSZip = (await import('jszip')).default;
-      const zip = await JSZip.loadAsync(Buffer.from(zipRes.data as ArrayBuffer));
-      const name = pickBinaryName(Object.keys(zip.files));
-      if (!name) {
-        return res.status(422).json({ error: 'That build did not contain an installable app file.' });
-      }
-      const content = await zip.files[name].async('nodebuffer');
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${name.split('/').pop()}"`);
-      res.send(content);
-    } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      res.status(status === 404 ? 404 : 502).json({
-        error: status === 404
-          ? 'That file has expired on GitHub (builds are kept for 14 days). Run the build again.'
-          : 'Could not download the app from GitHub.',
-      });
+    const got = await fetchBuildArtifact({ owner, repo, artifactId, token }, githubZipFetcher, jsZipLoader);
+    if (!got.ok) {
+      const status = got.failure === 'expired' ? 404 : got.failure === 'not-app' ? 422 : got.failure === 'bad-request' ? 400 : 502;
+      return res.status(status).json({ error: got.message });
     }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${got.fileName}"`);
+    res.send(got.bytes);
   });
 
   /**

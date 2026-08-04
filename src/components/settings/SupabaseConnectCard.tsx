@@ -27,11 +27,13 @@ interface Status {
 interface Props {
   /** Used only to name the created project so it is recognisable in the user's own dashboard. */
   appLabel?: string;
+  /** When given, the app's generated migrations are applied to the new database so it is not empty. */
+  workspaceId?: string;
   /** Called after a successful provision so the parent can refresh what it shows. */
   onProvisioned?: () => void;
 }
 
-export function SupabaseConnectCard({ appLabel, onProvisioned }: Props) {
+export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Props) {
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState<'connect' | 'create' | 'disconnect' | null>(null);
   const [error, setError] = useState('');
@@ -83,13 +85,21 @@ export function SupabaseConnectCard({ appLabel, onProvisioned }: Props) {
       const res = await authedFetch('/api/integrations/supabase/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appLabel: appLabel ?? '' }),
+        body: JSON.stringify({ appLabel: appLabel ?? '', workspaceId: workspaceId ?? '' }),
       }, 240_000);
       const data = await res.json();
       // The server words these to tell the user what to do next (plan limit, still starting up,
       // reconnect) — passing them through unchanged is more useful than any generic line here.
       if (!res.ok) { setError(data?.error || 'Could not create the database.'); return; }
-      setDone(`Database ready. Your app will use it automatically — no keys to copy.`);
+      // The database and its TABLES are reported separately, because they fail separately. Saying
+      // "ready" when the schema did not apply would be the nearly-true claim this feature exists to
+      // avoid — the app would be wired to an empty database and every query would fail.
+      if (data?.schemaApplied === false) {
+        setDone('Your database was created and your app is wired to it, but its tables could not be '
+          + 'set up yet. ' + (data?.schemaNote || 'Try "Create database" again in a moment.'));
+      } else {
+        setDone('Database ready. Your app will use it automatically — no keys to copy.');
+      }
       onProvisioned?.();
     } catch {
       setError('Could not reach NavBharatAI. Check your connection and try again.');

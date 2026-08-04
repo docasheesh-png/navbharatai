@@ -162,6 +162,7 @@ import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findC
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
+import { pickerItems } from '../../lib/reportPicker';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
@@ -2693,10 +2694,41 @@ export function registerAgentV3Routes(app: Express): void {
     }
     // Resolve the report from the same durable sources the download used.
     let report: BuildDiagnosticsReport | null = null;
-    if (workspaceId && buildId) report = await getDiagnosticsHistoryItem(workspaceId, buildId).catch(() => null);
-    if (!report && workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
-    if (!report && verifiedUid) report = lastDiagnostics.get(verifiedUid) ?? null;
-    if (!report && verifiedUid) report = await loadLatestForUser(verifiedUid).catch(() => null);
+    if (workspaceId && buildId) {
+      // A build PICKED from the report list. The user chose this one deliberately — resolve exactly
+      // it, and fail honestly rather than silently falling back to "latest", which would send us a
+      // report about a different build than the one they are complaining about.
+      report = await getDiagnosticsHistoryItem(workspaceId, buildId).catch(() => null);
+      if (!report) {
+        res.status(404).json({ error: 'That build\'s report is no longer available — please pick another build.' });
+        return;
+      }
+    }
+    // P0 SIBLING (2026-08-04): the download path validates every fallback candidate against the
+    // ACTIVE build the client is looking at (its buildId + promptHash) so a stale report for a
+    // DIFFERENT app can never be exported. This submit path was built later and dropped the guard —
+    // the client was already sending `activeBuildId`/`promptHash` and the server ignored both, so
+    // "Report" on the build in front of you could quietly submit a previous app's report and send us
+    // to debug the wrong thing. Same expectation object, same accept/reject rule.
+    const submitExpect: ActiveBuildExpectation = {
+      buildId: typeof body.activeBuildId === 'string' && body.activeBuildId ? body.activeBuildId : undefined,
+      promptHash: typeof body.promptHash === 'string' && body.promptHash ? body.promptHash : undefined,
+      workspaceId: workspaceId || undefined,
+    };
+    // Only guard the FALLBACK chain: an explicitly picked past build is, by definition, not the
+    // active one, and rejecting the user's own choice for not being "current" would be the bug.
+    const strictSubmit = !buildId && hasActiveBuildExpectation(submitExpect);
+    const acceptSubmit = (r: BuildDiagnosticsReport | null | undefined): BuildDiagnosticsReport | null => {
+      if (!r) return null;
+      if (strictSubmit && !reportMatchesActiveBuild(r, submitExpect).ok) {
+        audit('AGENTV3_REPORT_IDENTITY_MISMATCH', { workspaceId, wantBuildId: submitExpect.buildId, gotBuildId: r.buildId }, 'warn');
+        return null;
+      }
+      return r;
+    };
+    if (!report && workspaceId) report = acceptSubmit(await loadDiagnostics(workspaceId).catch(() => null));
+    if (!report && verifiedUid) report = acceptSubmit(lastDiagnostics.get(verifiedUid) ?? null);
+    if (!report && verifiedUid) report = acceptSubmit(await loadLatestForUser(verifiedUid).catch(() => null));
     if (!report) {
       res.status(404).json({ error: 'No build report yet — build an app first, then send the report.' });
       return;
@@ -2757,6 +2789,22 @@ export function registerAgentV3Routes(app: Express): void {
         ? history
         : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(h.summary), rootCause: h.rootCause === undefined ? undefined : redactProviderError(h.rootCause) }));
       res.json({ history: historyOut });
+      return;
+    }
+    // REPORT PICKER (admin 2026-08-04): "Report" used to be able to send only the LATEST build, so a
+    // bug from three edits ago was unreportable — the user clicked Report and we received a report
+    // about a different, working build. This lists the workspace's past builds so they can point at
+    // the one that actually broke.
+    //
+    // A SEPARATE mode from `history=1` on purpose. The report is admin-only (2026-07-29): the user
+    // submits it and never reads it. `history=1` carries our analysis (summary, root cause, issue
+    // counts) and stays as it was for admin tooling; this mode returns ONLY what the user already
+    // knows — when it ran, what they asked for, whether it worked — via the one tested strip
+    // (`pickerItems`), so a field added to the history entry later cannot leak onto a user's screen.
+    if (req.query.picker === '1') {
+      if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+      const entries = await listDiagnosticsHistory(workspaceId).catch(() => []);
+      res.json({ builds: pickerItems(entries) });
       return;
     }
     // FULL SESSION report (scope=session): stitch EVERY settled build of this session together, oldest
@@ -5308,7 +5356,12 @@ export function registerAgentV3Routes(app: Express): void {
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string>;
-        diag?: { record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }) => void } },
+        // `detail` carries the provider's/boot's own words for the ADMIN report; `recordCommand` is what
+        // lets this path leave the same forensic trail the agent's own commands already leave.
+        diag?: {
+          record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }) => void;
+          recordCommand?: (rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }) => void;
+        } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5456,10 +5509,28 @@ export function registerAgentV3Routes(app: Express): void {
             const provided: Record<string, string> = {};
             if (needsDb && typeof actuator.provisionBackend === 'function') {
               emitLive({ type: 'narration', agent: 'architect', text: '🗄️ Your app needs a database — provisioning a local PostgreSQL in the sandbox so it can boot…', ts: Date.now() });
+              const dbStartedAt = Date.now();
               try {
                 const prov = await withTimeout(actuator.provisionBackend(workspaceId, ['db']), 130_000, 'import-db-provision');
                 Object.assign(provided, prov.envVars ?? {}); // DATABASE_URL
-              } catch { /* DB provision is best-effort — the boot still tries without it */ }
+                // FORENSIC TRAIL (admin 2026-08-04): this outcome used to be swallowed entirely, so a
+                // report could never say whether the database the app needs actually came up. An
+                // autopsy of the "Cannot GET" class then has to GUESS, which is how a plausible-but-
+                // wrong root cause gets shipped.
+                opts.diag?.record({
+                  phase: 'preview', severity: 'info', code: 'IMPORT_DB_PROVISIONED',
+                  message: `Sandbox database provisioned for the preview in ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${Object.keys(prov.envVars ?? {}).join(', ') || 'no env vars returned'}).`,
+                  autoResolved: true,
+                });
+              } catch (e) {
+                // Still best-effort — the boot continues without a database — but NEVER silent again.
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_PROVISION_FAILED',
+                  message: `The sandbox database did NOT come up in ${Math.round((Date.now() - dbStartedAt) / 1000)}s. The app will boot without DATABASE_URL, so anything that queries on startup may fail.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
             }
             // P3 (admin 2026-07-05): CONJURE the app's own local secrets — SESSION_SECRET/JWT_SECRET
             // etc. get REAL random values, because an empty placeholder is itself a boot-killer
@@ -5477,8 +5548,26 @@ export function registerAgentV3Routes(app: Express): void {
             // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
             // start → serve), never a hardcoded `npm run dev` — CoreUI's script is `start`, so the
             // blind command failed with `Missing script: "dev"` and the live preview never booted.
-            const result = await withTimeout(actuator.runCommand(workspaceId, resolveDevRunCommand(importedFiles['package.json'] ?? null)), 240_000, 'import-preview-boot');
+            const bootCommand = resolveDevRunCommand(importedFiles['package.json'] ?? null);
+            const bootStartedAt = Date.now();
+            const result = await withTimeout(actuator.runCommand(workspaceId, bootCommand), 240_000, 'import-preview-boot');
             const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+            // THE REPORT'S BIGGEST BLIND SPOT, closed (admin 2026-08-04: "puri build report save hi
+            // nahi hoti hai"). recordCommand was wired ONLY into the ToolDispatcher, so it captured
+            // commands the AGENT ran and NOTHING from this path — yet this is the phase that takes
+            // minutes and produces the recurring "Cannot GET". An autopsy of build cb03bdde therefore
+            // found a 238-second window with no events at all; that was never a hole in TIME, it was
+            // a hole in the RECORDING. The boot's own log is the single most useful artefact for that
+            // failure class, so it now rides in the report like any other command.
+            try {
+              opts.diag?.recordCommand?.({
+                command: bootCommand,
+                exitCode: typeof result.exitCode === 'number' ? result.exitCode : null,
+                stdout: result.stdout ?? '',
+                stderr: result.stderr ?? '',
+                durationMs: Date.now() - bootStartedAt,
+              });
+            } catch { /* diagnostics are best-effort and must never break a boot */ }
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
               const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
@@ -8687,7 +8776,19 @@ export function registerAgentV3Routes(app: Express): void {
         // overlaid with this build's writes (newest content wins), so every integrity check judges the
         // complete app the user actually runs. Entry/html candidates from the sandbox remain the
         // fallback for anything not yet persisted.
+        // POST-ANSWER TIMING (autopsy cb03bdde, admin 2026-08-04): the user's answer landed at 399s and
+        // the build did not finish until 624s — 225 seconds of "still working" AFTER the reply was on
+        // screen. The autopsy could not say what dominated it, because nothing here was timed.
+        //
+        // Deliberately MEASURING rather than optimising: the obvious move is to background this whole
+        // pass, but the full-workspace load exists for a real reason (an edit build writes 3-4 files, so
+        // `writtenFiles` alone makes the integrity checks blind and produces FALSE positives), and
+        // backgrounding it risks the report finalising before these findings land — the exact blind spot
+        // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
+        // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
+        const integrityStartedAt = Date.now();
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
         for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
           if (integrityFiles[p] === undefined) {
@@ -8838,6 +8939,16 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* self-heal is best-effort — the honest warnings stand */ }
           }
         }
+        // The measurement the autopsy asked for (see the note above `integrityStartedAt`): how much of
+        // the post-answer tail this whole pass owns, and how much of THAT is just loading the project.
+        // Recorded even when nothing was found — a fast pass is the evidence that the time is elsewhere.
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'POST_ANSWER_TIMING',
+          message: `Post-answer integrity pass took ${Math.round((Date.now() - integrityStartedAt) / 1000)}s, of which loading the durable project was ${Math.round(storeLoadMs / 1000)}s (${Object.keys(storeFiles).length} files).`,
+          autoResolved: true,
+        });
       } catch { /* integrity analysis is best-effort — never blocks a build */ }
 
       // PRE-VERDICT DUPLICATE-IMPORT DEDUPE (build-report autopsy 2026-08-02, buildId a2f32f38): a weak-tier

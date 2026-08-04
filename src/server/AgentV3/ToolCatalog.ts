@@ -658,13 +658,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'Generate REAL, working authentication code for the app and write it to the workspace. ' +
         'type "jwt" (default) writes a dependency-free HS256 JWT module (sign/verify via Node crypto, ' +
         'reads JWT_SECRET) plus an Express Bearer-token middleware — runs with no install. type ' +
+        '"supabase" writes signup/login/logout/password-reset/session helpers against the user\'s OWN Supabase project (nothing to configure — the keys are already in the workspace); prefer it when a Supabase database is connected. ' +
         '"firebase" writes client auth helpers (signIn/signUp/signOut/onAuthChange) over the Firebase ' +
         'SDK (needs `firebase` installed). Use when the app needs login/protected routes — then wire ' +
         'signToken on login and the middleware onto protected routes with edit_file.',
       input_schema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['jwt', 'firebase'], description: 'Auth strategy. Defaults to "jwt" (dependency-free).' },
+          type: { type: 'string', enum: ['jwt', 'firebase', 'supabase'], description: 'Auth strategy. Use "supabase" whenever the app has a Supabase database connected — it needs NO configuration from the user. Defaults to "jwt" (dependency-free).' },
         },
       },
     },

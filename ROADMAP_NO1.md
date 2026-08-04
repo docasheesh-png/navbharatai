@@ -94,9 +94,10 @@ ek click me, humare through provision karna (OAuth).** User ka data user ka, bil
 
 | # | Item | Kya karna hai | Effort | Blocked on |
 |---|---|---|---|---|
-| 1.1 | **Neon/Supabase OAuth connector** | User "Connect Database" dabaye → apne Neon/Supabase account me login kare → hum uske account me project **auto-create** karke `DATABASE_URL` app me wire kar dein. | 3-4 PR | 🔒 **Admin:** Neon/Supabase pe OAuth app register (client id/secret + redirect URI) |
+| 1.1 | ~~**Supabase OAuth connector**~~ ✅ **DONE 2026-08-04** (PR #2069 + #2079) | Admin ne OAuth app register kiya; poora chain live: connect → create → keys apne aap encrypted vault me → build khud use karta hai. Project user ke APNE account me banta hai. 58 tests. | — | — |
 | 1.2 | **Sandbox → production migration path** | Dev me sandbox Postgres, publish pe schema+data user ke durable DB me migrate. Aaj yeh chhoot hai. | 2-3 PR | 1.1 |
-| 1.3 | **Zero-setup Auth** | User ke provisioned DB ke upar ek complete auth (signup/login/session/reset) — ek click, koi key nahi. Clerk/Auth0 OAuth connector bhi isi framework pe. | 2-3 PR | 1.1 |
+| 1.2b | ~~**Token refresh**~~ ✅ **DONE 2026-08-04** | Connection ~1 ghante me expire hoti hai par user ek baar connect karke hafton build karta hai — ab chupchap renew hoti hai. REVOKED (reconnect) aur TRANSIENT (retry) alag. | — | — |
+| 1.3 | **Zero-setup Auth** | User ke provisioned DB ke upar ek complete auth (signup/login/session/reset) — ek click, koi key nahi. Clerk/Auth0 OAuth connector bhi isi framework pe. | 2-3 PR | 1.1 ✅ |
 | 1.4 | **Secrets vault (user apps ke liye)** | Provisioned keys encrypted store + deploy pe inject. Platform-level `secrets/` hai; per-user-app nahi. | 2 PR | — |
 | 1.5 | **Honest fallback** | Jab tak OAuth app register nahi, "Connect Database" **honest** state dikhaye + aaj wala manual rasta de. Fake kabhi nahi. | (1.1 ka hissa) | — |
 
@@ -252,3 +253,46 @@ Phase 1 ka rasta khul jayega.
 ---
 
 *Banaya: 2026-08-04 · Base: `CAPABILITY_AUDIT.md` (code-verified) · Har phase ke baad update hoga.*
+
+---
+
+# 📌 Nav App Store — "Publish from the build" (admin-specified 2026-08-04, VERIFIED against code)
+
+**Admin's decision:** the Nav App Store only ever carries apps NavBharatAI itself built. The entry point
+is the EXISTING flow, at the point the user already reaches: *Other AI → Publish & Deploy → App Builder
+→ "Get my app ready to build" → "Build my app now" (v5 builds the APK via GitHub) → **Download APK**.*
+Next to that Download button, add **"Publish to Nav App Store"**.
+
+### ⚠️ Correction on the record (honesty, rule 3)
+Claude first argued this was impossible because "the APK never passes through our server". **That was
+wrong**, and the admin was right to push back. `GET /api/mobile-ship/download`
+(`src/server/routes/mobileShip.ts` ~line 147) already fetches the GitHub artifact **server-side**,
+unwraps the zip with JSZip, picks the real binary (`pickBinaryName`) and streams it to the user. The
+bytes are in our process. A server-side publish therefore needs **no upload from the user at all**.
+
+### The design (all pieces verified to exist)
+New route `POST /api/nav-store/publish-from-build`, taking the SAME identifiers the download already
+takes (`owner`, `repo`, `artifactId`) plus the store form fields:
+1. Verify identity (`verifyFirebaseIdentity`) and the GitHub token exactly as the download route does.
+2. Fetch + unwrap the artifact with the SAME logic as `/api/mobile-ship/download` — **extract that into
+   one shared helper** rather than copying it (rule 4: this repo has already paid for duplicated
+   helpers drifting).
+3. Hand the bytes into the EXISTING store pipeline unchanged: `validateSubmission` → `inspectApk` →
+   `scanFile` → `putApk` + `saveApp` as `pending` (`src/server/routes/navStore.ts` ~153-260). Reuse it;
+   do not reimplement — the "no scan ⇒ no publication" rule and the pending-only invariant must keep
+   holding by construction.
+4. Record the provenance we genuinely have: the workspace/repo the build came from and the run/artifact
+   id. That is real evidence the binary came from a NavBharatAI-driven build.
+
+### What this genuinely buys (and what it does not)
+- ✅ No arbitrary APK upload path is needed for the normal flow — the user never handles the file.
+- ✅ Provenance is real: the artifact id ties the binary to a specific GitHub Actions run of a repo the
+  signed-in user owns.
+- ❌ It is NOT cryptographic proof that NavBharatAI produced it: the build runs in the USER's Actions
+  with the USER's signing key. A determined user could still push arbitrary code into their own repo
+  before building. **So malware scanning and admin approval stay mandatory** — the earlier suggestion
+  that scanning could be dropped was based on the wrong premise above and does not hold.
+
+### Sequencing note
+The legacy upload route stays for now (someone may still have an APK from elsewhere); it can be retired
+once the build-flow path is the normal one.

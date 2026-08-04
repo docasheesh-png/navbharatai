@@ -60,3 +60,68 @@ describe('Firestore layer is safely dormant under test', () => {
     await expect(restoreWorkspaceAssets(new FakeSink(), 'ws-x')).resolves.toBe(0);
   });
 });
+
+// MEASURED regression (mitrify autopsy 2026-08-04, build cb03bdde). materializeAssets awaited ONE
+// write at a time. Every write is a network round-trip to the sandbox, so an import carrying 129
+// assets + 22 large images cost ~151 sequential trips — 100 SECONDS of a 624-second build. The report
+// shows it exactly: source files landed at 22s, the import did not report success until 122s.
+//
+// This was the FOURTH instance of one bug class in this repo (sandbox landing 648s, Firestore merge,
+// collectWorkspaceFiles 13-min stall). These tests close the class here rather than letting it return.
+describe('materializeAssets — writes concurrently (serial awaits over a network, 4th instance)', () => {
+  const png = 'data:image/png;base64,aGVsbG8=';
+
+  const mkSink = (opts?: { failOn?: string }) => {
+    let inFlight = 0;
+    const peak = { n: 0 };
+    const written: string[] = [];
+    return {
+      peak,
+      written,
+      sink: {
+        writeBinaryFile: async (_ws: string, p: string, _b64: string) => {
+          inFlight++; peak.n = Math.max(peak.n, inFlight);
+          await new Promise((r) => setTimeout(r, 5)); // stands in for the network round-trip
+          inFlight--;
+          if (opts?.failOn === p) throw new Error('sandbox write failed');
+          written.push(p);
+        },
+      },
+    };
+  };
+
+  const many = (n: number): Record<string, string> =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [`assets/img${i}.png`, png]));
+
+  it('actually writes concurrently — the whole point of the fix', async () => {
+    const h = mkSink();
+    await materializeAssets(h.sink, 'ws', many(40));
+    expect(h.peak.n).toBeGreaterThan(1); // the old serial loop peaked at exactly 1
+  });
+
+  it('writes every asset exactly once and counts them honestly', async () => {
+    const h = mkSink();
+    const n = await materializeAssets(h.sink, 'ws', many(25));
+    expect(n).toBe(25);
+    expect(new Set(h.written).size).toBe(25);
+  });
+
+  it('one broken asset never blocks the rest — the app still runs, that image just 404s', async () => {
+    const h = mkSink({ failOn: 'assets/img3.png' });
+    const n = await materializeAssets(h.sink, 'ws', many(10));
+    expect(n).toBe(9);
+    expect(h.written).not.toContain('assets/img3.png');
+  });
+
+  it('skips anything that is not a usable data URI instead of throwing', async () => {
+    const h = mkSink();
+    const n = await materializeAssets(h.sink, 'ws', { 'a.png': png, 'b.png': 'not-a-data-uri', 'c.png': '' });
+    expect(n).toBe(1);
+  });
+
+  it('an empty asset map is a no-op', async () => {
+    const h = mkSink();
+    expect(await materializeAssets(h.sink, 'ws', {})).toBe(0);
+    expect(h.written).toEqual([]);
+  });
+});

@@ -3659,7 +3659,10 @@ export class ToolDispatcher {
 
       case 'generate_auth': {
         const rawType = optStr(input, 'type');
-        const type: AuthType = rawType === 'firebase' ? 'firebase' : 'jwt';
+        // 'supabase' is the ZERO-SETUP path (ROADMAP #1 Phase 1.3): when one-click provisioning has
+        // already put VITE_SUPABASE_URL/ANON_KEY in the workspace, the generated auth works on the
+        // first build with nothing for the user to configure.
+        const type: AuthType = rawType === 'firebase' || rawType === 'supabase' ? rawType : 'jwt';
         const { files, dependencies, summary } = generateAuthCode({ type });
         const written: string[] = [];
         const wiring: string[] = [];

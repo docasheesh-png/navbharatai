@@ -40,7 +40,56 @@ describe('User UI — single Report button, no report content shown', () => {
     expect(panel).not.toContain('onClick={() => void toggleHistoryReport()}');
     // The report action lives in the mobile More sheet (the footer slot it also occupied was a
     // duplicate and now opens Code Studio — see v3FooterApi.test.ts) and still SENDS, never downloads.
-    expect(panel).toContain('setMobileSheet(null); void sendReportToAdmin();');
+    // Since 2026-08-04 it opens the "which build?" picker first, which itself ends in
+    // sendReportToAdmin — same invariant (submit-only), one step earlier in the path.
+    expect(panel).toContain("setMobileSheet(null); void openReportPicker('sheet');");
+    expect(panel).toContain('sendReportToAdmin');
+  });
+});
+
+/**
+ * PICK WHICH BUILD (admin 2026-08-04). "Report" could only send the LATEST build, so a problem from
+ * an earlier edit was unreportable. The picker fixes that WITHOUT re-opening the report to users:
+ * a row shows only what the user already watched happen.
+ */
+describe('Report picker — choose the build, still never see the report', () => {
+  const picker = read('src/lib/reportPicker.ts');
+
+  it('the server has a picker mode that returns the stripped list, not the history metadata', () => {
+    expect(agentv3).toContain("req.query.picker === '1'");
+    expect(agentv3).toContain('pickerItems(entries)');
+  });
+
+  it('the picker list is built by the tested strip — never by spreading the history entry', () => {
+    // A spread would carry summary / rootCause / counts (our analysis, admin-only) onto a user screen.
+    expect(picker).not.toMatch(/\.\.\.entry/);
+    expect(picker).toContain('label: reportLabel(entry.prompt)');
+  });
+
+  it('a picked build is submitted by id, and a missing one fails honestly', () => {
+    expect(panel).toContain('if (picked) body.buildId = picked.id;');
+    expect(agentv3).toContain("please pick another build");
+  });
+
+  it('one build in the chat stays one click — the picker never blocks reporting', () => {
+    expect(panel).toContain('if (builds.length < 2) { void sendReportToAdmin(); return; }');
+  });
+
+  it('the send count follows the build that was REPORTED, not the one on screen', () => {
+    // Reporting a past build must not inflate the current build's tally, or the number the
+    // duplicate-report guard depends on stops being true.
+    expect(panel).toContain('const countKeyFor = (picked?: ReportPickerItem): string =>');
+    expect(panel).toContain('bumpReportSendCount(countKeyFor(picked))');
+  });
+
+  it('the submit path validates the active build, like the download path always did', () => {
+    // Sibling of the P0 export guard: the client was already sending activeBuildId/promptHash and the
+    // server ignored both, so Report could submit a DIFFERENT app's report.
+    const at = agentv3.indexOf("app.post('/api/agentv3/report-to-admin'");
+    expect(at).toBeGreaterThan(-1);
+    const route = agentv3.slice(at, at + 4000);
+    expect(route).toContain('body.activeBuildId');
+    expect(route).toContain('reportMatchesActiveBuild');
   });
 });
 

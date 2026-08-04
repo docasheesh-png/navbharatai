@@ -103,7 +103,13 @@ describe('claimUpload contract', () => {
     // testing the invariant and testing an accident of line order.
     const claimAt = STORE.indexOf('const cleanupUpload =');
     expect(claimAt).toBeGreaterThan(-1);
-    const scanEnd = STORE.indexOf('await inspectApk(bytes)');
+    // The region ends where the temp file provably stops mattering: the handoff to the shared ingest
+    // pipeline, which runs on bytes already in memory. This used to be bounded by `inspectApk`, which
+    // moved into that shared function when publish-from-build needed the same pipeline — the
+    // invariant did not change, only where the boundary lives. (Verified by reading the route: every
+    // return between the claim and the handoff calls cleanupUpload, and the unconditional cleanup is
+    // now the LAST statement before the handoff, so nothing after it can leak a temp file.)
+    const scanEnd = STORE.indexOf('await ingestApkSubmission(bytes');
     expect(scanEnd).toBeGreaterThan(claimAt);
     const postClaim = STORE.slice(claimAt, scanEnd);
     const earlyReturns = [...postClaim.matchAll(/return res\.status\((\d{3})\)/g)];

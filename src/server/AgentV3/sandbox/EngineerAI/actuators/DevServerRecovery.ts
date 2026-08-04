@@ -37,6 +37,16 @@ export interface DevServerDiagnosis {
   recovery: DevServerRecovery;
   /** Short human-readable root cause for the health-check line + the build diagnostics report. */
   detail: string;
+  /**
+   * The node_modules package that installed only PARTIALLY, when the log proves one did.
+   *
+   * WHY IT MUST TRAVEL WITH THE DIAGNOSIS (mitrify autopsy 2026-08-04): a plain `npm install` cannot
+   * repair a half-installed package — package.json is already satisfied and the directory already
+   * exists, so npm does nothing and the next restart fails identically. The recovery has to DELETE the
+   * broken package first, which means it needs its name. Without this the 'reinstall' recovery would be
+   * classified correctly and still not work — a heal that runs and changes nothing.
+   */
+  corruptPackage?: string;
 }
 
 /**
@@ -164,7 +174,9 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
  * future reorder cannot silently downgrade the database path. PURE.
  */
 export function missingCredentialFromLog(log: string): string | null {
-  const text = (log || '').slice(-8000);
+  // ANSI-stripped for the same class reason as classifyDevServerFailure (see stripAnsi): a coloured
+  // "Missing STRIPE_SECRET_KEY" line would not match the word-boundary patterns below.
+  const text = stripAnsi(log || '').slice(-8000);
   const NAME = '[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+';
   const patterns: RegExp[] = [
     // "Error: Missing RAZORPAY_KEY_SECRET" / "Missing required environment variable: SMTP_HOST"
@@ -182,8 +194,51 @@ export function missingCredentialFromLog(log: string): string | null {
   return null;
 }
 
+/**
+ * Remove ANSI colour/style escape sequences from a log before pattern-matching it.
+ *
+ * ROOT CAUSE (mitrify autopsy 2026-08-04, "The app didn't finish starting… no recognisable error"): a
+ * dev-server log is written to a TTY-like stream, so esbuild/Vite colour it. The captured text is not
+ * `✘ [ERROR] Could not resolve` but `\x1b[31m✘ \x1b[41;97mERROR\x1b[0m…`. Every pattern in this file
+ * anchors on a WORD BOUNDARY (`\bError:`, `\bModule not found`), and an escape sequence ends in a word
+ * character (`m`), so `mERROR` has NO boundary before `E` — the match silently fails. That is a CLASS
+ * bug: it can defeat any rule here, not just one, and it defeated ALL of them on the reported build,
+ * which is exactly why a log full of loud red errors was classified "nothing recognisable".
+ *
+ * Stripping once, at the entry point, fixes the whole class rather than one pattern. PURE.
+ */
+export function stripAnsi(text: string): string {
+  // CSI sequences (colour/style) + the standalone ESC form some tools emit.
+  // eslint-disable-next-line no-control-regex
+  return (text || '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\u001b[@-Z\\-_]/g, '');
+}
+
+/**
+ * The unresolved import specifier + the file that imported it, from an esbuild/Vite resolution error.
+ *
+ * WHY THE IMPORTER MATTERS (mitrify autopsy 2026-08-04): "Could not resolve" means two completely
+ * different things depending on WHO could not resolve it. When the importing file lives inside
+ * `node_modules/`, the INSTALL is broken — the reported build had
+ * `node_modules/lucide-react/dist/esm/lucide-react.js` importing `./icons/router.js`, i.e. the package's
+ * barrel file was present but its `icons/` directory was not: a partial/corrupt install that a
+ * reinstall fixes and a code edit cannot. When the importer is the user's own source, it is a real code
+ * error and reinstalling would waste both recovery attempts. PURE.
+ */
+export function unresolvedImportFromLog(log: string): { specifier: string; importer: string | null; inNodeModules: boolean } | null {
+  const text = stripAnsi(log || '');
+  const m = /Could not resolve\s+["']([^"'\n]+)["']/i.exec(text);
+  if (!m) return null;
+  const specifier = m[1];
+  // esbuild prints the importing file on the NEXT non-empty line, as `path/to/file.js:LINE:COL:`.
+  const after = text.slice(m.index + m[0].length, m.index + m[0].length + 500);
+  const imp = /\n\s*([^\s:][^\n:]*?):\d+:\d+:/.exec(after);
+  const importer = imp ? imp[1].trim() : null;
+  return { specifier, importer, inNodeModules: !!importer && /(^|\/)node_modules\//.test(importer) };
+}
+
 export function classifyDevServerFailure(log: string): DevServerDiagnosis {
-  const text = (log || '').slice(-8000); // the tail carries the fatal line; bound the scan
+  // Strip ANSI FIRST (see stripAnsi): a coloured log defeats every word-boundary rule below.
+  const text = stripAnsi(log || '').slice(-8000); // the tail carries the fatal line; bound the scan
   const make = (cause: DevServerFailureCause, detail: string): DevServerDiagnosis => ({ cause, recovery: recoveryFor(cause), detail });
 
   // 1) Port already in use — free it and retry (never a code problem). Covers Node's EADDRINUSE,
@@ -211,6 +266,17 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     || text.match(/Cannot find package ['"]([^'"\n]+)['"]/i)
     || text.match(/Failed to resolve (?:import|entry|module) ['"]([^'"\n]+)['"]/i);
   if (mod) return make('missing_module', `Missing dependency "${mod[1]}" — reinstalling dependencies and restarting.`);
+  // esbuild's own phrasing — "Could not resolve "./icons/router.js"" — was matched by NOTHING here, so
+  // the single most common Vite/esbuild boot failure fell through to "no recognisable error" (mitrify
+  // autopsy 2026-08-04). It is only a MISSING-MODULE when the importer is inside node_modules, i.e. the
+  // package installed partially; when the user's own file cannot resolve an import, it is a code error
+  // and a reinstall would burn both recovery attempts (handled in the code_error branch below).
+  const unresolved = unresolvedImportFromLog(text);
+  if (unresolved?.inNodeModules) {
+    const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(unresolved.importer || '')?.[1];
+    const d = make('missing_module', `The installed package${pkg ? ` "${pkg}"` : ''} is incomplete — its own file could not resolve "${unresolved.specifier}", so the install is partial/corrupt. Removing it and reinstalling dependencies, then restarting.`);
+    return pkg ? { ...d, corruptPackage: pkg } : d;
+  }
   if (/\bModule not found\b/i.test(text)) return make('missing_module', 'A module could not be resolved — reinstalling dependencies and restarting.');
   if (/\b(?:vite|next|tsc|tsx|node|npm)\b\s*:\s*(?:command\s+)?not found/i.test(text) || /command not found/i.test(text)) {
     return make('missing_module', 'A required CLI was not found — reinstalling dependencies and restarting.');
@@ -256,6 +322,11 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   }
 
   // 3) Code error in the generated source — a restart can NEVER fix this; the agent must edit the code.
+  // An unresolved import from the user's OWN source (not node_modules) is a code error: the file or the
+  // dependency name is wrong, and no number of restarts or reinstalls changes that.
+  if (unresolved && !unresolved.inNodeModules) {
+    return make('code_error', `Code error in the source (a restart can't fix it): "${unresolved.specifier}" could not be resolved${unresolved.importer ? ` from ${unresolved.importer}` : ''} — fix the import path, or add the package to package.json if it is a real dependency.`);
+  }
   if (/\bSyntaxError\b/i.test(text)
     || /Transform failed with \d+ error/i.test(text)
     || /\[(?:esbuild|vite)\][^\n]*error/i.test(text)
@@ -309,7 +380,7 @@ export function terminalDetail(d: DevServerDiagnosis): string {
     case 'db_unreachable':
       return `The app needs a database and one could not be started in the sandbox. ${tail} Connect your own database in Settings → App Settings → Database, then press Diagnose to boot it.`;
     case 'missing_module':
-      return `A dependency the app needs is still missing after reinstalling. ${tail} Check that it is listed in package.json and installs cleanly.`;
+      return `A dependency the app needs is still missing after reinstalling. ${tail} ${d.detail.includes('incomplete') ? 'The package installed only partially — deleting node_modules and installing again usually clears it.' : 'Check that it is listed in package.json and installs cleanly.'}`.trim();
     case 'port_in_use':
       return `The port stayed occupied by another process. ${tail}`;
     case 'out_of_memory':

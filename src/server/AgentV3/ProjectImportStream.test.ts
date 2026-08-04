@@ -16,7 +16,7 @@ import * as path from 'node:path';
 import JSZip from 'jszip';
 import { extractZipProject } from './ProjectImport';
 import {
-  extractZipProjectFromDisk, hasSpaceForUpload, STREAM_MAX_ENTRIES,
+  extractZipProjectFromDisk, hasSpaceForUpload, uploadHeadroomBytes, STREAM_MAX_ENTRIES,
 } from './ProjectImportStream';
 
 const tmpFiles: string[] = [];
@@ -177,6 +177,36 @@ describe('the disk preflight (why a 5 GB upload fails in one second, not at 90%)
   it('junk sizes never throw', () => {
     expect(hasSpaceForUpload(1024, Number.NaN)).toBe(true);
     expect(hasSpaceForUpload(1024, -5)).toBe(true);
+  });
+
+  // ROOT CAUSE (admin 2026-08-04, ".zip file upload hi nahi ho rahi"): the fixed 512 MB headroom
+  // refused EVERY upload on Cloud Run's RAM-backed /tmp (a few hundred MB free is normal there) —
+  // a 10 MB zip was rejected by the guard built for 5 GB archives. Headroom now scales with the file.
+  describe('scaled headroom — a small upload must never be refused by a big-upload margin', () => {
+    const MB = 1024 ** 2;
+    const GB = 1024 ** 3;
+
+    it('a small zip on a tight RAM-backed tmp is ACCEPTED (the exact prod failure)', () => {
+      expect(hasSpaceForUpload(400 * MB, 50 * MB)).toBe(true);   // was false with fixed 512 MB headroom
+      expect(hasSpaceForUpload(200 * MB, 10 * MB)).toBe(true);
+    });
+
+    it('a small zip is still refused when the disk genuinely cannot hold it', () => {
+      expect(hasSpaceForUpload(60 * MB, 50 * MB)).toBe(false);   // 50 + 64 headroom > 60 free
+      expect(hasSpaceForUpload(0, 1 * MB)).toBe(false);
+    });
+
+    it('big uploads keep the big margin — the original wedge-protection is intact', () => {
+      expect(hasSpaceForUpload(4.2 * GB, 4 * GB)).toBe(false);   // needs 4 GB + 512 MB
+      expect(hasSpaceForUpload(4.6 * GB, 4 * GB)).toBe(true);
+    });
+
+    it('the headroom curve: 64 MB floor, 25% of the file, 512 MB cap', () => {
+      expect(uploadHeadroomBytes(10 * MB)).toBe(64 * MB);        // floor
+      expect(uploadHeadroomBytes(1 * GB)).toBe(256 * MB);        // 25%
+      expect(uploadHeadroomBytes(5 * GB)).toBe(512 * MB);        // cap
+      expect(uploadHeadroomBytes(Number.NaN)).toBe(64 * MB);     // junk → safe floor
+    });
   });
 });
 

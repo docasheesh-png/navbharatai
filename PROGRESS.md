@@ -24626,3 +24626,32 @@ precisely the blindness fixed above. The NEXT import of this app will carry the 
 Diagnose boot log shows it live.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1029 files / 11125 tests, 0 failures**.
+
+## 2026-08-04 — HOTFIX: the 5 GB preflight was refusing EVERY zip import in prod (fixed 512 MB headroom)
+
+**Admin report (minutes after the #2077 deploy went live):** "navbharatai pro v5 me .zip file upload
+hi nahi ho rahi hai — import project se."
+
+**Root cause (traced, not guessed):** the new begin-time disk preflight required
+`free >= fileSize + 512 MB` with a FIXED headroom. On Cloud Run, `/tmp` is RAM-backed and routinely
+has only a few hundred MB free — so the guard built to stop a 5 GB archive wedging the instance
+instead refused EVERY upload, including tiny ones. Timing matched exactly: the mitrify import worked
+on the pre-deploy code the same morning; uploads died the moment #2077 went live. One call site
+(`/api/zip-upload/begin`) covers v5 import, the Files-panel chunked path AND the APK publish — all
+three were down together.
+
+**Fix (rule 4):** headroom now SCALES with the upload — `max(64 MB, min(512 MB, size/4))`
+(`uploadHeadroomBytes`, exported + test-locked). A 50 MB zip on a 400 MB-free tmpfs is accepted
+(the exact prod failure); a 4 GB zip still demands the full 512 MB margin (wedge protection intact).
+Siblings fixed in the same change: the mid-stream 413 still said "1 GB import limit" (now derived
+from `MAX_ARCHIVE_BYTES` = 5 GB); the 507 message told small-zip users to "try a smaller zip"
+(nonsense — now says the server is temporarily low on space); the refusal now logs its real numbers
+(`console.warn`) so Cloud Run logs show WHICH branch fired.
+
+**50/50 law (why could this arise at all):** the preflight was tested pure (unit) but never against
+the REAL prod filesystem shape — RAM-backed /tmp with little free space. The regression tests now
+encode that shape explicitly (400 MB free / 50 MB file must pass). The deeper condition — /tmp
+capacity on Cloud Run — remains the recorded open infra item (raise instance memory or mount a gen2
+volume for genuine 5 GB uploads).
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1029 files / 11129 tests, 0 failures**.

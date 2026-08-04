@@ -30,6 +30,7 @@ import { extractZipProjectFromDisk, freeDiskBytes, hasSpaceForUpload } from '../
 import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { buildActuator } from './agentv3';
+import { importDropSummary } from '../../lib/importDropReport';
 
 /** One chunk stays far under Cloud Run's ~32 MB request cap even with protocol overhead. */
 export const ZIP_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -216,12 +217,22 @@ export function registerZipUploadRoutes(app: Express): void {
       const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files);
       // Durable persist — without this the import lives only in an ephemeral sandbox and vanishes.
       try { await mergeWorkspaceFiles(workspaceId, files); } catch { /* best-effort, mirrors import-files */ }
+      // HONEST OUTCOME (admin 2026-08-04). The extractor already counts every refusal in eight labelled
+      // categories, and this response used to discard all of it — so a media-heavy 1 GB project reported
+      // a green "Imported 400 files" while 3,600 were silently gone. The counts and the archive's real
+      // entry total now travel to the client, which states them. `writeWorkspaceFiles`' own `skipped` is
+      // folded in under `overCap` (a file that extracted fine but could not be landed is still a file the
+      // user does not have).
+      const dropped = { ...extracted.dropped, overCap: (extracted.dropped?.overCap ?? 0) + skipped.length };
       res.json({
         ok: true,
         fileName: u.fileName,
         fileCount,
         imported: written.length,
         skipped: skipped.length,
+        dropped,
+        totalEntries: extracted.totalEntries,
+        summary: importDropSummary({ kept: written.length, totalEntries: extracted.totalEntries, dropped }),
         paths: written.slice(0, 5000),
       });
     } catch (err: any) {

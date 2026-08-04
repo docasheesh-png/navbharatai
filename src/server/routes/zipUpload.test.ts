@@ -46,6 +46,26 @@ describe('zip-upload route contract', () => {
     expect(SRC).not.toContain('files: extracted.files'); // the old, cap-bound shape
   });
 
+  // HONESTY TRIPWIRE (admin 2026-08-04). The extractor counts every refusal in eight labelled
+  // categories, and commit used to return NONE of them — so a media-heavy 1 GB project reported
+  // "Imported 400 files" while 3,600 of the user's own files were silently gone. These assertions fail
+  // the moment the response goes quiet about that again, in either direction: the raw counts must
+  // travel AND the ready-made sentence must be built from the real numbers.
+  it('commit reports what it refused — the counts and the archive total both travel to the client', () => {
+    expect(SRC).toContain('dropped,');
+    expect(SRC).toContain('totalEntries: extracted.totalEntries');
+  });
+
+  it('commit ships the honest summary sentence, computed from the REAL kept/total/dropped numbers', () => {
+    expect(SRC).toContain('summary: importDropSummary({ kept: written.length, totalEntries: extracted.totalEntries, dropped })');
+  });
+
+  it('a file that extracted but could not be landed still counts as not-imported', () => {
+    // writeWorkspaceFiles' own `skipped` is folded in: from the user's side a file they do not have is
+    // missing regardless of which stage refused it.
+    expect(SRC).toContain('overCap: (extracted.dropped?.overCap ?? 0) + skipped.length');
+  });
+
   it('the temp archive is always discarded, even when extraction throws', () => {
     expect(SRC).toContain('discard(uploadId); // the temp archive is never kept past a commit attempt');
     expect(SRC).toContain('} finally {');

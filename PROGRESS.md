@@ -24800,3 +24800,59 @@ Related, same class: the advertised **5 GB** archive ceiling is optimistic on a 
 whose container filesystem is memory-backed. The begin-time `hasSpaceForUpload` preflight is what keeps
 this honest today (it refuses with real numbers); the advertised number itself has not been re-derived
 from the instance's actual limits.
+
+---
+
+## 2026-08-04 (later) — the import stops lying about what it imported
+
+**Admin, discussing a 1 GB / 4,000-file project:** *"pahle woh silent gayab wali fix karo"*. Agreed and
+done first, before any of the transport work.
+
+### The defect — a reporting failure, not an extraction one
+The import pipeline was already honest INTERNALLY: `ExtractedProject` carries `dropped` with eight
+labelled categories (`dir`, `junk`, `secret`, `binary`, `tooLarge`, `unsafe`, `overCap`,
+`outsideAppRoot`) plus `totalEntries`. Every one of those numbers was computed and then thrown away at
+every exit:
+- `/api/zip-upload/commit` returned only `fileCount` / `imported` / `skipped` — never `dropped`;
+- the client's `uploadZipProject` had no field for `skipped`, so it discarded even that;
+- the SSE path's `{type:'skipped', reason}` events were received by `useZipImport` and explicitly
+  ignored — the comment literally read *"a single file was skipped (binary/too large) — fine, keep
+  going"*.
+
+Net effect on a media-heavy 1 GB project: **"✅ Imported 400 files"** while ~3,600 of the user's own
+files were gone. The app looked imported and was not. That is the product lying about its own result —
+the second and third absolute rules forbid it outright, so this outranked the transport work.
+
+### Fix — `src/lib/importDropReport.ts` (new, pure, 13 tests)
+One module both paths use, so a third path cannot quietly regress to silence:
+- `totalDropped()` / `harmlessDropped()` / `meaningfulDropped()` — separates drops that cost the user
+  NOTHING (`node_modules`, `.git`, `dist` — `npm install` rebuilds them; OS junk) from drops that are a
+  REAL loss (their images, their oversized files). Lumping a 120,000-file `node_modules` count together
+  with 12 lost images would be accurate and useless; hiding the 12 would be useless AND dishonest.
+- `dropReasonPhrases()` orders real losses FIRST, and explains the harmless ones so they do not read as
+  damage (`"rebuilt automatically"`, `"never uploaded, by design"`).
+- `importDropSummary()` returns `''` when nothing was refused, so a clean import reads exactly as
+  before — this only ever adds truth, never noise. It reassures ("Nothing you need is missing") ONLY
+  when `meaningfulDropped === 0`; saying that while a user's images are gone would be the same lie in a
+  friendlier voice.
+
+Wired at all three points that were dropping it: the commit response (raw counts + `totalEntries` + the
+ready-made sentence), `uploadZipProject` (carries `dropSummary`, and recomputes it from raw counts if an
+older server omits the sentence, so truth survives a version skew), and both success messages.
+
+### Verification
+Server-side tripwires in `zipUpload.test.ts` assert the counts, the total and the summary all travel —
+**verified to FAIL against the old silent response shape** before being kept. `tsc` (frontend + server)
+clean; full `vitest run` green.
+
+### Next (admin-directed): ONE master import handler
+The admin's decision after reviewing the 1 GB walkthrough: combine all three proposals into a single
+handler that takes any file, any size, any complexity. Order agreed — this honesty fix first (done),
+then browser-side extraction + filtering (helps every user including mobile), then the File System
+Access "Open Folder" two-way path (removes upload entirely on desktop Chrome/Edge), then the
+connect-time audit. Recorded here so the sequence survives a session handoff.
+
+⚠️ Correction carried forward: `jszip` is NOT suitable for the browser-side path at 1 GB — it loads the
+whole archive into memory and would crash a phone tab. That path needs a random-access/streaming reader
+(`@zip.js/zip.js` reads the central directory and inflates only the entries kept, via `Blob.slice`).
+Stated to the admin as a correction to an earlier recommendation.

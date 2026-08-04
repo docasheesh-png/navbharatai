@@ -6,6 +6,7 @@
 // identifier back, so every file-drop / conflict-resolve caller is unchanged.
 
 import { saveAllFiles } from '../lib/storage';
+import { importDropSummary, type DropCounts } from '../lib/importDropReport';
 import { uploadFileChunked } from '../lib/zipProjectUpload';
 import { authJsonHeaders } from '../lib/authHeaders';
 
@@ -48,6 +49,8 @@ export function useZipImport(deps: ZipImportDeps) {
     setProBuildProgress({ active: true, stage: `📦 Streaming ${zipFile.name}...`, steps: [], percent: 5, generatedFiles: {} });
 
     const loadedFiles: Record<string, string> = {};
+    // Refusals reported by the server's stream, tallied so the import summary can state them.
+    const droppedCounts: DropCounts = {};
     let fileCount = 0;
     let appName = zipFile.name.replace(/\.zip$/i, '');
     const fileList: string[] = [];
@@ -148,7 +151,13 @@ export function useZipImport(deps: ZipImportDeps) {
             } else if (evt.type === 'progress') {
               setProBuildProgress(prev => ({ ...prev, stage: evt.stage || evt.message || prev.stage }));
             } else if (evt.type === 'skipped') {
-              // a single file was skipped (binary/too large) — fine, keep going
+              // NOT "fine, keep going" (admin 2026-08-04). These events were received and discarded, so a
+              // media-heavy project reported a clean import while thousands of the user's own files had
+              // been dropped. Count them by the server's own reason and state the total below.
+              if (evt.reason === 'binary') droppedCounts.binary = (droppedCounts.binary ?? 0) + 1;
+              else if (evt.reason === 'too large') droppedCounts.tooLarge = (droppedCounts.tooLarge ?? 0) + 1;
+              else if (evt.reason === 'unsafe path') droppedCounts.unsafe = (droppedCounts.unsafe ?? 0) + 1;
+              else droppedCounts.overCap = (droppedCounts.overCap ?? 0) + 1;
             } else if (evt.type === 'complete') {
               appName = evt.appName || appName;
             } else if (evt.type === 'error') {
@@ -213,9 +222,13 @@ export function useZipImport(deps: ZipImportDeps) {
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\nOpen Code Studio to view and edit the files. Tell me what you want to change!`;
       }
 
+      // HONEST TAIL (admin 2026-08-04): whatever the classification above says about the app, the
+      // message must also say what did NOT come in. '' for a clean import, so a complete project reads
+      // exactly as before — this only ever ADDS truth, never noise.
+      const dropSummary = importDropSummary({ kept: fileCount, dropped: droppedCounts });
       setProMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        text: importMessage,
+        text: dropSummary ? `${importMessage}\n\n⚠️ ${dropSummary}` : importMessage,
         sender: 'ai', timestamp: new Date(),
       }]);
       // Framework apps: open Code Studio so user can see the imported files immediately.

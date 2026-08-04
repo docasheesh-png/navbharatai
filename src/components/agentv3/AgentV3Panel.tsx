@@ -1256,9 +1256,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const result = await uploadZipProject(file, targetWorkspaceId, (p) => {
         setZipProgress(zipImportProgressLabel(p.phase, p.fraction));
       });
+      // The success line now STATES what did not come in. A green tick over a silently-gutted project
+      // is the product lying about its own result — the exact thing the second and third absolute rules
+      // forbid. `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
       setUserMsgs((c) => [...c, {
         role: 'agent',
-        text: `✅ Imported ${result.fileCount} file${result.fileCount === 1 ? '' : 's'} from “${result.fileName}”. Your project is in Files — tell me what to change.`,
+        text: result.dropSummary
+          ? `✅ Imported “${result.fileName}”.\n\n${result.dropSummary}\n\nYour project is in Files — tell me what to change.`
+          : `✅ Imported ${result.fileCount} file${result.fileCount === 1 ? '' : 's'} from “${result.fileName}”. Your project is in Files — tell me what to change.`,
         ts: Date.now(),
       }]);
       // Pull the landed project into the IDE/Files view through the SAME bridge a build's own file

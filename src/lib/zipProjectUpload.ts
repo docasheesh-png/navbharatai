@@ -9,6 +9,7 @@
 // into a build request. That distinction is the whole point of the separate entry point.
 
 import { authJsonHeaders } from './authHeaders';
+import { importDropSummary } from './importDropReport';
 
 /** Mirrors ZIP_CHUNK_BYTES on the server; the begin call returns the authoritative value. */
 export const DEFAULT_ZIP_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -26,6 +27,14 @@ export interface ZipProjectResult {
   fileCount: number;
   /** Files actually written into the workspace (landing happens server-side). */
   imported: number;
+  /**
+   * The honest one-line account of what did NOT come in ('' when nothing was refused).
+   *
+   * This used to be discarded here: the server already returned a `skipped` count and this type simply
+   * had no field for it, so a 1 GB media-heavy project reported "✅ Imported 400 files" while 3,600
+   * were gone. Carrying it is what makes the success message true.
+   */
+  dropSummary: string;
 }
 
 /** Pure: how many chunks a file of `size` needs at `chunkBytes` (always ≥1 so an empty file still posts). */
@@ -127,9 +136,15 @@ export async function uploadZipProject(
   if (!commitRes.ok || !commit?.ok) {
     throw new Error(commit?.error || 'The upload finished but the archive could not be read.');
   }
+  const imported = Number(commit.imported) || 0;
   return {
     fileName: String(commit.fileName || file.name),
     fileCount: Number(commit.fileCount) || 0,
-    imported: Number(commit.imported) || 0,
+    imported,
+    // Prefer the server's own sentence; recompute from the raw counts if an older server omits it, so
+    // the truth survives a version skew rather than silently reverting to the green-tick lie.
+    dropSummary: typeof commit.summary === 'string' && commit.summary
+      ? commit.summary
+      : importDropSummary({ kept: imported, totalEntries: Number(commit.totalEntries) || 0, dropped: commit.dropped }),
   };
 }

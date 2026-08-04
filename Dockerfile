@@ -40,6 +40,27 @@ ENV VITE_PREVIEW_ORIGIN=$VITE_PREVIEW_ORIGIN
 
 RUN npm run build
 
+# Drop the build/test toolchain from node_modules NOW, so the runtime stage copies production
+# dependencies only.
+#
+# WHY (evidence, 2026-08-04): the first Trivy scan of the slim image reported 46 HIGH findings in Go
+# binaries at `node_modules/{vite,vite-node,vitest}/node_modules/@esbuild/linux-x64/bin/esbuild` —
+# three copies of the esbuild Go binary belonging to the TEST runner, shipped to production and
+# scanned there, in a container that never runs a test. Vitest is not a production dependency; the
+# only reason those CVEs were ours to answer for is that we copied the whole install.
+#
+# `npm prune` rather than a second `npm ci --omit=dev`: prune edits the existing tree in place, so the
+# native modules node-gyp already compiled (ssh2, cpu-features) are kept as-is. A fresh install would
+# have to rebuild them, and the slim runtime has no compiler.
+#
+# ⚠️ THIS IS ONLY SAFE BECAUSE EVERY RUNTIME IMPORT IS A REAL `dependency`. `typescript` was found in
+# devDependencies while `src/server/AppMakerLab/**` imports it at runtime for AST analysis and
+# patching — pruning with it misclassified would have produced an image that BUILDS, passes every
+# test, and then crash-loops on Cloud Run for every user. It is now a dependency. Before moving any
+# package into devDependencies, check whether the server bundle requires it; the CI boot smoke test
+# below is the backstop that turns that class of mistake into a red check instead of an outage.
+RUN npm prune --omit=dev
+
 # ---------- Stage 2: runtime ----------
 FROM node:22-slim AS runtime
 

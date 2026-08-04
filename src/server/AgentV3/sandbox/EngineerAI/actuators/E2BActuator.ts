@@ -901,6 +901,18 @@ export class E2BActuator implements IEngineerActuator {
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {
+          // PARTIAL-INSTALL REPAIR (mitrify autopsy 2026-08-04): when the log proves ONE package
+          // installed only partially (its own file could not resolve a sibling — e.g. lucide-react's
+          // barrel importing ./icons/*.js that never landed), a plain `npm install` is a NO-OP: the
+          // dependency is already in package.json and the directory already exists, so npm has nothing
+          // to do and the next restart fails identically. The broken tree must be REMOVED first, or the
+          // "heal" runs, reports success, and changes nothing — the fake-heal this rule forbids.
+          if (diag.corruptPackage && /^(?:@[\w.-]+\/)?[\w.-]+$/.test(diag.corruptPackage)) {
+            await sandbox.commands
+              .run(`rm -rf ${WORKSPACE_ROOT}/node_modules/${diag.corruptPackage}`, { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 })
+              .catch(() => { /* best-effort — the reinstall below still runs */ });
+            stdout += ` (removed the incomplete "${diag.corruptPackage}" so it reinstalls cleanly)`;
+          }
           const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
           stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
         }

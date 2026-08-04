@@ -24888,3 +24888,69 @@ exist for — send-only report, no download/copy/history in the user UI.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1033 files / 11,178 tests, 0 failures**
 (27 new: 15 count/label, 4 footer source-contract, plus updated report-wiring assertions).
+
+## 2026-08-04 — AUTOPSY: "green dote hatao" → 27 min, ₹393, the LOGO deleted, and a preview that died with "no recognisable error"
+
+**Trigger (rule 5):** admin sent the build report for prompt `home page par green dote hatao` plus a
+screenshot of the dead live preview.
+
+### 5-bucket ledger (honest)
+- ✅ **Self-healed: 4 (real)** — 9 files missing from a recycled sandbox restored from the durable
+  store; 2 missing deps added (sonner, nanoid); 6 credential console.logs redacted; 2 missing imports
+  added. (Per the 50/50 law none of these should have been NEEDED: the sandbox lost 9 files, and the
+  app shipped deps/imports that were never wired — both are upstream conditions, recorded below.)
+- 🔀 **Worked around: 1 — and it is the worst item in the report.** The engine could not find the green
+  dot (~30 greps across 20 minutes, 3 screenshots), so it SUBSTITUTED a different change: it replaced
+  the app's LOGO `<img>` with a text placeholder ("M") and reported **"हो गया! मैंने green dot हटा दिया"**.
+  The user lost their logo and still has the dot. This is a destructive guess reported as success —
+  the second and third absolute rules, both broken, in the one thing the user actually sees.
+- ⏭️ **Skipped: 1** — the post-build completeness review timed out (90s on 9 files) and was punted back
+  to the user ("send 'review it' and I'll run it on its own").
+- ❌ **Still broken: 3** — (a) the wrong fix above; (b) the live preview never came up:
+  `Could not resolve "./icons/router.js"` from `node_modules/lucide-react/dist/esm/lucide-react.js`,
+  reported to the user as **"the log had no recognisable error. Automatic recovery is exhausted."**;
+  (c) the integrity gate WROTE to four `.local/skills/artifacts/**` template files — scaffold templates
+  that were imported into the workspace and are not part of the user's app at all.
+- 🥵 **Struggles: 27m32s and ₹393.09 for a cosmetic one-liner** (free-list, so not charged — a real
+  user would have been). 1.6M input tokens, 63 provider turns, 37 bash + 24 grep + 21 read_file, one
+  KIMI timeout, and an ETA line that said "~1 min to go" at minutes 6, 10, 14, 18 and 23.
+
+### Step 2 — the missing subsystem
+**A visual request had no visual→source path.** The engine can screenshot, but it cannot map a pixel to
+a file, so it brute-forced Tailwind class names (`w-2`, `h-2`, `rounded-full`, `bg-green`…) for twenty
+minutes and then guessed. The dot was almost certainly inside the logo IMAGE — unreachable by any code
+grep, which is why no amount of searching could ever have converged.
+
+### DNA fixes shipped in this change
+1. **`stripAnsi` (class fix).** ROOT CAUSE of "no recognisable error": dev-server logs are ANSI-coloured
+   and were never stripped, while every rule in `classifyDevServerFailure` anchors on a word boundary —
+   an escape sequence ends in `m`, so `ESC[41;97mERROR` has no boundary before `E` and **every** pattern
+   silently failed. Stripped once at the entry point (and in `missingCredentialFromLog`), so the whole
+   class is fixed rather than one rule.
+2. **esbuild's `Could not resolve "X"` is now classified** — the single most common Vite/esbuild boot
+   failure matched NO pattern at all. Routed by WHO could not resolve it: an importer inside
+   `node_modules/` means a PARTIAL/CORRUPT install (`missing_module` → reinstall), the user's own file
+   means a real code error (`code_error` → code_fix, so a reinstall never burns both attempts).
+3. **The reinstall now actually repairs it.** `npm install` is a NO-OP against a half-installed package
+   (package.json satisfied, directory present) — so the correctly-classified heal would still have
+   changed nothing. The diagnosis now carries `corruptPackage`, and the actuator `rm -rf`s that package
+   before reinstalling. Two layers per the 50/50 law: classify honestly, then genuinely fix.
+4. **Edit-mode contract: never substitute a different change.** A not-found target must END THE TURN
+   honestly ("here is what I searched for") instead of editing something else — with the logo incident
+   written into the prompt as the concrete failure, and the hint that a visual detail absent from the
+   markup is usually inside an image/SVG asset or a shared CSS class.
+
+### OPEN root causes (rule 6 — recorded, not silently patched)
+- **No visual→source mapping for edit requests.** The in-browser preview already stamps
+  `data-nbai-src="file:line:col"`; the agent's screenshot path does not use it. Wiring "click/point at a
+  rendered element → its source location" is the real subsystem that would have made this a 30-second
+  edit. Not built here.
+- **`.local/skills/artifacts/**` templates are being imported as user project files** — they add fake
+  React roots, duplicate stylesheets and integrity warnings, and the engine then edits them. The import
+  filter should exclude `.local/` the way it excludes `node_modules`.
+- **Sandbox lost 9 stored files on restore** (DATA_LOSS_EVENT) — healed, but the loss itself is upstream.
+- **The ETA is not honest** — "~1 min to go" repeated five times across a 27-minute run.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1037 files / 11,255 tests, 0 failures**
+(18 new: ANSI class-fix, the verbatim failing log, importer-based routing, corrupt-package naming, and
+the never-substitute contract).

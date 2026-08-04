@@ -21,6 +21,7 @@ import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
+import type { ReportPickerItem } from '../../lib/reportPicker';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
@@ -1548,6 +1549,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setSelectedHistoryBuildId(null);
     setHistoryReportItems([]);
     setHistoryReportOpen(false);
+    setReportPickerOpen(false);
+    setReportPickerItems([]);
     // Git / ship / billing footers from the previous project.
     setGitStatus(null);
     setRestoreNote('');
@@ -1967,7 +1970,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // ── Mobile footer (admin 2026-07-07): v5.0 owns the app's bottom nav while it is the active view.
   // One sheet at a time: the footer's History and More items open bottom sheets anchored above the
   // nav; any footer navigation action closes them.
-  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more'>(null);
+  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report'>(null);
   const openSurfaceFromFooter = (t: SurfaceTab) => {
     setMobileSheet(null);
     setTab(t);
@@ -2146,14 +2149,29 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // user gets only an acknowledgement; the report content never reaches the client. (The older
   // download/copy/history helpers above are no longer wired to any UI and are retained dormant to
   // avoid a risky large deletion in this file — they can be removed in a dedicated cleanup.)
+  //
+  // PICK WHICH BUILD (admin 2026-08-04): a chat is many builds — the first build and every edit
+  // after it. "Report" could only ever send the LATEST one, so a bug from three edits ago was
+  // unreportable: the user clicked Report and we received a report about a different, working build.
+  // Clicking Report now opens the list of this chat's builds and they choose the one that broke.
+  //
+  // This does NOT re-open the report to users. Each row shows only what the user already watched
+  // happen — when it ran, what they asked for, whether it worked (see `pickerItems`). Our analysis,
+  // and every provider name in it, stays admin-only exactly as before.
   const [reportSending, setReportSending] = useState(false);
   const [reportSent, setReportSent] = useState(false);
-  const sendReportToAdmin = useCallback(async () => {
+  const [reportPickerOpen, setReportPickerOpen] = useState(false);
+  const [reportPickerItems, setReportPickerItems] = useState<ReportPickerItem[]>([]);
+  const [reportPickerLoading, setReportPickerLoading] = useState(false);
+  const sendReportToAdmin = useCallback(async (pickedBuildId?: string) => {
     if (reportSending) return;
     setReportSending(true);
     try {
       const body: Record<string, string> = {};
       if (state.workspaceId) body.workspaceId = state.workspaceId;
+      // A picked past build resolves to exactly that report; without one the server falls back to the
+      // latest, guarded by the active build's identity so it can't be a different app's report.
+      if (pickedBuildId) body.buildId = pickedBuildId;
       if (state.buildId) body.activeBuildId = state.buildId;
       if (state.promptHash) body.promptHash = state.promptHash;
       const res = await fetch('/api/agentv3/report-to-admin', {
@@ -2163,6 +2181,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) {
+        setReportPickerOpen(false);
         setReportSent(true);
         setTimeout(() => setReportSent(false), 4000);
       } else {
@@ -2174,6 +2193,52 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReportSending(false);
     }
   }, [reportSending, state.workspaceId, state.buildId, state.promptHash]);
+
+  // Open the picker. One build in this chat means there is nothing to choose — sending straight away
+  // keeps the common case a single click, which is what it has always been.
+  // `surface` — the same list, shown where the tap came from: a popover under the desktop button, a
+  // bottom sheet on mobile (a popover anchored to a footer button is unusable on a phone).
+  const openReportPicker = useCallback(async (surface: 'popover' | 'sheet' = 'popover') => {
+    if (reportSending || reportPickerLoading) return;
+    if (!state.workspaceId) return;
+    setReportPickerLoading(true);
+    let builds: ReportPickerItem[] = [];
+    try {
+      const params = new URLSearchParams({ workspaceId: state.workspaceId, picker: '1' });
+      if (userId) params.set('userId', userId);
+      if (email) params.set('email', email);
+      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+      const data = await res.json().catch(() => ({}));
+      builds = Array.isArray(data?.builds) ? data.builds as ReportPickerItem[] : [];
+    } catch { /* the list is a convenience — a failed fetch still reports the latest build below */ }
+    finally { setReportPickerLoading(false); }
+    setReportPickerItems(builds);
+    // Fewer than two choices (including a history that hasn't landed yet, or a failed fetch) → send
+    // the current build, exactly as the button did before. The picker must never become a wall
+    // between the user and reporting a problem.
+    if (builds.length < 2) { void sendReportToAdmin(); return; }
+    if (surface === 'sheet') setMobileSheet('report');
+    else setReportPickerOpen(true);
+  }, [reportSending, reportPickerLoading, state.workspaceId, userId, email, sendReportToAdmin]);
+
+  // One list, rendered by both surfaces — so the desktop popover and the mobile sheet can never drift
+  // into showing different things (the drift that lets a field leak on one surface only).
+  const reportPickerRows = (onPick: (id: string) => void, mobile: boolean) => reportPickerItems.map((b, i) => (
+    <button
+      key={b.id}
+      onClick={() => onPick(b.id)}
+      disabled={reportSending}
+      className={`w-full text-left hover:bg-zinc-800 disabled:opacity-40 border-b border-zinc-800/60 last:border-b-0 ${mobile ? 'px-4 py-3 touch-manipulation' : 'px-3 py-2'}`}
+    >
+      <div className="flex items-center gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${b.ok === false ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+        <span className={`text-zinc-200 truncate ${mobile ? 'text-sm' : 'text-xs'}`}>{b.label}</span>
+      </div>
+      <div className="mt-0.5 pl-3.5 text-[10px] text-zinc-500">
+        {i === 0 ? 'Latest · ' : ''}{new Date(b.startedAt).toLocaleString()}
+      </div>
+    </button>
+  ));
 
   // ── Mobile footer API (admin 2026-07-07): registration moved BELOW the workspaceFiles state
   // declaration (it feeds the Files count + green-dot signal) — see the effect after it.
@@ -2313,7 +2378,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
-      buildReport: () => { setMobileSheet(null); void sendReportToAdmin(); },
+      buildReport: () => { setMobileSheet(null); void openReportPicker('sheet'); },
       reportBusy: reportSending,
       openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
@@ -2323,7 +2388,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       fileCount: realFileCount,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onFooterApi, showWorkspace, tab, reportSending, sendReportToAdmin, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
+  }, [onFooterApi, showWorkspace, tab, reportSending, openReportPicker, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
   // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
   // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
@@ -2779,18 +2844,32 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
-          {/* Report to admin (admin 2026-07-29): ONE button, no download/copy, no history browser —
-              the report is admin-only. Clicking it submits this build's report to NavBharatAI; the
-              user only sees a "sent" acknowledgement, never the report content. */}
-          <button
-            onClick={() => void sendReportToAdmin()}
-            disabled={reportSending || !state.workspaceId}
-            title="Send this build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)"
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
-          >
-            {reportSending ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
-            {reportSending ? 'Sending…' : reportSent ? 'Report sent' : 'Report'}
-          </button>
+          {/* Report to admin (admin 2026-07-29): the report itself stays admin-only — the user submits
+              it and never sees the content. Since 2026-08-04 clicking it first asks WHICH build, so a
+              problem from an earlier edit is reportable instead of always sending the newest build. */}
+          <div className="relative">
+            <button
+              onClick={() => void openReportPicker()}
+              disabled={reportSending || reportPickerLoading || !state.workspaceId}
+              title="Send a build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)"
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
+            >
+              {reportSending || reportPickerLoading ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+              {reportSending ? 'Sending…' : reportSent ? 'Report sent' : 'Report'}
+            </button>
+            {reportPickerOpen && (
+              <>
+                {/* Click-away layer, so the list closes the way every other popover here does. */}
+                <div className="fixed inset-0 z-40" onClick={() => setReportPickerOpen(false)} />
+                <div className="absolute right-0 z-50 mt-1 w-80 max-h-80 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl">
+                  <div className="px-3 py-2 text-[11px] text-zinc-400 border-b border-zinc-800">
+                    Which build had the problem?
+                  </div>
+                  {reportPickerRows((id) => void sendReportToAdmin(id), false)}
+                </div>
+              </>
+            )}
+          </div>
           {state.repoUrl && (
             <a
               href={state.repoUrl}
@@ -3879,7 +3958,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {mobileSheet === 'history' ? 'Session history' : 'More'}
+                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : 'More'}
               </span>
               <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
                 <X className="w-4 h-4" />
@@ -3887,6 +3966,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             </div>
             {mobileSheet === 'history' ? (
               <div className="py-1.5">{historyListBody}</div>
+            ) : mobileSheet === 'report' ? (
+              <div>{reportPickerRows((id) => { setMobileSheet(null); void sendReportToAdmin(id); }, true)}</div>
             ) : (
               <div className="py-1.5">
                 {/* Framework — moved here from the header (admin: "React + Vite ko More me bhej do") */}
@@ -3915,7 +3996,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 {/* Report to admin (admin 2026-07-29): one action, admin-only report — no download,
                     no copy, no history browser. Submits this build's report to NavBharatAI. */}
                 <button
-                  onClick={() => { setMobileSheet(null); void sendReportToAdmin(); }}
+                  onClick={() => { setMobileSheet(null); void openReportPicker('sheet'); }}
                   disabled={reportSending || !state.workspaceId}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >

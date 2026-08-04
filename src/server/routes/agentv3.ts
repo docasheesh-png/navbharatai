@@ -151,6 +151,7 @@ import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findC
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
+import { pickerItems } from '../../lib/reportPicker';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
@@ -2682,10 +2683,41 @@ export function registerAgentV3Routes(app: Express): void {
     }
     // Resolve the report from the same durable sources the download used.
     let report: BuildDiagnosticsReport | null = null;
-    if (workspaceId && buildId) report = await getDiagnosticsHistoryItem(workspaceId, buildId).catch(() => null);
-    if (!report && workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
-    if (!report && verifiedUid) report = lastDiagnostics.get(verifiedUid) ?? null;
-    if (!report && verifiedUid) report = await loadLatestForUser(verifiedUid).catch(() => null);
+    if (workspaceId && buildId) {
+      // A build PICKED from the report list. The user chose this one deliberately — resolve exactly
+      // it, and fail honestly rather than silently falling back to "latest", which would send us a
+      // report about a different build than the one they are complaining about.
+      report = await getDiagnosticsHistoryItem(workspaceId, buildId).catch(() => null);
+      if (!report) {
+        res.status(404).json({ error: 'That build\'s report is no longer available — please pick another build.' });
+        return;
+      }
+    }
+    // P0 SIBLING (2026-08-04): the download path validates every fallback candidate against the
+    // ACTIVE build the client is looking at (its buildId + promptHash) so a stale report for a
+    // DIFFERENT app can never be exported. This submit path was built later and dropped the guard —
+    // the client was already sending `activeBuildId`/`promptHash` and the server ignored both, so
+    // "Report" on the build in front of you could quietly submit a previous app's report and send us
+    // to debug the wrong thing. Same expectation object, same accept/reject rule.
+    const submitExpect: ActiveBuildExpectation = {
+      buildId: typeof body.activeBuildId === 'string' && body.activeBuildId ? body.activeBuildId : undefined,
+      promptHash: typeof body.promptHash === 'string' && body.promptHash ? body.promptHash : undefined,
+      workspaceId: workspaceId || undefined,
+    };
+    // Only guard the FALLBACK chain: an explicitly picked past build is, by definition, not the
+    // active one, and rejecting the user's own choice for not being "current" would be the bug.
+    const strictSubmit = !buildId && hasActiveBuildExpectation(submitExpect);
+    const acceptSubmit = (r: BuildDiagnosticsReport | null | undefined): BuildDiagnosticsReport | null => {
+      if (!r) return null;
+      if (strictSubmit && !reportMatchesActiveBuild(r, submitExpect).ok) {
+        audit('AGENTV3_REPORT_IDENTITY_MISMATCH', { workspaceId, wantBuildId: submitExpect.buildId, gotBuildId: r.buildId }, 'warn');
+        return null;
+      }
+      return r;
+    };
+    if (!report && workspaceId) report = acceptSubmit(await loadDiagnostics(workspaceId).catch(() => null));
+    if (!report && verifiedUid) report = acceptSubmit(lastDiagnostics.get(verifiedUid) ?? null);
+    if (!report && verifiedUid) report = acceptSubmit(await loadLatestForUser(verifiedUid).catch(() => null));
     if (!report) {
       res.status(404).json({ error: 'No build report yet — build an app first, then send the report.' });
       return;
@@ -2746,6 +2778,22 @@ export function registerAgentV3Routes(app: Express): void {
         ? history
         : history.map((h) => ({ ...h, summary: h.summary === undefined ? undefined : redactProviderError(h.summary), rootCause: h.rootCause === undefined ? undefined : redactProviderError(h.rootCause) }));
       res.json({ history: historyOut });
+      return;
+    }
+    // REPORT PICKER (admin 2026-08-04): "Report" used to be able to send only the LATEST build, so a
+    // bug from three edits ago was unreportable — the user clicked Report and we received a report
+    // about a different, working build. This lists the workspace's past builds so they can point at
+    // the one that actually broke.
+    //
+    // A SEPARATE mode from `history=1` on purpose. The report is admin-only (2026-07-29): the user
+    // submits it and never reads it. `history=1` carries our analysis (summary, root cause, issue
+    // counts) and stays as it was for admin tooling; this mode returns ONLY what the user already
+    // knows — when it ran, what they asked for, whether it worked — via the one tested strip
+    // (`pickerItems`), so a field added to the history entry later cannot leak onto a user's screen.
+    if (req.query.picker === '1') {
+      if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+      const entries = await listDiagnosticsHistory(workspaceId).catch(() => []);
+      res.json({ builds: pickerItems(entries) });
       return;
     }
     // FULL SESSION report (scope=session): stitch EVERY settled build of this session together, oldest

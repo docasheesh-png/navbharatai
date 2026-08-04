@@ -37,7 +37,7 @@ const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'Conn
 // The REAL sandbox terminal (same component Code Studio mounts) — runs actual commands in the
 // user's warm v5.0 sandbox via POST /api/agentv3/exec. Rendered by the 'shell' settings screen so
 // users can run a quick command without opening the full Code Studio.
-const RealTerminal     = _lz(() => import('../ide/RealTerminal'),          'RealTerminal');
+const TerminalPanel    = _lz(() => import('../ide/TerminalPanel'),         'TerminalPanel');
 // REAL workspace logs — live v5.0 build events + the app's own captured runtime errors.
 const WorkspaceLogs    = _lz(() => import('../ide/WorkspaceLogs'),         'WorkspaceLogs');
 
@@ -973,11 +973,15 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {/* REAL sandbox terminal (admin 2026-07-20): the same RealTerminal Code Studio mounts,
+            {/* REAL sandbox terminal (admin 2026-07-20): the same TerminalPanel Code Studio mounts,
                 pointed at the SAME v5.0 workspace (shared agentv3_session_{uid} key) — so commands run
                 in the exact sandbox where NavBharatAI Pro v5.0 builds the user's app, without opening
-                the full Code Studio. Honest by construction: when the sandbox is cold it says so and
-                explains how to warm it — it never fakes output. */}
+                the full Code Studio. Since 2026-08-04 that means REAL persistent shells here too: a
+                genuine TTY where `cd` persists, output streams live and Ctrl+C interrupts, and "+ New"
+                opens as many independent terminals as you need. Settings deliberately mounts the SAME
+                component rather than its own copy — two terminal implementations is exactly how one of
+                them quietly rots into the weaker one. Honest by construction: when the sandbox is cold
+                it says so and explains how to warm it — it never fakes output. */}
             {settingsScreen === 'shell' && (
               <motion.div
                 key="shell"
@@ -993,7 +997,7 @@ export function SettingsPanel({
                 {user ? (
                   <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
                     <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading terminal…</div>}>
-                      <RealTerminal
+                      <TerminalPanel
                         workspaceId={getAgentV3WorkspaceId(user.uid)}
                         userId={user.uid}
                         email={user.email || ''}

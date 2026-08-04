@@ -32,18 +32,34 @@ const RECYCLE_FRACTION = 0.5;
 
 /**
  * Decide what the guardian should restore. `saved` is the durable history (path→content); `existing`
- * is what is currently in the sandbox (path→content). Returns the files to write back + the mode.
- * Never throws.
+ * is what the sandbox scan READ (path→content); `skipped` is what that same scan SAW BUT DID NOT READ.
+ * Returns the files to write back + the mode. Never throws.
+ *
+ * WHY `skipped` IS NOT OPTIONAL IN SPIRIT (mitrify autopsy 2026-08-04). `collectWorkspaceFiles`
+ * returns `{ files, skipped }`, and the caller passed only `files`. But a path lands in `skipped`
+ * precisely because the scan SAW it in the sandbox listing and then declined to read it — it was
+ * excluded by pattern, too large, binary-looking, unreadable, or past a cap. The file is THERE. Judged
+ * only against `files`, every such path looked MISSING, and the guardian:
+ *   1. reported a data-loss event that never happened (the report claimed "9 file(s) missing from the
+ *      sandbox" on a healthy workspace — 608 stored vs 599 read is exactly the scan's own skip gap), and
+ *   2. OVERWROTE those files with the older durable snapshot. If one of them had newer content — say a
+ *      file that grew past the read cap during the build — the loss-prevention system was itself the
+ *      thing destroying work.
+ * A file the scanner refused to read is not evidence of absence. Same discipline as `scanned:false`
+ * in the UI scan and `captured` in the console-error reader: unknown is never reported as empty.
  */
 export function planFileGuardian(
   saved: Record<string, string>,
   existing: Record<string, string>,
+  skipped: readonly string[] = [],
 ): GuardianPlan {
   const savedPaths = Object.keys(saved ?? {});
   if (savedPaths.length === 0) return { restore: {}, mode: 'none', count: 0 };
 
   const have = existing ?? {};
-  const missing = savedPaths.filter((p) => !(p in have));
+  // Present = read OR seen-but-skipped. Both mean "the sandbox has this file".
+  const seen = new Set<string>(Array.isArray(skipped) ? skipped.filter((p): p is string => typeof p === 'string') : []);
+  const missing = savedPaths.filter((p) => !(p in have) && !seen.has(p));
   if (missing.length === 0) return { restore: {}, mode: 'none', count: 0 };
 
   // Most of the project is gone → the sandbox was recycled and any files present are just a bare

@@ -6636,7 +6636,11 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const saved = await loadWorkspaceFiles(workspaceId);
           const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-          const plan = planFileGuardian(saved, existing.files);
+          // `existing.skipped` MUST be passed: those paths ARE in the sandbox, the scan just declined
+          // to read them (excluded/too large/binary/unreadable/past a cap). Judged without it, they
+          // looked missing — a false data-loss report AND an overwrite of possibly-newer content by an
+          // older snapshot (mitrify autopsy 2026-08-04). See planFileGuardian's header.
+          const plan = planFileGuardian(saved, existing.files, existing.skipped);
           if (plan.count > 0) {
             // Fix 37c (admin: "data kyu udha, report me likh kar aaye"): record the OBSERVED cause of
             // the loss the guardian is about to repair — an empty sandbox listing means the ephemeral
@@ -6648,9 +6652,13 @@ export function registerAgentV3Routes(app: Express): void {
               // listed 27 — restoring 1" read as self-contradictory. The listings are SETS, not just
               // counts — the sandbox can list N files while still MISSING some stored ones (it may
               // hold different extras). Say the missing count in plain words.
+              // Honest arithmetic (mitrify autopsy 2026-08-04): the scan's SKIPPED paths are present in
+              // the sandbox, so they are named separately instead of silently inflating the "missing"
+              // number — the old line reported the scan's own skip gap as if it were lost data.
+              const skippedCount = existing.skipped.length;
               buildDiag.recordDataLoss(
                 existingCount === 0 ? 'sandbox recycled/empty' : 'files missing from sandbox',
-                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox listed ${existingCount} but was missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
+                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox read ${existingCount}${skippedCount > 0 ? ` (plus ${skippedCount} present but not read — excluded/too large/binary)` : ''} and was genuinely missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
               );
             } catch { /* diagnostics are best-effort */ }
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);

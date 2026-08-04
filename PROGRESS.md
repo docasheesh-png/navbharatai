@@ -25111,3 +25111,60 @@ Test-locked: skipped files are never overwritten, a genuinely absent file is sti
 recycled sandbox is still restored whole, and omitting the argument is byte-identical to before.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,324 tests, 0 failures**.
+---
+
+## 2026-08-04 (later still) — master import handler, part 1: read the zip in the BROWSER
+
+**Admin decision:** *"1-2-3 teeno ko aise banao ki ham har ek file chahe kitni bhi badi kyu na ho …
+sab handle kar paye — sabhi 3 mila kar ek master zip handler banao"*, with the honesty fix first (done,
+PR #2089). This is part 1 of that handler.
+
+### The reframe that made the earlier work obsolete
+Every fix before this asked *how do we carry a 1 GB zip to the server* — chunking, then a signed-URL
+direct upload. The admin's "VS Code jaisa" question exposed the better one: **why carry it at all?** The
+server already discards `node_modules`, `.git`, `dist`, media and junk the instant it unpacks the
+archive — its own module comment says *"a 5 GB app zip is node_modules, media and .git history"*. So the
+user was uploading a gigabyte for us to throw ~95% of it away on arrival, and `node_modules` was never
+needed in the first place because the sandbox runs `npm install`.
+
+Measured on a real archive built for the purpose (12 entries, source + node_modules + a 2 MB video +
+`.env` + a logo): **2.2 MB archive → 30 KB kept**. A 74× reduction on a toy project; far larger on a
+media-heavy one.
+
+### What shipped
+- **`src/lib/importRules.ts`** — the filter rules MOVED here (not copied) from
+  `ProjectImport.ts`, which now imports and re-exports every name it used to own, so no server call site
+  changed. The browser was about to become a second caller, and this repo has been bitten by drifted
+  copies before (four `safeRelPath`s; model ids in five files). A client-side copy would drift silently:
+  the browser keeping a file the server refuses, or dropping one it would keep.
+- **`src/lib/browserZipImport.ts`** — `keepVerdict()` decides from the CENTRAL DIRECTORY alone, so a
+  900 MB video is refused without ever being decompressed; `readZipInBrowser()` inflates only survivors.
+- **`@zip.js/zip.js`** added, and a correction to my own earlier advice recorded in the module comment:
+  **jszip is wrong here** — its `loadAsync` materializes the whole archive in memory, so a 1 GB zip
+  would need 1-2 GB in the tab and crash a phone, i.e. exactly the users this is meant to help. zip.js
+  reads the central directory first and pulls kept entries through `Blob.slice`, so peak memory is
+  bounded by what is kept, not by the archive.
+
+### Two real bugs the tests caught (not theory — they failed first)
+1. **A password-protected zip imported "successfully" with zero files.** Zip encryption covers content,
+   not the central directory, so names read fine and every `getData` fails one at a time — each counted
+   as a drop. The result was a green, empty import: the same silent-loss class eliminated hours earlier
+   in PR #2089, reappearing in new code. Now detected from the `encrypted` flag before any work.
+2. **An unreadable archive returned an empty map instead of failing.** Added a backstop keyed on READ
+   FAILURE, not emptiness — an archive that legitimately holds only `node_modules` keeps nothing and is
+   still perfectly readable, and the caller has an accurate message for that case.
+
+Also: `strictNullChecks: false` silently defeats zip.js's boolean-literal union narrowing, so
+`if (e.directory)` did not narrow and `getData` appeared missing. Fixed with an explicit type guard
+rather than an `as FileEntry` cast — a cast would compile today and hide a real API change tomorrow.
+
+### Verification
+21 tests in `browserZipImport.test.ts`, including three that build a real archive in-process and read it
+back (the pure-decision tests alone would have passed while `getData` was called on the wrong writer).
+113 existing `ProjectImport` tests still green, proving the rule MOVE changed no behaviour.
+`tsc` (frontend + server) clean; full suite green.
+
+### Still to come in the handler
+Part 2 — wire this into the panel with the server upload kept as an honest fallback (old browsers, an
+unreadable archive). Part 3 — File System Access "Open Folder", two-way, no upload at all on desktop
+Chrome/Edge. Part 4 — the connect-time audit.

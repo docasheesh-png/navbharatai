@@ -17,33 +17,21 @@
 
 // Derived/vendor folders across the stacks users actually migrate from (Node, Python, Rust/Java,
 // mobile/Expo, PHP) — all re-created by the stack's own install/build, never worth importing.
-// Exported (2026-07-24) so the api.github.com repo materializer (GithubApiTree.materializeRepoViaApi)
-// filters files with the EXACT same rules as the zip path — ONE source of truth, no drift.
-// `.local|.claude|.cursor|…` (via NON_APP_DIR_RE) are AI-assistant/tool state directories. They are
-// never part of the running app, and `.local/skills/**` in particular ships COMPLETE app scaffolds —
-// importing them gave one project five React roots and five copies of index.css, which the integrity
-// gate then reported as the user's defects and "repaired" by editing template files the user never
-// wrote (mitrify autopsy 2026-08-04). Dropped at the import boundary so they never enter at all.
-export const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea|\.local|\.claude|\.cursor|\.windsurf|\.continue|\.codeium|\.aider)(\/|$)/;
-// OS/editor junk files that ride along in almost every user-made zip.
-export const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
-// Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep.
-export const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
-export const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
-// Small binary ASSETS worth keeping (an imported app's logo/favicon/icons/fonts) so the preview
-// isn't full of broken images. Everything ELSE that matches BINARY_EXT_RE (video/audio/archives/
-// binaries) stays dropped — too large and never needed to boot a preview. ext → MIME for a data URI.
-const ASSET_MIME: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  avif: 'image/avif', ico: 'image/x-icon', bmp: 'image/bmp',
-  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject',
-};
+// SINGLE SOURCE OF TRUTH (2026-08-04): these rules now live in src/lib/importRules.ts so the BROWSER
+// can apply the exact same filter before uploading (the master import handler drops node_modules/media
+// client-side instead of shipping a gigabyte for the server to discard). They are re-exported here
+// unchanged, so every existing server call site — including the api.github.com repo materializer that
+// has relied on them since 2026-07-24 — keeps importing them from this module. Re-export, never a copy:
+// a second definition would drift, and the drift would be silent (the browser keeping a file the server
+// refuses, or dropping one it would keep).
+import {
+  SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath,
+} from '../../lib/importRules';
+export {
+  SKIP_DIR_RE, JUNK_FILE_RE, SECRET_FILE_RE, BINARY_EXT_RE, assetMimeFor, safeImportPath,
+  importDropReason, type ImportDropReason,
+} from '../../lib/importRules';
 
-/** The asset MIME for a path, or null when it is not a keepable small-asset type. Pure. */
-export function assetMimeFor(path: string): string | null {
-  const m = path.toLowerCase().match(/\.([a-z0-9]+)$/);
-  return m ? (ASSET_MIME[m[1]] ?? null) : null;
-}
 // Text lockfiles pin the EXACT dependency tree the app was built with — losing them makes
 // `npm install` re-resolve versions and can break an imported app in ways the user never had.
 // (bun.lockb is binary and stays excluded.)
@@ -116,15 +104,6 @@ export function isZipAttachment(att: { name?: unknown; type?: unknown }): boolea
   const name = typeof att?.name === 'string' ? att.name.toLowerCase() : '';
   const type = typeof att?.type === 'string' ? att.type.toLowerCase() : '';
   return name.endsWith('.zip') || type === 'application/zip' || type === 'application/x-zip-compressed';
-}
-
-/** Normalize a zip entry path; null → unsafe (zip-slip / absolute / empty). Pure. */
-export function safeImportPath(raw: string): string | null {
-  const p = raw.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (!p || p.startsWith('/') || /^[a-zA-Z]:/.test(p)) return null;
-  const parts = p.split('/');
-  if (parts.some((seg) => seg === '..' || seg === '')) return null;
-  return parts.join('/');
 }
 
 /**

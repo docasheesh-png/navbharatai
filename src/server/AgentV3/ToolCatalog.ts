@@ -2780,6 +2780,27 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'find_ui_element',
+      description:
+        'ASK THE RUNNING APP WHERE SOMETHING IS. Describe what you can SEE in plain language ("the small ' +
+        'green dot", "the logo in the header", "the red Delete button") and get back the matching ' +
+        'elements from the RENDERED page — each with its exact class string (grep that verbatim to reach ' +
+        'the source), its text, its position and size, its real colours, and its exact file:line when the ' +
+        'preview stamps one. USE THIS FIRST for any visual request ("remove/change/move the X") instead of ' +
+        'guessing class names with grep: one call replaces dozens of blind searches. ' +
+        'JUST AS IMPORTANT — if the thing is NOT on the page, this says so WITH EVIDENCE (which colours ' +
+        'and shapes actually exist). That is a real answer: report it to the user and ask what they meant. ' +
+        'NEVER edit a different element because you could not find the one they named. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The running app URL to inspect (the preview URL, or http://localhost:<devPort>).' },
+          query: { type: 'string', description: 'What you are looking for, in plain language — colour, shape, text or role (e.g. "small green dot", "logo", "Submit button").' },
+        },
+        required: ['url', 'query'],
+      },
+    },
+    {
       name: 'browser_action',
       description:
         'Drive a REAL Chrome browser — on your own app OR on any real website on the internet. Actions: ' +
@@ -3017,6 +3038,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_release_notes',
   'web_search',
   'screenshot',
+  'find_ui_element',
   'browser_action',
   'console_errors',
   'deploy',

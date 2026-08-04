@@ -25082,3 +25082,79 @@ may appear at most ONCE, no countdown may appear after the first overrun, and a 
 inside its estimate behaves exactly as before.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,317 tests, 0 failures**.
+
+## 2026-08-04 — ONE WALLET: every AI now spends the same balance, and the money is exact
+
+**Admin: "user unhin 50,000 token se kharch kare, har jagah."** Shipped as five merged PRs.
+
+**The gap.** The gifted balance was spent by v5 BUILDS only. The 70+ professionals, Doctor AI and the
+AI-backed Other-AI tools ran on a daily MESSAGE/ACTION COUNT instead — not the same limit, not the same
+promise. Ten cheap questions and ten expensive ones cost a user the same while costing us completely
+different amounts, and someone holding ₹600 of gifted credit could exhaust ten free messages and be
+told to buy a Pass **while their balance sat untouched**.
+
+**#1998 — the cost was not untracked, it was UNOBSERVABLE.** `AIProviderResponse` carried content,
+latency, provider and model — and no token usage. Every adapter had the real numbers in the API
+response and threw them away, so nothing anywhere could answer "what does Professional AI cost us?".
+All five adapters (GLM, Grok, Anthropic, Gemini, Vertex) now report usage through one shared reader
+covering the three field conventions in use. `chatSpend.ts` prices a turn with the SAME rate card and
+tiered markup a build uses — one money model, nothing to hand-sync.
+**Honesty line, deliberate:** a provider that reports no usage ⇒ `measured: false` ⇒ charge ZERO, never
+an estimate. Guessing from string length would produce a number that LOOKS like a measurement and land
+on a real user's bill. "Free because the model is free" and "unknown because the provider told us
+nothing" stay SEPARATE outcomes — only the second is costing us money silently.
+
+**#1941 — the debit was overcharging AND the wallet was drifting.** `inrToDebitTokens` ceiled, so every
+build charged up to ₹0.01 more than it cost. Worse: the ceil went into `tokenBalance` while
+`remaining_balance` moved by the paisa-rounded ₹ — two views of one balance moving by different amounts,
+drifting further apart on EVERY build. Now exact, with the sub-token remainder CARRIED to the next
+charge (no margin given away, only deferred ≤ ₹0.01), and the ₹ DERIVED from the tokens actually
+debited so the two can never disagree again. This is also what makes per-message charging honest:
+ceiling a ₹0.002 chat turn would bill 5×. `computeDebitedWallet` now returns `applied`, because a
+sub-token charge debits 0 tokens but still moves the carry.
+
+**#2086 / #2091 — the wiring.** Professionals + Doctor AI, then the Other-AI tools. An empty wallet is
+refused BEFORE any provider is called (a build may overdraw because the next pre-flight gate catches it;
+nothing catches a chat turn afterwards). Never charged: anonymous, free-list, and a **Pass holder** —
+the Pass IS the payment, so charging the wallet too bills them twice for one thing. The charge runs
+AFTER the answer and is never awaited into the response. Small charges roll into ONE ledger row per day
+(`NavBharatAI assistants`) — a row per turn would fill the 500-entry ledger in a fortnight and push the
+user's PURCHASE history off the end.
+For the tools, threading the cost back out would have meant six call sites of six different shapes, one
+of which (App Debugger) fans out over BATCHES. That is the fragility `noClaudeZone` was built to remove,
+so `aiSpendZone.ts` uses the same AsyncLocalStorage mechanism: the route opens a zone, the shared
+routing layer records each call, the route charges once. Batched tools bill ALL their calls, calls are
+SUMMED before the decision, and a new tool inherits billing for free.
+Image generation stays on its quota cap — per-image cost, nothing honest to price it with.
+**All of it is OFF until `AI_WALLET_SPEND=on`.**
+
+## 2026-08-04 — Two money leaks found while measuring cost
+
+**#1940 — E2B sandboxes nobody could see.** The idle sweep read an IN-MEMORY map on ONE Cloud Run
+instance. Cloud Run recycles instances and we redeploy on every merge, so the moment the creating
+instance vanished, its sandboxes were invisible to every sweep and billed until E2B's own 60-minute
+lifetime expired — **every deploy orphaned whatever was running.** The sweep now reads the DURABLE
+record, so an orphan is reachable from any instance. The idle limit also dropped 45 → 15 minutes (a
+~5-minute build was followed by 45 idle billed minutes). Root cause behind the danger in fixing it: the
+durable record was written only at build END, so `updatedAt` meant "last released" and a RUNNING build
+looked identical to an abandoned one; it is now stamped when the sandbox is taken and refreshed every
+~5 min. The cut-off is still held a whole max-build + 10 min past last activity. Sibling found:
+`ProEngineRunner` builds a NEW actuator per run and the constructor started a sweep timer that captured
+`this` forever — `unref()` stops a timer holding the process open, not the object.
+
+**#2024 — a user could pay and simply lose the money.** A Cashfree payment reached the wallet by two
+routes and BOTH can miss: the webhook is rejected outright without `CASHFREE_WEBHOOK_SECRET` (not set,
+so that route delivers nothing), and the client redirect only fires if the user returns carrying
+`?payment=success`. A user who pays by UPI and closes the app — the normal thing on a phone, since the
+UPI app is a different app — satisfied neither. Their order sat at PENDING forever and **nothing in the
+codebase ever revisited a pending order.** There is now a third path: on sign-in the server settles
+that user's own unfinished orders against Cashfree. Needs no webhook secret, filtered by the VERIFIED
+uid, settled by the same `verifyPaymentInternal` the redirect uses (Cashfree decides, not us),
+idempotent, bounded, and SILENT unless money actually arrived. **Open admin item:** setting
+`CASHFREE_WEBHOOK_SECRET` is still worth doing — it credits in seconds instead of on the next visit.
+
+**Correction to an earlier note:** CLAUDE.md's "Fix 68 open" line was already marked DONE by a previous
+session; a redundant-work check caught it before anything was rebuilt.
+
+**Verification (final PR):** frontend + server tsc clean; `npx vitest run` = **1036 files / 11,220
+tests, 0 failures**; `npm run build`, `boot:check` and the bundle budget all green.

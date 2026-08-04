@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn } from 'lucide-react';
+import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn, Wallet } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
@@ -63,7 +63,11 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [pass, setPass] = useState<PassStatus | null>(null);
-  const [paywall, setPaywall] = useState<null | 'paywall' | 'login'>(null);
+  // 'wallet' is NOT the same refusal as 'paywall'. The paywall means the free messages for today are
+  // used up; 'wallet' means the shared balance is empty (the one-wallet law — assistants spend the
+  // same wallet as a build). Telling an empty-balance user they "used their free messages" would be
+  // simply untrue, and would offer them the wrong action.
+  const [paywall, setPaywall] = useState<null | 'paywall' | 'login' | 'wallet'>(null);
   const [buying, setBuying] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
@@ -148,6 +152,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       });
       const data = await res.json().catch(() => ({}));
       // Professional Pass gate: show the paywall / login prompt instead of a raw error bubble.
+      if (data?.code === 'wallet_empty') { setPaywall('wallet'); return; }
       if (res.status === 402 || data?.code === 'professional_paywall') { setPaywall('paywall'); refreshPass(); return; }
       if (res.status === 401 || data?.code === 'login_required') { setPaywall('login'); return; }
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
@@ -263,7 +268,29 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-5" onClick={() => setPaywall(null)}>
           <div className="w-full max-w-sm rounded-2xl bg-[#161b22] border border-white/10 p-6 text-center" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => setPaywall(null)} className="absolute right-3 top-3 text-[#586069] hover:text-white"><X className="w-4 h-4" /></button>
-            {paywall === 'login' ? (
+            {paywall === 'wallet' ? (
+              <>
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Wallet className="w-6 h-6" /></div>
+                <h3 className="font-bold text-white mb-1">Your balance is empty</h3>
+                <p className="text-sm text-[#8b949e] mb-4">
+                  The assistants use the same balance as your builds — you only pay for what you actually use.
+                  Add credit to carry on.
+                </p>
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
+                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center justify-center gap-2"
+                >
+                  <Wallet className="w-4 h-4" /> Add credit
+                </button>
+                <button
+                  onClick={startBuyPass}
+                  disabled={buying}
+                  className="mt-2 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-60 text-[#8b949e] text-xs font-semibold"
+                >
+                  {buying ? 'Opening checkout…' : `Or get the Professional Pass — ₹${pass?.priceInr ?? 99}/month, unlimited`}
+                </button>
+              </>
+            ) : paywall === 'login' ? (
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-indigo-300 flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
                 <h3 className="font-bold text-white mb-1">Sign in to continue</h3>

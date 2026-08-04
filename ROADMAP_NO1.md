@@ -94,9 +94,10 @@ ek click me, humare through provision karna (OAuth).** User ka data user ka, bil
 
 | # | Item | Kya karna hai | Effort | Blocked on |
 |---|---|---|---|---|
-| 1.1 | **Neon/Supabase OAuth connector** | User "Connect Database" dabaye → apne Neon/Supabase account me login kare → hum uske account me project **auto-create** karke `DATABASE_URL` app me wire kar dein. | 3-4 PR | 🔒 **Admin:** Neon/Supabase pe OAuth app register (client id/secret + redirect URI) |
+| 1.1 | ~~**Supabase OAuth connector**~~ ✅ **DONE 2026-08-04** (PR #2069 + #2079) | Admin ne OAuth app register kiya; poora chain live: connect → create → keys apne aap encrypted vault me → build khud use karta hai. Project user ke APNE account me banta hai. 58 tests. | — | — |
 | 1.2 | **Sandbox → production migration path** | Dev me sandbox Postgres, publish pe schema+data user ke durable DB me migrate. Aaj yeh chhoot hai. | 2-3 PR | 1.1 |
-| 1.3 | **Zero-setup Auth** | User ke provisioned DB ke upar ek complete auth (signup/login/session/reset) — ek click, koi key nahi. Clerk/Auth0 OAuth connector bhi isi framework pe. | 2-3 PR | 1.1 |
+| 1.2b | ~~**Token refresh**~~ ✅ **DONE 2026-08-04** | Connection ~1 ghante me expire hoti hai par user ek baar connect karke hafton build karta hai — ab chupchap renew hoti hai. REVOKED (reconnect) aur TRANSIENT (retry) alag. | — | — |
+| 1.3 | **Zero-setup Auth** | User ke provisioned DB ke upar ek complete auth (signup/login/session/reset) — ek click, koi key nahi. Clerk/Auth0 OAuth connector bhi isi framework pe. | 2-3 PR | 1.1 ✅ |
 | 1.4 | **Secrets vault (user apps ke liye)** | Provisioned keys encrypted store + deploy pe inject. Platform-level `secrets/` hai; per-user-app nahi. | 2 PR | — |
 | 1.5 | **Honest fallback** | Jab tak OAuth app register nahi, "Connect Database" **honest** state dikhaye + aaj wala manual rasta de. Fake kabhi nahi. | (1.1 ka hissa) | — |
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { buildReactPreview, isReactProject, vendoredReactBase } from '../src/server/runtime/ReactPreview';
+import { buildReactPreview, isReactProject } from '../src/server/runtime/ReactPreview';
 import { renderPreview } from '../src/server/runtime/renderPreview';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { scaffold } from '../src/server/project/Scaffold';
@@ -274,97 +274,40 @@ describe('buildReactPreview — legacy react interop fallback (Fix 34b)', () => 
   it('ships the no-external last rung + multi-rung error recording', () => {
     const html = buildReactPreview(reactVfs());
     expect(html).toContain('WITHOUT react-externalization (legacy interop fallback)');
-    expect(html).toContain('on all 4 rungs');
+    expect(html).toContain('on all 3 rungs');
   });
 });
 
-// Vendored same-origin React (admin 2026-08-03, "in-browser preview ko 100x more strong"): React 18
-// ships from NavBharatAI's OWN origin (UMD + ESM facades in public/vendor/react18), so the preview's
-// FOUNDATION no longer depends on any third-party CDN. The CDN chain stays as the fallback.
-describe('buildReactPreview — vendored same-origin React runtime', () => {
-  const ORIGIN = 'https://navbharatai.com';
-  afterEach(() => { delete process.env.AGENTV3_VENDOR_REACT; });
+// Admin report 2026-08-04: "in-browser preview load hone me 2-4 min lagta hai."
+//
+// MEASURED root cause: the generated preview was 2.88 MB for a hello-world app, of which 2.85 MB was
+// the INLINED Babel compiler. Inline script lives in the HTML, so it can never be cached — every
+// preview, refresh and rebuild re-downloaded and re-parsed ~3 MB before the app ran. Served as a
+// <script src> the document is ~40 KB and the compiler is fetched once and cached thereafter.
+describe('buildReactPreview — the compiler is CACHEABLE, not a multi-megabyte inline copy', () => {
+  const bigApp = () => {
+    const vfs = reactVfs();
+    return buildReactPreview(vfs, 'https://navbharatai.com');
+  };
 
-  it('with an origin + a React 18 app: UMD scripts + importmap facades come from OUR origin', () => {
-    const html = buildReactPreview(reactVfs(), ORIGIN);
-    // The official UMD builds load as plain <script>s before anything else needs React…
-    expect(html).toContain(`<script src="${ORIGIN}/vendor/react18/react.production.min.js"></script>`);
-    expect(html).toContain(`<script src="${ORIGIN}/vendor/react18/react-dom.production.min.js"></script>`);
-    // …and ALL five React specifiers resolve to the same-origin facades over that one copy.
-    expect(html).toContain(`"react":"${ORIGIN}/vendor/react18/react.mjs"`);
-    expect(html).toContain(`"react-dom":"${ORIGIN}/vendor/react18/react-dom.mjs"`);
-    expect(html).toContain(`"react-dom/client":"${ORIGIN}/vendor/react18/react-dom-client.mjs"`);
-    expect(html).toContain(`"react/jsx-runtime":"${ORIGIN}/vendor/react18/jsx-runtime.mjs"`);
-    expect(html).toContain(`"react/jsx-dev-runtime":"${ORIGIN}/vendor/react18/jsx-dev-runtime.mjs"`);
+  afterEach(() => { delete process.env.AGENTV3_INLINE_BABEL; });
+
+  it('ships the compiler as a same-origin <script src>, so the browser can cache it', () => {
+    expect(bigApp()).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
   });
 
-  it('keeps the single-shared-React contract: other deps stay on esm.sh with ?external=react', () => {
-    const vfs = VirtualFileSystem.fromRecord({
-      'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', zustand: '^4.5.0' } }),
-      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
-      'src/main.jsx': "import { create } from 'zustand';\n",
-    });
-    const html = buildReactPreview(vfs, ORIGIN);
-    // zustand still comes from esm.sh, externalizing react — whose importmap entry is the facade,
-    // so zustand's internal `import "react"` lands on the ONE vendored copy.
-    expect(html).toContain('esm.sh/zustand@4.5.0?external=react,react-dom');
-    expect(html).toContain(`"react":"${ORIGIN}/vendor/react18/react.mjs"`);
+  it('the whole preview document stays small — the user\'s app, not a bundled compiler', () => {
+    // The exact regression that caused the report: a document measured in megabytes. A hello-world
+    // preview has no business being larger than a few hundred KB.
+    expect(bigApp().length).toBeLessThan(400_000);
   });
 
-  it('no origin → CDN importmap unchanged (a srcDoc iframe cannot resolve root-relative vendor URLs)', () => {
-    const html = buildReactPreview(reactVfs());
-    expect(html).not.toContain('/vendor/react18/');
-    expect(html).toMatch(/esm\.sh\/react@18/);
-  });
-
-  it('kill switch AGENTV3_VENDOR_REACT=off → CDN importmap unchanged', () => {
-    process.env.AGENTV3_VENDOR_REACT = 'off';
-    const html = buildReactPreview(reactVfs(), ORIGIN);
-    expect(html).not.toContain('/vendor/react18/');
-    expect(html).toMatch(/esm\.sh\/react@18/);
-  });
-
-  it('a non-18 React app is NEVER silently downgraded to the vendored 18 runtime', () => {
-    const v19 = VirtualFileSystem.fromRecord({
-      'package.json': JSON.stringify({ dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' } }),
-      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
-      'src/main.jsx': 'export default ()=>null',
-    });
-    const html = buildReactPreview(v19, ORIGIN);
-    expect(html).not.toContain('/vendor/react18/');
-    expect(html).toContain('esm.sh/react@19.0.0');
-  });
-
-  it('vendoredReactBase: normalises a trailing slash and defaults an unpinned app to eligible', () => {
-    expect(vendoredReactBase(reactVfs(), 'https://x.com/')).toBe('https://x.com/vendor/react18');
-    const unpinned = VirtualFileSystem.fromRecord({ 'src/main.jsx': 'export default ()=>null' });
-    expect(vendoredReactBase(unpinned, 'https://x.com')).toBe('https://x.com/vendor/react18');
-    expect(vendoredReactBase(reactVfs(), undefined)).toBe(null);
-  });
-
-  it('CDN fallback rungs are version-guarded for vendored roots (no "latest" mid-fallback)', () => {
-    const html = buildReactPreview(reactVfs(), ORIGIN);
-    // Each rung builder detects a non-esm.sh (vendored) base and pins @18 instead of parsing it.
-    expect(html).toContain("IMAP[root].indexOf(ESM) !== 0");
-    expect(html).toContain('specUrlPlain');
-    // The facades throw an explicit error when the UMD is missing, dropping into these rungs.
-    expect(html).toContain(`${ORIGIN}/vendor/react18/react.mjs`);
-  });
-});
-
-// Autopsy ce713a7e (2026-08-02): the in-browser preview blanked when esm.sh AND jsdelivr both failed to
-// fetch 'react-dom/client'. The three prior rungs collapse to only two CDN networks; add a genuinely
-// INDEPENDENT origin (unpkg) as the final rung so a two-host blip on the React core can't kill the preview.
-describe('buildReactPreview — independent third CDN origin (autopsy ce713a7e)', () => {
-  it('wires unpkg as a fourth, infra-independent rung after esm.sh + jsdelivr', () => {
-    const html = buildReactPreview(reactVfs());
-    // A third, independent host (unpkg) is present — distinct from esm.sh (rungs 1+3) and jsdelivr (rung 2).
-    expect(html).toContain('unpkg.com');
-    expect(html).toContain('specUrlAlt2');
-    // …and the loader actually tries it before recording a load error.
-    expect(html).toMatch(/import\(specUrlAlt2\(spec\)\)/);
-    expect(html).toContain('from unpkg (independent CDN) after esm.sh + jsdelivr failed');
-    // The unpkg rung records its own real failure reason ('unpkg: …') in the surfaced error.
-    expect(html).toContain("'unpkg: '");
+  it('keeps the CDN fallback chain, which is what makes dropping the inline copy safe', () => {
+    // Inlining was originally added because every CDN fallback was CSP-blocked. Those hosts are
+    // allow-listed now, so an unreachable same-origin asset still has two real ways to recover.
+    const html = bigApp();
+    expect(html).toContain('cdn.jsdelivr.net');
+    expect(html).toContain('cdnjs.cloudflare.com');
+    expect(html).toContain('BABEL_FALLBACKS');
   });
 });

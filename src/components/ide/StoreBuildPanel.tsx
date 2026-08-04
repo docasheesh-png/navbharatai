@@ -140,7 +140,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     if (!sessionId) { setError('Choose which app to package first.'); return; }
     setPhase('preparing');
     setError('');
-    setBusyNote('Packaging your app and sending it to your GitHub…');
+    // The prepare step now includes the compile pre-flight: the server verifies the app compiles and
+    // heals it if not, BEFORE anything reaches GitHub — so this can take up to a minute or two when a
+    // repair runs, and the note must not pretend it is only an upload.
+    setBusyNote('Checking your app compiles, fixing anything broken, and sending it to your GitHub…');
     try {
       const res = await fetch('/api/mobile-ship/setup', {
         method: 'POST',

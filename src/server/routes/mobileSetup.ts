@@ -17,7 +17,7 @@
 
 import type { Express, Request, Response } from 'express';
 import axios from 'axios';
-import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
@@ -27,6 +27,13 @@ import { assembleMobileProject } from '../lib/mobileProjectAssembler';
 import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
+// COMPILE PRE-FLIGHT (admin 2026-08-04: "v5 live banaye, fix kare — GitHub par bas download ho"): the
+// app is verified — and healed by the same AI repair tier — BEFORE anything is pushed. GitHub only ever
+// receives an app already proven to compile, and every heal is written back into the user's v5
+// workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
+import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
+import { aiRepairEnabled, aiRepairModelChain } from '../lib/mobileBuildAiRepair';
+import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
 export function isValidRepoName(name: string): boolean {
@@ -100,6 +107,29 @@ export function registerMobileSetupRoutes(app: Express): void {
       return res.status(401).json({ error: 'That GitHub connection is no longer valid. Please reconnect GitHub and try again.' });
     }
 
+    // ── Compile pre-flight: verify here, heal here, and only then involve GitHub. ──
+    //
+    // A compile error found on the runner costs five minutes, an unreadable remote log, and a repair
+    // that can only edit files by committing them. Found HERE it costs seconds, and the fix lands in
+    // the user's own v5 workspace. The AI chain is the same weak-tier-safe one the GitHub loop uses.
+    const preflight = await preflightAndHeal(
+      appFiles,
+      callRepairModel,
+      aiRepairEnabled() ? aiRepairModelChain() : [],
+    );
+    if (!preflight.ok) {
+      return res.status(422).json({
+        error: preflightUserMessage(preflight.problems),
+        compileProblems: preflight.problems.slice(0, 10),
+      });
+    }
+    if (Object.keys(preflight.changed).length > 0) {
+      // The heal is real only if the user's app itself carries it — otherwise the workspace and the
+      // repository drift apart and the next ship re-fights the same errors.
+      try { await mergeWorkspaceFiles(workspaceId, preflight.changed); } catch { /* the push still proceeds */ }
+    }
+    appFiles = preflight.files;
+
     const includeIos = ios !== false;
     const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos });
     const project = assembleMobileProject(appFiles, kit.files, {
@@ -127,7 +157,7 @@ export function registerMobileSetupRoutes(app: Express): void {
         fileCount: Object.keys(project.files).length + Object.keys(project.binaryFiles).length,
         kind: project.kind,
         webDir: project.webDir,
-        notes: project.notes,
+        notes: [...preflight.notes, ...project.notes],
         requiredSecrets: kit.requiredSecrets,
         // Derived from the ONE workflow registry, never re-typed — a hand-written copy here is exactly
         // how the APK workflow ended up generated-but-not-runnable.

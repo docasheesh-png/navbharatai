@@ -25,9 +25,9 @@ import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } fr
 // Code runs, which is exactly what the admin asked for ("jo claude code karta hai, woh navbharatai
 // nahi kar sakta kya?", 2026-08-03). See mobileBuildAiRepair.ts for the full safety model.
 import {
-  AI_REPAIR_SYSTEM_PROMPT, aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain,
-  runAiRepair, type AiRepairModel,
+  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepair,
 } from '../lib/mobileBuildAiRepair';
+import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
 import { buildPackageJson, detectProjectKind } from '../lib/mobileProjectAssembler';
 
@@ -399,33 +399,6 @@ export function registerMobileShipRoutes(app: Express): void {
       res.status(502).json({ error: 'Could not read the build log from GitHub.' });
     }
   });
-}
-
-/**
- * One bounded chat call to a repair model. OpenAI-compatible (Z.ai and Moonshot both speak the Chat
- * Completions shape — same pattern as GlmProvider), no retries, hard timeout: a hung provider must
- * fail this rung and let the chain move on, not hold the user's build hostage.
- */
-async function callRepairModel(model: AiRepairModel, system: string, prompt: string): Promise<string> {
-  const r = await axios.post(
-    `${model.baseURL}/chat/completions`,
-    {
-      model: model.model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: 16000,
-      temperature: 0,
-    },
-    {
-      headers: { Authorization: `Bearer ${model.apiKey}`, 'Content-Type': 'application/json' },
-      timeout: Number(process.env.MOBILE_AUTOFIX_AI_TIMEOUT_MS) || 90_000,
-    },
-  );
-  const content = r.data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) throw new Error('empty repair reply');
-  return content;
 }
 
 /**

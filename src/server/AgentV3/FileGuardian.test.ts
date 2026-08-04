@@ -45,3 +45,54 @@ describe('planFileGuardian (auto-recover lost files from history)', () => {
     expect(planFileGuardian(undefined as never, undefined as never)).toEqual({ restore: {}, mode: 'none', count: 0 });
   });
 });
+
+// MITRIFY AUTOPSY 2026-08-04. The report said "durable store holds 608 file(s); the live sandbox
+// listed 599 but was missing 9" — exactly the scan's own skip gap. `collectWorkspaceFiles` returns
+// { files, skipped }, and the caller passed only `files`, so every path the scan SAW but declined to
+// read (excluded / too large / binary / unreadable / past a cap) looked MISSING. Two harms:
+//   1. a data-loss event that never happened, in the user's report;
+//   2. the guardian OVERWROTE those files with an older durable snapshot — the loss-prevention system
+//      destroying newer work, which is the exact opposite of its job.
+describe('planFileGuardian — a file the scan REFUSED TO READ is present, not missing', () => {
+  const saved = { 'a.ts': 'A', 'big.ts': 'NEW-AND-BIGGER', 'logo.png': 'BINARY' };
+
+  it('does nothing when the only "gap" is what the scan skipped', () => {
+    const plan = planFileGuardian(saved, { 'a.ts': 'A' }, ['big.ts', 'logo.png']);
+    expect(plan.mode).toBe('none');
+    expect(plan.count).toBe(0);
+  });
+
+  it('NEVER overwrites a skipped file — that is how newer content gets destroyed', () => {
+    const plan = planFileGuardian(saved, { 'a.ts': 'A' }, ['big.ts']);
+    expect(plan.restore['big.ts']).toBeUndefined();
+  });
+
+  it('a genuinely absent file is still restored (the guardian must keep working)', () => {
+    const plan = planFileGuardian(saved, { 'a.ts': 'A' }, ['logo.png']);
+    expect(plan.mode).toBe('missing');
+    expect(Object.keys(plan.restore)).toEqual(['big.ts']);
+  });
+
+  it('skipped files no longer push a healthy sandbox over the "recycled" threshold', () => {
+    // 4 of 6 unread — but all of them merely skipped, so this is NOT a recycled sandbox.
+    const big = { a: '1', b: '2', c: '3', d: '4', e: '5', f: '6' };
+    const plan = planFileGuardian(big, { a: '1', b: '2' }, ['c', 'd', 'e', 'f']);
+    expect(plan.mode).toBe('none');
+  });
+
+  it('a REALLY recycled sandbox is still restored whole', () => {
+    const big = { a: '1', b: '2', c: '3', d: '4', e: '5', f: '6' };
+    const plan = planFileGuardian(big, {}, []);
+    expect(plan.mode).toBe('full');
+    expect(plan.count).toBe(6);
+  });
+
+  it('back-compatible: omitting skipped behaves exactly as before', () => {
+    expect(planFileGuardian(saved, { 'a.ts': 'A' })).toEqual(planFileGuardian(saved, { 'a.ts': 'A' }, []));
+  });
+
+  it('junk in the skipped list never throws', () => {
+    expect(() => planFileGuardian(saved, { 'a.ts': 'A' }, [undefined as unknown as string, 'big.ts'])).not.toThrow();
+    expect(() => planFileGuardian(saved, { 'a.ts': 'A' }, null as unknown as string[])).not.toThrow();
+  });
+});

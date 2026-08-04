@@ -25082,3 +25082,32 @@ may appear at most ONCE, no countdown may appear after the first overrun, and a 
 inside its estimate behaves exactly as before.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,317 tests, 0 failures**.
+
+## 2026-08-04 — The File Guardian could DESTROY newer work while claiming to protect it
+
+**From the mitrify autopsy's open list ("sandbox lost 9 files").** Investigating WHY those 9 files went
+missing found that **they never did**. The report's own arithmetic gives it away: "durable store holds
+608 file(s); the live sandbox listed 599 but was missing 9" — 608 − 599 = 9 exactly, i.e. precisely the
+scan's own skip gap.
+
+**ROOT CAUSE.** `collectWorkspaceFiles` returns `{ files, skipped }`. A path lands in `skipped`
+BECAUSE the scan saw it in the sandbox listing and then declined to read it — excluded by pattern, too
+large, binary-looking, unreadable, or past a cap. **The file is there.** But the call site passed only
+`files` to `planFileGuardian`, so every skipped path looked MISSING. Two harms, the second serious:
+1. A **data-loss event that never happened** appeared in the user's report (and in `dataLossEvents`),
+   making a healthy workspace look like it was losing files every build.
+2. The guardian **wrote the older durable snapshot over those files**. If one of them held newer
+   content — e.g. a file that grew past the read cap during the build — the loss-PREVENTION system was
+   itself the thing destroying work. It runs on EVERY turn, before the agent edits anything.
+
+**FIX.** `planFileGuardian(saved, existing, skipped)` treats a skipped path as PRESENT: a file the
+scanner refused to read is not evidence of absence. This is the same discipline already used for
+`scanned:false` (UI scan) and `captured` (console errors) — unknown is never reported as empty. The
+recycle-threshold check benefits too: skipped files can no longer push a healthy sandbox over the
+"sandbox was recycled, restore everything" line. The data-loss message now names them separately
+("plus N present but not read") instead of counting them as lost.
+
+Test-locked: skipped files are never overwritten, a genuinely absent file is still restored, a really
+recycled sandbox is still restored whole, and omitting the argument is byte-identical to before.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,324 tests, 0 failures**.

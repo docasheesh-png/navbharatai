@@ -303,13 +303,31 @@ export function freeDiskBytes(dir: string): number | null {
 }
 
 /**
+ * Headroom the preflight requires BEYOND the file itself, scaled to the upload.
+ *
+ * ROOT CAUSE (admin report 2026-08-04, ".zip file upload hi nahi ho rahi"): the first version used a
+ * FIXED 512 MB headroom. On Cloud Run, /tmp is RAM-backed and routinely has only a few hundred MB
+ * free — so the fixed constant made the preflight refuse EVERY upload, including a 10 MB zip that
+ * would have sailed through. The guard built to stop a 5 GB upload wedging the instance instead
+ * blocked all imports the moment it deployed. Headroom must be PROPORTIONAL to the risk: a small
+ * upload needs only a small safety margin (64 MB); only genuinely big uploads need big margins
+ * (25% of the file, capped at 512 MB). PURE, exported for the regression tests.
+ */
+export function uploadHeadroomBytes(declaredBytes: number): number {
+  const MIN = 64 * 1024 * 1024;        // never less — the instance must keep functioning
+  const MAX = 512 * 1024 * 1024;       // never more — beyond this the margin stops buying safety
+  if (!Number.isFinite(declaredBytes) || declaredBytes <= 0) return MIN;
+  return Math.max(MIN, Math.min(MAX, Math.floor(declaredBytes / 4)));
+}
+
+/**
  * Should an upload of `declaredBytes` be accepted, given `freeBytes` on the temp filesystem?
  * Pure. Requires headroom beyond the file itself so an import can never wedge the instance by filling
  * the disk to the last byte — and answers true when free space is UNKNOWN (null), because refusing
  * every upload on a platform that cannot report free space would be a worse failure than trying.
  */
-export function hasSpaceForUpload(freeBytes: number | null, declaredBytes: number, headroomBytes = 512 * 1024 * 1024): boolean {
+export function hasSpaceForUpload(freeBytes: number | null, declaredBytes: number, headroomBytes?: number): boolean {
   if (freeBytes === null) return true;
   if (!Number.isFinite(declaredBytes) || declaredBytes < 0) return true;
-  return freeBytes >= declaredBytes + headroomBytes;
+  return freeBytes >= declaredBytes + (headroomBytes ?? uploadHeadroomBytes(declaredBytes));
 }

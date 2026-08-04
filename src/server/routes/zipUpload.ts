@@ -117,7 +117,15 @@ export function registerZipUploadRoutes(app: Express): void {
     if (Number.isFinite(declaredBytes) && declaredBytes > 0) {
       const free = freeDiskBytes(os.tmpdir());
       if (!hasSpaceForUpload(free, declaredBytes)) {
-        res.status(507).json({ error: `The server does not have enough free space for a ${(declaredBytes / (1024 ** 3)).toFixed(1)} GB upload right now (${free !== null ? (free / (1024 ** 3)).toFixed(1) : '?'} GB free). Try a smaller zip — removing node_modules and media usually shrinks it dramatically.` });
+        // Admin-visible evidence (Cloud Run logs): the refusal with its REAL numbers, so a "uploads
+        // are failing" report is diagnosable without guessing which branch fired.
+        console.warn(`[zip-upload] begin REFUSED: declared ${(declaredBytes / (1024 ** 2)).toFixed(1)} MB, free tmp ${free !== null ? (free / (1024 ** 2)).toFixed(1) : '?'} MB`);
+        const mb = declaredBytes / (1024 ** 2);
+        // With scaled headroom a refusal means the disk genuinely lacks room for THIS file. For a big
+        // archive, shrinking it is real advice; for a small one it is not — say what is actually wrong.
+        res.status(507).json({ error: mb > 512
+          ? `The server does not have enough free space for a ${(mb / 1024).toFixed(1)} GB upload right now (${free !== null ? (free / (1024 ** 3)).toFixed(1) : '?'} GB free). Removing node_modules, build output and media from the zip usually shrinks it dramatically.`
+          : `The server is temporarily low on working space and cannot receive a ${mb.toFixed(0)} MB upload right now. Please try again in a minute.` });
         return;
       }
     }
@@ -159,7 +167,7 @@ export function registerZipUploadRoutes(app: Express): void {
       });
       if (aborted) {
         discard(uploadId);
-        res.status(413).json({ error: 'This project is larger than the 1 GB import limit.' });
+        res.status(413).json({ error: `This project is larger than the ${Math.round(MAX_ARCHIVE_BYTES / (1024 ** 3))} GB import limit.` });
         return;
       }
       u.bytes += received;

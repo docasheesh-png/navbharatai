@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
@@ -2914,7 +2914,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
-  app.post('/api/agentv3/preview-error', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/preview-error', previewPollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3203,7 +3203,7 @@ export function registerAgentV3Routes(app: Express): void {
   // crashed / inbrowser_only / empty. Deliberately does NOT create a sandbox just to check (that would
   // be wasteful and slow) — a cold workspace reports `sleeping` (rebootable from saved files), which is
   // exactly the "reopen an old chat years later" case: files are safe, the live preview boots on demand.
-  app.post('/api/agentv3/preview-health', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/preview-health', previewPollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';

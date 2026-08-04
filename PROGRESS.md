@@ -24954,3 +24954,40 @@ grep, which is why no amount of searching could ever have converged.
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1037 files / 11,255 tests, 0 failures**
 (18 new: ANSI class-fix, the verbatim failing log, importer-based routing, corrupt-package naming, and
 the never-substitute contract).
+
+## 2026-08-04 — The admin's scaling question found a real bug: the 5 GB import was capped at ~470 MB
+
+**Admin asked:** "60 preview per hr — yeh per user hai ya pure NavBharatAI ke liye? Agar puri app ke
+liye hai to buri baat hai, future me 100+ user ek saath use karenge."
+
+**The answer (from the code, `rateLimiter` in authMiddleware.ts):** the bucket key is
+`` `${name}:${uid ?? ip}` `` — so every limit is **PER USER**. 100 users do NOT share 60; they get 60
+each. The only platform-wide ceiling is `anonGlobalPerHour`, which applies to ANONYMOUS traffic only
+(a botnet cap) and is opt-in per limiter. So the scaling fear was unfounded — **but answering it
+surfaced a genuine bug.**
+
+**THE BUG:** the `workspace` bucket (60/hr) is SHARED across ~44 routes, and two high-frequency paths
+were sitting in it:
+1. **`/api/zip-upload/chunk`** — one request per 8 MB chunk. The 5 GB import shipped that same morning
+   needs **640 chunk requests**, so it would 429 at chunk ~60 — a real ceiling of roughly **470 MB**,
+   and lower still because preview polling and file ops spend the same 60. The advertised 5 GB was
+   FICTION in production: precisely the "advertised but not real" failure the second absolute rule
+   forbids, in a feature shipped hours earlier.
+2. **`preview-health` / `preview-error`** — the watchdog re-probes every 150s AND on every window
+   focus/visibility change, and every browser console error is reported. A tab left open through an
+   afternoon exhausts the bucket, after which the health probe 429s and NavBharatAI reports a WORKING
+   preview as down — which the user reads as "preview never works" (the admin's problem #1).
+
+**FIX:** two dedicated buckets, sized to the real work and in-memory (`durable:false`, so no Firestore
+write per chunk/poll):
+- `ZIP_CHUNK_RATE` — `zip-chunk`, 2000/hr authed, **0 anon** (begin already requires a signed-in user).
+  Total bytes stay bounded by `MAX_ARCHIVE_BYTES` + the free-disk preflight, so the request count was
+  never what protected us.
+- `PREVIEW_POLL_RATE` — `preview-poll`, 600/hr authed, 300 anon.
+- **`preview-diagnose` deliberately KEEPS the tight workspace limiter** — it genuinely boots a sandbox
+  and installs dependencies, which is real spend that must stay bounded.
+
+Test-locked in `tests/authMiddleware.test.ts`: the chunk limit is asserted to exceed
+`ceil(5 GB / 8 MB) = 640`, so a future edit cannot silently re-cap the import below its advertised size.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,273 tests, 0 failures**.

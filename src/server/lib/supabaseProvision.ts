@@ -329,6 +329,65 @@ export async function refreshAccessToken(
   } };
 }
 
+/**
+ * Apply the app's schema to the freshly created project (ROADMAP #1 Phase 1.2 remainder).
+ *
+ * WITHOUT THIS THE FEATURE IS HALF-DONE. One-click provisioning hands the user an EMPTY database:
+ * the app is wired to it, but every query hits a table that does not exist. The build already writes
+ * `migrations/001_init.sql`; this is what actually runs it, so "your database is ready" is true rather
+ * than nearly true.
+ *
+ * Failures are classified, not thrown, because they mean different things to the user:
+ *   • `unauthorized` — the grant no longer covers this, or was revoked → reconnect.
+ *   • `api-error` with Supabase's own message — almost always a real SQL error in the generated
+ *     schema. That belongs in the admin diagnostics (it is OUR bug to fix), while the user is told
+ *     plainly that the tables were not created rather than being shown raw SQL.
+ *
+ * Deliberately NOT wrapped in a transaction here: Supabase's query endpoint runs the statement batch
+ * as given, and a generated `001_init.sql` is CREATE-only. Silently wrapping it would change the
+ * semantics of SQL we did not write.
+ */
+export async function applySchemaToProject(
+  token: string,
+  projectRef: string,
+  sql: string,
+  fetchImpl: Fetch = globalThis.fetch,
+): Promise<{ ok: true } | ProvisionError> {
+  const trimmed = String(sql ?? '').trim();
+  if (!trimmed) {
+    // Nothing to apply is not a failure — plenty of apps have no schema yet.
+    return { ok: true };
+  }
+  let res: Response;
+  try {
+    res = await fetchImpl(`${SUPABASE_API}/v1/projects/${projectRef}/database/query`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ query: trimmed }),
+    });
+  } catch (e) {
+    return { ok: false, failure: 'api-error', detail: String(e),
+      message: 'Your database was created, but we could not set up its tables. Open Settings → Database and try again.' };
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    if (res.status === 401 || res.status === 403) return classifyStatus(res.status, body, 'read');
+    return { ok: false, failure: 'api-error', detail: body.slice(0, 500),
+      message: 'Your database was created, but its tables could not be set up. NavBharatAI has recorded the details — please try again in a moment.' };
+  }
+  return { ok: true };
+}
+
+/** Pick the schema SQL out of a workspace file map. Pure — the caller supplies the files. */
+export function schemaSqlFromFiles(files: Record<string, string>): string {
+  // `migrations/001_init.sql` is what generate_migration writes. Any other .sql under migrations/ is
+  // applied too, in path order, so a multi-step schema is not silently truncated to its first file.
+  const paths = Object.keys(files ?? {})
+    .filter((p) => /(^|\/)migrations\/.*\.sql$/i.test(p))
+    .sort();
+  return paths.map((p) => files[p]).filter(Boolean).join('\n\n');
+}
+
 /** The env pairs written into the generated app — the SAME names the existing scaffolder already uses. */
 export function envForProject(c: ProjectCredentials): Record<string, string> {
   return { VITE_SUPABASE_URL: c.url, VITE_SUPABASE_ANON_KEY: c.anonKey };

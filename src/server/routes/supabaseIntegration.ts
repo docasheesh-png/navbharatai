@@ -30,7 +30,7 @@ import {
 } from '../lib/supabaseOAuth';
 import {
   listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
-  projectNameFor, envForProject, refreshAccessToken,
+  projectNameFor, envForProject, refreshAccessToken, applySchemaToProject, schemaSqlFromFiles,
 } from '../lib/supabaseProvision';
 import {
   saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh, updateTokens,
@@ -38,6 +38,7 @@ import {
 import { audit } from '../lib/audit';
 import { getServerDb } from '../lib/serverDb';
 import { encrypt } from '../lib/secrets';
+import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 
 /**
  * Default region for a new project.
@@ -330,6 +331,32 @@ export function registerSupabaseIntegrationRoutes(
       return;
     }
 
+    // A database with no tables is not "ready". The build already writes migrations/001_init.sql, so
+    // apply it now — otherwise the app is wired to an EMPTY database and every query hits a table
+    // that does not exist, which is the same class of nearly-true claim this feature exists to avoid.
+    //
+    // Reported SEPARATELY from the database itself: the project genuinely was created, so saying the
+    // whole thing failed would send the user to create a second one (and burn a free-plan slot). The
+    // schema outcome is its own field the client can surface honestly.
+    let schemaApplied: boolean | null = null;
+    let schemaNote: string | undefined;
+    const workspaceId = typeof (req.body ?? {}).workspaceId === 'string' ? (req.body as { workspaceId: string }).workspaceId : '';
+    if (workspaceId) {
+      try {
+        const files = await loadWorkspaceFiles(workspaceId);
+        const sql = schemaSqlFromFiles(files || {});
+        if (sql) {
+          const applied = await applySchemaToProject(accessToken, created.project.id, sql);
+          schemaApplied = applied.ok;
+          if (!applied.ok) schemaNote = applied.message;
+        }
+      } catch {
+        // Reading the workspace is best-effort; a database with no schema applied is still a real,
+        // usable database, and we say so rather than failing the whole provision.
+        schemaApplied = null;
+      }
+    }
+
     const saved = await saveUserSecrets(uid, {
       ENGINEER_DB_PROVIDER: 'supabase',
       ...envForProject(creds.credentials),
@@ -346,7 +373,14 @@ export function registerSupabaseIntegrationRoutes(
     }
 
     try { audit('SUPABASE_PROJECT_PROVISIONED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
-    res.json({ ok: true, projectRef: created.project.id, projectName: created.project.name, url: creds.credentials.url });
+    res.json({
+      ok: true,
+      projectRef: created.project.id,
+      projectName: created.project.name,
+      url: creds.credentials.url,
+      schemaApplied,
+      ...(schemaNote ? { schemaNote } : {}),
+    });
   });
 
   // Forget our copy. Deliberately explicit that this does NOT revoke the grant on Supabase's side —

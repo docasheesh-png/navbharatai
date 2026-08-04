@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyStatus, listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
-  projectNameFor, envForProject, refreshAccessToken, PROJECT_READY_STATUS,
+  projectNameFor, envForProject, refreshAccessToken, applySchemaToProject, schemaSqlFromFiles, PROJECT_READY_STATUS,
 } from './supabaseProvision';
 
 /** A fake fetch that replays queued responses and records the requests it saw. */
@@ -253,5 +253,78 @@ describe('refreshAccessToken — a one-time setup must stay one-time', () => {
   it('refuses to claim success when no access token comes back', async () => {
     const { impl } = fakeFetch([{ json: { expires_in: 3600 } }]);
     expect((await refreshAccessToken(base, impl)).ok).toBe(false);
+  });
+});
+
+// Phase 1.2 remainder. Without this, one-click provisioning hands the user an EMPTY database: the app
+// is wired to it, but every query hits a table that does not exist. "Your database is ready" has to be
+// true, not nearly true.
+describe('applySchemaToProject — a database with no tables is not "ready"', () => {
+  it('runs the schema against the project and reports success', async () => {
+    const { impl, calls } = fakeFetch([{ json: [] }]);
+    expect(await applySchemaToProject('tok', 'ref123', 'CREATE TABLE notes (id int);', impl)).toEqual({ ok: true });
+    expect(calls[0].url).toBe('https://api.supabase.com/v1/projects/ref123/database/query');
+    expect(JSON.parse(String(calls[0].init?.body)).query).toContain('CREATE TABLE notes');
+  });
+
+  it('an app with NO schema is a success, not a failure — plenty of apps have none', async () => {
+    const { impl, calls } = fakeFetch([]);
+    expect(await applySchemaToProject('tok', 'ref', '   ', impl)).toEqual({ ok: true });
+    expect(calls.length).toBe(0); // nothing to run ⇒ no pointless request
+  });
+
+  it('401/403 is a reconnect prompt, not a mysterious failure', async () => {
+    for (const status of [401, 403]) {
+      const { impl } = fakeFetch([{ status, text: 'nope' }]);
+      expect((await applySchemaToProject('t', 'r', 'SELECT 1;', impl) as { failure: string }).failure)
+        .toBe('unauthorized');
+    }
+  });
+
+  it('a SQL error keeps Supabase\'s words for the ADMIN but never shows raw SQL to the user', async () => {
+    // A broken generated schema is OUR bug. The admin needs the exact message; the user needs to know
+    // the tables were not created and that we recorded it.
+    const { impl } = fakeFetch([{ status: 400, text: 'syntax error at or near "CREAT"' }]);
+    const r = await applySchemaToProject('t', 'r', 'CREAT TABLE x;', impl);
+    expect(r).toMatchObject({ ok: false, failure: 'api-error' });
+    if (!r.ok) {
+      expect(r.detail).toContain('syntax error');
+      expect(r.message).not.toContain('syntax error');
+      expect(r.message).toContain('tables could not be set up');
+    }
+  });
+
+  it('a network failure says the database exists but the tables do not', async () => {
+    const { impl } = fakeFetch([{ throws: true }]);
+    const r = await applySchemaToProject('t', 'r', 'SELECT 1;', impl);
+    expect((r as { message: string }).message).toContain('could not set up its tables');
+  });
+});
+
+describe('schemaSqlFromFiles — find the schema the build already wrote', () => {
+  it('picks up migrations/001_init.sql', () => {
+    expect(schemaSqlFromFiles({ 'migrations/001_init.sql': 'CREATE TABLE a();' })).toBe('CREATE TABLE a();');
+  });
+
+  it('applies EVERY migration in path order — a multi-step schema is not truncated to its first file', () => {
+    const sql = schemaSqlFromFiles({
+      'migrations/002_add_users.sql': 'SECOND',
+      'migrations/001_init.sql': 'FIRST',
+    });
+    expect(sql.indexOf('FIRST')).toBeLessThan(sql.indexOf('SECOND'));
+  });
+
+  it('ignores everything that is not a migration', () => {
+    expect(schemaSqlFromFiles({
+      'src/App.tsx': 'x', 'prisma/schema.prisma': 'y', 'README.md': 'z',
+    })).toBe('');
+  });
+
+  it('finds migrations under a nested app root too', () => {
+    expect(schemaSqlFromFiles({ 'server/migrations/001_init.sql': 'DDL' })).toBe('DDL');
+  });
+
+  it('an empty workspace yields nothing rather than throwing', () => {
+    expect(schemaSqlFromFiles({})).toBe('');
   });
 });

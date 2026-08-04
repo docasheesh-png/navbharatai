@@ -17,6 +17,7 @@ export type DevServerFailureCause =
   | 'missing_script'  // the launch command names a script package.json doesn't have ("Missing script: dev")
   | 'port_in_use'     // the target port is occupied (EADDRINUSE)
   | 'db_unreachable'  // the app's database isn't running in the sandbox (Prisma P1001 / ECONNREFUSED :5432)
+  | 'missing_credential' // the app kills itself at boot because a USER-supplied key isn't set yet
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
   | 'crash'           // the process exited/crashed with no more specific signal
@@ -136,6 +137,7 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
     case 'missing_script': return 'code_fix'; // restarting re-runs the same wrong command forever — the LAUNCH COMMAND must change
     case 'port_in_use': return 'kill_port_retry';
     case 'db_unreachable': return 'reprovision_db'; // a blind restart can never revive a reaped Postgres — restart the DB itself
+    case 'missing_credential': return 'code_fix'; // the key is still unset on every restart — only the SOURCE can stop crashing
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
     case 'crash': return 'plain_retry';
@@ -148,6 +150,38 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
  * generic "Error:" never shadows a precise signal (a missing module, a busy port, a syntax error).
  * PURE. Call this only when the port is actually DOWN (a healthy server needs no diagnosis).
  */
+/**
+ * The env-var name whose absence killed the app at boot, or `null` when the log shows no such failure.
+ *
+ * HIGH PRECISION on purpose — a wrong hit would send the agent editing source for an unrelated crash.
+ * The name must look like a real environment variable (UPPER_SNAKE, i.e. at least one underscore), which
+ * is how essentially every credential is named (RAZORPAY_KEY_SECRET, SMTP_HOST, TWILIO_ACCOUNT_SID …).
+ * A single all-caps word without an underscore is deliberately NOT matched; it falls through to the
+ * generic crash branch rather than risk a false "edit your source" verdict.
+ *
+ * DATABASE_URL is excluded here because the caller reaches this only after the db_unreachable branch,
+ * which has a strictly better recovery for it (provision Postgres); this guard makes that explicit so a
+ * future reorder cannot silently downgrade the database path. PURE.
+ */
+export function missingCredentialFromLog(log: string): string | null {
+  const text = (log || '').slice(-8000);
+  const NAME = '[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+';
+  const patterns: RegExp[] = [
+    // "Error: Missing RAZORPAY_KEY_SECRET" / "Missing required environment variable: SMTP_HOST"
+    new RegExp(`\\bMissing\\s+(?:required\\s+)?(?:env(?:ironment)?\\s+var(?:iable)?s?\\s*:?\\s*)?["'\`]?(${NAME})["'\`]?`, 'i'),
+    // "STRIPE_SECRET_KEY is required" / "must be set" / "is not defined" / "is undefined"
+    new RegExp(`["'\`]?(${NAME})["'\`]?\\s+(?:is\\s+)?(?:required|must\\s+be\\s+set|is\\s+not\\s+set|not\\s+set|is\\s+not\\s+defined|not\\s+defined|is\\s+undefined|is\\s+missing)\\b`),
+    // "Environment variable SENDGRID_API_KEY is ..." (the name follows the phrase)
+    new RegExp(`\\benv(?:ironment)?\\s+var(?:iable)?s?\\s+["'\`]?(${NAME})["'\`]?`, 'i'),
+  ];
+  for (const re of patterns) {
+    const m = re.exec(text);
+    const name = m?.[1];
+    if (name && name !== 'DATABASE_URL') return name;
+  }
+  return null;
+}
+
 export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   const text = (log || '').slice(-8000); // the tail carries the fatal line; bound the scan
   const make = (cause: DevServerFailureCause, detail: string): DevServerDiagnosis => ({ cause, recovery: recoveryFor(cause), detail });
@@ -206,6 +240,21 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('db_unreachable', "The app needs a database but none is set up in the sandbox — provisioning PostgreSQL, writing DATABASE_URL, and retrying.");
   }
 
+  // 2.6) MISSING USER CREDENTIAL — the app kills itself at boot because an env var the END USER supplies
+  //    from their own account (a payment key, an SMTP password, a Maps key) is not set yet. Caught AFTER
+  //    db_unreachable (DATABASE_URL has a better recovery: provision Postgres) and BEFORE the generic
+  //    crash branch, which used to swallow it: `throw new Error('Missing RAZORPAY_KEY_SECRET')` matched
+  //    only `/\bError:/` → 'crash' → 'plain_retry', and a restart can NEVER help because the key is still
+  //    unset on the next boot. Both attempts were wasted and the report said "crashed on startup" instead
+  //    of the truth. This is the RETROACTIVE half of the missing-credential contract (2026-08-03): apps
+  //    built BEFORE the contract shipped still contain these boot-killers, and this is the moment it
+  //    actually bites — so classify it honestly and route it to the SOURCE fix.
+  const missingCred = missingCredentialFromLog(text);
+  if (missingCred) {
+    return make('missing_credential',
+      `The app refuses to start because ${missingCred} is not set — but that key is supplied later by the end user from their own account, so it is legitimately empty here. A restart can never fix this. Fix the SOURCE: delete the boot-time throw/exit for ${missingCred}, gate that feature on a boolean (e.g. \`const enabled = Boolean(process.env.${missingCred});\`), and render its control visibly disabled as "Coming soon" naming ${missingCred} and Settings → App Settings → Secrets & API Keys. Keep every other part of the app working, never crash at boot, and never fake a result.`);
+  }
+
   // 3) Code error in the generated source — a restart can NEVER fix this; the agent must edit the code.
   if (/\bSyntaxError\b/i.test(text)
     || /Transform failed with \d+ error/i.test(text)
@@ -243,8 +292,13 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
  */
 export function planDevServerRecovery(log: string, attempt: number, maxAttempts: number): DevServerDiagnosis {
   const d = classifyDevServerFailure(log);
-  // A syntax/transform error will fail identically on every restart — stop and surface it now.
-  if (d.cause === 'code_error') return d;
+  // Anything whose ONLY cure is a source change fails identically on every restart — stop and surface it
+  // now, on ANY attempt. Keyed on the RECOVERY, not on one cause: `code_error` was special-cased here,
+  // but `missing_script` and `missing_credential` are equally unfixable by restarting, and on the FINAL
+  // attempt they were being rewritten to 'give_up' — which throws away the one thing that would have
+  // fixed them (the actionable detail telling the agent exactly what to change). Fix the class, not the
+  // instance: every `code_fix` recovery short-circuits with its detail intact.
+  if (d.recovery === 'code_fix') return d;
   if (attempt >= Math.max(1, maxAttempts)) return { ...d, recovery: 'give_up' };
   return d;
 }

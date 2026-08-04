@@ -1,8 +1,9 @@
 import type { Express, Request, Response } from 'express';
+import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring } from '../lib/validate';
-import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
 import {
   buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse, isValidDebugRequest,
 } from '../lib/debugAnalysis';
@@ -29,7 +30,7 @@ const schema = vobject({
 });
 
 export function registerDebugRoutes(app: Express): void {
-  app.post('/api/debug', workspaceRateLimiter(), validateBody(schema), async (req: Request, res: Response) => {
+  app.post('/api/debug', workspaceRateLimiter(), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
     if (!isValidDebugRequest(req.body)) {
       res.status(400).json({ error: 'A non-empty "error" text is required.' });
       return;
@@ -57,10 +58,11 @@ export function registerDebugRoutes(app: Express): void {
       }
       // Only a genuinely-answered analysis spends an allowance.
       if (gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
+      chargeToolAction(gate); // ONE WALLET — bills every model call this action made (aiSpendZone)
       res.json(parseDebugResponse(content));
     } catch {
       // White-label honest failure: no provider names, no fake result.
       res.status(503).json({ error: 'NavBharatAI\'s engine is briefly busy — please try again in a minute.' });
     }
-  });
+  }));
 }

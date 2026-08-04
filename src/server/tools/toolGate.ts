@@ -23,6 +23,12 @@ import {
 } from '../professionals/professionalPaid';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { toolUsageStore, type ToolBucket } from './ToolUsageStore';
+import { aiWalletSpendEnabled, chargeForAiTurns } from '../lib/aiTurnCharge';
+import { currentAiSpend } from '../lib/aiSpendZone';
+import { usdInrRate } from '../lib/UsdInrRate';
+import { walletTooEmptyForTurn } from '../professionals/passGate';
+import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { getServerDb } from '../lib/serverDb';
 
 export type { ToolBucket };
 
@@ -58,7 +64,11 @@ export function dailyLimitFor(bucket: ToolBucket): number {
 
 /** What a tool route needs back: run it (and whether to burn a free action), or a ready-to-send block. */
 export type ToolGateResult =
-  | { allow: true; countsAgainstFree: boolean; remainingFree?: number; uid: string | null; tier: 'free' | 'paid' }
+  | {
+      allow: true; countsAgainstFree: boolean; remainingFree?: number; uid: string | null; tier: 'free' | 'paid';
+      /** Carried so the route can charge the wallet without re-deriving (or re-reading) either fact. */
+      isFreeListed: boolean; hasActivePass: boolean;
+    }
   | { allow: false; status: number; body: Record<string, unknown> };
 
 /** The human name each bucket is refused by, so the paywall message names the thing the user just tried. */
@@ -79,12 +89,42 @@ export async function gateToolAction(
   email: string | null,
   bucket: ToolBucket,
 ): Promise<ToolGateResult> {
-  if (!professionalPaidEnabled()) {
-    // Flag off → today's behaviour exactly: allow, meter nothing, touch no Firestore.
-    return { allow: true, countsAgainstFree: false, uid, tier: 'paid' };
-  }
   const freeListed = isProfessionalFreeUser(uid, email);
-  const hasActivePass = !!uid && !freeListed ? (await professionalPassStore.getStatus(uid)).active : false;
+  const walletSpend = aiWalletSpendEnabled();
+  // Read the pass at most ONCE and share it between the two gates — it answers "unlimited access?" for
+  // the paywall and "already paid for, do not charge the wallet" for the spend gate.
+  const needsPass = !!uid && !freeListed && (walletSpend || professionalPaidEnabled());
+  const hasActivePass = needsPass
+    ? (await professionalPassStore.getStatus(uid as string).catch(() => ({ active: false }))).active
+    : false;
+
+  // ONE WALLET (admin 2026-08-01): a tool action costs NavBharatAI the same kind of money a build or a
+  // professional answer does, so it draws on the same balance and an empty one is refused before any
+  // provider is called. Independent of the Pass paywall — the two answer different questions. Entirely
+  // inert (not even a Firestore read) while AI_WALLET_SPEND is off, which is the default.
+  if (walletSpend && uid && !freeListed && !hasActivePass) {
+    const balanceInr = await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid).catch(() => null);
+    if (walletTooEmptyForTurn(balanceInr)) {
+      return {
+        allow: false,
+        status: 402,
+        body: {
+          error: 'Your balance is empty. Add credit to keep using NavBharatAI, or get the Professional Pass for unlimited access.',
+          code: 'wallet_empty',
+          reason: 'wallet-empty',
+          bucket,
+          balanceInr: balanceInr ?? 0,
+          passPriceInr: professionalPassPriceInr(),
+          passDays: professionalPassDays(),
+        },
+      };
+    }
+  }
+
+  if (!professionalPaidEnabled()) {
+    // Flag off → today's quota behaviour exactly: allow, meter nothing.
+    return { allow: true, countsAgainstFree: false, uid, tier: 'paid', isFreeListed: freeListed, hasActivePass };
+  }
 
   // Images are capped even WITH a pass; every other bucket is unlimited for a pass holder.
   const passIsUnlimitedHere = hasActivePass && bucket !== 'image';
@@ -103,7 +143,10 @@ export async function gateToolAction(
 
   if (decision.action === 'allow') {
     const tier: 'free' | 'paid' = decision.reason === 'within-free-quota' && !hasActivePass ? 'free' : 'paid';
-    return { allow: true, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid, tier };
+    return {
+      allow: true, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid, tier,
+      isFreeListed: freeListed, hasActivePass,
+    };
   }
 
   const login = decision.reason === 'login-required';
@@ -130,4 +173,25 @@ export async function gateToolAction(
 /** Record one consumed free action. Only call after the action genuinely succeeded. Best-effort. */
 export function burnToolAction(uid: string | null | undefined, bucket: ToolBucket): void {
   if (uid) void toolUsageStore.increment(uid, bucket);
+}
+
+/**
+ * Charge the wallet for everything the model did during THIS tool action. Call it beside
+ * `burnToolAction`, at the point the route has already decided the action genuinely succeeded.
+ *
+ * The cost comes from the surrounding spend zone (aiSpendZone.ts), so a tool that fans out over batches
+ * is billed for ALL its model calls rather than one of them, and a tool that adds a model call later is
+ * billed correctly without touching this. A route that failed never reaches here, which keeps the
+ * platform's standing rule intact: a user is not charged for something that did not work.
+ *
+ * Fire-and-forget on purpose — a money-path failure must never cost the user their result.
+ */
+export function chargeToolAction(gate: Extract<ToolGateResult, { allow: true }>): void {
+  void chargeForAiTurns(
+    getServerDb() as any,
+    { userId: gate.uid, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass },
+    currentAiSpend(),
+    usdInrRate(),
+    Date.now(),
+  );
 }

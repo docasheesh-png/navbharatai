@@ -16,6 +16,7 @@
 
 import { AIRouterManager } from '../AI/AIRouterManager';
 import type { ChatTurnUsage } from './chatSpend';
+import { recordAiSpend } from './aiSpendZone';
 
 export type ProfessionalTier = 'free' | 'paid';
 
@@ -47,15 +48,19 @@ export async function callProfessionalAIWithUsage(
   prompt: string,
   tier: ProfessionalTier = 'free',
 ): Promise<ProfessionalAnswer> {
-  const answer = (response: { content: string; provider?: string; model?: string; usage?: { inputTokens: number; outputTokens: number } }): ProfessionalAnswer => ({
-    content: response.content,
-    spend: {
+  const answer = (response: { content: string; provider?: string; model?: string; usage?: { inputTokens: number; outputTokens: number } }): ProfessionalAnswer => {
+    const spend: ChatTurnUsage = {
       provider: response.provider,
       model: response.model,
       inputTokens: response.usage?.inputTokens,
       outputTokens: response.usage?.outputTokens,
-    },
-  });
+    };
+    // THE ONE LINE that gives every Other-AI tool correct billing without its own plumbing: any caller
+    // running inside a spend zone accumulates this call automatically, including a tool that fans out
+    // over batches and makes a dozen of them. See aiSpendZone.ts. A no-op outside a zone.
+    recordAiSpend(spend);
+    return { content: response.content, spend };
+  };
 
   // Tier-1 leader (both tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
   try {

@@ -21,7 +21,7 @@
 // Off by default. `AI_WALLET_SPEND=on` is what makes any of it real, so this ships and bakes long
 // before it moves a single rupee of anyone's balance.
 
-import { chatTurnCost, type ChatTurnUsage, type ChatTurnCost } from './chatSpend';
+import { chatTurnCost, sumChatTurnCosts, type ChatTurnUsage, type ChatTurnCost } from './chatSpend';
 import { debitWalletForAiUsage } from './walletDebit';
 
 /** The master switch. Off unless explicitly enabled, so shipping this changes nothing by itself. */
@@ -97,6 +97,34 @@ export function aiSpendRollupRef(nowMs: number): string {
 /** Ledger text for the bucket. NavBharatAI's own words — never a vendor name (white-label law §2). */
 export const AI_SPEND_LEDGER_LABEL = 'NavBharatAI assistants';
 
+/**
+ * The same decision for a request that made SEVERAL model calls — the App Debugger fans out over
+ * batches of files, so one action can be a dozen calls.
+ *
+ * They are summed FIRST and charged once, which is not the same as charging each: a request of ten
+ * calls each costing a fraction of a token is one honest charge here, rather than ten decisions that
+ * individually round to nothing. It also means the tiered markup applies to the request's real total,
+ * exactly as a build's does.
+ */
+export function decideAiChargeForTurns(
+  ctx: AiChargeContext,
+  usages: Array<ChatTurnUsage | null | undefined>,
+  usdInr: number,
+  env: NodeJS.ProcessEnv = process.env,
+): AiChargeDecision {
+  const cost = sumChatTurnCosts((usages || []).map((u) => chatTurnCost(u, usdInr)));
+  const no = (reason: AiChargeReason): AiChargeDecision => ({ charge: false, reason, billedInr: 0, cost });
+
+  if (!aiWalletSpendEnabled(env)) return no('disabled');
+  if (!ctx.userId) return no('anonymous');
+  if (ctx.isFreeListed) return no('free-list');
+  if (ctx.hasActivePass) return no('pass');
+  if (!cost.measured) return no('unmeasured');
+  if (cost.billedInr <= 0) return no('free-model');
+
+  return { charge: true, reason: 'charge', billedInr: cost.billedInr, cost };
+}
+
 export interface AiChargeResult extends AiChargeDecision {
   /** True when the wallet was actually debited. */
   debited: boolean;
@@ -118,7 +146,27 @@ export async function chargeForAiTurn(
   nowMs: number,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AiChargeResult> {
-  const decision = decideAiCharge(ctx, usage, usdInr, env);
+  return applyAiCharge(db, ctx, decideAiCharge(ctx, usage, usdInr, env), nowMs);
+}
+
+/** The multi-call form — one charge for every model call a single request made. See above. */
+export async function chargeForAiTurns(
+  db: any,
+  ctx: AiChargeContext,
+  usages: Array<ChatTurnUsage | null | undefined>,
+  usdInr: number,
+  nowMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AiChargeResult> {
+  return applyAiCharge(db, ctx, decideAiChargeForTurns(ctx, usages, usdInr, env), nowMs);
+}
+
+async function applyAiCharge(
+  db: any,
+  ctx: AiChargeContext,
+  decision: AiChargeDecision,
+  nowMs: number,
+): Promise<AiChargeResult> {
   if (!decision.charge || !ctx.userId) return { ...decision, debited: false, tokensDebited: 0 };
 
   const res = await debitWalletForAiUsage(db, ctx.userId, {

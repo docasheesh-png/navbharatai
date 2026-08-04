@@ -162,4 +162,66 @@ describe('summarizeProject', () => {
       expect(summarizeProject(mitrify, 'x')).toContain("Here's what I built");
     });
   });
+
+  // Mitrify autopsy 2026-08-04: on a "do not change any files" survey turn the header said
+  // "I changed 1 file in your project" — the pipeline's own dev .env from key-provisioning — and named
+  // nothing. The user read that as a broken promise. Naming the files turns confusion into
+  // information; an engine-config-only change-set is said as exactly what it is: setup, source untouched.
+  describe('WHICH files changed — naming + engine-config attribution', () => {
+    const mitrify = graph({
+      files: ['client/src/App.tsx', 'server/routes.ts', 'shared/schema.ts'],
+      components: ['App'],
+      routes: ['/'],
+      dependencies: ['react', 'vite', 'express'],
+    });
+
+    it('an edit run NAMES the changed files when there are three or fewer', () => {
+      const out = summarizeProject(mitrify, 'fix login', {
+        changedFiles: 2, editMode: true, changedPaths: ['client/src/App.tsx', 'server/routes.ts'],
+      });
+      expect(out).toContain('I changed 2 files in your project (client/src/App.tsx, server/routes.ts)');
+    });
+
+    it('a change-set that is ONLY engine-written setup config says the source is untouched', () => {
+      const out = summarizeProject(mitrify, 'import and analyze my app', {
+        changedFiles: 1, editMode: true, changedPaths: ['.env'],
+      });
+      expect(out).toContain('Your source files are untouched');
+      expect(out).toContain('a setup file (.env)');
+      expect(out).not.toContain('I changed 1 file');
+      expect(out).not.toContain("Here's what I built");
+    });
+
+    it('a MIXED change-set (setup + real source) keeps the honest "I changed" header', () => {
+      const out = summarizeProject(mitrify, 'fix it', {
+        changedFiles: 2, editMode: true, changedPaths: ['.env', 'server/routes.ts'],
+      });
+      expect(out).toContain('I changed 2 files in your project (.env, server/routes.ts)');
+      expect(out).not.toContain('untouched');
+    });
+
+    it('more than three changed files: count only, no unwieldy path dump', () => {
+      const out = summarizeProject(mitrify, 'refactor', {
+        changedFiles: 4, editMode: true, changedPaths: ['a.ts', 'b.ts', 'c.ts', 'd.ts'],
+      });
+      expect(out).toContain('I changed 4 files in your project.');
+      expect(out).not.toContain('a.ts');
+    });
+
+    it('.env variants and node version files count as engine config', () => {
+      const out = summarizeProject(mitrify, 'analyze', {
+        changedFiles: 2, editMode: true, changedPaths: ['.env.local', '.nvmrc'],
+      });
+      expect(out).toContain('2 setup files (.env.local, .nvmrc)');
+      expect(out).toContain('Your source files are untouched');
+    });
+
+    it('a fresh build never names paths — the app itself is the change-set', () => {
+      const out = summarizeProject(mitrify, 'build me an app', {
+        changedFiles: 2, editMode: false, changedPaths: ['a.ts', 'b.ts'],
+      });
+      expect(out).toContain("Here's what I built");
+      expect(out).not.toContain('a.ts');
+    });
+  });
 });

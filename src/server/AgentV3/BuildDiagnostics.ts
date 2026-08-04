@@ -861,7 +861,11 @@ export class BuildDiagnostics {
     // Observations are neither ours to have healed nor ours to still owe — they get their own bucket, so
     // the auto-resolved tally means "v5.0 genuinely fixed this" and nothing else (mitrify 2026-08-04).
     const observations = this.issues.filter((i) => i.observation === true).length;
-    const autoResolved = this.issues.filter((i) => i.autoResolved && i.observation !== true).length;
+    // INFO events are excluded too (mitrify autopsy #2, same day): a read-only import+survey turn with
+    // ZERO real heals reported healCount 32, because every heartbeat, tool call and narration line is
+    // recorded `severity:'info', autoResolved:true`. Narration is not a fix; a heal tally that counts
+    // heartbeats is a green number wearing a lie. Only a WARNING/ERROR that v5 genuinely resolved counts.
+    const autoResolved = this.issues.filter((i) => i.autoResolved && i.observation !== true && i.severity !== 'info').length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,

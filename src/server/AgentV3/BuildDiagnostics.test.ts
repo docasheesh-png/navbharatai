@@ -1327,4 +1327,21 @@ describe('counts — an OBSERVATION is neither a self-heal nor an unresolved def
     d.record({ phase: 'build', severity: 'warning', code: 'X', message: 'y', autoResolved: true });
     expect(d.report().counts.observations).toBeUndefined();
   });
+
+  // Mitrify autopsy #2 (2026-08-04): a read-only import+survey turn with ZERO real heals reported
+  // healCount 32 — heartbeats, tool calls and narration lines are all `severity:'info',
+  // autoResolved:true`, and every one of them was counted as a "self-heal". Narration is not a fix.
+  it('info-severity timeline events (heartbeats, tool calls, narration) never count as self-heals', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'import my repo' });
+    d.heartbeat();                                                     // info, autoResolved:true
+    d.ingestEvent({ type: 'tool_call', tool: 'read_file', callId: 'c1', ts: 1 } as unknown as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: true, summary: 'ok', ts: 2 } as AgentEvent);
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Reading your files…', ts: 3 } as AgentEvent);
+    // … one GENUINE heal: a real warning v5 resolved.
+    d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed a broken import', autoResolved: true });
+
+    const c = d.report().counts;
+    expect(c.autoResolved).toBe(1); // NOT 5 — the timeline is activity, not fixes
+    expect(c.unresolved).toBe(0);   // and excluding info from heals must not turn it into "unresolved"
+  });
 });

@@ -5080,7 +5080,7 @@ export function registerAgentV3Routes(app: Express): void {
      */
     const recordImportAccounting = (
       extracted: Parameters<typeof importAccountingLine>[0],
-      diag?: { record: (issue: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }) => void },
+      diag?: { record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }) => void },
     ): void => {
       try {
         const line = importAccountingLine(extracted);
@@ -5094,7 +5094,7 @@ export function registerAgentV3Routes(app: Express): void {
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string>;
-        diag?: { record: (issue: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }) => void } },
+        diag?: { record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }) => void } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5210,8 +5210,26 @@ export function registerAgentV3Routes(app: Express): void {
       // "read/analyze my app" ask with an honest survey of the real files.
       attachmentContext += `\n\n[APP IMPORT — already completed] The user's app from ${opts.source} has ALREADY been imported into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze it, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
       // Background live-preview boot (the actuator handles install + start + health-check).
+      // FORENSIC TRAIL (mitrify autopsy 2026-08-04, "Cannot GET /customer/home" AGAIN): the honest
+      // boot-verify shipped 2026-08-03 — and today's report contained ZERO preview entries, so the #1
+      // user-visible failure could not be autopsied: was the boot skipped? did it finish after the
+      // stream closed (emitLive drops post-end narrations by design)? Nobody could tell. Every branch
+      // now records into buildDiag, which does not depend on the stream — starting with the SKIP case,
+      // whose reason was exactly the entry missing from today's report.
+      if (!(validation.hasPackageJson && sandboxDiag().livePreviewAvailable)) {
+        opts.diag?.record({
+          phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_SKIPPED',
+          message: `Background live-preview boot NOT attempted for this import: ${!validation.hasPackageJson ? 'the project has no package.json (nothing to npm-install/run)' : 'the sandbox live preview is unavailable in this session'}.`,
+          autoResolved: true,
+        });
+      }
       if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
         const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
+        opts.diag?.record({
+          phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_BOOT_STARTED',
+          message: 'Background live-preview boot started (npm install + dev server). Its verdict is recorded here even if it lands after the reply stream closes.',
+          autoResolved: true,
+        });
         // HEAVY-APP PREVIEW (capability ②): a full-stack imported app (Express + Postgres + env-driven
         // config, like Mitrify) crashes on a bare `npm run dev` — no DATABASE_URL, undefined env vars.
         // Provision a local DB + write a dev .env FIRST so the server has a real chance to boot; the
@@ -5266,6 +5284,12 @@ export function registerAgentV3Routes(app: Express): void {
               }
               const verdict = previewServeNarration({ rendered: served.rendered, problems: served.problems, port: bootPort, needsDb });
               emitLive({ type: 'narration', agent: 'architect', text: verdict.text, ts: Date.now() });
+              // The verdict is the fact the next autopsy needs — a served=false here IS the
+              // "Cannot GET /customer/home" class, named with its exact problem.
+              opts.diag?.record({
+                phase: 'preview', severity: verdict.ok ? 'info' : 'warning', code: verdict.ok ? 'IMPORT_PREVIEW_SERVING' : 'IMPORT_PREVIEW_NOT_SERVING',
+                message: verdict.text.slice(0, 400), autoResolved: verdict.ok,
+              });
             } else {
               // HONEST DB-AWARE FAILURE (admin 2026-07-24): a full-stack app that crashed on boot almost
               // always needs a real DB and/or external secrets — say so with the exact fix, instead of a
@@ -5278,6 +5302,10 @@ export function registerAgentV3Routes(app: Express): void {
               });
               emitLive({ type: 'narration', agent: 'architect', text: dbNote
                 || '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
+              opts.diag?.record({
+                phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
+                message: (dbNote || 'Dev server did not come up within the boot window.').slice(0, 400), autoResolved: false,
+              });
             }
           } catch {
             const dbNote = previewBootFailureAdvisory({
@@ -5288,6 +5316,12 @@ export function registerAgentV3Routes(app: Express): void {
             });
             emitLive({ type: 'narration', agent: 'architect', text: dbNote
               || '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
+            // The exception/timeout path must leave the same trail as a clean failure — this branch
+            // going silent is exactly how today's report ended up with zero preview entries.
+            opts.diag?.record({
+              phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
+              message: (dbNote || 'Preview boot timed out or threw before a verdict could be read.').slice(0, 400), autoResolved: false,
+            });
           }
         })();
       }
@@ -9245,7 +9279,7 @@ export function registerAgentV3Routes(app: Express): void {
           // writtenFiles counts only dispatcher writes (AI edits), NOT imported files, so a read-only
           // import+survey gets "I analyzed your project — no files were changed" instead of the false
           // "Here's what I built". An edit run says "I changed N file(s)"; a fresh build keeps "built".
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode, changedPaths: [...writtenFiles.keys()] });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }

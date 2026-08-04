@@ -16,6 +16,13 @@ describe('golden scaffolds — every simple starter chip ships a hand-verified, 
     expect(simpleScaffolds).toEqual(SIMPLE.map((t) => t.id).sort());
   });
 
+  it('FULL COVERAGE: every starter chip a user can click has a scaffold, and nothing extra', () => {
+    // Reached 2026-08-04. Every chip on the start screen — simple and pro — now begins from an app
+    // proven to parse and to compile in the preview, so no chip can give someone a broken first build.
+    // Adding a chip without a scaffold now fails HERE, in the same PR, rather than in front of a user.
+    expect(GOLDEN_SCAFFOLDS.map((g) => g.id).sort()).toEqual(STARTER_TEMPLATES.map((t) => t.id).sort());
+  });
+
   it('every scaffold id is a REAL chip id, and its tier matches that chip', () => {
     for (const g of GOLDEN_SCAFFOLDS) {
       const chip = STARTER_TEMPLATES.find((t) => t.id === g.id);
@@ -107,10 +114,17 @@ describe('goldenScaffoldForPrompt — exact chip prompts match, edited prompts b
     expect(showcase.length).toBeGreaterThan(0);
   });
 
-  it('a pro chip WITHOUT a scaffold still falls through to a normal build — never a wrong template', () => {
-    for (const t of PRO.filter((x) => !PRO_WITH_SCAFFOLD.includes(x.id))) {
-      expect(goldenScaffoldForPrompt(t.prompt), t.id).toBeNull();
+  it('EVERY pro chip prompt now matches its own scaffold', () => {
+    for (const t of PRO) {
+      expect(goldenScaffoldForPrompt(t.prompt)?.id, t.id).toBe(t.id);
     }
+  });
+
+  it('the fall-through path still works for anything that is NOT a chip prompt', () => {
+    // The safety property that made partial coverage safe must survive full coverage: an unknown or
+    // edited prompt gets a normal from-scratch build, never the nearest template.
+    expect(goldenScaffoldForPrompt('build me an app for tracking my cows')).toBeNull();
+    expect(goldenScaffoldForPrompt(PRO[0].prompt + ' with realtime chat')).toBeNull();
   });
 });
 

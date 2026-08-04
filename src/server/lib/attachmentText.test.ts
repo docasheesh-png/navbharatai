@@ -39,11 +39,14 @@ describe('extractDocumentText — text formats', () => {
 
 describe('extractDocumentText — office + archives', () => {
   it('extracts text from a real .xlsx workbook', async () => {
-    const XLSX = await import('xlsx');
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([['Name', 'Age'], ['Asha', 30], ['Ravi', 25]]);
-    XLSX.utils.book_append_sheet(wb, ws, 'People');
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    // Fixture built with exceljs — SheetJS was removed (its last npm release, 0.18.5, carries a
+    // prototype-pollution CVE with no registry fix). The assertions are unchanged on purpose: this
+    // test exists to prove the migration did not change what a user's workbook extracts to.
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('People');
+    for (const row of [['Name', 'Age'], ['Asha', 30], ['Ravi', 25]]) ws.addRow(row as never[]);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
     const out = await extractDocumentText({ name: 'p.xlsx', type: '', base64: buf.toString('base64') });
     expect(out).toContain('Name');
     expect(out).toContain('Asha');
@@ -88,5 +91,66 @@ describe('buildDocumentContext', () => {
   it('returns empty string when there are no document attachments', async () => {
     expect(await buildDocumentContext([{ name: 'a.png', type: 'image/png', base64: b64('x') }])).toBe('');
     expect(await buildDocumentContext([])).toBe('');
+  });
+});
+
+/**
+ * SPREADSHEET EXTRACTION — the user-uploaded-file path that made the SheetJS CVEs real rather than
+ * theoretical (CVE-2023-30533, prototype pollution reachable by parsing a crafted workbook; npm's
+ * last published SheetJS, 0.18.5, is still vulnerable because the vendor left the registry).
+ *
+ * These build a REAL .xlsx with exceljs and read it back through the production path, so the
+ * migration is proven to still extract the user's data — not merely to compile.
+ */
+describe('extractDocumentText — spreadsheets (post-SheetJS migration)', () => {
+  async function xlsxBase64(sheets: Record<string, unknown[][]>): Promise<string> {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    for (const [name, rows] of Object.entries(sheets)) {
+      const ws = wb.addWorksheet(name);
+      for (const r of rows) ws.addRow(r as never[]);
+    }
+    return Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
+  }
+
+  it('extracts every sheet as CSV, labelled by sheet name', async () => {
+    const base64 = await xlsxBase64({
+      Sales: [['item', 'qty'], ['chai', 2]],
+      Costs: [['head', 'inr'], ['rent', 15000]],
+    });
+    const text = await extractDocumentText({ name: 'book.xlsx', type: '', base64 });
+    expect(text).toContain('# Sheet: Sales');
+    expect(text).toContain('item,qty');
+    expect(text).toContain('chai,2');
+    expect(text).toContain('# Sheet: Costs');
+    expect(text).toContain('rent,15000');
+  });
+
+  it('quotes a cell containing a comma instead of splitting it into two columns', async () => {
+    const base64 = await xlsxBase64({ S: [['name', 'note'], ['Asheesh', 'Delhi, India']] });
+    const text = await extractDocumentText({ name: 'a.xlsx', type: '', base64 });
+    expect(text).toContain('"Delhi, India"');
+  });
+
+  it('never renders a rich-text cell as [object Object]', async () => {
+    // exceljs returns rich objects for formatted cells; String() on those would put
+    // "[object Object]" into the text the AI reads about the user's file.
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('S');
+    ws.addRow([{ richText: [{ text: 'Total ' }, { text: 'due' }] }]);
+    const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
+    const text = await extractDocumentText({ name: 'rich.xlsx', type: '', base64 });
+    expect(text).toContain('Total due');
+    expect(text).not.toContain('[object Object]');
+  });
+
+  it('is honest about a file it cannot parse — never a fabricated reading', async () => {
+    // Legacy .xls (pre-2007 binary) is not supported by exceljs. The honest outcome is nothing
+    // extracted, not a partial or invented interpretation of bytes we cannot read.
+    const base64 = Buffer.from('this is not a spreadsheet').toString('base64');
+    const text = await extractDocumentText({ name: 'old.xls', type: '', base64 });
+    expect(text === '' || text === null || /Could not extract/.test(String(text))).toBe(true);
+    expect(text).not.toContain('# Sheet:');
   });
 });

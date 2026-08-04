@@ -173,6 +173,7 @@ import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
 import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
+import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -3959,6 +3960,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('recruitment starter');
         const rcDeps = rccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Recruitment / job-board backend:\n${rcWritten.join('\n')}\nAdd the dependencies: ${rcDeps}\n\n${rccfg.instructions}`;
+      }
+
+      case 'generate_invoicing': {
+        // Breadth recipe (domain vertical) — Invoicing / billing (server/invoicing/): a real InvoicingService
+        // with an invoice STATE-MACHINE (invalid jumps → 409), an exact payment ledger (no overpay → 409,
+        // auto-paid at zero), and a DERIVED overdue status, plus an Express router. Pure gen in InvoicingGenerator.ts.
+        const invcfg = generateInvoicingIntegration();
+        const invWritten: string[] = [];
+        for (const [path, content] of Object.entries(invcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          invWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('invoicing starter');
+        const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an Invoicing / billing backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
       }
 
       case 'generate_events': {

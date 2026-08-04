@@ -25158,3 +25158,194 @@ session; a redundant-work check caught it before anything was rebuilt.
 
 **Verification (final PR):** frontend + server tsc clean; `npx vitest run` = **1036 files / 11,220
 tests, 0 failures**; `npm run build`, `boot:check` and the bundle budget all green.
+
+---
+## 2026-08-04 — The File Guardian could DESTROY newer work while claiming to protect it
+
+**From the mitrify autopsy's open list ("sandbox lost 9 files").** Investigating WHY those 9 files went
+missing found that **they never did**. The report's own arithmetic gives it away: "durable store holds
+608 file(s); the live sandbox listed 599 but was missing 9" — 608 − 599 = 9 exactly, i.e. precisely the
+scan's own skip gap.
+
+**ROOT CAUSE.** `collectWorkspaceFiles` returns `{ files, skipped }`. A path lands in `skipped`
+BECAUSE the scan saw it in the sandbox listing and then declined to read it — excluded by pattern, too
+large, binary-looking, unreadable, or past a cap. **The file is there.** But the call site passed only
+`files` to `planFileGuardian`, so every skipped path looked MISSING. Two harms, the second serious:
+1. A **data-loss event that never happened** appeared in the user's report (and in `dataLossEvents`),
+   making a healthy workspace look like it was losing files every build.
+2. The guardian **wrote the older durable snapshot over those files**. If one of them held newer
+   content — e.g. a file that grew past the read cap during the build — the loss-PREVENTION system was
+   itself the thing destroying work. It runs on EVERY turn, before the agent edits anything.
+
+**FIX.** `planFileGuardian(saved, existing, skipped)` treats a skipped path as PRESENT: a file the
+scanner refused to read is not evidence of absence. This is the same discipline already used for
+`scanned:false` (UI scan) and `captured` (console errors) — unknown is never reported as empty. The
+recycle-threshold check benefits too: skipped files can no longer push a healthy sandbox over the
+"sandbox was recycled, restore everything" line. The data-loss message now names them separately
+("plus N present but not read") instead of counting them as lost.
+
+Test-locked: skipped files are never overwritten, a genuinely absent file is still restored, a really
+recycled sandbox is still restored whole, and omitting the argument is byte-identical to before.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,324 tests, 0 failures**.
+
+## 2026-08-04 — The completeness reviewer was budgeted for the wrong app (last mitrify ledger item)
+
+**The report's ⏭️ SKIPPED item:** `Post-build review timed out after 90000ms on 9 files`, followed by
+telling the user *"send 'review it' and I'll run it on its own"* — the engine handing its own safety
+check back to the user.
+
+**ROOT CAUSE.** The app had **608 files**; the reviewer was budgeted for **9**. `reviewerBudgetMs`
+scaled with the number of files HANDED to the reviewer, but the work scales with the app it has to
+UNDERSTAND. On an edit to a large existing project those two numbers diverge wildly (here 9 vs 608),
+so a review that had to reason about a 608-file app got a 9-file app's budget, was killed mid-review,
+and its verdict was lost. This is the SAME class as the 2026-07-07 fix (a fixed 90s cap killing the
+reviewer on a 40-file app) — that fix scaled the budget by the right idea but the wrong input.
+
+**FIX.** `reviewerBudgetMs(fileCount, headroomMs, projectFileCount)` adds a context term (200ms per
+project file beyond the first 50), so the reported case now gets **201.6s instead of 90s**. The route
+captures the real project size BEFORE the existing fallback can shrink `rFiles` to just this turn's
+writes. Every existing guard is untouched: the 210s ceiling, the wall-clock headroom clamp (a reviewer
+must never be why a finished app times out) and the 45s floor. Omitting the argument is byte-identical
+to the old behaviour, and a genuinely small app still gets exactly 90s.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,362 tests, 0 failures**.
+
+### Mitrify autopsy — LEDGER CLOSED
+Every item from the 2026-08-04 report is now fixed and merged (or recorded as an infra open item):
+report honesty ×3 · preview classifier + partial-install repair · never-substitute-an-edit ·
+`find_ui_element` (pixel→source + proof of absence) · assistant scaffold templates ·
+ETA broken-promise loop · File Guardian overwriting present files · reviewer budget.
+Remaining open (infra, unchanged): Cloud Run /tmp size for full 5 GB uploads; Play Store closed-testing
+(12 testers × 14 days) before production access.
+
+---
+
+## 2026-08-04 (later) — Code Studio becomes a real IDE; the production image stops shipping the test toolchain
+
+Seven PRs, all merged green: **#2097, #2099, #2101, #2106, #2111, #2112** (plus #2092's recovery).
+
+### 0. First, a lost-work incident worth remembering
+PR #2092 was merged — but GitHub's PR head was stuck at `13f786e6` while the branch had already moved
+to `af0d918e` (a dropped sync event). **The merge landed only the first of three commits.** The
+multi-terminal and portal-menu work silently never reached `main`. Recovered by rebasing the two
+orphaned commits and re-landing them as **#2097**.
+**Lesson for every session:** after a merge, verify `git log origin/main` actually contains your
+commits. A green merge is not proof your work landed.
+
+### 1. REAL PERSISTENT SHELL (#2099) — the admin's "kya ham, replit jaisa real shell nahi bana sakte?"
+Code Studio's terminal was a **command runner wearing a terminal's clothes**: each line went to
+`/api/agentv3/exec`, which ran it once and returned. No state between commands (`cd` forgotten by the
+next line, and so were `export`/`source`), a hard 30s cap that cut `npm install` off mid-work, no
+output until the command ended, no Ctrl+C (no process left to signal), and nothing interactive.
+Opening three of those made three command runners, not three shells.
+
+**It turned out the sandbox already supported the real thing** — the E2B SDK ships a full PTY API
+(`pty.create` / `sendInput` / `resize` / `kill`) we were not using. Now each terminal tab is a genuine
+TTY inside the user's own sandbox; the VM is already running and already paid for, so a shell costs a
+**process, not a machine**.
+
+- `src/server/AgentV3/ShellSessions.ts` (NEW) — session registry. **The server holds the output, not
+  the browser**: a shell keeps producing output whether or not anyone is watching, and browsers
+  disconnect constantly. Every session owns a scrollback ring with a **monotonic cursor**, so a reader
+  asks for "everything after N" and reconnection is ordinary rather than a special case. When the
+  buffer overran while nobody was watching we **say so**, instead of a scrollback with a silent hole.
+- `E2BActuator` gained the four PTY methods behind an **optional** interface, so LocalActuator keeps
+  its honest "sandbox not active" answer rather than a shell that swallows keystrokes. `isPtyHost`
+  rejects a *partially* implemented host too — that would open fine and make Ctrl+C do nothing.
+- Limits are part of the design (a persistent process is exactly what gets left running forever): 6
+  shells/workspace, 30-min idle reaper that **never touches a shell someone is streaming** (the case
+  it protects: a 40-minute `npm install` that prints nothing), bounded scrollback + writes, and the
+  reaper is `unref()`d so it can never hold the Node process open.
+- Client `ShellTerminal.tsx` — **xterm.js** (a real shell speaks ANSI; a list-of-lines renderer prints
+  escape codes as garbage), imported **dynamically** so only people who open a terminal pay the 70 KB.
+  Transport is a **streamed fetch, not EventSource**: EventSource cannot send an `Authorization`
+  header, and the alternative was putting the Firebase token in a query string where it lands in
+  access logs. A shell **survives unmount** and reattaches by id, so switching to Preview does not kill
+  a running build; only the ✕ kills one on purpose.
+- 32 regression tests. Bundle budget raised 1200→1300 KB with the reason recorded in
+  `bundleBudget.mjs` (lazily-loaded xterm is honest new capability; the **main chunk is unchanged**).
+
+Then **Settings → Terminal** was still mounting the old runner — one app, two terminals, one real and
+one not. It now mounts the same `TerminalPanel`, and **`RealTerminal.tsx` was deleted**: two terminal
+implementations is exactly how one quietly rots into the weaker one. Its KB entry still promised a
+"30-second timeout" that no longer exists — a stale KB is not cosmetic, **every AI in NavBharatAI
+answers from it**, so its test now asserts that claim is ABSENT.
+
+### 2. SPLIT EDITOR (#2101)
+`Ctrl+\` was wired to a case that did nothing (the comment was honest about it — but an honest no-op
+is still a shortcut that does nothing). Now **View → Split Editor** opens a genuine second editor group
+with its **own tabs and own active file**, because the point of a split is two DIFFERENT files.
+
+The bug that would have made it dangerous: `handleFileChange` wrote to `activeFile` unconditionally —
+typing in the right pane would have **corrupted the left pane's file**. Edits now go through
+`writeFileContent(path, …)`. For focus, rather than teaching ~40 call sites which pane they meant,
+`editorInstance` **follows focus**, so Find/Format/Undo/status-bar all became correct untouched; only
+Save and Save All needed explicit handling (saving the left buffer while the user types in the right
+one is the worst thing a save button can do). Desktop-only on purpose. Strictly additive: with no
+split open, layout/save/focus behave exactly as before.
+
+### 3. THE PRODUCTION IMAGE SHIPPED THE TEST TOOLCHAIN (#2106)
+Trivy's 46 HIGH findings were **all** in `node_modules/{vite,vite-node,vitest}/…/@esbuild` — the test
+runner's and dev bundler's Go binaries, shipped to Cloud Run, in a container that never runs a test.
+**Our own esbuild was reported CLEAN.** Every one of those findings was ours only because the runtime
+image copied the entire install. Fix: `npm prune --omit=dev` in the builder (prune, not a second
+`npm ci --omit=dev` — it keeps the native modules node-gyp already compiled; slim has no compiler).
+
+**Checking what `dist/server.cjs` actually requires, instead of assuming, found two latent prod bugs:**
+- **`typescript`** sat in devDependencies while `src/server/AppMakerLab/**` imports it at runtime.
+  Pruning blind would have produced an image that builds, passes all tests, and **crash-loops on Cloud
+  Run for every user**.
+- **`zip-stream`** was **never declared at all** — `/api/download-zip` resolved it by hoisting accident
+  through `archiver`, a devDependency. Its require is inside a try/catch, so nothing would crash: the
+  "download your app as ZIP" button would have **quietly returned 500 forever**, which is worse.
+  `yauzl` was in the same position. Both now declared.
+- **`vite`** was the last thing keeping the bundler in production — `server.ts` imported
+  `createViteServer` at the **top level** though it is used only in the dev branch. Now lazy.
+- Deduped **axios** (cashfree-pg pinned exactly `1.15.0`, prototype-pollution transport hijacking) via
+  a `$axios` override, and **undici** → 7.28.0.
+- Verified beyond the gate: with the tree **actually pruned**, the production server boots and serves
+  `/api/health`, and exactly one esbuild Go binary remains — ours, the clean one.
+
+### 4. THE LAST TWO CVEs (#2111) — neither answer was "bump the version"
+- **react-router-dom** (HIGH, "fixed in 8.3.0") was **entirely unused**: 0 occurrences in the client
+  bundle, not required by the server bundle, and generated user apps get their router from esm.sh
+  resolved from *their* package.json. So the fix was **deletion**, not a risky major upgrade of a
+  router we do not use — an unused dependency is pure attack surface. Its ambient type shim went too:
+  a `declare module` for a package we no longer install is a trap (typechecks, fails at runtime).
+- **xlsx 0.18.5** — prototype pollution (CVE-2023-30533), and **npm has no fix**: SheetJS left the
+  registry, so 0.18.5 is the newest that exists there. **Reachable, not theoretical** —
+  `attachmentText.ts` hands a **user-uploaded file** straight to the parser. The vendor's answer is a
+  tarball on `cdn.sheetjs.com`; **not taken**, because pinning a non-registry URL makes every `npm ci`
+  (CI, Docker, Cloud Build) depend on that host, and one outage there breaks every deploy — and the
+  host was unreachable from the session, so it could not be verified either. Migrated both call sites
+  to **exceljs** (maintained, on the registry, CVE-free). Needed a `csvCell()` helper because exceljs
+  returns rich cell objects where SheetJS returned primitives — `String()` would have put
+  `[object Object]` into the text the AI reads about a user's spreadsheet. Legacy `.xls` is
+  unsupported and now extracts **nothing honestly**, rather than inventing a reading.
+
+### 5. USER KEYS, END TO END (#2112) — the admin's original question, finally test-locked
+Every piece of the keys path was unit-tested in isolation while **nothing walked the whole thing** —
+which is precisely where this class of feature breaks (each part works, the seam does not). 9 tests now
+walk it: vault → `.env` in the sandbox before the app runs; the vault **overrides the scaffold's
+placeholder** (otherwise the app boots against `your-key-here` while Settings insists the key is
+saved); `.gitignore` hardened; empty vault invents no file; a sandbox write failure degrades honestly.
+The one that must never regress: **NavBharatAI's own platform keys never reach a user's app** — a user
+secret NAMED exactly like ours still carries the USER's value.
+
+### 6. A CORRECTION recorded honestly
+Earlier in the session I claimed "CSP, Permissions-Policy, COOP/COEP are missing". **That was wrong.**
+Booting the server in production mode and reading the real headers shows CSP, HSTS, COOP, CORP,
+X-Frame-Options, nosniff and Referrer-Policy all present — the claim came from a DAST report that was
+scanning the **dev** server, a problem already fixed in #2064. Only `Permissions-Policy` is genuinely
+absent, and it is **deliberately not added**: it gates mic/camera/payment, and this app needs mic
+(Sonic voice) and payment (Cashfree). `securityHeaders.ts` warns "DO NOT tighten blindly" for exactly
+this reason — every line in it marks a real outage (Apple login, Cashfree redirect, preview CDN).
+Low value, real breakage risk ⇒ **closed, not open**.
+
+### Open / not done (honest)
+- **Live step-debugger** (real pause/step/inspect) — needs a CDP tunnel to the sandbox's Node
+  inspector. Named to the admin as low value for *this* product's users (non-technical people building
+  in Hindi, for whom the AI debugs) and **deliberately not built**; recorded rather than silently
+  skipped.
+- Cloud Run `/tmp` size for full 5 GB uploads; Play Store closed testing — unchanged infra items.

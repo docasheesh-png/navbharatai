@@ -278,6 +278,11 @@ export class E2BActuator implements IEngineerActuator {
   // Last time each workspace's DURABLE record was refreshed, so a live build's timestamp says "in use"
   // to the cross-instance orphan reaper. Throttled — see shouldTouchDurable.
   private _lastDurableTouch = new Map<string, number>();
+  // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
+  // WALL-CLOCK, which is a completely different cost shape from token spend — a build that used almost
+  // no tokens but held a VM for forty minutes still cost real money, and nothing in the build report
+  // showed it. See sandboxCost.ts.
+  private _sandboxStartedAt = new Map<string, number>();
 
   /**
    * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
@@ -382,6 +387,7 @@ export class E2BActuator implements IEngineerActuator {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);
+        this._sandboxStartedAt.delete(workspaceId);
         this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
         await sandboxStore.markPaused(workspaceId).catch(() => {});
       }
@@ -421,6 +427,7 @@ export class E2BActuator implements IEngineerActuator {
       if (paused) {
         this._lastActivity.delete(rec.workspaceId);
         this._lastDurableTouch.delete(rec.workspaceId);
+        this._sandboxStartedAt.delete(rec.workspaceId);
         this._fileCache.delete(rec.workspaceId);
       }
     }
@@ -479,6 +486,7 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
     // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
     // what made a running build indistinguishable from an abandoned one.
     this._lastDurableTouch.delete(workspaceId);
@@ -1301,6 +1309,17 @@ const {chromium}=require('playwright');
     // The log file existed and was read → the console WAS captured (empty errors here = genuinely clean).
     // Cap to the most recent 20 to keep the AI prompt bounded.
     return { errors: errors.slice(-20), captured: true };
+  }
+
+  /**
+   * Seconds this instance has held a sandbox for the workspace, or null when it never created one
+   * (a build served entirely from another instance's sandbox, or no sandbox at all). Null means
+   * "not measured" — the report says exactly that rather than showing a zero that looks like a fact.
+   */
+  sandboxHeldSeconds(workspaceId: string): number | null {
+    const started = this._sandboxStartedAt.get(workspaceId);
+    if (!started) return null;
+    return Math.max(0, Math.round((Date.now() - started) / 1000));
   }
 
   async getSandboxId(workspaceId: string): Promise<string | null> {

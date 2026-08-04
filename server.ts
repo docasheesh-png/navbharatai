@@ -166,7 +166,6 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import https from 'https';
 import * as cheerio from 'cheerio';
 import fs from 'fs';
@@ -437,8 +436,15 @@ setInterval(() => {
 
   async function initializeServer() {
 
-    // Vite integration
+    // Vite integration.
+    //
+    // Imported LAZILY, inside the dev-only branch. Vite is a DEV bundler — production serves the
+    // pre-built dist/ below and never calls this. A top-level `import ... from 'vite'` nevertheless
+    // loaded the whole bundler into every production boot, which is why vite had to be a runtime
+    // dependency, which is why its nested esbuild Go binary shipped to Cloud Run and answered for 14
+    // HIGH CVEs in a container that never bundles anything (Trivy, 2026-08-04).
     if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',

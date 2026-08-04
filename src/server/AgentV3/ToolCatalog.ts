@@ -1258,6 +1258,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_invoicing',
+      description:
+        'Add a real Invoicing / billing backend to the app (server/invoicing/) — a packaged domain vertical for ' +
+        'freelancers, agencies and SMBs. THREE real guarantees: (1) INVOICE STATE-MACHINE — draft → sent → ' +
+        'paid|cancelled along allowed transitions only (paid/cancelled terminal), an invalid jump rejected ' +
+        '(409); (2) EXACT PAYMENT LEDGER — balance = total − sum(payments), a payment can never exceed the ' +
+        'balance (409, no negative), invoice auto-marks PAID at zero balance; (3) OVERDUE is DERIVED — a sent, ' +
+        'unpaid, past-due invoice reads "overdue" (computed from the dates, never set by hand). Emits a ' +
+        'dependency-free InvoicingService (createInvoice, total, balance, setStatus, recordPayment, ' +
+        'displayStatus, isOverdue, outstandingTotal) + an Express router (GET/POST /invoices, GET /invoices/:id, ' +
+        'PATCH /invoices/:id/status, POST /invoices/:id/payments, GET /invoices/outstanding/total) + a README. ' +
+        'In-memory by default — swap the Maps for your DB. Pairs with the auth/payment/notification recipes. ' +
+        'Use for invoicing / billing / freelance / accounts-receivable prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2903,6 +2919,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_fitness',
   'generate_pharmacy',
   'generate_recruitment',
+  'generate_invoicing',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

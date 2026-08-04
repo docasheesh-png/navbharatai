@@ -1859,3 +1859,109 @@ describe('user vault secrets reach the app (mitrify autopsy 2026-08-04)', () => 
     expect(act.files.get('.env') ?? '').toContain('B_KEY=2');
   });
 });
+
+/**
+ * USER KEYS, END TO END (admin 2026-08-04: "user keys dal bhi de, to kya v5 ki banayi app un keys ko
+ * padh payegi?").
+ *
+ * Every piece of this pipeline was unit-tested in isolation — mergeDotEnv here, loadUserVaultSecrets
+ * there — but NOTHING walked the whole path, which is where this kind of feature actually breaks: each
+ * part works and the seam between two of them does not. These tests walk it: vault secrets go in, and a
+ * real `.env` must land in the sandbox the app runs from, with the right values, before the app starts.
+ *
+ * The invariant that matters most is the LAST one: NavBharatAI's own platform keys must never reach a
+ * user's app, even when the user names their secret exactly like ours.
+ */
+describe('user vault keys reach the app the build produces', () => {
+  let act: FakeActuator;
+  let d: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    const stream = new AgentEventStream();
+    d = new ToolDispatcher(act, 'ws-keys', new WorkspaceState(stream), stream);
+  });
+
+  it('writes the user\'s keys into the app\'s .env before it runs', async () => {
+    d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue', DATABASE_URL: 'postgres://u:p@host/db' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+
+    const env = act.files.get('.env');
+    expect(env).toBeTruthy();
+    expect(env).toContain('STRIPE_SECRET_KEY=sk_live_realvalue');
+    expect(env).toContain('DATABASE_URL=postgres://u:p@host/db');
+  });
+
+  it('OVERRIDES the placeholder the builder generated, and keeps unrelated lines', async () => {
+    // The generated scaffold writes its own .env with dummy values. If the vault did not win here, the
+    // app would boot with "your-key-here" and fail against the real service — with the user staring at
+    // a key they DID save, in a Settings screen that said it was saved.
+    act.files.set('.env', 'STRIPE_SECRET_KEY=your-key-here\nAPP_NAME=Chaiwala\n');
+    d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+
+    const env = act.files.get('.env')!;
+    expect(env).toContain('STRIPE_SECRET_KEY=sk_live_realvalue');
+    expect(env).not.toContain('your-key-here');
+    expect(env).toContain('APP_NAME=Chaiwala');       // the app's own settings survive
+  });
+
+  it('hardens .gitignore so the user\'s real keys can never reach their git repo', async () => {
+    d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.gitignore')).toContain('.env');
+  });
+
+  it('fires on a real app command, not on an unrelated one', async () => {
+    d.setUserSecrets({ API_KEY: 'v' });
+    await d.ensureUserSecretsEnvFile('ls -la');           // not an install/build/run
+    expect(act.files.get('.env')).toBeUndefined();
+    await d.ensureUserSecretsEnvFile('npm install');      // now the app is about to exist
+    expect(act.files.get('.env')).toContain('API_KEY=v');
+  });
+
+  it('writes ONCE per build, but a NEW secret set can still reach disk', async () => {
+    d.setUserSecrets({ A: '1' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);   // repeat — must not rewrite
+    expect(act.files.get('.env')).toContain('A=1');
+
+    // The user adds a key mid-session and the composition root re-loads the vault: that must not be
+    // swallowed by the once-per-build guard, or the newly-saved key silently never arrives.
+    d.setUserSecrets({ A: '1', B: '2' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.env')).toContain('B=2');
+  });
+
+  it('does nothing at all when the user has saved no keys', async () => {
+    d.setUserSecrets({});
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.env')).toBeUndefined();   // no empty/placeholder file invented
+  });
+
+  it('never throws when the sandbox write fails — the build continues without the keys', async () => {
+    // Honest degradation: the app runs without injected keys rather than the whole build dying.
+    vi.spyOn(act, 'writeFile').mockRejectedValue(new Error('sandbox gone'));
+    d.setUserSecrets({ API_KEY: 'v' });
+    await expect(d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS)).resolves.toBeUndefined();
+  });
+
+  it('carries only what the caller passed — a platform key is never injected on its own', async () => {
+    // THE ONE THAT MUST NEVER REGRESS. loadUserVaultSecrets deliberately never falls back to
+    // process.env, because process.env holds NavBharatAI's OWN keys. This locks the dispatcher end of
+    // that contract: a user secret NAMED like a platform key carries the USER's value, and a platform
+    // key the user never saved does not appear at all.
+    process.env.GEMINI_API_KEY = 'PLATFORM-KEY-MUST-NOT-LEAK';
+    try {
+      d.setUserSecrets({ GEMINI_API_KEY: 'user-own-gemini-key' });
+      await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+      const env = act.files.get('.env')!;
+      expect(env).toContain('GEMINI_API_KEY=user-own-gemini-key');
+      expect(env).not.toContain('PLATFORM-KEY-MUST-NOT-LEAK');
+      expect(env).not.toContain('E2B_API_KEY');
+      expect(env).not.toContain('ANTHROPIC_API_KEY');
+    } finally {
+      delete process.env.GEMINI_API_KEY;
+    }
+  });
+});

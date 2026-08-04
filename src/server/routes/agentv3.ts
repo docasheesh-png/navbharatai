@@ -9554,6 +9554,11 @@ export function registerAgentV3Routes(app: Express): void {
       if (result.ok && reviewHeadroomOk && reviewerAllowed) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+          // The REAL project size, captured before the fallback below can shrink rFiles to just this
+          // turn's writes. The reviewer's budget must reflect the app it has to understand, not only
+          // the handful of files handed to it (mitrify autopsy 2026-08-04: 90s granted "on 9 files"
+          // for a 608-file app, killed mid-review, and the user asked to re-run it by hand).
+          const projectFileCount = rFiles.length;
           // If sandbox listFiles came back empty but the build wrote real files, use the
           // captured write-time paths as a fallback so the reviewer is never skipped after
           // a successful build due to a transient sandbox read hiccup.
@@ -9572,7 +9577,7 @@ export function registerAgentV3Routes(app: Express): void {
           // reviewer mid-review on a 40-file app and silently lost its completeness verdict. Bigger apps
           // get more time, never past the wall-clock safety margin. Honest note on timeout, not silence.
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
-          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs);
+          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
           let review;
           try {
             review = await raceTimeout(reviewBuild({
@@ -10518,6 +10523,16 @@ export function registerAgentV3Routes(app: Express): void {
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
       }
+      // ADMIN-ONLY infra cost: how long this build held a real VM. A build is billed by WALL-CLOCK as
+      // well as by tokens, and until now only the token half was visible — so "why is the E2B bill this
+      // size?" had no answer in the product. Never part of the user's charge; omitted by construction
+      // from the user-facing report (allow-list). Best-effort, and honestly absent when unmeasurable.
+      try {
+        const held = typeof (actuator as any).sandboxHeldSeconds === 'function'
+          ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null
+          : null;
+        buildDiagRef?.setSandboxSeconds(held);
+      } catch { /* a cost measurement must never affect a build */ }
       // A zip/GitHub import's background preview boot must finish BEFORE the response ends — Cloud
       // Run throttles CPU after the stream closes, which would silently kill npm install mid-way.
       // Bounded + best-effort. The cap covers a HEAVY full-stack app: up to ~130s to provision a

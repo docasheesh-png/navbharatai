@@ -69,10 +69,19 @@ export function scaleBuildSeconds(baseSeconds: number, depth: PipelineDepth): nu
  * NEVER eat into the wall-clock safety margin — a reviewer must never be the reason a finished app
  * times out. `headroomMs` = ms left before the wall-clock cap (Infinity when no cap is configured).
  */
-export function reviewerBudgetMs(fileCount: number, headroomMs: number): number {
+export function reviewerBudgetMs(fileCount: number, headroomMs: number, projectFileCount = 0): number {
   const BASE = 90_000, PER_FILE = 4_000, MIN = 45_000, MAX = 210_000, SAFETY = 60_000;
+  // SECOND ROOT CAUSE (mitrify autopsy 2026-08-04): "Post-build review timed out after 90000ms on 9
+  // files" — on an app with 608 files. The budget scaled with the number of files HANDED to the
+  // reviewer, but the work scales with the app it has to UNDERSTAND. On an edit to a large existing
+  // project those numbers diverge wildly (9 vs 608), so a review that had to reason about a 608-file
+  // app was given the budget of a 9-file one, was killed, and the user was asked to re-run it by hand —
+  // the completeness safety net disappearing on exactly the apps that need it most, again.
+  const PER_CONTEXT_FILE = 200; // ms per project file beyond the first 50 — context to hold, not files to read
   const files = Number.isFinite(fileCount) && fileCount > 0 ? Math.floor(fileCount) : 0;
-  const scaled = Math.min(BASE + Math.max(0, files - 20) * PER_FILE, MAX);
+  const project = Number.isFinite(projectFileCount) && projectFileCount > 0 ? Math.floor(projectFileCount) : 0;
+  const contextMs = Math.max(0, Math.max(project, files) - 50) * PER_CONTEXT_FILE;
+  const scaled = Math.min(BASE + Math.max(0, files - 20) * PER_FILE + contextMs, MAX);
   if (!Number.isFinite(headroomMs)) return scaled;          // no wall-clock cap → the scaled budget
   return Math.max(MIN, Math.min(scaled, headroomMs - SAFETY)); // else leave a 60s wall-clock safety margin
 }

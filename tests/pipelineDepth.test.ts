@@ -89,3 +89,51 @@ describe('reviewerBudgetMs — the completeness reviewer scales with app size, c
     expect(reviewerBudgetMs(NaN, Infinity)).toBe(90_000);
   });
 });
+
+// MITRIFY AUTOPSY 2026-08-04: "Post-build review timed out after 90000ms on 9 files" — on an app with
+// 608 files. The budget scaled with the files HANDED to the reviewer; the work scales with the app it
+// has to UNDERSTAND. On an edit to a large existing project those diverge (9 vs 608), so the review
+// was killed and the user was told to re-run it by hand — the completeness safety net vanishing on
+// exactly the apps that need it most.
+describe('reviewerBudgetMs — the budget follows the APP being understood, not just the files handed over', () => {
+  it('the reported case: 9 files inside a 608-file app gets far more than the old 90s', () => {
+    const before = 90_000;
+    const now = reviewerBudgetMs(9, Infinity, 608);
+    expect(now).toBeGreaterThan(before);
+    expect(now).toBeGreaterThanOrEqual(180_000);
+  });
+
+  it('a small app is unchanged — 9 files in a 9-file project still gets the base budget', () => {
+    expect(reviewerBudgetMs(9, Infinity, 9)).toBe(90_000);
+  });
+
+  it('back-compatible: omitting the project size behaves exactly as before', () => {
+    expect(reviewerBudgetMs(8, Infinity)).toBe(reviewerBudgetMs(8, Infinity, 0));
+    expect(reviewerBudgetMs(40, Infinity)).toBe(reviewerBudgetMs(40, Infinity, 0));
+  });
+
+  it('still clamped to the ceiling — a giant app cannot run the reviewer forever', () => {
+    expect(reviewerBudgetMs(9, Infinity, 100_000)).toBeLessThanOrEqual(210_000);
+  });
+
+  it('still clamped to wall-clock headroom — a big project cannot spend the safety margin', () => {
+    // The contract is max(MIN, min(scaled, headroom - SAFETY)): the headroom clamp bites, and the
+    // 45s floor deliberately wins when headroom is already tighter than the floor (a reviewer that
+    // gets less than 45s is worthless, and the wall-clock cap has its own separate guard).
+    // 608 project files → scaled = 90s base + (608-50)×200ms = 201.6s (under the 210s ceiling).
+    expect(reviewerBudgetMs(9, Infinity, 608)).toBe(201_600);
+    // Ample headroom (300s − 60s safety = 240s) → the scaled budget still wins.
+    expect(reviewerBudgetMs(9, 300_000, 608)).toBe(201_600);
+    // Tight headroom (150s − 60s = 90s) → the headroom clamp bites.
+    expect(reviewerBudgetMs(9, 150_000, 608)).toBe(90_000);
+    expect(reviewerBudgetMs(9, 30_000, 608)).toBe(45_000);     // never below the floor
+  });
+
+  it('junk project counts never throw or produce NaN', () => {
+    for (const n of [NaN, -5, Infinity]) {
+      const v = reviewerBudgetMs(9, Infinity, n as number);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThan(0);
+    }
+  });
+});

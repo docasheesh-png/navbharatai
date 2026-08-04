@@ -24316,3 +24316,47 @@ CLAUDE.md's "OPEN ITEM (Fix 68, not yet done)" corrected to DONE with code ancho
 
 **Verification:** frontend + server `tsc` clean; full `npx vitest run` green (1022 files / 10,820
 tests before this slice, growing with it).
+
+## 2026-08-04 — v5 CAN BROWSE THE REAL INTERNET (admin: "koi real world website open kare, live browser ke jaisa? haan ya na?")
+
+**The answer was yes — and the surprising part is that almost none of it needed building.** The E2B
+sandbox has ALWAYS run a real Chromium via Playwright, and `screenshot` / `browser_action` have ALWAYS
+passed their URL straight through with no restriction. The capability existed and was **invisible to the
+only thing that could use it**: every tool description and prompt line framed the browser as "test YOUR
+OWN app", so v5 never considered visiting a real site and answered questions about real websites from
+memory. Nothing was broken. It was simply never told.
+
+**Why option 3 and not the other two (recorded, since the admin asked for the comparison):**
+- an `<iframe>` is the easy path and a *lie* — `X-Frame-Options` / `frame-ancestors` mean Google,
+  Amazon, banks and most large sites render blank. Half the web would silently fail;
+- a server-side HTML proxy reaches more sites but breaks JS-heavy SPAs and logins, and — the real
+  objection — re-serves someone else's site from `navbharatai.com` with their security headers
+  stripped. That is a phishing vector and a ToS violation; declined on principle, not on effort;
+- a REAL headless browser renders exactly what a person would see, and we already had one.
+
+**What shipped:**
+1. **`lib/browseTarget.ts`** — the guard that had to exist before pointing an LLM-driven browser at
+   arbitrary URLs, because that is an SSRF primitive: a prompt-injected page or a confused model could
+   navigate to `169.254.169.254` / `metadata.google.internal` and read instance credentials, or probe
+   private LAN services. Classifies every URL as `sandbox` | `public` | `blocked`.
+   **The non-obvious part:** a blanket "block private addresses" guard would have been the natural
+   implementation and would have **silently broken every preview screenshot in the product**, because
+   the long-standing use is `http://localhost:5173`. Loopback is therefore classified SEPARATELY and
+   stays allowed; only genuinely dangerous ranges (link-local/metadata, RFC1918, CGNAT, IPv6 ULA/LL,
+   dotless hostnames, non-http schemes) are refused. A regression test asserts localhost still works.
+2. **Both tools guarded** in `ToolDispatcher.runVisual` — a refusal returns a message written for the
+   MODEL to act on, not a stack trace.
+3. **The unlock itself** — `browser_action` / `screenshot` descriptions now state they reach any public
+   site, and `architectSystemPrompt` tells v5 to GO AND LOOK rather than answer from memory, to never
+   claim to have seen a page it did not open, to say so honestly when a page fails to load rather than
+   inventing its contents, and to copy IDEAS and STRUCTURE only — never a site's copyrighted text,
+   images or logos.
+4. `AppKnowledgeBase` entry so every other AI can tell users the capability exists.
+
+**Honest cost note for the admin:** this rides the EXISTING sandbox — no new per-user browser process,
+so no new cost line. A dedicated always-on "browser tab" UI (the fuller version of the idea) WOULD mean
+an E2B sandbox per browsing user, which is real money per minute; that remains unbuilt and is the
+decision to take deliberately if it is ever wanted.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1023 files / 10812 tests, 0 failures**
+(34 new).

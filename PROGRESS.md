@@ -24684,3 +24684,11 @@ hidden there). Chat text is not a declared app feature and is not part of Play's
 tightening it (native-aware knowledge filtering) is a follow-up, not a blocker.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1030 files / 11,136 tests, 0 failures**.
+
+### Release record — signed .aab run #60 (Play compliance build)
+Built from `eb74be7` (the merge of PR #2083, medical features hidden in the native shell):
+https://github.com/docasheesh-png/navbharatai/actions/runs/30909548544 — GREEN, artifact
+`navbharatai-release-aab` (`app-release.aab`, versionCode 60). This is the FIRST bundle whose shipped
+web payload matches a "no medical features" Play health declaration; every earlier bundle (incl. run
+#59, same morning) still contains Doctor AI and must NOT be uploaded against cleared declarations.
+Handed to the admin for the Play Console upload (Claude cannot reach Play Console — rule 6).

@@ -26,6 +26,7 @@ import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
   path: string;
@@ -636,20 +637,36 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // Bound the PLAN call: if it exceeds planTimeoutMs the fast lane bails NOW (→ full builder) instead
       // of one slow call running to the 240 s overall cap. `withTimeout` only races, so the underlying call
       // keeps running in the background, but the lane stops waiting on it.
-      const planCap = deps.planTimeoutMs ?? 90_000;
+      //
+      // BUDGET ALLOCATION (admin report 858f6d7b): the plan and contract caps used to be INDEPENDENT, so
+      // two 90s caps could consume 180s of a 240s lane and leave 60s to generate the whole app — which is
+      // exactly what happened (plan 89s + contract 70s = 159s before file one). `preambleCapMs` derives
+      // each cap from what the budget can still afford, so a slow plan shrinks the contract's cap instead
+      // of compounding with it, and the file-generation phase keeps its reserved majority.
+      const configuredPlanCap = deps.planTimeoutMs ?? 90_000;
+      const overallMs = deps.overallTimeoutMs ?? 240_000;
+      const laneStartedAt = Date.now();
       const manifestText = await withTimeout(
         deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
-        planCap, 'simple-plan');
+        preambleCapMs(overallMs, 0, configuredPlanCap), 'simple-plan');
       const manifest = parseFileManifest(manifestText);
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
       // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`
       // empty, so a storming contract call can't eat the budget either).
-      if (shareContract) {
+      // The contract's cap is whatever the preamble share can still afford after the plan. A cap of 0
+      // means the plan already spent the share — skip the contract rather than starve file generation.
+      // Safe by design: the contract is best-effort (an empty one weakens per-file agreement, which the
+      // deterministic import/export reconcilers below then repair; a starved build phase produces no app
+      // at all).
+      const contractCap = shareContract ? preambleCapMs(overallMs, Date.now() - laneStartedAt, configuredPlanCap) : 0;
+      if (shareContract && contractCap > 0) {
         deps.log?.('Designing the shared types & component contract…');
         try {
-          contract = (await withTimeout(deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)), planCap, 'simple-contract') || '').trim();
+          contract = (await withTimeout(deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)), contractCap, 'simple-contract') || '').trim();
         } catch { contract = ''; }
+      } else if (shareContract) {
+        deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);
       // REAL per-file progress: the chat used to go silent between "Building N file(s)…" and "Built
@@ -692,12 +709,25 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const depOrder = deps.depOrder !== false;
       const tiers = depOrder ? [0, 1, 2] : [0];
       const written: OneShotFile[] = [];
-      for (const tier of tiers) {
+      for (let ti = 0; ti < tiers.length; ti++) {
+        const tier = tiers[ti];
         const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
         if (specs.length === 0) continue;
         const producedSoFar = [...written]; // real source of all earlier tiers (snapshot for this tier)
+        const tierStartedAt = Date.now();
         const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));
         for (const f of gen) if (f && f.content) written.push(f);
+        // EARLY BAIL (admin report 858f6d7b). A tier costs as much as its slowest file, so once ONE tier's
+        // real duration is known the rest is predictable. The reported build ground on to the full 240s to
+        // produce 4 of 14 files — work the full builder then had to continue anyway. Bailing the moment the
+        // arithmetic says we cannot finish hands off sooner and without a tier being killed mid-flight;
+        // the catch below salvages exactly the same finished files. Never fires without a real measurement.
+        const tiersRemaining = tiers.length - 1 - ti;
+        const progress = { tiersRemaining, lastTierMs: Date.now() - tierStartedAt, elapsedMs: Date.now() - laneStartedAt, overallMs };
+        if (!canFinishRemainingTiers(progress)) {
+          if (written.length >= minFiles) break; // enough files to be a real app — finish this build honestly
+          throw new Error(`simple-build ${earlyBailReason(progress)}`);
+        }
       }
       if (written.length < minFiles) throw new Error('too_few_files_generated');
       // DETERMINISTIC IMPORT SELF-HEAL before the files are written/previewed (jungle-game report
@@ -831,7 +861,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // exactly the workspace it keeps. Best-effort with its own small timeout; salvage failure only
     // means the old empty-tree behavior.
     let salvagedPaths: string[] | undefined;
-    if (reason.includes('timed out') && generatedSoFar.length > 0) {
+    // An EARLY BAIL is a budget exhaustion the lane saw coming, so it salvages exactly like a timeout —
+    // otherwise predicting the timeout instead of waiting for it would silently DISCARD the finished
+    // files the old path preserved, making the improvement a regression.
+    if ((reason.includes('timed out') || reason.includes('stopped early')) && generatedSoFar.length > 0) {
       const salvage = [...generatedSoFar]; // snapshot — in-flight genOne pushes can't mutate mid-write
       try {
         await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');

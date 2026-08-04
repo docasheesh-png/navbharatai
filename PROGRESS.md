@@ -23533,6 +23533,50 @@ recorded for the report but never acted on while a healthy alternative existed.
 
 ---
 
+## 2026-08-02 (follow-up) — closing the fast-lane budget open root cause from the 858f6d7b autopsy
+
+The autopsy above recorded "the fast lane's 240s budget ignores its own preamble" as an OPEN root cause.
+Closed here rather than left to recur.
+
+### The defect
+`runSimpleBuild` runs three phases inside ONE 240s budget — plan the manifest, design the shared
+contract, then generate files tier by tier. The first two were capped INDEPENDENTLY at 90s each, so by
+construction the preamble could consume **180s of 240s** and leave 60s to write the whole app. Nothing
+guaranteed the phase that produces the FILES a usable share of its own budget.
+
+The reported build hit it precisely: plan **89s** (one second under its cap) + contract **70s** = 159s
+before file one, leaving 81s for 14 files. Files generate in dependency TIERS and a tier costs as much
+as its slowest file (~45s here), so only tier 0 finished. The lane then ground on to the full 240s to
+produce 4 of 14 files — work the full builder had to continue anyway. End-to-end: 591s for a to-do app.
+
+### Fixes (`FastLaneBudget.ts`, new — pure + 14 tests)
+1. **`preambleCapMs(overallMs, elapsedMs, configuredCapMs)`** — each preamble call's cap is now derived
+   from what the budget can still afford (`BUILD_PHASE_RESERVE = 0.6` keeps 60% for file generation), so
+   a slow plan SHRINKS the contract's cap instead of compounding with it. On the reported numbers the
+   contract cap becomes 7s instead of 90s, and file generation gets 144s instead of 81s. A cap of 0 skips
+   the contract entirely — safe, because the contract is best-effort (the deterministic import/export
+   reconcilers repair per-file drift) whereas a starved build phase produces no app at all.
+2. **`canFinishRemainingTiers(progress)`** — after each tier completes, its MEASURED duration projects the
+   remaining tiers. When the arithmetic says the lane cannot finish, it bails immediately instead of
+   burning the rest of the budget. Deliberately measurement-based, not a hardcoded per-model guess: the
+   decision improves automatically on a fast tier. Never fires without a real measurement (`lastTierMs > 0`),
+   and never when enough files already exist to be a real app (`written.length >= minFiles` → finish
+   honestly instead of bailing).
+3. **Salvage extended to the early bail.** The catch salvaged only on `'timed out'`; predicting the timeout
+   instead of waiting for it would have silently DISCARDED the finished files the old path preserved,
+   turning the improvement into a regression. Early bail now salvages identically.
+
+Together these change the reported build from "killed at 240s with 4/14 files" to "preamble bounded at
+96s, ~144s for files, projected to complete" — verified by tests encoding the exact reported timings.
+
+### Verification
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json` clean · full `npx vitest run` green.
+
+### Still open (unchanged, honestly)
+**Weak-tier latency remains the real ceiling.** Single calls took 70–119s. This change stops the lane
+WASTING time it cannot use; it does not make a slow provider fast. That needs 2–3 more real build reports
+before any routing change — deliberately not guessed at.
+---
 ## 2026-08-02 (evening) — App Store rejection fully answered + 8-times-failed restart-logout ROOT-CAUSED + top failure pattern killed
 
 **Session:** claude/app-control-deployment-q1wq51. Five PRs merged, all CI-green: #2023, #2025, #2027, #2028, #2031.

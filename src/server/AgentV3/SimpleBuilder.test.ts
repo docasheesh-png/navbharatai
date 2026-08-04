@@ -160,6 +160,62 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(elapsed).toBeLessThan(2500); // bailed on the ~40ms plan cap, NOT the 5000ms overall cap
   });
 
+  // WIRING TESTS for the budget allocation (admin report 858f6d7b). FastLaneBudget's own unit tests prove
+  // the arithmetic; these prove runSimpleBuild actually USES it. Without them the pure functions could be
+  // perfect and the lane could still starve its file-generation phase — which is precisely the bug that
+  // shipped. Scaled-down timings (a 1000ms lane instead of 240s) keep the same ratios and run fast.
+  it('a slow PLAN shrinks the contract phase instead of compounding with it (budget allocation)', async () => {
+    // The reported build: the plan consumed nearly the whole preamble, then the contract took another 70s
+    // on top because its cap was INDEPENDENT — 159s of a 240s lane gone before the first file was written.
+    //
+    // Scaled down: a 1000ms lane, so the preamble's share is 40% = 400ms. The plan eats 380ms of it, which
+    // leaves the contract a ~20ms sliver. The contract then needs 300ms, so it is abandoned and the
+    // file-generation phase keeps its reserved majority. Under the OLD independent cap (900ms) the contract
+    // would have completed comfortably and its text would appear in every per-file prompt.
+    //
+    // The assertion is on that OBSERVABLE — whether the contract reached the per-file prompts — deliberately
+    // NOT on wall-clock elapsed time or on r.ok, both of which drift when the whole suite runs in parallel.
+    // A flaky test that reddens CI at random is worse than no test.
+    const filePrompts: string[] = [];
+    await runSimpleBuild(baseDeps({
+      shareContract: true,
+      planTimeoutMs: 900,          // the OLD independent cap — comfortably longer than the contract needs
+      overallTimeoutMs: 1000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) {
+          await new Promise((res) => setTimeout(res, 380));
+          return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list\nsrc/index.css :: styles';
+        }
+        if (user.includes('Design the shared contract')) {
+          await new Promise((res) => setTimeout(res, 300));
+          return 'export type CONTRACT_MARKER = 1;';
+        }
+        filePrompts.push(user);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(filePrompts.length).toBeGreaterThan(0);   // the assertion below must not be vacuous
+    // The contract never made it in — its cap was what the budget could afford, not its own 900ms.
+    for (const p of filePrompts) expect(p).not.toContain('CONTRACT_MARKER');
+  });
+
+  it('a fast plan still gets its full contract phase — the cap only bites when the budget is tight', async () => {
+    let contractCalled = false;
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: true,
+      overallTimeoutMs: 5000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list\nsrc/index.css :: styles';
+        if (user.includes('Design the shared contract')) { contractCalled = true; return 'export type T = 1;'; }
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(contractCalled).toBe(true);
+    expect(r.ok).toBe(true);
+  });
+
   it('a file that fails to generate gets NO tick — the counter only advances on real success', async () => {
     let calls = 0;
     const logs: string[] = [];

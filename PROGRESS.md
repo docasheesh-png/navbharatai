@@ -24655,3 +24655,32 @@ capacity on Cloud Run — remains the recorded open infra item (raise instance m
 volume for genuine 5 GB uploads).
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1029 files / 11129 tests, 0 failures**.
+
+## 2026-08-04 — Play compliance: medical features hidden in the native shell (Google Play rejection fix, admin-approved)
+
+**Context:** Google Play rejected the app update (2026-08-02, "Developer Account" violation — since
+Aug 2024 an app DECLARING medical features may only be published by an organization account; the
+admin's account is personal). Admin verified in Play Console today: Financial features already clean;
+the Health declaration had NINE medical boxes checked. Admin proposed "coming soon + quietly re-enable
+later"; per rule 3 the honest correction was given and ACCEPTED: fully hide medical features in the
+Play app now, and re-enable on mobile ONLY after an organization account exists (quiet re-enable =
+deceptive behaviour = account-level ban risk).
+
+**What shipped:** `src/lib/playCompliance.ts` (pure, test-locked) — `MEDICAL_PROFESSIONAL_IDS` =
+sda_chat (Doctor AI), pharmacist_ai, firstaid_ai, maternity_ai. In the native shell
+(`isNativeApp()`): ProfessionalsView drops the four tiles; App.tsx blocks the four views at the
+`toggleTab` choke point AND at each render site (defense in depth); HomeView's Professionals card
+swaps to copy with no "Doctor"/stethoscope; LiveCollaboration's coming-soon dropdown drops Doctor AI.
+WEB IS UNTOUCHED — every gate is `hideMedical=false` on web, locked by tests (7 new).
+
+**⚠️ RELEASE ORDER (bundled mode — web is BAKED into the .aab):** the gating reaches users only via a
+NEW .aab built AFTER this merges. Order: merge this → build fresh .aab (android-aab.yml) → admin
+unchecks all 9 medical boxes in Play Console Health declaration → upload the NEW .aab → submit.
+Uploading the pre-gate .aab (run #59) with cleared declarations would be a mis-declaration.
+
+**Known limitation (recorded honestly):** server-side AI knowledge (AppKnowledgeBase) can still
+DESCRIBE Doctor AI in chat answers inside the native app ("where is Doctor AI" → a path that is
+hidden there). Chat text is not a declared app feature and is not part of Play's feature review;
+tightening it (native-aware knowledge filtering) is a follow-up, not a blocker.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1030 files / 11,136 tests, 0 failures**.

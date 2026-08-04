@@ -1,4 +1,6 @@
 import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb, Shield, ScrollText, BadgeCheck, Flame, Palette, Star, PenLine, Brain, AlertTriangle, Bird, Laptop, Tag, Droplets, Heart, Telescope, Pencil, PersonStanding, Puzzle, ShoppingCart, Mountain, PiggyBank, GitBranch } from 'lucide-react';
+import { isNativeApp } from '../../lib/mobileNative';
+import { medicalFeaturesHidden, visibleProfessionals } from '../../lib/playCompliance';
 
 interface ProfessionalCard {
   id: string;
@@ -93,6 +95,9 @@ interface ProfessionalsViewProps {
 }
 
 export function ProfessionalsView({ onSelect }: ProfessionalsViewProps) {
+  // Play compliance (admin 2026-08-04): inside the Play-distributed native shell the medical-class
+  // assistants are hidden entirely, so the Play Console health declarations stay truthful. Web shows all.
+  const cards = visibleProfessionals(CARDS, medicalFeaturesHidden(isNativeApp()));
   return (
     <div className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-10 bg-[#0d1117]">
       <div className="max-w-3xl mx-auto">
@@ -100,7 +105,7 @@ export function ProfessionalsView({ onSelect }: ProfessionalsViewProps) {
         <p className="text-sm text-[#8b949e] mb-8">Domain-expert AI assistants — pick a profession to get started.</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {CARDS.map((card) => (
+          {cards.map((card) => (
             <button
               key={card.id}
               disabled={!card.active}

@@ -1,5 +1,6 @@
 import type { GitManager, CommandRunner } from './GitManager';
 import { wrapBoundedCommand, capOutput, isRunnableCommand, EXEC_TIMEOUT_SEC, type ExecResult } from './execCommand';
+import { isPtyHost, type PtyHost } from './ShellSessions';
 
 /**
  * WorkspaceRegistry — keeps active v5.0 build sessions addressable after the
@@ -99,6 +100,20 @@ export async function execInSession(
     // The sandbox has no shell (e.g. LocalActuator in dev/CI) → honest "not available".
     return offline;
   }
+}
+
+/**
+ * The PTY-capable actuator behind a workspace, for Code Studio's REAL shells (ShellSessions.ts).
+ *
+ * Undefined when the session is unknown, not owned by the caller, or the actuator has no TTY support
+ * (LocalActuator in dev/CI) — so the caller shows an honest "sandbox not active" state rather than a
+ * shell that silently swallows every keystroke.
+ */
+export function ptyHostForSession(workspaceId: string, userId?: string): PtyHost | undefined {
+  const session = sessions.get(workspaceId);
+  if (!session || !session.runner) return undefined;
+  if (userId && session.userId && session.userId !== userId) return undefined;
+  return isPtyHost(session.runner) ? session.runner : undefined;
 }
 
 export function sessionCount(): number {

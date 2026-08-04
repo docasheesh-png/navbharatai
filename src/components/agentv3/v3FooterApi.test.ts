@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { footerSection, v3MobileFooterActive , previewReadySignal } from './v3FooterApi';
 
 describe('footerSection (v5.0 mobile footer — active-item highlight from real surface state)', () => {
@@ -42,5 +44,37 @@ describe('previewReadySignal — the footer green dot fires only on a genuinely 
     expect(previewReadySignal(false, false, undefined, 12)).toBe(false);
     expect(previewReadySignal(false, true, false, 12)).toBe(false);
     expect(previewReadySignal(false, true, true, 0)).toBe(false);
+  });
+});
+
+// Admin 2026-08-04: the footer's 5th slot was "Report" — the SAME action already in the More sheet,
+// so one slot was a duplicate while Code Studio (which edits the very files v5.0 builds) had no
+// direct route on mobile. Source contract: the footer opens Code Studio, Report lives only in More,
+// and the dead buildReport/reportBusy API surface is gone (no orphan fields left behind).
+describe('v5.0 mobile footer wiring (admin 2026-08-04)', () => {
+  const APP = readFileSync(fileURLToPath(new URL('../../App.tsx', import.meta.url)), 'utf8');
+  const API = readFileSync(fileURLToPath(new URL('./v3FooterApi.ts', import.meta.url)), 'utf8');
+  const PANEL = readFileSync(fileURLToPath(new URL('./AgentV3Panel.tsx', import.meta.url)), 'utf8');
+
+  it('the footer slot opens Code Studio', () => {
+    expect(APP).toContain("label: 'Code Studio'");
+    expect(APP).toContain("toggleTab('studio')");
+  });
+
+  it('the footer no longer carries a Report item', () => {
+    expect(APP).not.toContain("key: 'report'");
+    expect(APP).not.toContain('v3FooterApi.buildReport');
+  });
+
+  it('the retired footer-report API fields are removed, not left dangling', () => {
+    expect(API).not.toContain('buildReport');
+    expect(API).not.toContain('reportBusy');
+    expect(PANEL).not.toContain('reportBusy:');
+  });
+
+  it('Report still exists inside the panel (the More sheet), with its send count', () => {
+    expect(PANEL).toContain('sendReportToAdmin');
+    expect(PANEL).toContain('reportButtonLabel');
+    expect(PANEL).toContain('bumpReportSendCount');
   });
 });

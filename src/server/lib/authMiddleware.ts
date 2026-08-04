@@ -451,6 +451,45 @@ export function inbrowserPreviewRateLimiter() {
 }
 
 /**
+ * CHUNKED UPLOAD TRANSPORT (`/api/zip-upload/chunk`) — its own bucket, sized to the real work.
+ *
+ * ROOT CAUSE (admin question 2026-08-04, "60 per hour — per user or for the whole app?"): the chunk
+ * endpoint sat on `workspaceRateLimiter` (60 requests/hour, a bucket SHARED with ~44 other workspace
+ * routes). A chunk is 8 MB, so the advertised 5 GB import needs **640 chunk requests** — it would 429
+ * at chunk ~60, i.e. after roughly 470 MB, and sooner still because preview polling and file
+ * operations spend the same 60. The 5 GB ceiling shipped the same morning was therefore FICTION in
+ * production: exactly the "advertised but not real" failure the second absolute rule forbids.
+ *
+ * Sized at 2000/hr so a full 5 GB upload (640) plus retries and a second upload all fit. This is NOT a
+ * loosening of abuse control: total bytes are bounded by MAX_ARCHIVE_BYTES + the free-disk preflight
+ * (an upload cannot exceed 5 GB no matter how many requests it splits into), so the request count was
+ * never the thing protecting us. `durable: false` for the same reason as the preview render — a
+ * per-chunk Firestore write would be 640 writes per import, for no protection at all.
+ */
+export const ZIP_CHUNK_RATE: RateLimitOptions = { name: 'zip-chunk', authed: 2000, anon: 0, noun: 'upload chunks', durable: false };
+export function zipChunkRateLimiter() {
+  return rateLimiter(ZIP_CHUNK_RATE);
+}
+
+/**
+ * PREVIEW POLLING (`/api/agentv3/preview-health`, `/api/agentv3/preview-error`) — its own bucket.
+ *
+ * Same root cause as above, felt by the user as "the preview just doesn't work". The preview watchdog
+ * re-probes every 150s AND on every window focus/visibility change, and each browser console error is
+ * reported — all on the shared 60/hr workspace bucket. A user with the tab open through an afternoon
+ * exhausts it, and from then on the health probe 429s: the preview is fine, but NavBharatAI reports it
+ * as down. Polling is cheap (a durable file count + a `curl` against an ALREADY-warm sandbox; it never
+ * spins one up), so it gets a generous, in-memory bucket of its own.
+ *
+ * `preview-diagnose` deliberately KEEPS the tight workspace limiter: it genuinely boots a sandbox and
+ * installs dependencies — real spend that must stay bounded.
+ */
+export const PREVIEW_POLL_RATE: RateLimitOptions = { name: 'preview-poll', authed: 600, anon: 300, noun: 'preview checks', durable: false };
+export function previewPollRateLimiter() {
+  return rateLimiter(PREVIEW_POLL_RATE);
+}
+
+/**
  * P-SEC.13 — Device binding for sensitive operations. Records the caller's device fingerprint
  * (hashed UA + IP) against the user and DETECTS anomalies. Non-blocking by design (a UA bump or
  * mobile IP change must never lock a real user out — see sessionTracker.ts): on a first-seen

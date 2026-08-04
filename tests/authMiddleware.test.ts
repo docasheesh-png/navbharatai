@@ -4,7 +4,7 @@
  * no-auth fast-paths and basic input validation.
  */
 import { describe, it, expect } from 'vitest';
-import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, INBROWSER_PREVIEW_RATE, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
+import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, INBROWSER_PREVIEW_RATE, ZIP_CHUNK_RATE, PREVIEW_POLL_RATE, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
 import type { Request, Response, NextFunction } from 'express';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -202,5 +202,48 @@ describe('rateLimiter (generic factory)', () => {
     await middleware(req, res as any, () => { nextCalled = true; });
     expect(nextCalled).toBe(true);
     expect(res._status).toBeUndefined();
+  });
+});
+
+// ADMIN QUESTION 2026-08-04: "60 preview per hour — per user, or for the WHOLE app?" Answering it from
+// the code surfaced a real bug. The limiter key is `${name}:${uid}`, so 60/hr is PER USER (100 users do
+// NOT share 60) — but the 'workspace' bucket is shared across ~44 routes, and two high-frequency paths
+// were sitting in it:
+//   • /api/zip-upload/chunk — an 8 MB chunk per request, so the advertised 5 GB import needs 640 of
+//     them. It would 429 at chunk ~60, i.e. after ~470 MB: the 5 GB ceiling was FICTION in production.
+//   • preview-health / preview-error — the watchdog re-probes every 150s and on every window focus, so
+//     a tab left open all afternoon exhausted the bucket and the health probe started 429-ing. The
+//     preview was fine; NavBharatAI reported it as down.
+describe('high-frequency endpoints have their OWN buckets (admin scaling question 2026-08-04)', () => {
+  const CHUNK_BYTES = 8 * 1024 * 1024;
+  const MAX_ARCHIVE = 5 * 1024 * 1024 * 1024;
+
+  it('the chunk limiter fits a FULL 5 GB import, with headroom for retries', () => {
+    const chunksFor5GB = Math.ceil(MAX_ARCHIVE / CHUNK_BYTES); // 640
+    expect(ZIP_CHUNK_RATE.authed).toBeGreaterThan(chunksFor5GB);
+    // The old shared cap could not even carry 500 MB — lock that this never regresses to it.
+    expect(ZIP_CHUNK_RATE.authed).toBeGreaterThan(60);
+  });
+
+  it('the chunk limiter is its OWN bucket, never shared with general workspace requests', () => {
+    expect(ZIP_CHUNK_RATE.name).toBe('zip-chunk');
+    expect(ZIP_CHUNK_RATE.name).not.toBe('workspace');
+  });
+
+  it('a chunk never writes to Firestore — 640 durable writes per import would protect nothing', () => {
+    expect(ZIP_CHUNK_RATE.durable).toBe(false);
+  });
+
+  it('anonymous callers cannot upload chunks at all (begin already requires a signed-in user)', () => {
+    expect(ZIP_CHUNK_RATE.anon).toBe(0);
+  });
+
+  it('preview polling gets its own generous bucket so a long session never fakes a dead preview', () => {
+    expect(PREVIEW_POLL_RATE.name).toBe('preview-poll');
+    expect(PREVIEW_POLL_RATE.authed).toBeGreaterThanOrEqual(600);
+    expect(PREVIEW_POLL_RATE.durable).toBe(false);
+    // A 150s watchdog is 24 probes/hr; with focus/visibility re-probes and error reports the old 60
+    // shared with everything else was reachable in one afternoon.
+    expect(PREVIEW_POLL_RATE.authed).toBeGreaterThan(60);
   });
 });

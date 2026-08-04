@@ -1,4 +1,5 @@
 import { Sandbox } from 'e2b';
+import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
@@ -277,6 +278,11 @@ export class E2BActuator implements IEngineerActuator {
   // Last time each workspace's DURABLE record was refreshed, so a live build's timestamp says "in use"
   // to the cross-instance orphan reaper. Throttled — see shouldTouchDurable.
   private _lastDurableTouch = new Map<string, number>();
+  // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
+  // WALL-CLOCK, which is a completely different cost shape from token spend — a build that used almost
+  // no tokens but held a VM for forty minutes still cost real money, and nothing in the build report
+  // showed it. See sandboxCost.ts.
+  private _sandboxStartedAt = new Map<string, number>();
 
   /**
    * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
@@ -381,6 +387,7 @@ export class E2BActuator implements IEngineerActuator {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);
+        this._sandboxStartedAt.delete(workspaceId);
         this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
         await sandboxStore.markPaused(workspaceId).catch(() => {});
       }
@@ -420,6 +427,7 @@ export class E2BActuator implements IEngineerActuator {
       if (paused) {
         this._lastActivity.delete(rec.workspaceId);
         this._lastDurableTouch.delete(rec.workspaceId);
+        this._sandboxStartedAt.delete(rec.workspaceId);
         this._fileCache.delete(rec.workspaceId);
       }
     }
@@ -478,6 +486,7 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
     // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
     // what made a running build indistinguishable from an abandoned one.
     this._lastDurableTouch.delete(workspaceId);
@@ -901,6 +910,18 @@ export class E2BActuator implements IEngineerActuator {
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {
+          // PARTIAL-INSTALL REPAIR (mitrify autopsy 2026-08-04): when the log proves ONE package
+          // installed only partially (its own file could not resolve a sibling — e.g. lucide-react's
+          // barrel importing ./icons/*.js that never landed), a plain `npm install` is a NO-OP: the
+          // dependency is already in package.json and the directory already exists, so npm has nothing
+          // to do and the next restart fails identically. The broken tree must be REMOVED first, or the
+          // "heal" runs, reports success, and changes nothing — the fake-heal this rule forbids.
+          if (diag.corruptPackage && /^(?:@[\w.-]+\/)?[\w.-]+$/.test(diag.corruptPackage)) {
+            await sandbox.commands
+              .run(`rm -rf ${WORKSPACE_ROOT}/node_modules/${diag.corruptPackage}`, { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 })
+              .catch(() => { /* best-effort — the reinstall below still runs */ });
+            stdout += ` (removed the incomplete "${diag.corruptPackage}" so it reinstalls cleanly)`;
+          }
           const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
           stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
         }
@@ -1069,6 +1090,80 @@ const {chromium}=require('playwright');
     return `https://${sandbox.getHost(port)}`;
   }
 
+  /**
+   * Scan the RENDERED page and return every visible element with the facts needed to locate it in the
+   * source: its class string (greppable verbatim), text, position, computed colours, and the
+   * `data-nbai-src` stamp when the preview provides one.
+   *
+   * WHY (mitrify autopsy 2026-08-04): the agent could screenshot a page but had no pixel→file path, so
+   * a request to remove a small green dot became ~30 blind greps over 20 minutes and then a destructive
+   * guess. This is the missing half — see UiElementFinder.ts for the matching + the honest
+   * proof-of-absence. Bounded and best-effort: an unavailable browser returns an empty list, and the
+   * caller reports that honestly rather than pretending the element is absent.
+   */
+  async scanUiElements(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    if (!this._playwrightReady.has(workspaceId)) this._kickoffPlaywright(sandbox, workspaceId);
+    const ready = await Promise.race([
+      this._playwrightReady.get(workspaceId)!,
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 60_000)),
+    ]).catch(() => false);
+    // NO BROWSER ⇒ scanned:false, NOT "no elements". The difference matters: an empty list from a real
+    // scan is evidence the thing is absent; an empty list from a failed scan is evidence of nothing.
+    if (!ready) return { elements: [], scanned: false };
+
+    // domcontentloaded + settle, never networkidle: a Vite dev server's HMR socket never goes idle, so
+    // networkidle times out and captures the un-hydrated shell (the exact false-negative that made the
+    // preview self-check report "Present: none" for every React build).
+    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
+const {chromium}=require('playwright');
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+  await p.setViewportSize({width:1280,height:800});
+  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+  await p.waitForTimeout(1800);
+  const out=await p.evaluate(()=>{
+    var res=[];
+    var all=document.querySelectorAll('body *');
+    for(var i=0;i<all.length && res.length<600;i++){
+      var e=all[i];
+      var r=e.getBoundingClientRect();
+      if(r.width<=0||r.height<=0) continue;              // invisible: no box
+      var cs=getComputedStyle(e);
+      if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0) continue;
+      var host=e.closest?e.closest('[data-nbai-src]'):null;
+      var own=e.children.length===0?(e.textContent||'').trim():'';
+      res.push({
+        tag:e.tagName.toLowerCase(),
+        className:typeof e.className==='string'?e.className.slice(0,240):'',
+        id:e.id||undefined,
+        text:own?own.slice(0,120):undefined,
+        selector:(e.id?('#'+e.id):(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
+        source:host?(host.getAttribute('data-nbai-src')||undefined):undefined,
+        rect:{x:r.x,y:r.y,w:r.width,h:r.height},
+        bg:cs.backgroundColor,
+        color:cs.color,
+        borderRadius:cs.borderRadius,
+        src:e.tagName==='IMG'?(e.getAttribute('src')||undefined):undefined
+      });
+    }
+    return res;
+  }).catch(function(){return [];});
+  process.stdout.write(JSON.stringify(out));
+  await b.close();
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
+" 2>/dev/null`;
+    const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 }).catch(() => null);
+    if (!run || run.exitCode !== 0 || !run.stdout.trim()) return { elements: [], scanned: false };
+    try {
+      const parsed = JSON.parse(run.stdout.trim());
+      return Array.isArray(parsed) ? { elements: parsed, scanned: true } : { elements: [], scanned: false };
+    } catch {
+      return { elements: [], scanned: false };
+    }
+  }
+
   async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     const sandbox = await this.getSandbox(workspaceId);
     usageTracker.record(workspaceId, 'screenshot');
@@ -1216,9 +1311,94 @@ const {chromium}=require('playwright');
     return { errors: errors.slice(-20), captured: true };
   }
 
+  /**
+   * Seconds this instance has held a sandbox for the workspace, or null when it never created one
+   * (a build served entirely from another instance's sandbox, or no sandbox at all). Null means
+   * "not measured" — the report says exactly that rather than showing a zero that looks like a fact.
+   */
+  sandboxHeldSeconds(workspaceId: string): number | null {
+    const started = this._sandboxStartedAt.get(workspaceId);
+    if (!started) return null;
+    return Math.max(0, Math.round((Date.now() - started) / 1000));
+  }
+
   async getSandboxId(workspaceId: string): Promise<string | null> {
     const sandbox = this.sandboxes.get(workspaceId);
     return sandbox ? sandbox.sandboxId : null;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // PtyHost — real, persistent shells for Code Studio (see ShellSessions.ts for the why).
+  //
+  // `runCommand` above runs one command to completion and returns; these four run a genuine TTY that
+  // stays alive between commands, which is what makes `cd`, Ctrl+C, colours and interactive prompts
+  // work at all. The PTY is a process inside the sandbox that is ALREADY running for this workspace,
+  // so a shell costs a process, not a machine.
+  // ---------------------------------------------------------------------------------------------
+
+  /** Live PTY handles by pid, so the shell can be killed and so the process isn't garbage-collected. */
+  private ptys = new Map<number, { handle: CommandHandle; workspaceId: string }>();
+
+  async openPty(
+    workspaceId: string,
+    opts: { cols: number; rows: number; onData: (chunk: string) => void; onExit: (code?: number) => void },
+  ): Promise<{ pid: number }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'command');
+
+    // A STREAMING decoder, not `new TextDecoder().decode(chunk)` per callback. PTY output arrives in
+    // arbitrary byte-sized pieces, so a multi-byte character (₹, an emoji, a box-drawing glyph in a
+    // progress bar) is routinely split across two chunks. Decoding each chunk independently would
+    // turn every such split into a replacement character — the terminal would look subtly corrupted
+    // for exactly the output that matters most to an Indian user.
+    const decoder = new TextDecoder('utf-8');
+
+    const handle = await sandbox.pty.create({
+      cols: opts.cols,
+      rows: opts.rows,
+      cwd: WORKSPACE_ROOT,
+      // Interactive programs read TERM to decide whether they may use colour and cursor movement.
+      // Without it they fall back to dumb output and the shell looks nothing like a real terminal.
+      envs: { TERM: 'xterm-256color' },
+      // The SDK default is 60 SECONDS — a persistent shell needs an hour. ShellSessions reaps idle
+      // shells long before this; this is the sandbox-side backstop against a forgotten process.
+      timeoutMs: 60 * 60 * 1000,
+      onData: (data: Uint8Array) => {
+        try { opts.onData(decoder.decode(data, { stream: true })); } catch { /* never break the stream */ }
+      },
+    });
+
+    this.ptys.set(handle.pid, { handle, workspaceId });
+    // `wait()` rejects with CommandExitError on a non-zero exit — for a shell that is the ORDINARY
+    // case (`exit 1`, or Ctrl+D after a failed command), not an error to log. Either way the shell is
+    // over, and the reader is told honestly.
+    void handle
+      .wait()
+      .then((r) => opts.onExit(typeof r.exitCode === 'number' ? r.exitCode : undefined))
+      .catch((e: unknown) => opts.onExit(typeof (e as { exitCode?: number })?.exitCode === 'number' ? (e as { exitCode: number }).exitCode : undefined))
+      .finally(() => { this.ptys.delete(handle.pid); });
+
+    return { pid: handle.pid };
+  }
+
+  async writePty(workspaceId: string, pid: number, data: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    await sandbox.pty.sendInput(pid, new TextEncoder().encode(data));
+  }
+
+  async resizePty(workspaceId: string, pid: number, cols: number, rows: number): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    await sandbox.pty.resize(pid, { cols, rows });
+  }
+
+  async killPty(workspaceId: string, pid: number): Promise<boolean> {
+    this.ptys.delete(pid);
+    try {
+      const sandbox = await this.getSandbox(workspaceId);
+      return await sandbox.pty.kill(pid);
+    } catch {
+      return false; // sandbox already gone ⇒ the PTY is gone with it
+    }
   }
 
   async searchFiles(workspaceId: string, terms: string[]): Promise<string[]> {

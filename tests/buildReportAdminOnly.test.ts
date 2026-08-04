@@ -21,8 +21,15 @@ describe('User UI — single Report button, no report content shown', () => {
     expect(panel).toContain('method: \'POST\'');
   });
 
-  it('renders a "Report" button with a sent acknowledgement (no download/copy label)', () => {
-    expect(panel).toMatch(/reportSent \? 'Report sent' : 'Report'/);
+  // Label wiring UPDATED 2026-08-04 (admin: "report (1), report (2) aise — jisse duplicate report na
+  // ho"): the inline ternary became the shared pure `reportButtonLabel`, so the desktop pill and the
+  // mobile More sheet cannot drift. The invariant this test exists for is unchanged and still checked
+  // below: one send-only Report button, no download/copy/history anywhere in the user UI.
+  it('renders the Report button through the shared label helper (send-only, never download/copy)', () => {
+    expect(panel).toContain('reportButtonLabel');
+    expect(panel).toContain("from './reportSendCount'");
+    expect(panel).not.toContain('Download report');
+    expect(panel).not.toContain('Copy report');
   });
 
   it('no user-facing button downloads, copies, or opens report history anymore', () => {
@@ -31,9 +38,12 @@ describe('User UI — single Report button, no report content shown', () => {
     expect(panel).not.toContain("onClick={() => downloadDiagnostics('copy')}");
     expect(panel).not.toContain('onClick={toggleHistoryReport}');
     expect(panel).not.toContain('onClick={() => void toggleHistoryReport()}');
-    // The mobile footer report action submits to admin instead of downloading. Since 2026-08-04 it
-    // opens the "which build?" picker first — still a submit path, still no report content shown.
-    expect(panel).toContain("buildReport: () => { setMobileSheet(null); void openReportPicker('sheet'); }");
+    // The report action lives in the mobile More sheet (the footer slot it also occupied was a
+    // duplicate and now opens Code Studio — see v3FooterApi.test.ts) and still SENDS, never downloads.
+    // Since the build picker landed it opens the "which build?" list first, which itself ends in
+    // sendReportToAdmin — same invariant (submit-only), one step earlier in the path.
+    expect(panel).toContain("setMobileSheet(null); void openReportPicker('sheet');");
+    expect(panel).toContain('sendReportToAdmin');
   });
 });
 

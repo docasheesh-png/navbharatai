@@ -8,9 +8,10 @@
 // gives nothing usable; never fakes a result.
 
 import type { Express, Request, Response } from 'express';
+import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
-import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
 import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y } from '../AppMakerLab/intelligence/A11yLinter';
@@ -23,7 +24,7 @@ export function registerDesignRoutes(app: Express): void {
   const routeFn: RouteFn = async (prompt, system) => ({ response: { content: await callProfessionalAI(system ?? '', prompt ?? '', 'free') } });
 
   // Context-aware AI improvement suggestions for the current app.
-  app.post('/api/design/suggest', async (req: Request, res: Response) => {
+  app.post('/api/design/suggest', inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op).
     const identity = await verifyFirebaseIdentity(req);
     const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
@@ -36,15 +37,16 @@ export function registerDesignRoutes(app: Express): void {
       const suggestions = await aiSuggestions(code, routeFn);
       // An empty result is the honest "nothing to say" path below, so only a real answer is charged.
       if (suggestions.length && gate.countsAgainstFree) burnToolAction(gate.uid, 'ai_tool');
+      if (suggestions.length) chargeToolAction(gate); // ONE WALLET — only a real result is charged
       res.json({ suggestions });
     } catch {
       // Honest empty result — the client falls back to its static suggestions.
       res.json({ suggestions: [] });
     }
-  });
+  }));
 
   // AI colour palette + type scale from a brand/description.
-  app.post('/api/design/palette', async (req: Request, res: Response) => {
+  app.post('/api/design/palette', inAiSpendZone(async (req: Request, res: Response) => {
     const brand = typeof req.body?.brand === 'string' ? req.body.brand.trim().slice(0, MAX_BRAND) : '';
     if (!brand) {
       res.status(400).json({ error: 'provide { brand: "<description of the brand/vibe>" }' });
@@ -59,11 +61,12 @@ export function registerDesignRoutes(app: Express): void {
     try {
       const palette = await aiPalette(brand, routeFn);
       if (palette && paletteGate.countsAgainstFree) burnToolAction(paletteGate.uid, 'ai_tool');
+      if (palette) chargeToolAction(paletteGate); // ONE WALLET — only a real result is charged
       res.json({ palette });
     } catch {
       res.json({ palette: null });
     }
-  });
+  }));
 
   // P-DESIGN.8 — deterministic design-consistency lint (no AI, no credit spend). Scores the current
   // app's code for colour/font/spacing consistency and returns concrete, actionable violations.

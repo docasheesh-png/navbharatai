@@ -22,6 +22,39 @@ jobs:
       - name: Build production image
         run: docker build -t navbharatai:scan .
 
+      # BOOT SMOKE TEST (2026-08-04). Building an image proves it COMPILES; it does not prove it RUNS.
+      # That distinction stopped being theoretical the moment this Dockerfile became a multi-stage build:
+      # the runtime stage copies a hand-picked set of paths, so one missing directory would produce an
+      # image that builds perfectly and then crash-loops on Cloud Run — for every user, in production,
+      # with the only warning being a green CI tick.
+      #
+      # So the image is actually STARTED here and asked for its health endpoint, exactly as Cloud Run
+      # will. It fails loudly if the container does not come up, and prints the container's own logs so
+      # the reason is visible instead of guessed. Runs BEFORE the CVE scan: a container that cannot boot
+      # is a worse problem than a container with a CVE.
+      - name: Boot smoke test — the image must actually START and serve
+        run: |
+          set -e
+          docker run -d --name nbai-smoke -p 8080:8080 -e PORT=8080 navbharatai:scan
+          ok=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8080/api/health >/dev/null 2>&1; then ok=1; break; fi
+            if [ -z "$(docker ps -q -f name=nbai-smoke)" ]; then
+              echo "::error::The container EXITED during startup — it never served a request."
+              break
+            fi
+            sleep 3
+          done
+          echo "----- container logs -----"
+          docker logs nbai-smoke 2>&1 | tail -60 || true
+          echo "--------------------------"
+          docker rm -f nbai-smoke >/dev/null 2>&1 || true
+          if [ "$ok" != "1" ]; then
+            echo "::error::Image built but did NOT serve /api/health — do not ship it."
+            exit 1
+          fi
+          echo "Image booted and served /api/health."
+
       # NO ACTION, ON PURPOSE. This workflow has now broken TWICE for reasons that had nothing to do
       # with our security posture: first the pinned action tag was deleted upstream (job died at "Unable
       # to resolve action" — the image was never scanned at all), then the newer action's own contract

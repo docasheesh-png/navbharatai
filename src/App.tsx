@@ -3574,7 +3574,14 @@ export default function App() {
           gating) but its ITEMS follow the active view. v5.0 active → its own six items (History ·
           Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
           via onFooterApi. Every other view keeps the default items. */}
-      {effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && (
+      {/* CODE STUDIO OWNS ITS OWN FOOTER (admin 2026-08-04, with screenshot). Code Studio already renders
+          a full IDE footer of its own — CODE · FILES · PREVIEW · AI · MORE — so on mobile the screen was
+          showing TWO stacked navigation bars: the IDE's, and this global one right below it. Two footers
+          is not a cosmetic annoyance on a phone; it eats a double slice of the smallest screen we have,
+          and the two rows disagree about where you are (the IDE says CODE, the global bar says STUDIO).
+          Inside the IDE, the IDE's own bar is the correct and only one. `botbuilder` is excluded here for
+          the same reason and has been for a while. */}
+      {effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio' && (
         <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.

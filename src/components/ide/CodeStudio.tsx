@@ -1425,7 +1425,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                </div>
              </>
            )}
-           <div className="flex border-t border-[var(--theme-border)] bg-[var(--theme-card)] h-16 shrink-0 relative z-[57] select-none">
+           {/* Code Studio's own footer is now the BOTTOM-MOST bar on mobile — the global app footer is
+               hidden inside the IDE (App.tsx, admin 2026-08-04), so this row sits directly on the device
+               edge and must reserve the home-indicator inset itself. Without it the tap targets fall
+               under the iPhone home bar. Content height stays a fixed 4rem; the inset is added below it. */}
+           <div
+             className="flex border-t border-[var(--theme-border)] bg-[var(--theme-card)] shrink-0 relative z-[57] select-none"
+             style={{ height: 'calc(4rem + env(safe-area-inset-bottom, 0px))', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+           >
              {([
                { id: 'code', label: 'Code', Icon: Code2, active: !isSidebarOpen && activeScreen !== 'preview', onTap: () => { setMobileMoreOpen(false); if (activeScreen === 'preview') setActiveScreen('files'); setIsSidebarOpen(false); } },
                { id: 'files', label: 'Files', Icon: FilesIcon, active: isSidebarOpen && activeScreen === 'files', onTap: () => { setMobileMoreOpen(false); setActiveScreen('files'); setIsSidebarOpen(true); } },

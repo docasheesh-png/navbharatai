@@ -8500,7 +8500,19 @@ export function registerAgentV3Routes(app: Express): void {
         // overlaid with this build's writes (newest content wins), so every integrity check judges the
         // complete app the user actually runs. Entry/html candidates from the sandbox remain the
         // fallback for anything not yet persisted.
+        // POST-ANSWER TIMING (autopsy cb03bdde, admin 2026-08-04): the user's answer landed at 399s and
+        // the build did not finish until 624s — 225 seconds of "still working" AFTER the reply was on
+        // screen. The autopsy could not say what dominated it, because nothing here was timed.
+        //
+        // Deliberately MEASURING rather than optimising: the obvious move is to background this whole
+        // pass, but the full-workspace load exists for a real reason (an edit build writes 3-4 files, so
+        // `writtenFiles` alone makes the integrity checks blind and produces FALSE positives), and
+        // backgrounding it risks the report finalising before these findings land — the exact blind spot
+        // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
+        // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
+        const integrityStartedAt = Date.now();
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
         for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
           if (integrityFiles[p] === undefined) {
@@ -8651,6 +8663,16 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* self-heal is best-effort — the honest warnings stand */ }
           }
         }
+        // The measurement the autopsy asked for (see the note above `integrityStartedAt`): how much of
+        // the post-answer tail this whole pass owns, and how much of THAT is just loading the project.
+        // Recorded even when nothing was found — a fast pass is the evidence that the time is elsewhere.
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'POST_ANSWER_TIMING',
+          message: `Post-answer integrity pass took ${Math.round((Date.now() - integrityStartedAt) / 1000)}s, of which loading the durable project was ${Math.round(storeLoadMs / 1000)}s (${Object.keys(storeFiles).length} files).`,
+          autoResolved: true,
+        });
       } catch { /* integrity analysis is best-effort — never blocks a build */ }
 
       // PRE-VERDICT DUPLICATE-IMPORT DEDUPE (build-report autopsy 2026-08-02, buildId a2f32f38): a weak-tier

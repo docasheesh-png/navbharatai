@@ -99,3 +99,36 @@ describe('import preview boot leaves a forensic trail (the report must not be bl
     expect(boot).toContain('catch { /* diagnostics are best-effort and must never break a boot */ }');
   });
 });
+
+// THE POST-ANSWER TAIL (autopsy cb03bdde, admin 2026-08-04). The user's answer was on screen at 399s;
+// the build did not end until 624s. 225 seconds of unexplained "still working" — and the report could
+// not say what owned them, because nothing in that stretch was timed. Measuring first is deliberate:
+// the tempting fix (background the whole integrity pass) would trade a slow build for a blind one.
+describe('the post-answer tail is measured, so the next autopsy is evidence and not a guess', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('../src/server/routes/agentv3.ts', import.meta.url)), 'utf8');
+
+  it('times the whole integrity pass and, separately, the durable project load inside it', () => {
+    const at = SRC.indexOf("code: 'POST_ANSWER_TIMING'");
+    expect(at).toBeGreaterThan(-1);
+    const block = SRC.slice(at - 300, at + 600);
+    expect(block).toContain('Date.now() - integrityStartedAt');
+    expect(block).toContain('storeLoadMs');
+    // File count matters: a 30s load of 4 files and of 400 files point at different root causes.
+    expect(block).toContain('Object.keys(storeFiles).length');
+  });
+
+  it('starts the clock BEFORE the workspace load, which is the suspected cost', () => {
+    const start = SRC.indexOf('const integrityStartedAt = Date.now();');
+    const load = SRC.indexOf('const storeLoadMs = Date.now() - integrityStartedAt;');
+    expect(start).toBeGreaterThan(-1);
+    expect(load).toBeGreaterThan(start);
+    expect(SRC.slice(start, load)).toContain('loadWorkspaceFiles(workspaceId)');
+  });
+
+  it('records unconditionally — a fast pass is the evidence that the time is somewhere else', () => {
+    // Recording only on a slow run would leave every clean build indistinguishable from an untimed one.
+    const at = SRC.indexOf("code: 'POST_ANSWER_TIMING'");
+    const before = SRC.slice(at - 400, at);
+    expect(before).not.toContain('if (Date.now() - integrityStartedAt >');
+  });
+});

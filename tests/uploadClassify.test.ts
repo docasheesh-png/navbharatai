@@ -35,20 +35,16 @@ describe('isTextFile', () => {
 });
 
 describe('classifyZipSize', () => {
-  it('returns too-large above 500 MB', () => {
-    expect(classifyZipSize(501 * MB)).toBe('too-large');
-  });
-  it('returns github between 50 and 500 MB', () => {
-    expect(classifyZipSize(100 * MB)).toBe('github');
-    expect(classifyZipSize(51 * MB)).toBe('github');
-  });
-  it('returns ok at or below 50 MB', () => {
+  // The old 50/500 MB buckets were fiction (2026-08-04 audit): "ok" waved files into a transport the
+  // platform kills at ~32 MB, and "github" was an excuse. One honest gate now: the server's real 5 GB.
+  it('returns ok all the way to the real 5 GB ceiling', () => {
     expect(classifyZipSize(50 * MB)).toBe('ok');
-    expect(classifyZipSize(1 * MB)).toBe('ok');
-    expect(classifyZipSize(0)).toBe('ok');
+    expect(classifyZipSize(100 * MB)).toBe('ok');
+    expect(classifyZipSize(500 * MB)).toBe('ok');
+    expect(classifyZipSize(4 * 1024 * MB)).toBe('ok');
+    expect(classifyZipSize(5 * 1024 * MB)).toBe('ok');
   });
-  it('boundary: exactly 500 MB is github, just above is too-large', () => {
-    expect(classifyZipSize(500 * MB)).toBe('github');
-    expect(classifyZipSize(500 * MB + 1)).toBe('too-large');
+  it('returns too-large only past 5 GB', () => {
+    expect(classifyZipSize(5 * 1024 * MB + 1)).toBe('too-large');
   });
 });

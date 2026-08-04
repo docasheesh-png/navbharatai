@@ -1918,11 +1918,7 @@ export default function App() {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      if (bucket === 'github') {
-        setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
-        return;
-      }
-      // < 50 MB: proceed with normal conflict check + import
+      // Up to 5 GB: proceed with the normal conflict check + import (chunked transport handles size)
       const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
       if (hasExisting) {
         setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });

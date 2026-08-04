@@ -24151,3 +24151,107 @@ window, so the SAME commit that passed at 18:44 failed at 20:07. Fixed for real 
 npm overrides (NOT by allowlisting — `ip-address` is an SSRF-class bug in the IP parser
 `express-rate-limit` depends on). **Lesson: when CI goes red, read WHICH STEP failed before assuming
 the diff broke something** — the audit gate depends on the outside world and can turn red on its own.
+
+## 2026-08-04 — Mitrify autopsy (build ca5a4ca8): a WORKING app reported dead, a DB that was never provisioned, keys that never reached the app, and three permanently-red CI gates
+
+Admin sent build report `ca5a4ca8` (Mitrify GitHub import, weak tier / KIMI, ₹6.80, 6 min) plus the
+Preview panel screenshot, and asked for a full autopsy. Six root causes were found and fixed across
+PRs **#2063, #2064, #2067**. Every one of them was a case of the SYSTEM LYING — about the port, about
+what it had done, about what it had healed, or about why a gate was red.
+
+### The headline: the app was SERVING and we told the user it was dead
+Its own log said `5:06:31 AM [express] serving on port 5000`. The panel said *"The dev server did not
+come up on **port 5432**"* — a Postgres port the dev server never had anything to do with.
+`detectDevPort` ran four regexes over the whole log and returned the first hit ANYWHERE, so it matched
+the ECONNREFUSED error's REMOTE address. Reproduced before fixing: pattern 1 → 5432 (from the error),
+pattern 4 → 5000 (correct, never reached). Two defects: (1) error/stack-trace lines were allowed to
+answer "which port is the server listening on?" — a connection error's address is a destination the app
+FAILED to reach; (2) `serving on port N`, Express's most common phrasing, was not even a recognised
+announcement (only `running on port N` was). Now line-based + tiered: a real listening announcement
+beats the loose `port: N` fallback wherever each appears, error lines are excluded outright, and a
+datastore port (5432/3306/27017/6379/…) is never adopted from a weak signal unless it IS the port the
+caller asked for. **(#2063)**
+
+### The database was never provisioned — we only SAID it was
+The log read *"provisioning PostgreSQL, writing DATABASE_URL, and retrying"* and provisioned nothing:
+neither success nor failure string from that block appears anywhere. ROOT CAUSE — the recovery loop
+called `planDevServerRecovery(log, attempt, MAX_RECOVERY)`, which escalates to `give_up` as soon as
+`attempt >= maxAttempts`. With `MAX_RECOVERY = 2` the LAST attempt was diagnosed and then broke out
+BEFORE its recovery ran, so "2 recovery attempts" only ever performed ONE action — and the give_up
+branch printed the diagnosis detail verbatim, which is written in the voice of a recovery about to
+happen. **We announced an action at the exact moment we stopped trying.** Every attempt now performs a
+real recovery; the give_up escalation is decided AFTER the loop. This is the SIBLING of the bug #2060
+fixed in the same function (there, `code_fix` causes lost their actionable detail on the final attempt)
+— same flaw, different branch. **(#2064)**
+
+### The terminal message promised work it was not doing
+Every `detail` is present-progressive ("provisioning PostgreSQL…", "reinstalling dependencies and
+restarting", "freeing it and restarting"), so reusing it as the FINAL verdict is fake success by
+construction. New `terminalDetail()` keeps the real CAUSE and replaces the promise with the honest
+outcome plus what the user can do. **(#2064)**
+
+### The user's saved keys never reached the app on a managed preview
+The admin's direct question: *"agar user keys dal bhi de, to kya v5 ne jo app banayi hai, woh app un
+keys ko padh payega??"* Traced end to end. Storage was fine (encrypted vault → `loadUserVaultSecrets`
+→ `setUserSecrets`) and READING was fine (the dev-server launch already does `set -a; . ./.env`, so even
+an app without `dotenv` sees them). **The gap was in between:** the `.env` was written LAZILY from
+inside `run_command`, the first time a command looked like npm/node/vite. A MANAGED PREVIEW — an import
+turn, the Diagnose button, `update_preview` — starts the dev server through the ACTUATOR and never
+passes that gate, so on those paths the app booted with NONE of the keys the user had saved. The two
+were simply never introduced. Now driven explicitly: once at build start right after the vault loads
+(`ALWAYS_WRITE_SECRETS`), and again before `update_preview` can start a server; a fresh `setUserSecrets`
+can re-reach disk. Empty vault stays a no-op, the lazy gate still works, `.env` still force-added to
+`.gitignore`. **(#2064)**
+
+### The user was told a GUESS, in the AGENT's words
+The Diagnose headline said *"the exact cause is in the detail log below (a crash on boot, a missing
+dependency, or a port conflict)"* while `classifyDevServerFailure` already knew the answer
+deterministically — we made a non-technical user read a raw log to learn something we had computed. And
+where a real cause DID show, it was the agent's text (`missing_credential` tells the MODEL to "delete
+the boot-time throw and gate the feature on a boolean" — instructions a user cannot act on, about code
+they did not write). One string was serving two audiences that need opposite things. Now different
+strings by construction: `userFacingPreviewFailure()` never names a file, stack frame or internal fix,
+and for the two causes a user CAN resolve it names the exact screen — a missing key →
+`Settings → App Settings → Secrets & API Keys` (naming the key), a database →
+`Settings → App Settings → Database`. Test-locked so the two can never converge. Also
+`cleanPreviewLogForUser()` drops the `?? path` git-porcelain noise that was leaking into the panel
+("…and retrying.?? .gitignore ?? DEPLOY_NOW.md ?? attached_assets/"). **(#2064)**
+
+### The report inflated its own self-heal count
+It claimed **"32 auto-resolved"** while healing essentially nothing — 14 were advisory notes about the
+user's PRE-EXISTING code, each literally saying *"nothing was changed"*. `importTurnObservation` had set
+`autoResolved: true` to keep them out of the "problems we still owe" bucket (a real fix, 2026-07-27),
+which silenced a false DEFECT count by creating a false SELF-HEAL count. That number is precisely what
+an autopsy reads to judge the engine, so this one lied to the process meant to catch it. Observations
+now carry their own `observation` flag and their own bucket — neither auto-resolved nor unresolved; the
+key is omitted entirely when there are none, so a normal build report is unchanged. **(#2063)**
+
+### THREE permanently-red CI gates, only ONE of them real
+Chasing a red X on `main` (which turned out NOT to be from the merge under it) uncovered:
+- **CI audit gate** — genuinely new advisories `fast-uri` (GHSA-7p8r-x3mc-p8w7) and `ip-address`
+  (GHSA-mwp4-54f8-5fhr, an SSRF-class bug in the IP parser `express-rate-limit` depends on). FIXED FOR
+  REAL by bumping the npm overrides, NOT allowlisted (#2057). The same commit passed at 18:44 and failed
+  at 20:07 — the gate depends on the outside world.
+- **DAST (ZAP)** — the scan RAN; the job failed uploading its report through the artifact v1/v2 REST API
+  GitHub retired. Action bumped `v0.12.0 → v0.15.0` (tag verified to exist, not guessed). (#2064)
+- **Trivy image scan** — died at `Unable to resolve action aquasecurity/trivy-action@0.28.0`; upstream
+  deleted that tag, so **the production image was never scanned at all**. Pinned to `v0.33.1` (verified;
+  upstream's newer tags carry a `v` prefix, the old ones did not — that is how it drifted). (#2067)
+
+**The lesson worth keeping:** a check that is always red teaches everyone to ignore red. Two of these
+three had failed on EVERY run, so `main` carried a permanent red X indistinguishable from a real one —
+and the dead Trivy gate showed a red X that looked exactly like a CVE finding, so the signal saying
+"your scanner is broken" was read as "your container has a problem", and neither was read.
+
+Gate for all three PRs: `tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest run` (1021 files,
+10,817 tests; 52 new tests across the three).
+
+**OPEN (rule 6, honestly recorded):**
+- The DAST and Trivy fixes each need ONE real run on `main` to confirm green. Both replace deterministic
+  failures, so neither can be worse than today, but neither is proven yet.
+- **No end-to-end test proves a user's key reaches the running app.** Today's headline finding is that
+  keys reached the app on ONE of three paths and nobody noticed. Every fix so far is unit-level; the
+  journey Settings → vault → build → sandbox `.env` → the app reading it has no single test that walks
+  it. This is the next thing to build, and it is the highest-value one: the user's own credentials are
+  what makes their app real.
+- The GitHub zipball import took 118s of a 6-minute survey turn. Worth caching; not yet done.

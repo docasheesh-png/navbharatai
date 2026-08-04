@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Editor } from './Editor';
 import { FileExplorer } from './FileExplorer';
 import { ActivityBar } from './ActivityBar';
@@ -183,12 +184,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   // every item routes through the SAME handleShortcut dispatcher the palette + keyboard already use —
   // one command path, no parallel fake wiring. Items that have no real implementation are simply not
   // listed (honesty rule: no dead entries).
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  // The dropdown is rendered through a PORTAL onto document.body, not inline (admin 2026-08-04: the
+  // menus did not visibly open on desktop). Inline, a dropdown is at the mercy of every ancestor: one
+  // `overflow-hidden` or one stacking context anywhere up the tree — and this component has several,
+  // including the root — silently clips or hides it, with no error and nothing to debug. A portal has
+  // no ancestors but <body>, so that entire class of failure cannot happen. The anchor rect is captured
+  // on open and the menu is positioned `fixed` from it.
+  const [openMenu, setOpenMenu] = useState<{ name: string; x: number; y: number } | null>(null);
   const menuBarRef = React.useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!openMenu) return;
+    // Both the bar and the portalled dropdown carry data-ide-menu, so a click on a MENU ITEM is not
+    // treated as "outside". Without that the mousedown would unmount the dropdown before the item's
+    // click fired, and every entry would silently do nothing — the exact bug this menu is fixing.
     const close = (e: MouseEvent) => {
-      if (menuBarRef.current && !menuBarRef.current.contains(e.target as Node)) setOpenMenu(null);
+      if (!(e.target as HTMLElement)?.closest?.('[data-ide-menu]')) setOpenMenu(null);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null); };
     window.addEventListener('mousedown', close);
@@ -856,7 +866,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                <MenuIcon className="w-4 h-4 text-white/70" />
                <span className="text-[11px] text-white/80 font-medium">NavBharat IDE</span>
             </div>
-            <div ref={menuBarRef} className="hidden md:flex items-center gap-0.5 text-[11px] text-white/60 font-medium relative">
+            <div ref={menuBarRef} data-ide-menu className="hidden md:flex items-center gap-0.5 text-[11px] text-white/60 font-medium relative">
                {([
                  { name: 'File', items: [
                    { label: 'New File…', shortcut: 'Ctrl+N', run: () => handleShortcut([], 'explorer.newFile') },
@@ -926,12 +936,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                ] as Array<{ name: string; items: Array<{ label?: string; shortcut?: string; run?: () => void; divider?: boolean }> }>).map((menu) => (
                  <div key={menu.name} className="relative">
                    <button
-                     className={`px-2 py-1 rounded transition-colors ${openMenu === menu.name ? 'bg-white/10 text-white' : 'hover:text-white hover:bg-white/5'}`}
-                     onClick={() => setOpenMenu(openMenu === menu.name ? null : menu.name)}
-                     onMouseEnter={() => { if (openMenu && openMenu !== menu.name) setOpenMenu(menu.name); }}
+                     className={`px-2 py-1 rounded transition-colors ${openMenu?.name === menu.name ? 'bg-white/10 text-white' : 'hover:text-white hover:bg-white/5'}`}
+                     onClick={(e) => {
+                       if (openMenu?.name === menu.name) { setOpenMenu(null); return; }
+                       const r = e.currentTarget.getBoundingClientRect();
+                       setOpenMenu({ name: menu.name, x: r.left, y: r.bottom + 4 });
+                     }}
+                     onMouseEnter={(e) => {
+                       if (!openMenu || openMenu.name === menu.name) return;
+                       const r = e.currentTarget.getBoundingClientRect();
+                       setOpenMenu({ name: menu.name, x: r.left, y: r.bottom + 4 });
+                     }}
                    >{menu.name}</button>
-                   {openMenu === menu.name && (
-                     <div className="absolute left-0 top-full mt-1 min-w-[230px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[80]">
+                   {openMenu?.name === menu.name && createPortal(
+                     <div
+                       data-ide-menu
+                       style={{ position: 'fixed', left: openMenu.x, top: openMenu.y }}
+                       className="min-w-[230px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
                        {menu.items.map((item, i) => item.divider ? (
                          <div key={i} className="h-px bg-white/10 my-1 mx-2" />
                        ) : (
@@ -944,7 +965,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                            {item.shortcut && <span className="text-[9px] opacity-50 font-mono">{item.shortcut}</span>}
                          </button>
                        ))}
-                     </div>
+                     </div>,
+                     document.body,
                    )}
                  </div>
                ))}

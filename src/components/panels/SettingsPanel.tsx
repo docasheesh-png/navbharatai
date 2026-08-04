@@ -421,6 +421,20 @@ export function SettingsPanel({
                     ],
                   },
                   {
+                    // GET MY APP AS AN ANDROID FILE (admin 2026-08-04). The APK Builder already lived in
+                    // Other AI → Publish & Deploy, but a user who has just built an app is looking for it
+                    // HERE — in the "More" tab of the app they are standing in — not two screens away in a
+                    // tool directory. `tab: true` routes through the SAME toggleTab('apk') destination the
+                    // Other AI tile uses, so there is one APK Builder and no second copy to drift.
+                    title: 'Your App',
+                    color: 'text-green-400',
+                    icon: Smartphone as any,
+                    desc: 'Turn the app you built into a real Android file you can install',
+                    items: [
+                      { id: 'apk', label: 'Download APK', icon: Smartphone as any, tab: true },
+                    ],
+                  },
+                  {
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,

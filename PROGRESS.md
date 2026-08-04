@@ -24056,3 +24056,44 @@ button inside the v5 screen after seeing the pre-flight work, that is a clean fo
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1020 files / 10764 tests, 0 failures**
 (14 new pre-flight tests, including "an AI fix that does not re-verify is a miss").
+
+## 2026-08-04 — ✅ THE APK BUILT AND DOWNLOADED. Follow-up: "Download APK" in More + closing v5's own knowledge gap
+
+**Admin:** *"han, apk file ban kar download ho gayi 😂"* — the full chain worked end to end for the first
+time. Two follow-ups: (a) does v5 KNOW how a real working apk is made, and will it guide a user who
+asks? do the other AIs? (b) add a "Download APK" button in v5's bottom-right "More" that redirects to
+the Other AI build screen.
+
+### The honest audit of (a) — and it was NOT flattering
+Verified by reading the wiring, not assuming:
+- `AppContextInjector` (which serves `AppKnowledgeBase`) IS wired into **Free chat** (`routes/chat.ts`),
+  **Pro chat** (`routes/pro.ts`), **Doctor AI** (`routes/sda.ts`), **Engineer AI**
+  (`EngineerAgentLoop.ts`) and **Professionals** (`professionals/engine.ts`). All of them could already
+  answer "how do I get my apk?" from the `apk_builder` entry.
+- It is **NOT** wired into **AgentV3** (`routes/agentv3.ts` / `AgentV3/systemPrompt.ts`) — i.e.
+  NavBharatAI Pro v5, the assistant the user is actually standing in. **The ONE AI that BUILDS the app
+  was the ONLY one that could not tell you how to hold it.**
+
+**Fix (bounded, deliberately not the whole KB):** the v5 build prompt is cached and must stay lean, so
+injecting the entire knowledge base there would be the wrong trade. Instead `architectSystemPrompt` now
+carries the single navigation fact the builder genuinely needs, in its existing CONVERSATION branch (v5
+already answers questions without building): where to go, which two buttons to press, that it takes a
+few minutes with a percentage and self-repairs, and the signing-key truth (.apk needs none; only the
+Play .aab does, and that key stays with the user). Kept in step with `AppKnowledgeBase.apk_builder`;
+`apkGuidance.test.ts` locks both halves so the two can never drift into different directions.
+
+### (b) The button — shipped where the user actually looks
+"More" (bottom bar, gear) opens the Settings view. A new **"Your App → Download APK"** group sits at the
+TOP of it, above App Settings, routing through the SAME `toggleTab('apk')` destination the Other AI tile
+uses — one APK Builder, no second copy to drift. Rationale recorded in code: a user who has just built
+an app looks for the file HERE, in the app they are standing in, not two screens away in a tool
+directory.
+
+Also widened the `apk_builder` keywords with the Hinglish forms a real user types ("apk kaise banaye",
+"app download kaise kare", "phone me install", …) and made the FASTEST route lead its `howToUse`, so no
+AI sends someone the long way round.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1021 files / 10778 tests, 0 failures**
+(14 new). One of my own test assumptions was wrong and corrected rather than forced: a plain build
+request DOES legitimately surface other features — what must not happen is unsolicited APK guidance, and
+that is what the test now asserts.

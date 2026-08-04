@@ -234,7 +234,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
-import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
@@ -3182,8 +3182,14 @@ export function registerAgentV3Routes(app: Express): void {
         ok: false,
         portListening: false,
         port: boundPort,
-        reason: `The dev server did not come up on port ${boundPort} after installing dependencies and one restart attempt. The exact cause is in the detail log below (a crash on boot, a missing dependency, or a port conflict).`,
-        detail: combined.slice(-4000),
+        // HONEST, ACTIONABLE HEADLINE (mitrify autopsy 2026-08-04). This used to GUESS — "the exact cause
+        // is in the detail log below (a crash on boot, a missing dependency, or a port conflict)" — while
+        // classifyDevServerFailure already knew the answer deterministically. Worse, a user was made to
+        // read a raw log to learn something we had computed. Now the panel states the real cause in plain
+        // language, and for the two causes the user can genuinely resolve — a missing key of theirs, or a
+        // database — it names the exact screen to go to.
+        reason: userFacingPreviewFailure(classifyDevServerFailure(combined), boundPort, combined),
+        detail: cleanPreviewLogForUser(combined).slice(-4000),
       });
     } catch (err) {
       if (heartbeat) clearInterval(heartbeat);

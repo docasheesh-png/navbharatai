@@ -28,9 +28,54 @@ import {
   tokenExchangeBody, basicAuthHeader, parseCallbackParams, supabaseOAuthConfigured,
   connectFailureMessage, SUPABASE_TOKEN_URL, OAUTH_STATE_TTL_MS,
 } from '../lib/supabaseOAuth';
-import { listOrganizations } from '../lib/supabaseProvision';
-import { saveConnection, getConnectionStatus, deleteConnection } from '../lib/supabaseConnectionStore';
+import {
+  listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
+  projectNameFor, envForProject,
+} from '../lib/supabaseProvision';
+import {
+  saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh,
+} from '../lib/supabaseConnectionStore';
 import { audit } from '../lib/audit';
+import { getServerDb } from '../lib/serverDb';
+import { encrypt } from '../lib/secrets';
+
+/**
+ * Default region for a new project.
+ *
+ * India-first is the product's whole positioning, and database latency is felt on every single
+ * request — so a user in India gets a Mumbai database unless they ask for something else, rather
+ * than the provider's US default.
+ */
+export const DEFAULT_REGION = 'ap-south-1';
+
+/**
+ * Write the provisioned keys into the user's encrypted vault, replacing any earlier value.
+ *
+ * Uses the same `user_secrets` collection, the same names and the same encryption as the manual
+ * Settings → Database flow, so the builder picks them up through a path that already works.
+ */
+async function saveUserSecrets(userId: string, values: Record<string, string>): Promise<boolean> {
+  const db = getServerDb() as any;
+  if (!db) return false;
+  try {
+    const col = db.collection('user_secrets');
+    for (const [name, value] of Object.entries(values)) {
+      if (!value) continue;
+      // Replace rather than accumulate — a stale duplicate would make which key wins ambiguous.
+      const dupes = await col.where('user_id', '==', userId).where('secret_name', '==', name).get();
+      await Promise.all(dupes.docs.map((d: { ref: { delete: () => Promise<unknown> } }) => d.ref.delete()));
+      await col.add({
+        user_id: userId,
+        secret_name: name,
+        encrypted_secret_value: encrypt(value),
+        created_at: new Date(),
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** What Supabase's token endpoint returns. Fields are `unknown` because they come off the wire. */
 interface TokenResponse {
@@ -202,6 +247,89 @@ export function registerSupabaseIntegrationRoutes(
 
     try { audit('SUPABASE_CONNECTED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
     res.status(200).type('html').send(closingPage(true, `Connected to ${orgs.orgs[0].name}.`));
+  });
+
+  // Spend the connection: create a real database in the user's account and wire it into their app.
+  //
+  // Separate from `callback` on purpose (see the header): consent and provisioning fail for different
+  // reasons, and the free-plan cap in particular must be retryable without redoing consent.
+  //
+  // The resulting keys are written into the SAME encrypted vault, under the SAME names, that the
+  // manual Settings → Database flow already uses. That is deliberate: the builder already knows how
+  // to pick those up, so provisioning inherits a working path instead of introducing a second
+  // convention that could drift from it.
+  app.post('/api/integrations/supabase/provision', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+
+    const conn = await getConnection(uid);
+    if (!conn) {
+      res.status(400).json({ error: 'Connect your Supabase account first, then create the database.' });
+      return;
+    }
+    if (!conn.orgId) {
+      res.status(400).json({ error: 'No Supabase organization is linked. Please disconnect and connect again.' });
+      return;
+    }
+    // An expired access token here is a reconnect prompt, not a failure to hide: the refresh grant is
+    // Phase 1.2 work, so until it lands we say exactly what the user must do rather than half-trying.
+    if (needsRefresh(conn.expiresAtMs, Date.now())) {
+      res.status(401).json({ error: 'Your Supabase connection has expired. Please connect Supabase again from Settings → Database.' });
+      return;
+    }
+
+    const appLabel = typeof (req.body ?? {}).appLabel === 'string' ? (req.body as { appLabel: string }).appLabel : '';
+    const region = typeof (req.body ?? {}).region === 'string' && (req.body as { region: string }).region
+      ? (req.body as { region: string }).region
+      : DEFAULT_REGION;
+
+    // The database password is generated here, used once, and never shown or stored by us. The user
+    // can reset it in their own Supabase dashboard; keeping a copy would be a credential we have no
+    // reason to hold.
+    const created = await createProject({
+      token: conn.accessToken,
+      orgId: conn.orgId,
+      name: projectNameFor(appLabel),
+      region,
+      dbPass: crypto.randomBytes(24).toString('base64url'),
+    });
+    if (!created.ok) {
+      res.status(created.failure === 'plan-limit' ? 409 : 502)
+        .json({ error: created.message, failure: created.failure });
+      return;
+    }
+
+    // "Created" is not "usable" — see supabaseProvision.waitUntilReady. Claiming success here would
+    // hand the user a database that refuses every connection.
+    const ready = await waitUntilReady(conn.accessToken, created.project.id);
+    if (!ready.ok) {
+      res.status(202).json({ error: ready.message, failure: ready.failure, projectRef: created.project.id });
+      return;
+    }
+
+    const creds = await fetchProjectCredentials(conn.accessToken, created.project.id);
+    if (!creds.ok) {
+      res.status(202).json({ error: creds.message, failure: creds.failure, projectRef: created.project.id });
+      return;
+    }
+
+    const saved = await saveUserSecrets(uid, {
+      ENGINEER_DB_PROVIDER: 'supabase',
+      ...envForProject(creds.credentials),
+    });
+    if (!saved) {
+      // The project EXISTS in their account even though we could not record it — say so, so they do
+      // not create a second one chasing a database they already have.
+      res.status(500).json({
+        error: 'Your database was created in Supabase, but NavBharatAI could not save its keys. '
+          + 'Open Settings → Database and try again — do not create another project.',
+        projectRef: created.project.id,
+      });
+      return;
+    }
+
+    try { audit('SUPABASE_PROJECT_PROVISIONED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
+    res.json({ ok: true, projectRef: created.project.id, projectName: created.project.name, url: creds.credentials.url });
   });
 
   // Forget our copy. Deliberately explicit that this does NOT revoke the grant on Supabase's side —

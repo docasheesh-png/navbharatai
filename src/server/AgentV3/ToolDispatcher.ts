@@ -305,6 +305,10 @@ import { containsSymbol } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
+// Where the sandbox browser may go: its own preview, or the real public web — never an internal
+// infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
+// primitive; see lib/browseTarget.ts.
+import { classifyBrowseTarget } from '../lib/browseTarget';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -1520,6 +1524,10 @@ export class ToolDispatcher {
         return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
       }
       const url = reqStr(input, 'url');
+      // The sandbox browser may reach its own dev server or the public web — never an internal
+      // infrastructure address. See lib/browseTarget.ts for why this guard exists.
+      const target = classifyBrowseTarget(url);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
       const width = typeof input.width === 'number' ? input.width : undefined;
       const height = typeof input.height === 'number' ? input.height : undefined;
       const viewport = width && height ? { width, height } : undefined;
@@ -1536,6 +1544,11 @@ export class ToolDispatcher {
     const action = reqStr(input, 'action');
     if (!BROWSER_ACTIONS.includes(action as BrowserActionName)) {
       return { content: `browser_action: unknown action "${action}". Valid: ${BROWSER_ACTIONS.join(', ')}.` };
+    }
+    const navUrl = optStr(input, 'url');
+    if (navUrl) {
+      const target = classifyBrowseTarget(navUrl);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
     }
     const dir = input.direction;
     const direction: 'up' | 'down' | undefined = dir === 'up' ? 'up' : dir === 'down' ? 'down' : undefined;

@@ -274,6 +274,22 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // The whole KB is not injected here — this build prompt is cached and must stay lean — so the single
     // navigation fact the builder genuinely needs is stated directly. Keep it in step with the
     // `apk_builder` entry in AppKnowledgeBase.ts.
+    // A REAL BROWSER, POINTED AT THE REAL WEB (admin 2026-08-04: "koi real world website open kare,
+    // aur preview me dikhe? live browser ke jaisa?"). The sandbox has always run a real Chromium via
+    // Playwright, and browser_action/screenshot always accepted any URL — but every description framed
+    // them as "test YOUR app", so the model never thought to visit an actual site and answered about
+    // real websites from memory instead. Saying it plainly is the whole unlock.
+    'You can BROWSE THE REAL INTERNET. `screenshot` and `browser_action` drive a real Chrome browser',
+    'in your sandbox and accept any public https address — not just your own preview:',
+    '- If the user references a real website ("make it like <site>", "look at this page", "what does',
+    '  <site> do?"), GO AND LOOK: navigate there and screenshot it. Do not answer from memory, and',
+    '  never claim to have seen a page you did not open.',
+    '- You can click, scroll and type on a real site to see more of it — state persists between calls.',
+    '- Describe what you ACTUALLY see in the screenshot. If a page fails to load or is blocked, say so',
+    '  plainly rather than inventing its contents.',
+    '- Internal/private addresses are refused by design; only real public websites open.',
+    '- Copy IDEAS and STRUCTURE, never a site\'s copyrighted text, images or logos into a user\'s app.',
+    '',
     'If the user asks how to get their app as a real Android file (an .apk they can install on a',
     'phone, or the .aab Google Play needs) — answer them, do NOT start building:',
     '- Tell them NavBharatAI does it for them: it checks the app compiles, fixes anything broken,',

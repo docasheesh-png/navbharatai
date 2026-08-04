@@ -2763,10 +2763,12 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'screenshot',
       description:
-        'Capture a screenshot of a running URL inside the sandbox and SEE the result image, so ' +
-        'you can verify the app actually renders correctly (layout, broken UI, missing elements). ' +
-        'Use the preview URL (or http://localhost:<devPort>) after the dev server is up. Optional ' +
-        'width/height check responsive layouts. Requires a real sandbox.',
+        'Capture a screenshot of ANY URL and SEE the result image. Two uses: (1) YOUR OWN APP — use the ' +
+        'preview URL (or http://localhost:<devPort>) after the dev server is up, to verify it renders ' +
+        'correctly (layout, broken UI, missing elements); (2) ANY REAL WEBSITE ON THE INTERNET — pass a ' +
+        'public address like https://example.com to actually LOOK at a real site, e.g. when the user ' +
+        'asks for something "like <site>", or wants a real page examined. Optional width/height check ' +
+        'responsive layouts. Requires a real sandbox.',
       input_schema: {
         type: 'object',
         properties: {
@@ -2780,10 +2782,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'browser_action',
       description:
-        'Drive a real headless browser to TEST interactive flows: click, type, navigate, scroll, ' +
-        'press, hover, double_click, select_option, or wait. State (cookies/DOM/URL) persists across ' +
-        'calls so you can complete a multi-step flow (fill a form → submit → verify). Returns the ' +
-        'action result and a screenshot you can SEE. Requires a real sandbox.',
+        'Drive a REAL Chrome browser — on your own app OR on any real website on the internet. Actions: ' +
+        'click, type, navigate, scroll, press, hover, double_click, select_option, wait. State ' +
+        '(cookies/DOM/URL) persists across calls, so you can complete a multi-step flow (fill a form → ' +
+        'submit → verify) or browse a real site page by page. Every action returns a screenshot you can ' +
+        'SEE. `navigate` accepts any public https address (e.g. https://example.com) as well as the ' +
+        'sandbox preview URL — so when the user asks about a real website, GO AND LOOK AT IT rather than ' +
+        'guessing from memory. Internal/private network addresses are refused. Requires a real sandbox.',
       input_schema: {
         type: 'object',
         properties: {

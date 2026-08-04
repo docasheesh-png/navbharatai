@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { PublishToNavStore } from './PublishToNavStore';
 import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
   Rocket, Key, RefreshCw,
@@ -552,6 +553,19 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   Download {/apk/i.test(a.name) ? '.apk (install on a phone)' : '.aab (upload to Play Store)'}
                   <span className="text-xs font-normal opacity-70">{fmtSize(a.sizeBytes)}</span>
                 </button>
+              ))}
+              {/* Publish straight from this build (admin 2026-08-04). Offered ONLY for the .apk: the
+                  Nav App Store installs apps, and a .aab is a Play Store bundle no phone can install —
+                  showing it here would promise something that cannot work. */}
+              {setup && artifacts.filter((a) => /apk/i.test(a.name)).map((a) => (
+                <PublishToNavStore
+                  key={`store-${a.id}`}
+                  owner={setup.owner}
+                  repo={setup.repo}
+                  artifactId={a.id}
+                  ghHeaders={ghHeaders}
+                  defaultAppName={setup.repo}
+                />
               ))}
               <p className="text-[11px] text-white/40 leading-relaxed">
                 {buildKind === 'apk'

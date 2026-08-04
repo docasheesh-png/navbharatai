@@ -102,3 +102,42 @@ describe('the ingest pipeline keeps every store guarantee in ONE place', () => {
     expect(stored === -1 || returned < stored).toBe(true);
   });
 });
+
+// The button that makes the route reachable. Source-contract again: the panel needs a live build and
+// a GitHub token, so what is worth locking is the honesty of WHEN it is offered and WHAT it claims.
+describe('the Publish button — offered only where it can actually work', () => {
+  const PANEL = readFileSync(fileURLToPath(new URL('../src/components/ide/StoreBuildPanel.tsx', import.meta.url)), 'utf8');
+  const FORM = readFileSync(fileURLToPath(new URL('../src/components/ide/PublishToNavStore.tsx', import.meta.url)), 'utf8');
+
+  it('sits on the finished build, beside Download', () => {
+    expect(PANEL).toContain('<PublishToNavStore');
+    expect(PANEL).toContain('artifactId={a.id}');
+  });
+
+  it('is offered for the .apk ONLY — a .aab is a Play bundle no phone can install', () => {
+    // Showing it for the .aab would promise a store install that cannot happen.
+    expect(PANEL).toContain("artifacts.filter((a) => /apk/i.test(a.name))");
+  });
+
+  it('sends no file — the server takes the bytes from the build', () => {
+    expect(FORM).toContain("'/api/nav-store/publish-from-build'");
+    // No file input anywhere: the whole point is that the user never handles the APK.
+    expect(FORM).not.toContain('type="file"');
+    expect(FORM).not.toContain('FormData');
+  });
+
+  it('says PENDING REVIEW on success, never "published"', () => {
+    // Nothing reaches the store without an admin approving it; claiming otherwise would break the one
+    // rule the store rests on.
+    expect(FORM).toContain('waiting for review');
+    expect(FORM).not.toMatch(/is now live|published successfully/i);
+  });
+
+  it('shows the server\'s own refusal wording rather than a generic line', () => {
+    expect(FORM).toContain('data?.error');
+  });
+
+  it('cannot be submitted with an empty form', () => {
+    expect(FORM).toContain('disabled={busy || !ready}');
+  });
+});

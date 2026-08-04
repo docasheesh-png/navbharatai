@@ -1,4 +1,5 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -2340,6 +2341,18 @@ export class ToolDispatcher {
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
         let out =
           `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
+        // THE PIPE ATE THE EXIT CODE (autopsy 56ee622f, 2026-08-04). `tsc --noEmit 2>&1 | head -30`
+        // exits 0 because `head` succeeds — a pipeline reports its LAST command's status. The agent
+        // verified its work with exactly that, was told "exit 0", moved on, and shipped an app with ~10
+        // real TypeScript errors whose preview then refused to start. It asked the only question it could
+        // and got a truthful-looking lie. We do not rewrite the shell (`set -o pipefail` is a bashism this
+        // repo has already been burned by); we read the output the command already produced and tell the
+        // agent the truth. Silent unless a gate tool was piped, exit was 0, AND the output carries a real
+        // compiler/test error. Kill switch AGENTV3_PIPED_GATE_CHECK=off.
+        if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
+          const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
+          if (lie) out = `${out}\n\n${lie}`;
+        }
         // PRISMA SCHEMA REPAIR HINT (widen the relation self-heal beyond the `prisma format` class):
         // when a prisma command STILL fails with a schema-validation error that `prisma format` cannot
         // mechanically fix (ambiguous relation, missing @id/@unique, missing fields/references, SQLite

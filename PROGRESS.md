@@ -25030,3 +25030,28 @@ edit-mode prompt now REQUIRES calling it first for any visual request (test-lock
 told to call is a tool that never runs), and `AppKnowledgeBase` documents it for every AI in the app.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **1039 files / 11,301 tests, 0 failures**.
+
+## 2026-08-04 — Assistant scaffold templates are no longer treated as the user's app
+
+**From the mitrify autopsy's open list.** The integrity check reported "5 files each mount a React
+root" and "./index.css imported by 5 modules" — and FOUR of the five were
+`.local/skills/artifacts/artifacts/{mockup-sandbox,react-vite,slides,video-js}/files/src/main.tsx`:
+AI-assistant scaffold TEMPLATES that had ridden along inside the user's project. They are complete
+mini-apps by design, so every analyzer saw genuine duplicate entry points. The engine then "repaired"
+them — it spent turns EDITING four files that are not part of the user's application at all, and the
+user's integrity report was polluted with findings about code they never wrote.
+
+**Fixed at BOTH ends (the 50/50 law), through ONE shared predicate (`lib/nonAppPaths.ts`) so the two
+call sites cannot drift:**
+- **Upstream — never enter.** `SKIP_DIR_RE` now skips assistant/tool state directories
+  (`.local`, `.claude`, `.cursor`, `.windsurf`, `.continue`, `.codeium`, `.aider`), so a zip/repo
+  import drops them the way it already drops `node_modules`.
+- **Downstream — never analyzed.** `isSourceFile` in `ProjectIntegrityChecks` (the ONE predicate every
+  analyzer runs through) excludes them too, so projects that already contain them stop generating
+  false findings — and stop being edited.
+
+Deliberately conservative: `.github`, `.vscode`, `.husky` and `.devcontainer` are NOT excluded — those
+are genuinely the user's repo, even though they are not app source. Test-locked, including that a REAL
+duplicate entry point is still reported (the guard must not blind the check).
+
+**Verification:** server tsc clean; `npx vitest run` = **1040 files / 11,311 tests, 0 failures**.

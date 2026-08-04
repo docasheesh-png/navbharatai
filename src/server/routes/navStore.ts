@@ -20,6 +20,22 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import * as fs from 'node:fs';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
+import axios from 'axios';
+import { fetchBuildArtifact, type ArtifactFetcher } from '../lib/buildArtifact';
+
+/** Real HTTP at the edge, so the artifact logic itself stays testable without a network. */
+const githubZipFetcher: ArtifactFetcher = async (url, token) => {
+  const r = await axios.get(url, {
+    headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5,
+  });
+  return { status: r.status, data: r.data as ArrayBuffer };
+};
+
+/** JSZip lazily — only the publish-from-build path needs it. */
+const jsZipLoader = async (buf: Buffer) => {
+  const JSZip = (await import('jszip')).default;
+  return await JSZip.loadAsync(buf) as unknown as { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
+};
 import { claimUpload } from './zipUpload';
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import {
@@ -118,6 +134,96 @@ function decodeUpload(base64: unknown): Buffer | null {
   }
 }
 
+/**
+ * The ONE path from "we have APK bytes" to "a pending store record exists".
+ *
+ * Extracted when a second caller appeared (publish-from-build). Every guarantee the store rests on
+ * lives HERE, so neither entry point can accidentally skip one:
+ *   • the file must genuinely be an installable, signed Android package;
+ *   • it must be scanned — no verdict means NO publication, ever;
+ *   • malware is recorded but never stored (we keep no copy of it);
+ *   • the record lands as `pending`; nothing in this file can make an app public.
+ * Returns an HTTP status + body rather than writing to the response, so it stays testable and both
+ * routes report identically.
+ */
+async function ingestApkSubmission(
+  bytes: Buffer,
+  form: SubmissionForm,
+  uid: string,
+  provenance?: { source: 'navbharatai-build'; repo: string; artifactId: string },
+): Promise<{ httpStatus: number; body: Record<string, unknown> }> {
+    // 1) Is this genuinely an installable Android app?
+    const facts = await inspectApk(bytes);
+    if (!facts.ok) return { httpStatus: 422, body: { error: facts.error } };
+
+    // 2) Malware scan. No verdict means no publication — this is the rule the store rests on.
+    const scan = await scanFile(bytes, facts.sha256);
+    if (scan.verdict === 'malicious') {
+      // Recorded but never stored: we keep no copy of something the engines call malware.
+      return { httpStatus: 422, body: {
+        error: `This app was flagged as malicious by ${scan.malicious} security engines, so it cannot be published.`,
+        flaggedBy: scan.flaggedBy.slice(0, 5),
+        reportUrl: scan.reportUrl,
+      } };
+    }
+    if (scan.verdict === 'unavailable') {
+      return { httpStatus: 503, body: { error: `Your app could not be scanned, so it was not uploaded. ${scan.reason || ''}`.trim() } };
+    }
+
+    // 3) Store the bytes and the record. PENDING — an admin decides from here.
+    const id = `${facts.sha256.slice(0, 16)}_${Date.now().toString(36)}`;
+    try {
+      const storagePath = await putApk(facts.sha256, bytes);
+      const record: StoreApp = {
+        id,
+        status: 'pending',
+        uid,
+        developer: {
+          name: form.developerName,
+          email: form.developerEmail,
+          phone: form.developerPhone,
+          website: form.developerWebsite,
+        },
+        appName: form.appName,
+        packageName: '',
+        versionName: form.versionName,
+        shortDescription: form.shortDescription,
+        description: form.description,
+        category: form.category,
+        iconDataUrl: form.iconDataUrl,
+        sha256: facts.sha256,
+        sizeBytes: facts.sizeBytes,
+        permissions: facts.permissions,
+        highRisk: facts.highRisk,
+        inspectionWarnings: facts.warnings,
+        scanVerdict: scan.verdict,
+        scanMalicious: scan.malicious,
+        scanEnginesTotal: scan.enginesTotal,
+        scanFlaggedBy: scan.flaggedBy,
+        scanReportUrl: scan.reportUrl,
+        scanReason: scan.reason,
+        storagePath,
+        downloads: 0,
+        submittedAt: Date.now(),
+        ...(provenance ? { provenance } : {}),
+      };
+      await saveApp(record);
+      return { httpStatus: 200, body: {
+        ok: true,
+        id,
+        status: 'pending',
+        scanVerdict: scan.verdict,
+        enginesChecked: scan.enginesTotal,
+        highRisk: facts.highRisk,
+        message: scan.verdict === 'suspicious'
+          ? 'Your app was uploaded, but one security engine flagged it — a reviewer will look closely before it goes live.'
+          : 'Your app was uploaded and passed the malware scan. A reviewer will check it before it appears in the store.',
+      } };
+    } catch {
+      return { httpStatus: 502, body: { error: 'Your app could not be saved. Nothing was published — please try again.' } };
+    }
+}
+
 export function registerNavStoreRoutes(app: Express): void {
   /**
    * Is the store open for submissions at all?
@@ -193,75 +299,62 @@ export function registerNavStoreRoutes(app: Express): void {
     // The assembled temp file is never needed past this point — the bytes are in memory now.
     cleanupUpload();
 
-    // 1) Is this genuinely an installable Android app?
-    const facts = await inspectApk(bytes);
-    if (!facts.ok) return res.status(422).json({ error: facts.error });
+    const out = await ingestApkSubmission(bytes, parsed.value, me.uid);
+    return res.status(out.httpStatus).json(out.body);
+  });
 
-    // 2) Malware scan. No verdict means no publication — this is the rule the store rests on.
-    const scan = await scanFile(bytes, facts.sha256);
-    if (scan.verdict === 'malicious') {
-      // Recorded but never stored: we keep no copy of something the engines call malware.
-      return res.status(422).json({
-        error: `This app was flagged as malicious by ${scan.malicious} security engines, so it cannot be published.`,
-        flaggedBy: scan.flaggedBy.slice(0, 5),
-        reportUrl: scan.reportUrl,
+  /**
+   * PUBLISH FROM THE BUILD — the button that sits next to "Download APK" (admin 2026-08-04).
+   *
+   * The Nav App Store carries only apps NavBharatAI built, and the user should never have to handle
+   * the file: `/api/mobile-ship/download` already pulls the finished artifact from GitHub Actions
+   * SERVER-SIDE, so the same bytes can go straight into the store. No upload, no "choose file".
+   *
+   * It reuses `fetchBuildArtifact` (shared with the download route) and `ingestApkSubmission` (shared
+   * with the manual upload), so scanning, the pending-only rule and the honest failures cannot be
+   * skipped on this path — they are the same code.
+   *
+   * HONEST LIMIT, recorded rather than implied: this is PROVENANCE, not proof. The build runs in the
+   * USER's own GitHub Actions with the USER's signing key, so a determined user could push arbitrary
+   * code into their own repo before building. That is exactly why the scan and admin approval stay
+   * mandatory here — publishing from a build earns no shortcut past either.
+   */
+  app.post('/api/nav-store/publish-from-build', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Please sign in to publish an app.' });
+
+    if (!isStorageConfigured() || !isScanningConfigured()) {
+      return res.status(503).json({
+        error: 'The Nav App Store is not accepting apps yet — malware scanning and app storage must be switched on first. Nothing was uploaded.',
       });
     }
-    if (scan.verdict === 'unavailable') {
-      return res.status(503).json({ error: `Your app could not be scanned, so it was not uploaded. ${scan.reason || ''}`.trim() });
+
+    const body = (req.body || {}) as Record<string, unknown>;
+    const parsed = validateSubmission(body as Partial<SubmissionForm>);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+
+    // The GitHub token is the USER's — we read their artifact on their behalf, exactly as the
+    // download button already does.
+    const token = typeof body.githubToken === 'string' ? body.githubToken : '';
+    const owner = String(body.owner ?? '');
+    const repo = String(body.repo ?? '');
+    const artifactId = String(body.artifactId ?? '');
+
+    const got = await fetchBuildArtifact({ owner, repo, artifactId, token }, githubZipFetcher, jsZipLoader);
+    if (!got.ok) {
+      const status = got.failure === 'expired' ? 404 : got.failure === 'not-app' ? 422 : got.failure === 'bad-request' ? 400 : 502;
+      return res.status(status).json({ error: got.message, failure: got.failure });
     }
 
-    // 3) Store the bytes and the record. PENDING — an admin decides from here.
-    const id = `${facts.sha256.slice(0, 16)}_${Date.now().toString(36)}`;
-    try {
-      const storagePath = await putApk(facts.sha256, bytes);
-      const record: StoreApp = {
-        id,
-        status: 'pending',
-        uid: me.uid,
-        developer: {
-          name: parsed.value.developerName,
-          email: parsed.value.developerEmail,
-          phone: parsed.value.developerPhone,
-          website: parsed.value.developerWebsite,
-        },
-        appName: parsed.value.appName,
-        packageName: '',
-        versionName: parsed.value.versionName,
-        shortDescription: parsed.value.shortDescription,
-        description: parsed.value.description,
-        category: parsed.value.category,
-        iconDataUrl: parsed.value.iconDataUrl,
-        sha256: facts.sha256,
-        sizeBytes: facts.sizeBytes,
-        permissions: facts.permissions,
-        highRisk: facts.highRisk,
-        inspectionWarnings: facts.warnings,
-        scanVerdict: scan.verdict,
-        scanMalicious: scan.malicious,
-        scanEnginesTotal: scan.enginesTotal,
-        scanFlaggedBy: scan.flaggedBy,
-        scanReportUrl: scan.reportUrl,
-        scanReason: scan.reason,
-        storagePath,
-        downloads: 0,
-        submittedAt: Date.now(),
-      };
-      await saveApp(record);
-      return res.json({
-        ok: true,
-        id,
-        status: 'pending',
-        scanVerdict: scan.verdict,
-        enginesChecked: scan.enginesTotal,
-        highRisk: facts.highRisk,
-        message: scan.verdict === 'suspicious'
-          ? 'Your app was uploaded, but one security engine flagged it — a reviewer will look closely before it goes live.'
-          : 'Your app was uploaded and passed the malware scan. A reviewer will check it before it appears in the store.',
-      });
-    } catch {
-      return res.status(502).json({ error: 'Your app could not be saved. Nothing was published — please try again.' });
+    const publishCap = publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES);
+    if (got.bytes.length > publishCap) {
+      return res.status(413).json({ error: `That file is over the ${publishCap / 1024 / 1024} MB limit.` });
     }
+
+    const out = await ingestApkSubmission(got.bytes, parsed.value, me.uid, {
+      source: 'navbharatai-build', repo: `${owner}/${repo}`, artifactId,
+    });
+    return res.status(out.httpStatus).json(out.body);
   });
 
   /** A developer's own submissions, with the real status of each. */

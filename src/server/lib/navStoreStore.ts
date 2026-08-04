@@ -70,6 +70,14 @@ export interface StoreApp {
   reviewedAt?: number;
   reviewedBy?: string;
   reviewNote?: string;
+  /**
+   * Where the binary came from, when we know (publish-from-build).
+   *
+   * This is real evidence a reviewer can act on — the exact GitHub Actions run of a repo the
+   * submitting account owns. It is PROVENANCE, not proof: the build runs in the user's own Actions
+   * with their own signing key, so it never substitutes for the scan or for admin approval.
+   */
+  provenance?: { source: 'navbharatai-build'; repo: string; artifactId: string };
 }
 
 /** Public view — everything a downloader needs, and nothing about our internals. */

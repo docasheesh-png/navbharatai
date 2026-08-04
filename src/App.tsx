@@ -53,6 +53,10 @@ import {
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 import { AdminDashboard } from './components/AdminDashboard';
+// Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
+// native shell so the Play Console health declarations stay truthful. Web is untouched.
+import { isNativeApp } from './lib/mobileNative';
+import { medicalViewBlocked } from './lib/playCompliance';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
@@ -1217,6 +1221,10 @@ export default function App() {
   };
 
   const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
+    // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
+    // the render guards below) means a medical view cannot open in the native shell no matter which
+    // button, deep link, or restored state asked for it.
+    if (medicalViewBlocked(view, isNativeApp())) return;
     // Pre-warm server when user opens chat tabs (fire-and-forget)
     if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
@@ -2752,8 +2760,8 @@ export default function App() {
           </div>
           )}
 
-          {/* ── Senior Doctor Assistant ── */}
-          {activeView === 'sda_chat' && (
+          {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
+          {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <SDAChat key={sdaResetKey} userId={user?.uid} />
             </div>
@@ -2958,7 +2966,7 @@ export default function App() {
               <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'pharmacist_ai' && (
+          {activeView === 'pharmacist_ai' && !medicalViewBlocked('pharmacist_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} />
             </div>
@@ -3078,12 +3086,12 @@ export default function App() {
               <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'maternity_ai' && (
+          {activeView === 'maternity_ai' && !medicalViewBlocked('maternity_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.maternity_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'firstaid_ai' && (
+          {activeView === 'firstaid_ai' && !medicalViewBlocked('firstaid_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.firstaid_ai} userId={user?.uid} />
             </div>

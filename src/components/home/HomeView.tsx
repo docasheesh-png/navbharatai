@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
+import { isNativeApp } from '../../lib/mobileNative';
+import { medicalFeaturesHidden, professionalsCardCopy } from '../../lib/playCompliance';
 
 interface HomeData {
   heroTitle: string;
@@ -121,6 +123,9 @@ const PRODUCT_CARDS = [
 ];
 
 const PROF_ICONS = [Stethoscope, Scale, GraduationCap, Activity, Code2];
+// Play compliance (admin 2026-08-04): inside the native shell the Professionals card must not
+// advertise medical features — no "Doctor AI" copy, no stethoscope icon (playCompliance.ts).
+const PROF_ICONS_NATIVE = [Scale, GraduationCap, Activity, Code2];
 
 export const HomeView = ({
   onStartChat,
@@ -212,7 +217,13 @@ export const HomeView = ({
 
         {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
         <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-          {PRODUCT_CARDS.map((card, i) => {
+          {PRODUCT_CARDS.map((rawCard, i) => {
+            // Play compliance: the Professionals card's copy must not name medical assistants in the
+            // native shell (the shipped app declares no medical features — copy and app must match).
+            const hideMedical = medicalFeaturesHidden(isNativeApp());
+            const card = rawCard.id === 'professionals' && hideMedical
+              ? { ...rawCard, ...professionalsCardCopy(true), features: [...professionalsCardCopy(true).features] }
+              : rawCard;
             const CardIcon = card.Icon;
             const BtnIcon = card.btnIcon;
             const FeatIcon = card.featureIcon;
@@ -268,7 +279,7 @@ export const HomeView = ({
                   {/* Professionals mini-icon row */}
                   {card.id === 'professionals' && (
                     <div className="flex items-center gap-2">
-                      {PROF_ICONS.map((PIcon, idx) => (
+                      {(hideMedical ? PROF_ICONS_NATIVE : PROF_ICONS).map((PIcon, idx) => (
                         <div key={idx} className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
                           <PIcon className="w-3.5 h-3.5 text-teal-400" />
                         </div>

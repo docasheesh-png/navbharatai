@@ -21,6 +21,7 @@ import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
+import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
@@ -2148,6 +2149,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // avoid a risky large deletion in this file — they can be removed in a dedicated cleanup.)
   const [reportSending, setReportSending] = useState(false);
   const [reportSent, setReportSent] = useState(false);
+  // SEND COUNT (admin 2026-08-04, "report (1), report (2) aise — jisse duplicate report na ho"): the
+  // old button flashed "Report sent" for 4s and then looked untouched again, so a user who missed the
+  // flash re-sent the same build's report. The count is per BUILD and persisted, so the button tells
+  // the truth after a reload too. See reportSendCount.ts.
+  const reportIdKey = reportKey(state.workspaceId, state.buildId);
+  const [reportCount, setReportCount] = useState(0);
+  useEffect(() => { setReportCount(reportSendCount(reportIdKey)); }, [reportIdKey]);
   const sendReportToAdmin = useCallback(async () => {
     if (reportSending) return;
     setReportSending(true);
@@ -2163,6 +2171,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) {
+        // Count ONLY a genuinely accepted submission — a failed send must never inflate the tally
+        // (the whole point of the number is that the user can trust it).
+        setReportCount(bumpReportSendCount(reportKey(state.workspaceId, state.buildId)));
         setReportSent(true);
         setTimeout(() => setReportSent(false), 4000);
       } else {
@@ -2313,8 +2324,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
-      buildReport: () => { setMobileSheet(null); void sendReportToAdmin(); },
-      reportBusy: reportSending,
       openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
       // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
@@ -2785,11 +2794,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <button
             onClick={() => void sendReportToAdmin()}
             disabled={reportSending || !state.workspaceId}
-            title="Send this build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)"
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
+            title={`Send this build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)${reportCount > 0 ? ` ${reportAlreadySentHint(reportCount)}` : ''}`}
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent || reportCount > 0 ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
           >
-            {reportSending ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
-            {reportSending ? 'Sending…' : reportSent ? 'Report sent' : 'Report'}
+            {reportSending ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent || reportCount > 0 ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+            {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
           </button>
           {state.repoUrl && (
             <a
@@ -3917,10 +3926,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button
                   onClick={() => { setMobileSheet(null); void sendReportToAdmin(); }}
                   disabled={reportSending || !state.workspaceId}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                  className="w-full flex items-start gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
-                  {reportSent ? <Check className="w-4 h-4 shrink-0 text-emerald-400" /> : <FileText className="w-4 h-4 shrink-0 text-zinc-400" />}
-                  <span className="flex-1 text-left">{reportSending ? 'Sending report…' : reportSent ? 'Report sent' : 'Report'}</span>
+                  {reportSent || reportCount > 0
+                    ? <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                    : <FileText className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />}
+                  <span className="flex-1 text-left">
+                    {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
+                    {/* The count alone answers "did mine go through?"; this line says outright that a
+                        second send adds nothing — the actual ask behind "duplicate report na ho". */}
+                    {reportCount > 0 && !reportSending && (
+                      <span className="block text-[11px] text-zinc-500 leading-snug">{reportAlreadySentHint(reportCount)}</span>
+                    )}
+                  </span>
                 </button>
                 {state.repoUrl && (
                   <a

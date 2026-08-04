@@ -24856,3 +24856,35 @@ connect-time audit. Recorded here so the sequence survives a session handoff.
 whole archive into memory and would crash a phone tab. That path needs a random-access/streaming reader
 (`@zip.js/zip.js` reads the central directory and inflates only the entries kept, via `Blob.slice`).
 Stated to the admin as a correction to an earlier recommendation.
+
+---
+## 2026-08-04 — v5.0 mobile: footer Report → Code Studio, and the Report button now counts its sends
+
+**Admin request (screenshot):** "report button 2 jagah hai — footer me aur 3-dot More me. Footer wale
+ko hatao, waha Code Studio daal do (jo v5 se already sync hai). More waale report par count aaye —
+report (1), report (2) — jisse duplicate report na ho."
+
+**1. Footer slot: Report → Code Studio.** The footer's 5th item duplicated the action already sitting
+in the More sheet, while Code Studio — which edits the SAME live file map v5.0 builds into (`files`
+state + workspace syncer, `toggleTab('studio')`) — had no direct route on mobile. Now:
+History · Pro Chat · Preview · Files · **Code Studio** · More. The retired `buildReport`/`reportBusy`
+fields were DELETED from `V3FooterApi` and its registration rather than left dangling (rule 4 — no
+orphan API surface to drift).
+
+**2. Report send count (`reportSendCount.ts`, pure + persisted).** ROOT CAUSE of duplicate reports:
+the button flashed "Report sent" for 4s and then looked untouched again, so a user who missed the
+flash re-sent the same build's report — inbox noise and no signal about which builds actually hurt.
+The count is keyed per BUILD (`workspaceId#buildId`, so a new build legitimately resets it), stored in
+localStorage (survives the reload that most often triggers a re-send), bounded to 40 builds, and
+incremented ONLY on a genuinely accepted submission (a failed send must never inflate a number the
+user is asked to trust). Label comes from ONE pure helper (`reportButtonLabel`) used by both the
+desktop pill and the mobile sheet, so they cannot drift: `Report` → `Report (1)` → `Report (2)`, plus
+an explicit sub-line "Already sent once for this build — no need to send it again."
+
+`AppKnowledgeBase` updated (footer item + the count behaviour + new keywords) per the sync rule.
+Two assertions in `buildReportAdminOnly.test.ts` encoded the OLD wiring (the inline label ternary and
+the footer's buildReport line); they were updated to the new truth while keeping the invariant they
+exist for — send-only report, no download/copy/history in the user UI.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1033 files / 11,178 tests, 0 failures**
+(27 new: 15 count/label, 4 footer source-contract, plus updated report-wiring assertions).

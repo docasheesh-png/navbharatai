@@ -3591,7 +3591,11 @@ export default function App() {
               { key: 'chat',    icon: MessageSquare,  label: 'Pro Chat', onTap: v3FooterApi.openChat,    active: v3FooterApi.section === 'chat' },
               { key: 'preview', icon: Monitor,        label: 'Preview',  onTap: v3FooterApi.openPreview, active: v3FooterApi.section === 'preview', dot: v3FooterApi.previewReady },
               { key: 'files',   icon: FolderOpen,     label: 'Files',    onTap: v3FooterApi.openFiles,   active: v3FooterApi.section === 'files', count: v3FooterApi.fileCount },
-              { key: 'report',  icon: FileText,       label: 'Report',   onTap: v3FooterApi.buildReport, active: false, busy: v3FooterApi.reportBusy },
+              // Code Studio (admin 2026-08-04): replaces the footer's old "Report" item, which merely
+              // duplicated the action already in the More sheet. Studio edits the SAME live file map
+              // v5.0 builds into (files state + workspace syncer), so this is one feature reached from
+              // two places — not a second editor.
+              { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => toggleTab('studio'), active: false },
               { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history' },
             ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number }) => (
               <button

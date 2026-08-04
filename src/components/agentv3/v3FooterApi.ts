@@ -1,7 +1,12 @@
 // Dynamic per-view footer (admin 2026-07-07): on mobile/tablet the app's single bottom nav shows
 // VIEW-SPECIFIC options — v5.0 first. When NavBharatAI Pro v5.0 is the active view, the nav swaps
 // its default items (Home / AI / Preview / Studio / More) for v5.0's own six:
-// History · Pro Chat · Preview · Files · Build Report · More.
+// History · Pro Chat · Preview · Files · Code Studio · More.
+//
+// (Admin 2026-08-04: the footer slot was "Report" — the SAME action already sitting in the More
+// sheet, so one tap-target was duplicated while the code editor, which shares v5.0's live file state,
+// had no direct route on mobile. Report stays in More, where it now carries a send count; the footer
+// slot now opens Code Studio.)
 //
 // The nav bar itself stays ONE component in App.tsx (same design, same gating, same safe-area
 // padding). AgentV3Panel registers this API upward (via onFooterApi) so the nav's v5.0 items drive
@@ -21,11 +26,7 @@ export interface V3FooterApi {
   openPreview: () => void;
   /** Open the built-files list (tap → Open / Copy file / Copy path / Delete). */
   openFiles: () => void;
-  /** Download the latest build report (same real diagnostics JSON as the desktop header button). */
-  buildReport: () => void;
-  /** True while the report download is being prepared (spinner on the footer item). */
-  reportBusy: boolean;
-  /** Open the More sheet (framework, diff, terminal, checkpoints, GitHub, deploy, live site…). */
+  /** Open the More sheet (framework, diff, terminal, checkpoints, Report, GitHub, deploy, live site…). */
   openMore: () => void;
   /** Admin 2026-07-07: green dot on the Preview item the moment the app is genuinely viewable. */
   previewReady: boolean;

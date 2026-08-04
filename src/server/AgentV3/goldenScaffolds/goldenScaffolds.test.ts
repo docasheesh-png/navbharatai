@@ -96,6 +96,17 @@ describe('goldenScaffoldForPrompt — exact chip prompts match, edited prompts b
     }
   });
 
+  it('EVERY showcase chip has a scaffold — these are the apps a user is shown FIRST', () => {
+    // A showcase chip is someone's first impression of NavBharatAI. Adding one without a scaffold
+    // would quietly send the most-seen builds back to building from nothing, so this fails CI instead.
+    const showcase = STARTER_TEMPLATES.filter((t) => t.showcase).map((t) => t.id).sort();
+    const scaffolded = GOLDEN_SCAFFOLDS.map((g) => g.id);
+    for (const id of showcase) {
+      expect(scaffolded, id + ' is a showcase chip with no golden scaffold').toContain(id);
+    }
+    expect(showcase.length).toBeGreaterThan(0);
+  });
+
   it('a pro chip WITHOUT a scaffold still falls through to a normal build — never a wrong template', () => {
     for (const t of PRO.filter((x) => !PRO_WITH_SCAFFOLD.includes(x.id))) {
       expect(goldenScaffoldForPrompt(t.prompt), t.id).toBeNull();

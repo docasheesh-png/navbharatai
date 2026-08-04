@@ -24441,3 +24441,24 @@ fitness, expense) can be added one at a time. That is the next batch.
 Every pro scaffold is proven to parse under esbuild AND compile under the in-browser Babel preview — the
 same white-screen proof the simple ones carry — plus new tests that it stays multi-file, uses the shared
 foundation instead of duplicating it, persists data, and cannot white-screen on bad localStorage.
+
+### Same day — the SHOWCASE set is complete (restaurant + social feed)
+
+The two remaining `showcase: true` pro chips now ship golden scaffolds, so **every app a user is shown
+FIRST** starts from something already proven to run:
+- **Restaurant** — menu by category with a veg/non-veg marker and availability, table vs takeaway
+  ordering, a real kitchen ticket queue (placed → preparing → served), and **5% GST billing** as a named
+  constant so a different slab is a one-number change, not an arithmetic hunt.
+- **Social feed** — posts with real **image upload** (FileReader → data URL, so it works with no backend),
+  likes, comments, follow/unfollow, a notifications view derived from actual activity, and moderation
+  where a reported post is **hidden from the feed but never deleted** — a review queue, not a shredder.
+
+Locked by a new test: **every showcase chip must have a scaffold.** A showcase chip is someone's first
+impression of NavBharatAI; adding one without a scaffold would quietly send the most-seen builds back to
+building from nothing, so that now fails CI instead.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1027 files / 10973 tests, 0 failures**.
+Both new scaffolds parse under esbuild and compile under the in-browser Babel preview.
+
+**Remaining pro chips (next batches, no longer blocking):** invoicing, bookings, community, events,
+kanban, notes, lms, portfolio, fitness, expense — each falls through to a normal build until it has one.

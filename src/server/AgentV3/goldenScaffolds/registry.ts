@@ -18,6 +18,7 @@ import { todoAppTsx, calculatorAppTsx, stopwatchAppTsx, pomodoroAppTsx, tipSplit
 import { unitConverterAppTsx, qrMakerAppTsx, quickNotesAppTsx, passwordGenAppTsx, loginPageAppTsx } from './appsB';
 import { proUiTsx, proStoreTs } from './proShell';
 import { saasDashboardAppTsx, crmAppTsx, storeAppTsx } from './proApps';
+import { restaurantAppTsx, socialFeedAppTsx } from './proAppsB';
 
 export interface GoldenScaffold {
   /** Must equal the matching StarterTemplate id (the CI lockstep test enforces this). */
@@ -60,6 +61,8 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'saas-dashboard', label: 'SaaS dashboard', title: 'SaaS Dashboard', appTsx: saasDashboardAppTsx, tier: 'pro' },
   { id: 'crm', label: 'CRM / pipeline', title: 'Pipeline CRM', appTsx: crmAppTsx, tier: 'pro' },
   { id: 'store', label: 'Online store', title: 'Online Store', appTsx: storeAppTsx, tier: 'pro' },
+  { id: 'restaurant', label: 'Restaurant / menu', title: 'Restaurant', appTsx: restaurantAppTsx, tier: 'pro' },
+  { id: 'social-feed', label: 'Social feed', title: 'Social Feed', appTsx: socialFeedAppTsx, tier: 'pro' },
 ];
 
 /**

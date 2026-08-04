@@ -4,7 +4,7 @@ import { Editor } from './Editor';
 import { FileExplorer } from './FileExplorer';
 import { ActivityBar } from './ActivityBar';
 import { DebugPanel } from './DebugPanel';
-import { RealTerminal } from './RealTerminal';
+import { TerminalPanel } from './TerminalPanel';
 import { ProblemsPanel } from './ProblemsPanel';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { loadBreakpoints, serializeBreakpoints, toggleBreakpoint as toggleBpInMap, BREAKPOINTS_STORAGE_KEY, type BreakpointMap } from '../../lib/breakpoints';
@@ -1337,7 +1337,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      exit={{ height: 0 }}
                      className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
-                      <RealTerminal
+                      {/* MULTI-TERMINAL (admin 2026-08-04): one panel, many independent sessions, with
+                          the "+ New" dropdown inside the terminal itself. */}
+                      <TerminalPanel
                         onClose={() => {
                           setIsPanelOpen(false);
                           setIsPanelMaximized(false);

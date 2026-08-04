@@ -103,7 +103,6 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
-const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
 import { motion, AnimatePresence } from 'motion/react';
@@ -3384,12 +3383,6 @@ export default function App() {
           {/* Separate 'engine_builder' v5.0 view REMOVED — v5.0 is now reached only via the two
               gates (sidebar "NavBharatAI Pro v5.0" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
-
-          {activeView === 'entertainment' && (
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
-              <SocialHub />
-            </div>
-          )}
 
           {activeView === 'connect_domain' && (
             <ConnectMyWebsitePanel onBack={() => toggleTab('home')} uid={user?.uid} />

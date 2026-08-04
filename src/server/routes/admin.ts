@@ -14,6 +14,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
@@ -510,6 +511,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ reports });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to load build reports.' });
+    }
+  });
+
+  // FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the one number that says whether the ENGINE is getting
+  // better, not just whether the heals are. Per the fifth absolute rule's 50/50 law a self-heal is a RED
+  // FLAG, so the headline is the CLEAN rate (builds that needed zero repairs), never the delivered rate.
+  // `topHealCodes` is the actionable half: each entry is an upstream bug to prevent so that heal becomes
+  // dead code. Admin-only — this is internal engine quality, never a user-facing surface.
+  app.get('/api/admin/first-pass-quality', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const reports = await listAdminBuildReports(limit);
+      const stats = firstPassStatsFromMeta(reports);
+      res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
     }
   });
 

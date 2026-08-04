@@ -24255,3 +24255,64 @@ Gate for all three PRs: `tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest
   it. This is the next thing to build, and it is the highest-value one: the user's own credentials are
   what makes their app real.
 - The GitHub zipball import took 118s of a 6-minute survey turn. Worth caching; not yet done.
+
+## 2026-08-04 — ROADMAP #1 Phase 0 (honesty debt + measurement)
+
+Admin ne `CAPABILITY_AUDIT.md` (422/505) + `ROADMAP_NO1.md` approve karke Phase 0 shuru karwaya.
+
+### 0.0 — Supabase OAuth registered (admin, live)
+Admin published a Supabase OAuth app (`docasheesh-png's Org` → Settings → OAuth Apps) and set
+`SUPABASE_OAUTH_CLIENT_ID` / `SUPABASE_OAUTH_CLIENT_SECRET` in Cloud Run. NAMES appended to the
+CLAUDE.md registry (never values), with the scope set recorded: Projects r/w · Organizations r ·
+Secrets r · Auth r/w · Database r/w; everything else deliberately No-access. This unlocks Phase 1
+(zero-setup DB) WITHOUT breaking the standing rule — the project is created in the USER's own
+Supabase account, so their app runs on their account and their bill, never NavBharatAI's.
+⚠️ Recorded caveat: Supabase free plan = 2 projects/org, so a capped user must get an honest
+"no room in your account" message, never a silent failure.
+
+### 0.1 — "Coming soon" audit (absolute rule 2) — 7 sites READ, not grepped
+Five were already the CORRECT pattern and are kept + now test-guarded: GitPanel cloud sync ("we
+won't fake a connection that doesn't work" + names the working alternative), DebugPanel run
+controls (`disabled`, "No fake stepping"), ProfessionalsView inactive cards, HostingChooser,
+LiveCollaboration's Pro-v5 empty state. Two were genuine violations:
+- **SocialHub — DELETED.** It rendered "Feed coming soon using Firestore…", its second tab
+  rendered NOTHING, and it imported Firestore APIs it never used. Worse, it was UNREACHABLE:
+  nothing anywhere assigns `activeView = 'entertainment'` and its module flag is never read, so no
+  user could ever open it — a stub shipping in the bundle forever. Removed as a whole dead concept
+  (component + lazy import + render branch + ViewType member + module flag), not just the file.
+- **TeamCollaboration video call** — its only explanation was a `group-hover` tooltip. Hover never
+  fires on touch and NavBharatAI is mobile-first, so a phone user saw a dead grey button with no
+  reason at all. Reason moved into the label + visible helper text naming what does work today.
+`tests/honestStates.test.ts` locks both fixes AND the five good examples.
+**Deliberately NOT shipped:** a generic "unreachable view" CI check — it flags 6 legitimately
+reachable views (they navigate via nav-config variables, not literal calls), so it would need a
+6-entry allowlist on day one. A test people learn to append to is worse than no test.
+
+### 0.2 — First-pass quality: the number that says whether the ENGINE improved
+We shipped ~500 capability points and could not answer the only question a user cares about: *did
+it work the first time?* Built `src/lib/firstPassQuality.ts` (isomorphic — ONE implementation shared
+by the admin route and the dashboard, so they cannot drift):
+- `classifyFirstPass` → `clean` | `healed` | `failed`. Per the 50/50 law a self-heal is a RED FLAG,
+  so **healed is NOT success** — the headline is the CLEAN rate (zero repairs needed), with the
+  flattering `deliveredRate` kept beside it on purpose so nobody can quote it alone.
+- `topHealCodes` — the ACTIONABLE half: each entry is an upstream bug to prevent until that heal
+  becomes dead code.
+- `firstPassStatsFromMeta` — reports written before the counts field carry NO signal and are
+  EXCLUDED (`skippedLegacy`), never counted as clean; an all-legacy window reports no rate at all
+  rather than a fake 100%.
+- Heal signal is `counts.autoResolved`, which already excludes OBSERVATIONS — load-bearing, because
+  before that exclusion an import turn's 14 advisory notes were counted as self-heals and a build
+  that healed nothing reported "32 auto-resolved".
+Wired end-to-end: `healCount`/`unresolvedCount` projected into `AdminBuildReportMeta` at write time
+(listing stays cheap), `GET /api/admin/first-pass-quality` (admin-only), and a headline card on the
+admin dashboard's Build Reports tab. 18 unit tests.
+
+### 0.3 — Fix 68 was ALREADY DONE; CLAUDE.md was stale
+Audited the live code instead of trusting the doc (safeguard #1). The diagnostics GET already gates
+on `isReportAdmin(<VERIFIED email>)`, **fails closed**, and gives non-admins `userFacingReport()` +
+`redactProviderError()` — test-locked in three suites. Separately the user no longer downloads a
+report at all (2026-07-29): "Report" submits it server-side and the user gets only `{ ok }`.
+CLAUDE.md's "OPEN ITEM (Fix 68, not yet done)" corrected to DONE with code anchors.
+
+**Verification:** frontend + server `tsc` clean; full `npx vitest run` green (1022 files / 10,820
+tests before this slice, growing with it).

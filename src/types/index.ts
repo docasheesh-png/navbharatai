@@ -69,7 +69,7 @@ export interface BrainConfig {
 export type ViewType =
   | 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'offline_ai'
   | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings'
-  | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report'
+  | 'deploy' | 'templates' | 'donation' | 'studio' | 'report'
   | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api'
   | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot'
   | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components'

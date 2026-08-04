@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
+import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../lib/firstPassQuality';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -42,6 +43,11 @@ interface AdminBuildReportRow {
   buildMs: number | null;
   rootCause: string | null;
   summary: string | null;
+  /** How many defects the engine repaired in its OWN output, and how many it left unresolved.
+   *  Absent on reports written before this measurement existed — those rows are EXCLUDED from the
+   *  first-pass rate rather than counted as clean (see firstPassStatsFromMeta). */
+  healCount?: number;
+  unresolvedCount?: number;
 }
 
 type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
@@ -179,6 +185,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   // M8-S8.1 — data-driven failure signal: which failure class recurs most across all reports.
   const failureSummary = useMemo(() => summarizeFailurePatterns(buildReports), [buildReports]);
+  // ROADMAP #1 Phase 0.2 — FIRST-PASS QUALITY: the one number that says whether the ENGINE improved.
+  // Per the 50/50 law a self-heal is a RED FLAG, so the headline is the CLEAN rate (zero repairs
+  // needed), never the delivered rate. Computed from the SAME rows already fetched — one shared
+  // implementation with the server route (src/lib/firstPassQuality.ts), so the two can never drift.
+  const firstPass = useMemo(() => firstPassStatsFromMeta(buildReports), [buildReports]);
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
   const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
   const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
@@ -1220,6 +1231,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
                 </button>
               </div>
+
+              {/* FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the headline engine number. A build that
+                  healed itself is NOT counted as a success (50/50 law: a heal is a red flag), so this
+                  deliberately reads lower than the delivered rate shown beside it. Honest by
+                  construction: shows nothing rather than a fake 0% when no row carries the signal. */}
+              {!buildReportsLoading && firstPass.cleanRate !== null && (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4">
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <Target className="w-4 h-4 text-indigo-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">First-pass quality</h4>
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                      firstPass.cleanRate >= FIRST_PASS_TARGET
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    }`}>
+                      target {Math.round(FIRST_PASS_TARGET * 100)}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                    <div>
+                      <p className="text-2xl font-black text-white tabular-nums">{(firstPass.cleanRate * 100).toFixed(1)}%</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Right first time</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-emerald-300 tabular-nums">{firstPass.clean}</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Clean</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-amber-300 tabular-nums">{firstPass.healed}</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Needed repair</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-rose-300 tabular-nums">{firstPass.failed}</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Failed</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)}</p>
+                  {firstPass.skippedLegacy > 0 && (
+                    <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
+                      {firstPass.skippedLegacy} older report(s) excluded — they predate this measurement and
+                      carry no repair count. Counting them as clean would inflate the number.
+                    </p>
+                  )}
+                  {firstPass.topHealCodes.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider mb-2">
+                        Repairs that fire most — prevent these upstream
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {firstPass.topHealCodes.map((h) => (
+                          <span key={h.code} className="text-[10px] font-mono px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9]">
+                            {h.code} <span className="text-amber-300 font-bold">×{h.count}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Top failure patterns (M8-S8.1) — data-driven: which failure class recurs most, so the
                   most-impactful fix is chosen from real evidence. Only shown when there are failures. */}

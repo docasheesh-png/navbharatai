@@ -71,6 +71,17 @@ export interface AdminBuildReportMeta {
   buildMs: number | null;
   rootCause: string | null;
   summary: string | null;
+  /**
+   * FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — how many defects the engine had to repair in its OWN
+   * output, and how many it left unresolved. Projected into the meta at write time so the admin list
+   * can compute the clean-first-pass rate WITHOUT fetching every full report.
+   *
+   * `undefined` means "this record predates the field", NOT zero — a legacy row must be excluded from
+   * the rate, never counted as a clean build (that would silently inflate the one number we use to
+   * judge whether the engine is improving). See firstPassStatsFromMeta.
+   */
+  healCount?: number;
+  unresolvedCount?: number;
 }
 
 /**
@@ -140,6 +151,10 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       buildMs,
       rootCause: cap(trimmed.rootCause, 400),
       summary: cap(trimmed.summary, 400),
+      // counts.autoResolved already EXCLUDES observations (advisory notes about the user's own code),
+      // which is what keeps the self-heal tally from inflating itself — see BuildDiagnostics.
+      healCount: typeof trimmed.counts?.autoResolved === 'number' ? trimmed.counts.autoResolved : undefined,
+      unresolvedCount: typeof trimmed.counts?.unresolved === 'number' ? trimmed.counts.unresolved : undefined,
     },
     report: trimmed,
   };

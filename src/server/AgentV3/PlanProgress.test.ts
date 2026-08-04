@@ -44,4 +44,19 @@ describe('computePlanProgress — live spinner + green ticks driven by REAL buil
     expect(r.map((t) => t.title)).toEqual(['step 0', 'step 1']);
     expect(r.map((t) => t.id)).toEqual(['t0', 't1']);
   });
+
+  it('NEVER downgrades a done item (the "green ticks vanish mid-build" reset bug)', () => {
+    // The agent marked item 2 done via update_todo; the per-file positional tick (completedSteps=1)
+    // used to stomp it back to pending. It must stay done.
+    const r = computePlanProgress(todos('done', 'done', 'pending', 'pending'), 1, false);
+    expect(r[0].status).toBe('done');
+    expect(r[1].status).toBe('done');
+  });
+
+  it('moves the live spinner to the first pending item when the positional slot is already done', () => {
+    const r = computePlanProgress(todos('done', 'done', 'pending', 'pending'), 1, false);
+    expect(r[2].status).toBe('in_progress'); // exactly one spinner, on real remaining work
+    expect(r[3].status).toBe('pending');
+    expect(r.filter((t) => t.status === 'in_progress')).toHaveLength(1);
+  });
 });

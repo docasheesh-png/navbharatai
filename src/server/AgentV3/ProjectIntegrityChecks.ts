@@ -15,6 +15,8 @@
 // sandbox). Designed to feed the existing fast-lane repair gate: each finding carries a precise,
 // actionable instruction the repair pass can act on, so these defects self-heal before a build ships.
 
+import { isNonAppPath } from '../lib/nonAppPaths';
+
 export interface FocusOwner {
   /** The component file that grabs initial focus. */
   file: string;
@@ -80,7 +82,14 @@ export interface ProjectIntegrityReport {
   ok: boolean;
 }
 
-const isSourceFile = (path: string): boolean => /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path);
+// isNonAppPath: a tool/assistant scratch directory is not the user's source. Excluded HERE — the one
+// predicate every analyzer below runs through — so a single edit keeps `.local/skills/**` scaffold
+// templates out of ALL of them (duplicate entry points, duplicate stylesheets, focus owners, …), and
+// out of the repairs those findings trigger. Mitrify autopsy 2026-08-04: four such templates were
+// reported as duplicate React roots and then actually EDITED by the integrity repair, in an app they
+// have no part in. See lib/nonAppPaths.ts.
+const isSourceFile = (path: string): boolean =>
+  /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path) && !isNonAppPath(path);
 
 /** Strip line and block comments so a commented-out `.focus()` / import never counts. Best-effort. */
 function stripComments(src: string): string {
@@ -93,6 +102,15 @@ function stylesheetKey(spec: string): string {
   const seg = clean.split('/').filter(Boolean).pop() ?? clean;
   return seg.toLowerCase();
 }
+
+/**
+ * A build/framework config file (nuxt.config.ts, vite.config.ts, tailwind.config.js, app.config.ts, …).
+ * These wire stylesheets by DECLARATION, not by `import`: Nuxt's `css: ['~/assets/css/main.css']` array,
+ * a Vite `css` option, etc. A sheet named there is genuinely wired even though no module imports it, so
+ * the orphan check must treat a config reference as a real reference (ShopSphere/Nuxt autopsy 2026-07-19:
+ * `assets/css/main.css` wired in `nuxt.config.ts` was falsely reported "imported by nothing").
+ */
+const isConfigFile = (path: string): boolean => /(^|\/)[\w.-]*\.config\.[cm]?[jt]s$/i.test(path);
 
 /**
  * Find every component that grabs INITIAL focus at mount. A component is a focus owner when it either
@@ -166,14 +184,24 @@ export function findOrphanStylesheets(files: Record<string, string>): OrphanStyl
   const referencedKeys = new Set<string>();
   const importRe = /import\s+['"]([^'"]+\.css)['"]/g;
   const linkRe = /<link\b[^>]*href\s*=\s*['"]([^'"]+\.css)['"]/gi;
+  // In a config file a stylesheet is wired by DECLARATION (Nuxt `css: ['~/assets/css/main.css']`), not
+  // an `import` statement, so match every quoted `.css` string literal there — not only imports.
+  const anyCssRe = /['"]([^'"]+\.css)['"]/g;
   for (const [file, raw] of Object.entries(files)) {
     if (typeof raw !== 'string') continue;
-    if (isSourceFile(file)) {
+    if (isConfigFile(file)) {
       const src = stripComments(raw);
       let m: RegExpExecArray | null;
+      anyCssRe.lastIndex = 0;
+      while ((m = anyCssRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+    } else if (isSourceFile(file)) {
+      const src = stripComments(raw);
+      let m: RegExpExecArray | null;
+      importRe.lastIndex = 0;
       while ((m = importRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
     } else if (/\.html?$/i.test(file)) {
       let m: RegExpExecArray | null;
+      linkRe.lastIndex = 0;
       while ((m = linkRe.exec(raw)) !== null) referencedKeys.add(stylesheetKey(m[1]));
     }
   }
@@ -468,8 +496,118 @@ export function relativeSpecifier(importer: string, module: string): string {
 }
 
 /**
+ * Positions in `src` that are REAL CODE — i.e. not inside a string, template literal, or comment.
+ *
+ * ROOT CAUSE (navbharatai self-import autopsy 2026-07-27, buildId d1623410): `normalizeImportSpecifiers`
+ * rewrote specifiers with a blind regex over raw file text, so it also matched quoted text inside
+ * ordinary string literals, comments, and the template literals of this repo's many CODE GENERATORS.
+ * It corrupted `src/server/lib/DbConfigGenerator.ts` line 125 — a single-quoted *documentation* string
+ * that happens to contain `import { db } from "@/lib/firebase"` — producing
+ * `'… from '../../lib/firebase'. …'`, which terminates the enclosing string early and yields exactly
+ * the reported `Expected identifier but found "."`. It also silently rewrote test fixtures
+ * (ViteReactProvider.test.ts, previewBundle.test.ts, reactPreview.test.ts).
+ *
+ * Deliberately CONSERVATIVE — the only failure mode we accept is "declined a legitimate rewrite",
+ * never "corrupted a file". Handles line/block comments, both quote styles with escapes, template
+ * literals (with `${…}` returning to code), and uses the standard prev-significant-char heuristic to
+ * tell a regex literal from division. Anything it cannot classify stays marked NOT-code, so no rewrite
+ * happens there. PURE + tested.
+ */
+export function codePositions(src: string): Uint8Array {
+  const n = src.length;
+  const mask = new Uint8Array(n); // 1 = real code position
+  // Template-literal nesting: each entry is the brace depth at which the current `${` began.
+  const tmplStack: number[] = [];
+  let braceDepth = 0;
+  let i = 0;
+  let prevSignificant = '';
+  while (i < n) {
+    const c = src[i];
+    const next = src[i + 1];
+    // ── comments ──────────────────────────────────────────────────────────────
+    if (c === '/' && next === '/') {
+      while (i < n && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    // ── regex literal (heuristic: a `/` right after an operator/keyword position) ──
+    if (c === '/' && /[=([,;:!&|?{}+\-*%~^<>]|^$/.test(prevSignificant)) {
+      i++;
+      let closed = false;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '\n') break;              // unterminated → bail out safely
+        if (src[i] === '[') { while (i < n && src[i] !== ']' && src[i] !== '\n') { if (src[i] === '\\') i++; i++; } }
+        if (src[i] === '/') { i++; closed = true; break; }
+        i++;
+      }
+      if (!closed) { /* not a regex after all — keep scanning from here */ }
+      prevSignificant = '/';
+      continue;
+    }
+    // ── strings ───────────────────────────────────────────────────────────────
+    if (c === '\'' || c === '"') {
+      const quote = c;
+      i++;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '\n') break;              // unterminated string → stop, stay safe
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      prevSignificant = quote;
+      continue;
+    }
+    // ── template literals (code resumes inside `${ … }`) ──────────────────────
+    if (c === '`') {
+      i++;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '`') { i++; break; }
+        if (src[i] === '$' && src[i + 1] === '{') {
+          tmplStack.push(braceDepth);
+          braceDepth++;
+          i += 2;
+          // Inside ${…} we are back in code: mark it and let the outer loop handle it.
+          const start = i;
+          let d = 1;
+          while (i < n && d > 0) {
+            if (src[i] === '{') d++;
+            else if (src[i] === '}') d--;
+            if (d > 0) i++;
+          }
+          for (let k = start; k < i && k < n; k++) mask[k] = 1;
+          braceDepth--;
+          tmplStack.pop();
+          if (i < n) i++; // consume '}'
+          continue;
+        }
+        i++;
+      }
+      prevSignificant = '`';
+      continue;
+    }
+    // ── ordinary code ─────────────────────────────────────────────────────────
+    mask[i] = 1;
+    if (!/\s/.test(c)) prevSignificant = c;
+    i++;
+  }
+  return mask;
+}
+
+/**
  * DETERMINISTIC FIX: rewrite every import of a mixed-specifier module to the canonical relative form,
  * so every bundler (including the in-browser preview) sees ONE module instance. Pure.
+ *
+ * SAFETY (autopsy 2026-07-27 — see codePositions): a rewrite happens ONLY when the specifier sits in a
+ * genuine module-specifier position (`from "X"`, bare `import "X"`, `require("X")`, `import("X")`) at a
+ * REAL CODE offset — never inside a string, comment, or generator template — and the ORIGINAL QUOTE
+ * CHARACTER is preserved, so a replacement can never terminate an enclosing string.
  */
 export function normalizeImportSpecifiers(
   files: Record<string, string>,
@@ -487,9 +625,24 @@ export function normalizeImportSpecifiers(
       for (const spec of specs) {
         if (spec === canonical) continue;
         if (resolveProjectSpecifier(files, file, spec) !== module) continue; // this file's spec resolves elsewhere
-        const re = new RegExp(`(['"])${spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`, 'g');
-        const replaced = next.replace(re, `'${canonical}'`);
-        if (replaced !== next) { next = replaced; rewrites.push({ file, from: spec, to: canonical }); }
+        const esc = spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Genuine module-specifier positions only: `… from "X"`, bare `import "X"`,
+        // `require("X")`, `import("X")`. The leading group is preserved verbatim.
+        const re = new RegExp(
+          `(\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s+)(['"])${esc}\\2`,
+          'g',
+        );
+        // Recomputed per pass: an earlier rewrite shifts offsets, and the mask must match `next`.
+        const mask = codePositions(next);
+        let changed = false;
+        const replaced = next.replace(re, (match, lead: string, quote: string, offset: number) => {
+          // Test the LEADING KEYWORD's offset, not the quote's: a string's opening quote is never
+          // itself a "code" position, so checking it would reject every genuine import too.
+          if (!mask[offset]) return match; // keyword sits inside a string/comment/template → leave it
+          changed = true;
+          return `${lead}${quote}${canonical}${quote}`;       // preserve the ORIGINAL quote character
+        });
+        if (changed) { next = replaced; rewrites.push({ file, from: spec, to: canonical }); }
       }
     }
     if (next !== raw) out[file] = next;

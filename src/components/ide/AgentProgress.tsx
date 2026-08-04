@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, Circle, Loader2, AlertCircle } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 export type BuildStepStatus = 'pending' | 'running' | 'complete' | 'error';
 
@@ -32,7 +33,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({ steps }) => {
 const StatusIcon: React.FC<{ status: BuildStepStatus }> = ({ status }) => {
   switch (status) {
     case 'complete': return <CheckCircle2 className="w-4 h-4 text-emerald-500" />;
-    case 'running': return <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />;
+    case 'running': return <TirangaLoader className="w-4 h-4" />;
     case 'error': return <AlertCircle className="w-4 h-4 text-rose-500" />;
     default: return <Circle className="w-4 h-4 text-gray-700" />;
   }

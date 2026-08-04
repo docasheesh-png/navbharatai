@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Plus, Trash2, Edit2, Check, X, RefreshCw, Download, Upload, Search, ChevronRight, Copy, AlertCircle, Table, Filter, ArrowUpDown } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { db } from '../../App';
 import { collection, getDocs, doc, setDoc, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
 import { Breadcrumb } from '../ui/Breadcrumb';
@@ -111,7 +112,7 @@ export function DatabaseStudio() {
   };
 
   const deleteRow = async (row: DBRow) => {
-    if (!window.confirm(`"${row.id || row.name}" delete karna hai?`)) return;
+    if (!window.confirm(`Delete "${row.id || row.name}"?`)) return;
     if (source === 'firestore') {
       try { await deleteDoc(doc(db, selectedCol, row.id)); } catch {}
     }
@@ -299,7 +300,7 @@ export function DatabaseStudio() {
             <div className="flex-1 overflow-auto">
               {loading ? (
                 <div className="flex items-center justify-center h-40 gap-2">
-                  <RefreshCw className="w-5 h-5 text-cyan-400 animate-spin" />
+                  <TirangaLoader className="w-5 h-5" />
                   <p className="text-sm text-white/40">Loading...</p>
                 </div>
               ) : filteredRows.length === 0 ? (

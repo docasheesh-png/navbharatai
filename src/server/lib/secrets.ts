@@ -5,16 +5,36 @@ import { query, collection, where, getDocs, doc, updateDoc, getServerDb as getDb
 /**
  * Encryption & user-secret helpers.
  *
- * P-SEC.5 — Key rotation. Ciphertext is versioned as `v<N>:<iv>:<ct>`. Multiple key
- * versions can coexist in env (`SECRET_KEY_V1`, `SECRET_KEY_V2`, …, falling back to the
- * legacy `SECRET_ENCRYPTION_KEY` for v1), so a key can be rotated WITHOUT losing access
- * to data encrypted under old keys.
+ * SECURITY — AUTHENTICATED ENCRYPTION (2026-07-19). New secrets are written with
+ * AES-256-**GCM**, formatted `g<N>:<iv>:<authTag>:<ct>`. GCM is authenticated: a
+ * tampered ciphertext (bit-flip, truncation, padding-oracle probing) fails the auth-tag
+ * check and `decrypt()` returns '' instead of leaking a manipulated plaintext — the
+ * integrity guarantee plain AES-256-CBC never had.
  *
- * BACKWARD-COMPATIBLE: legacy two-part ciphertext (`<iv>:<ct>`) still decrypts byte-for-
- * byte under the v1/legacy key — no migration needed. Secrets upgrade to the latest
- * version lazily on the next write, or in bulk via the admin rotate-keys endpoint.
+ * P-SEC.5 — Key rotation. Multiple key versions coexist in env (`SECRET_KEY_V1`,
+ * `SECRET_KEY_V2`, …, falling back to the legacy `SECRET_ENCRYPTION_KEY` for v1), so a
+ * key can be rotated WITHOUT losing access to data encrypted under old keys. The version
+ * number is carried in the ciphertext prefix for BOTH the GCM (`g<N>`) and legacy CBC
+ * (`v<N>`) formats.
+ *
+ * BACKWARD-COMPATIBLE (the one absolute rule — never break): every historical format
+ * still decrypts byte-for-byte —
+ *   • GCM        `g<N>:<iv>:<tag>:<ct>`  (4 parts, current writes)
+ *   • CBC v-tag  `v<N>:<iv>:<ct>`        (3 parts, previous writes)
+ *   • CBC legacy `<iv>:<ct>`             (2 parts, pre-versioning writes)
+ * Nothing needs migrating; a secret upgrades to GCM lazily on its next write, or in bulk
+ * via the admin rotate-keys endpoint. `SECRET_CIPHER=cbc` is a rollback kill-switch that
+ * makes new writes use the old CBC format again (decrypt always reads all formats).
  */
 const LEGACY_FALLBACK = 'navBharatAISecurityLedgerFallbackKey';
+/** GCM standard nonce length. 12 bytes is the recommended IV size for AES-GCM. */
+const GCM_IV_BYTES = 12;
+
+/** Cipher mode for NEW writes. Default GCM (authenticated); `SECRET_CIPHER=cbc` rolls back to
+ *  legacy CBC without a redeploy. decrypt() reads every format regardless of this setting. */
+function newWriteCipher(): 'gcm' | 'cbc' {
+  return process.env.SECRET_CIPHER === 'cbc' ? 'cbc' : 'gcm';
+}
 
 /**
  * Exact 32-byte key buffer for AES-256. Pads short keys, and slices to 32 bytes
@@ -58,16 +78,39 @@ export const encrypt = (text: string): string => {
   if (usingFallback && process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to encrypt a secret: SECRET_ENCRYPTION_KEY (or SECRET_KEY_V1) is not configured. Set it in the Cloud Run console before storing user secrets.');
   }
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', keys[latest], iv);
-  const encrypted = Buffer.concat([cipher.update(text), cipher.final()]);
-  return `v${latest}:${iv.toString('hex')}:${encrypted.toString('hex')}`;
+  if (newWriteCipher() === 'cbc') {
+    // Rollback path (SECRET_CIPHER=cbc): legacy unauthenticated CBC. Kept only as insurance.
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-cbc', keys[latest], iv);
+    const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+    return `v${latest}:${iv.toString('hex')}:${encrypted.toString('hex')}`;
+  }
+  // Default: AES-256-GCM (authenticated). The auth tag detects any tampering on decrypt.
+  const iv = crypto.randomBytes(GCM_IV_BYTES);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keys[latest], iv);
+  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `g${latest}:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
 };
 
 export const decrypt = (encryptedText: string): string => {
   try {
     const { keys } = resolveKeys();
     const parts = encryptedText.split(':');
+    // Current format: AES-256-GCM `g<N>:<iv>:<tag>:<ct>`. A wrong auth tag (tampering, wrong
+    // key) makes final() throw → caught below → '' (never a manipulated plaintext).
+    if (parts.length === 4 && /^g\d+$/.test(parts[0])) {
+      const version = parseInt(parts[0].slice(1), 10);
+      const key = keys[version] || keys[1]; // unknown version → best-effort v1
+      const iv = Buffer.from(parts[1], 'hex');
+      const tag = Buffer.from(parts[2], 'hex');
+      const ct = Buffer.from(parts[3], 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      const decrypted = Buffer.concat([decipher.update(ct), decipher.final()]);
+      return decrypted.toString('utf8');
+    }
+    // Legacy AES-256-CBC (still fully supported so historical secrets never break).
     let key: Buffer, ivHex: string, ctHex: string;
     if (parts.length === 3 && /^v\d+$/.test(parts[0])) {
       const version = parseInt(parts[0].slice(1), 10);

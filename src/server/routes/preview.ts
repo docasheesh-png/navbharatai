@@ -11,6 +11,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { getPreviewService } from '../runtime/PreviewService';
 import { buildProxyUrl } from '../runtime/proxyUrl';
 import { buildVuePreview } from '../runtime/VuePreview';
+import { sendSafeError } from '../lib/httpError';
 
 // ── Server-side esbuild bundler for React/TS preview ────────────────────────
 // Eliminates the browser-side Babel CDN + complex require() runtime entirely.
@@ -317,7 +318,8 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
       const buf = Buffer.from(await upstream.arrayBuffer());
       res.send(buf);
     } catch (err: any) {
-      res.status(502).json({ error: 'Preview upstream unreachable', detail: err?.message });
+      // Do NOT leak the raw upstream/network error (host, IP, infra) to the client.
+      sendSafeError(res, 502, 'Preview upstream unreachable', err, 'preview proxy');
     }
   });
 

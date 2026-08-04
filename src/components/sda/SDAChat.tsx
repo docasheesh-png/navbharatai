@@ -7,12 +7,16 @@ import {
   Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../../App';
 import { escapeHtml } from '../../lib/escapeHtml';
 import { newSdaCaseId } from '../../lib/sdaCaseId';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -252,6 +256,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isListening, setIsListening] = useState(false);
+  // Mic renders only where the Web Speech API exists — absent on iOS/iPadOS WKWebView so it is never a
+  // dead "unresponsive" button (Apple App Review 2.1(a), 2026-08-02). See src/lib/voiceInput.ts.
+  const [voiceSupported] = useState(speechRecognitionSupported);
   const [suggestPDF, setSuggestPDF] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
 
@@ -386,10 +393,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   const startVoice = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert('Voice input is not supported in this browser. Please use Chrome.');
-      return;
-    }
+    if (!SR) return; // unsupported platforms never render the button; this is a defensive no-op
     const rec = new SR();
     rec.lang = 'en-IN';
     rec.interimResults = true;
@@ -530,7 +534,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
       const res = await fetch('/api/sda-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Send the verified Firebase ID token so the server resolves a REAL identity for the Professional
+        // Pass gate. Without it (the bug: this fetch sent only Content-Type), a SIGNED-IN doctor was seen
+        // as anonymous → "Please sign in to use the Professionals" even though they were logged in.
+        headers: await authJsonHeaders(),
         body: JSON.stringify({
           message: text || 'Please analyze this medical document and extract all relevant clinical findings.',
           history,
@@ -545,7 +552,23 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         }),
       });
 
-      if (!res.ok) throw new Error('Service error');
+      // Surface the server's REAL reason instead of a blanket "unavailable" (which made a sign-in
+      // prompt, a free-limit paywall, or a keys/busy error all look identically like "not responding").
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({} as { error?: string; code?: string }));
+        const honest = errData?.error
+          || (res.status === 401 ? 'Please sign in to use Doctor AI — new users get free messages every day.'
+            : res.status === 402 ? 'You have used your free messages for today. Get the Professional Pass for unlimited access.'
+            : res.status === 429 ? 'Doctor AI is busy right now — please try again in a few seconds.'
+            : 'Doctor AI could not respond right now. Please try again in a moment.');
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: `⚠️ ${honest}`,
+          sender: 'sda',
+          timestamp: new Date(),
+        }]);
+        return;
+      }
       const data = await res.json();
 
       const sdaMsg: SDAMessage = {
@@ -761,6 +784,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+          {(() => {
+            // In SDA the USER is the 'doctor' sender; 'sda' is the assistant.
+            const lastUser = [...messages].reverse().find(m => m.sender === 'doctor');
+            return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+          })()}
           {messages.map(msg => (
             <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
               {msg.sender === 'sda' && (
@@ -843,15 +871,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             <div className="flex justify-center">
               <div className="bg-emerald-950/60 border border-emerald-600/40 rounded-2xl px-5 py-3 flex items-center gap-4 max-w-sm">
                 <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
-                <p className="text-[11px] text-emerald-200 flex-1">Case assessment ready. PDF report banana chahiye?</p>
+                <p className="text-[11px] text-emerald-200 flex-1">Case assessment ready. Generate a PDF report?</p>
                 <div className="flex gap-2">
                   <button onClick={generatePDF}
                     className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-[10px] font-black text-white transition-all">
-                    Haan, Banao
+                    Yes, Generate
                   </button>
                   <button onClick={() => setSuggestPDF(false)}
                     className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] font-black text-[#8b949e] transition-all">
-                    Baad mein
+                    Later
                   </button>
                 </div>
               </div>
@@ -942,18 +970,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 </button>
                 <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileSelect} className="hidden" />
 
-                {/* Dictation mic — speech → TEXT into the box (you still read + Send). */}
-                <button
-                  onClick={isListening ? stopVoice : startVoice}
-                  disabled={loading}
-                  title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
-                  className={cn(
-                    "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
-                    isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
-                  )}
-                >
-                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </button>
+                {/* Dictation mic — speech → TEXT into the box (you still read + Send). Renders only where
+                    the Web Speech API exists; absent on iOS/iPadOS WKWebView (no dead button). */}
+                {voiceSupported && (
+                  <button
+                    onClick={isListening ? stopVoice : startVoice}
+                    disabled={loading}
+                    title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
+                    className={cn(
+                      "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
+                      isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
+                    )}
+                  >
+                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
+                )}
 
                 {/* Text input */}
                 <textarea
@@ -1001,7 +1032,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               disabled={(!input.trim() && !attachedFile) || loading}
               className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
             >
-              {loading ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
+              {loading ? <TirangaLoader className="w-4 h-4 text-white" /> : <Send className="w-4 h-4 text-white" />}
             </button>
           </div>
 

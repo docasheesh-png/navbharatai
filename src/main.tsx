@@ -19,7 +19,7 @@ import { MobileEngagementGate } from './components/MobileEngagementGate';
 import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
-import { installNativeShellPolish } from './lib/nativeShell';
+import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -243,8 +243,14 @@ requestAnimationFrame(() => {
   // Bundled native shell polish (Capacitor): hide splash screen, apply status bar theme, install
   // back button handler. Runs after React mounts so the back button handler can navigate. NO-OP
   // on web and hosted shell.
-  void installNativeShellPolish(window as any, () => {
-    // Back button handler: delegate to history back (React Router will handle it).
-    window.history.back();
-  });
+  // Pass the REAL plugin context. This used to hand over `window`, but Capacitor 4+ does not expose
+  // plugins as window globals — so every polish feature silently no-opped (no splash control, no
+  // status-bar theme, no haptics and, most visibly on Android, no hardware Back handling at all).
+  void loadNativeShellContext()
+    .then((ctx) => installNativeShellPolish(ctx, () => {
+      // Somewhere to go back to → go. (A genuinely empty back stack is handled inside the installer,
+      // which exits the app rather than trapping the user on the screen.)
+      window.history.back();
+    }))
+    .catch(() => { /* polish is best-effort — it must never block the app from starting */ });
 });

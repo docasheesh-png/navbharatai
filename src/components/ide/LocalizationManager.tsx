@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Languages, Globe, Plus, Trash2, Check, X, Copy, Download, Search, Edit2, ChevronRight, RefreshCw, Upload, FileCode } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface TranslationKey {
   key: string;
@@ -221,7 +222,7 @@ export function LocalizationManager() {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Localization Manager</h2>
-          <p className="text-xs text-white/40">App ko multiple languages mein translate karo — 18 languages supported</p>
+          <p className="text-xs text-white/40">Translate your app into multiple languages — 18 languages supported</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowImport(!showImport)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">
@@ -261,7 +262,7 @@ export function LocalizationManager() {
               disabled={autoTranslating}
               className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center justify-center gap-1.5 disabled:opacity-50 transition-all"
             >
-              {autoTranslating ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Translating...</> : <><Languages className="w-3.5 h-3.5" /> Auto Translate</>}
+              {autoTranslating ? <><TirangaLoader className="w-3.5 h-3.5" /> Translating...</> : <><Languages className="w-3.5 h-3.5" /> Auto Translate</>}
             </button>
           </div>
 

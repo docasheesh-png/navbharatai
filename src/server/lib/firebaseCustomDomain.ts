@@ -1,0 +1,290 @@
+// Firebase-native custom domains — connect a user's OWN domain directly to their
+// "Host on NavBharatAI" (Firebase Hosting) site, with Firebase serving the site and
+// auto-issuing the SSL certificate. This is the serving layer the design doc flagged as
+// missing (NAVBHARATAI_PRO_V3_DESIGN.md): the earlier Cloudflare-for-SaaS flow provisioned a
+// hostname + returned DNS records but nothing routed the domain to the user's published app.
+//
+// How Firebase custom domains actually work (why a dedicated site is needed):
+//   - A custom domain attaches to a Firebase Hosting *site*, NOT to a preview *channel*.
+//   - The default publish path puts each app on a preview channel of one shared site
+//     (`<project>--<channel>.web.app`), which cannot carry a custom domain.
+//   - So a custom-domain app gets its OWN dedicated Firebase Hosting site (multi-site), the
+//     app is deployed to that site's LIVE channel, and the domain attaches to that site.
+//
+// Real API (firebasehosting v1beta1): projects.sites.customDomains.{create,get}. `create` returns
+// a long-running Operation; the CustomDomain resource then exposes `requiredDnsUpdates` (the exact
+// A/AAAA/TXT records the user must add), `ownershipState`, `hostState`, and `cert.state` — all of
+// which we surface honestly. Nothing is faked: a domain reads "Live" only when Firebase reports
+// ownership + host + cert all active.
+//
+// Config: Application Default Credentials (same as Deployment.ts). On Cloud Run the platform
+// service account is used automatically; it needs the "Firebase Hosting Admin" role and the
+// Firebase Hosting API enabled. When auth/permission is missing, callers surface an honest error —
+// never a fake "connected" state.
+
+import { GoogleAuth } from 'google-auth-library';
+import * as crypto from 'crypto';
+
+const FIREBASE_PROJECT = process.env.FIREBASE_DEPLOY_PROJECT ?? 'gen-lang-client-0866594388';
+const HOSTING_API = 'https://firebasehosting.googleapis.com/v1beta1';
+
+// ── Public, UI-facing shapes ────────────────────────────────────────────────────────────────
+
+/** A DNS record the user must add at their registrar (registrar-agnostic). */
+export interface CustomDomainDnsRecord {
+  type: string;   // 'A' | 'AAAA' | 'TXT' | 'CNAME'
+  name: string;   // the host/record name (the domain, or a challenge subdomain)
+  value: string;  // the record value (an IP, a TXT token, …)
+  note?: string;  // a short human hint of what the record is for
+}
+
+/** Honest, serialisable status of a Firebase custom domain. */
+export interface CustomDomainStatus {
+  domain: string;
+  /** True only when Firebase reports ownership + host + cert all ACTIVE (i.e. genuinely live). */
+  active: boolean;
+  ownershipState: string; // OWNERSHIP_PENDING | OWNERSHIP_ACTIVE | …
+  hostState: string;      // HOST_PENDING | HOST_ACTIVE | HOST_BROKEN | …
+  sslState: string;       // CERT_PENDING | CERT_ACTIVE | CERT_BROKEN | …
+  records: CustomDomainDnsRecord[]; // the records still needed to finish the connection
+}
+
+// ── Raw API shape (only the fields we read) ─────────────────────────────────────────────────
+
+interface ApiDnsRecord {
+  domainName?: string;
+  type?: string;
+  rrdata?: string[];
+  rdata?: string[];
+  requiredAction?: string; // NONE | ADD | REMOVE (records with ADD are the ones to add)
+}
+interface ApiDnsRecordSet {
+  domainName?: string;
+  records?: ApiDnsRecord[];
+}
+interface ApiCustomDomain {
+  name?: string;
+  customDomainId?: string;
+  ownershipState?: string;
+  hostState?: string;
+  cert?: { state?: string };
+  requiredDnsUpdates?: {
+    desiredDnsState?: ApiDnsRecordSet[];
+  };
+}
+
+// ── Pure helpers (unit-testable without any live API) ───────────────────────────────────────
+
+/**
+ * A stable, valid Firebase Hosting site id for a workspace. Firebase site ids must be lowercase,
+ * `[a-z0-9-]`, ≤ 30 chars, and must not start/end with a hyphen. We derive it from a hash of the
+ * FULL workspaceId so it is unique per workspace AND identical on every redeploy of that workspace
+ * (same failure class the channel-id fix guarded against — never a truncated prefix collision).
+ */
+export function siteIdForWorkspace(workspaceId: string): string {
+  const hash = crypto.createHash('sha256').update(workspaceId).digest('hex').slice(0, 20);
+  return `nbai-${hash}`; // 5 + 20 = 25 chars, always [a-z0-9-], no leading/trailing hyphen
+}
+
+/** Normalise a user-entered domain (strip scheme/path/trailing dot, lowercase). */
+export function normalizeDomain(raw: unknown): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/\.$/, '');
+}
+
+const NOTE_BY_TYPE: Record<string, string> = {
+  A: 'Points your domain to NavBharatAI',
+  AAAA: 'Points your domain to NavBharatAI (IPv6)',
+  TXT: 'Proves you own the domain / validates SSL',
+  CNAME: 'Points your domain to NavBharatAI',
+};
+
+/**
+ * Map a CustomDomain API resource to the exact DNS records the user still needs to add. We surface
+ * every `desiredDnsState` record whose `requiredAction` is ADD (i.e. not yet present); if the API
+ * omits `requiredAction`, we conservatively surface every desired record so the user is never left
+ * short an instruction.
+ */
+export function customDomainRecords(cd: ApiCustomDomain): CustomDomainDnsRecord[] {
+  const sets = cd.requiredDnsUpdates?.desiredDnsState ?? [];
+  const out: CustomDomainDnsRecord[] = [];
+  const anyActionFlagged = sets.some((s) => (s.records ?? []).some((r) => !!r.requiredAction));
+  for (const set of sets) {
+    for (const rec of set.records ?? []) {
+      const action = (rec.requiredAction || '').toUpperCase();
+      // Skip records that are already correct or must be removed — only ADD is an instruction.
+      if (anyActionFlagged && action !== 'ADD') continue;
+      const values = rec.rrdata ?? rec.rdata ?? [];
+      const type = (rec.type || '').toUpperCase();
+      for (const value of values) {
+        if (!value) continue;
+        out.push({
+          type,
+          name: rec.domainName || set.domainName || cd.customDomainId || '',
+          value,
+          note: NOTE_BY_TYPE[type],
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Map a CustomDomain API resource to an honest status (active only when genuinely live). */
+export function customDomainStatus(domain: string, cd: ApiCustomDomain): CustomDomainStatus {
+  const ownershipState = cd.ownershipState || 'OWNERSHIP_PENDING';
+  const hostState = cd.hostState || 'HOST_PENDING';
+  const sslState = cd.cert?.state || 'CERT_PENDING';
+  const active =
+    ownershipState === 'OWNERSHIP_ACTIVE' &&
+    hostState === 'HOST_ACTIVE' &&
+    sslState === 'CERT_ACTIVE';
+  return { domain, active, ownershipState, hostState, sslState, records: customDomainRecords(cd) };
+}
+
+// ── Live API (needs ADC; cannot be exercised in the dev sandbox — fails honestly) ───────────
+
+let _auth: GoogleAuth | null = null;
+function auth(): GoogleAuth {
+  if (!_auth) _auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/firebase'] });
+  return _auth;
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await auth().getAccessToken();
+  if (!token) {
+    throw new Error(
+      'Could not obtain a Google auth token for Firebase Hosting. On Cloud Run this works ' +
+      'automatically; locally set GOOGLE_APPLICATION_CREDENTIALS to a service-account JSON with ' +
+      'the "Firebase Hosting Admin" role.',
+    );
+  }
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
+async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const headers = await authHeaders();
+  const res = await fetch(`${HOSTING_API}${path}`, {
+    method: init?.method ?? 'GET',
+    headers,
+    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  const data = await res.json().catch(() => ({} as any));
+  if (!res.ok) {
+    const msg = (data as any)?.error?.message || `Firebase Hosting API error (HTTP ${res.status})`;
+    throw new Error(msg);
+  }
+  return data as T;
+}
+
+/**
+ * Ensure a dedicated Firebase Hosting site exists for this workspace (multi-site). Idempotent: a
+ * 409 (already exists) is treated as success. Returns the site id.
+ */
+export async function ensureSite(workspaceId: string): Promise<string> {
+  const siteId = siteIdForWorkspace(workspaceId);
+  try {
+    await api(`/projects/${FIREBASE_PROJECT}/sites?siteId=${encodeURIComponent(siteId)}`, {
+      method: 'POST',
+      body: {},
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Already exists → idempotent success. Anything else is a real failure.
+    if (!/already exists|HTTP 409|ALREADY_EXISTS/i.test(msg)) throw err;
+  }
+  return siteId;
+}
+
+/** Attach (or return the existing) custom domain on the workspace's dedicated site. */
+export async function attachCustomDomain(workspaceId: string, domain: string): Promise<CustomDomainStatus> {
+  // ROOT CAUSE of "Failed to start domain connection" (admin 2026-08-02, mitrify.xyz): this function
+  // assumed the workspace's dedicated site already existed — but the site is only created by the
+  // DEPLOY path (Deployment.ts). A user who connects a domain BEFORE a dedicated-site deploy (e.g.
+  // their app was published via the instant /pwa hosting instead) hit `customDomains.create` on a
+  // NONEXISTENT site → Google API 404 → 500. The site must be ensured HERE too — ensureSite is
+  // idempotent (409 = success), so a site the deploy path already created is simply reused.
+  const siteId = await ensureSite(workspaceId);
+  const existing = await getCustomDomainRaw(siteId, domain);
+  if (existing) return customDomainStatus(domain, existing);
+  await api(
+    `/projects/${FIREBASE_PROJECT}/sites/${siteId}/customDomains?customDomainId=${encodeURIComponent(domain)}`,
+    { method: 'POST', body: {} },
+  );
+  // create returns a long-running Operation; read the resource back for its DNS records + state.
+  const cd = (await getCustomDomainRaw(siteId, domain)) ?? {};
+  return customDomainStatus(domain, cd);
+}
+
+async function getCustomDomainRaw(siteId: string, domain: string): Promise<ApiCustomDomain | null> {
+  try {
+    return await api<ApiCustomDomain>(
+      `/projects/${FIREBASE_PROJECT}/sites/${siteId}/customDomains/${encodeURIComponent(domain)}`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/HTTP 404|NOT_FOUND/i.test(msg)) return null;
+    throw err;
+  }
+}
+
+/** Poll the current status of a workspace's custom domain (null if never attached). */
+export async function customDomainStatusLive(
+  workspaceId: string,
+  domain: string,
+): Promise<CustomDomainStatus | null> {
+  const siteId = siteIdForWorkspace(workspaceId);
+  const cd = await getCustomDomainRaw(siteId, domain);
+  return cd ? customDomainStatus(domain, cd) : null;
+}
+
+/**
+ * Classify a custom-domain failure into an HONEST, user-facing message.
+ *
+ * ROOT CAUSE (admin 2026-08-02): every failure surfaced the same "Failed to start domain connection.
+ * Please try again." — including PERMANENT ones. Telling a user to retry something that can never
+ * succeed by retrying is a dishonest instruction (rule 3) and leaves them looping forever. The real
+ * classes need different answers, and only some of them are "try again":
+ *   • permission/auth   — the server isn't allowed to create the domain yet ⇒ ADMIN action, not a retry.
+ *   • already-taken     — the domain is attached elsewhere ⇒ the USER must free it; a retry won't help.
+ *   • quota/rate        — genuinely temporary ⇒ wait, then retry.
+ *   • invalid/not-found — the input is wrong ⇒ fix the spelling.
+ * Pure + unit-tested; never leaks the raw API text (the real detail stays in the server log).
+ */
+export function customDomainErrorMessage(err: unknown): string {
+  const raw = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
+  if (/permission|denied|forbidden|unauthorized|403|401|iam|scope|credential|auth token/.test(raw)) {
+    return 'Custom domains are not switched on for this server yet — our team has to enable it. Retrying will not help; please contact support.';
+  }
+  if (/already (exists|owned|in use)|taken|conflict|409/.test(raw)) {
+    return 'That domain is already connected to another site. Remove it there first, then connect it here.';
+  }
+  if (/quota|rate|429|resource_exhausted/.test(raw)) {
+    return 'Too many domain requests right now. Please wait a few minutes and try again.';
+  }
+  if (/invalid|not.?found|400|404/.test(raw)) {
+    return 'That domain could not be set up — check the spelling (like myshop.com, no https:// and no slashes) and try again.';
+  }
+  return 'Could not start the domain connection. Please try again in a moment.';
+}
+
+/** True when Firebase Hosting deploys are available (ADC present). Mirrors the deploy provider. */
+export function firebaseHostingConfigured(): boolean {
+  // On Cloud Run ADC is always present (the platform service account). We cannot cheaply prove the
+  // IAM role here; a missing role surfaces as an honest error at call time, never a fake success.
+  return true;
+}
+
+/**
+ * Master flag for the Firebase-native custom-domain feature (Slice 2). OFF by default so merging the
+ * code changes nothing in production until the admin deliberately enables it AND runs the one live
+ * test. When off: the connect routes return an honest "not enabled" and the deploy path never
+ * publishes to a dedicated site (byte-identical to today).
+ */
+export function firebaseCustomDomainsEnabled(): boolean {
+  return /^(on|true|1)$/i.test((process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS || '').trim());
+}

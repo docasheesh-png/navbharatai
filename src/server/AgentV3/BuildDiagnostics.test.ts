@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, userFacingReport, importTurnObservation, honestModelLabel, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 describe('isClaudeModel (pure helper)', () => {
@@ -81,6 +81,52 @@ describe('BuildDiagnostics', () => {
     expect(r.counts.autoResolved).toBe(1);
   });
 
+  it('classifies a dead-sandbox "exit -1 (0s, empty)" as SANDBOX_UNAVAILABLE, not an app-build error (ShopSphere autopsy)', () => {
+    const d = fresh();
+    // The exact shape of the 81 dead-sandbox commands: the SDK threw, program never ran → exit -1, 0ms, empty.
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit 2>&1', exitCode: -1, stdout: '', stderr: '', durationMs: 0 });
+    const r = d.report();
+    const issue = r.issues.find((i) => i.code === 'SANDBOX_UNAVAILABLE');
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe('warning');
+    expect(issue?.message).toMatch(/sandbox was unavailable/i);
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD_FAILED')).toBe(false); // NOT blamed on the app
+  });
+
+  it('a REAL command failure (nonzero exit WITH output) still records as SANDBOX_CMD_FAILED', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'error TS2304: Cannot find name X', durationMs: 4200 });
+    const r = d.report();
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD_FAILED')).toBe(true);
+    expect(r.issues.some((i) => i.code === 'SANDBOX_UNAVAILABLE')).toBe(false); // a genuine failure is not excused
+  });
+
+  it('classifies a migrate that exits 0 but could not reach the DB as DB_UNREACHABLE (MediConnect autopsy)', () => {
+    const d = fresh();
+    // The exact MediConnect shape: `prisma migrate dev` exits 0 while its output says the DB is unreachable.
+    d.recordCommand({
+      command: 'npx prisma migrate dev --name init',
+      exitCode: 0,
+      stdout: '[health-check] Error: P1001: Can\'t reach database server at `localhost:5432`\n[health-check] dev server did not come up on port 5432 after automatic recovery.',
+      durationMs: 71474,
+    });
+    const r = d.report();
+    const issue = r.issues.find((i) => i.code === 'DB_UNREACHABLE');
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe('error');
+    expect(issue?.autoResolved).toBe(false);
+    expect(issue?.message).toMatch(/database was NOT reachable/i);
+    // The misleading exit-0 must NOT be logged as a benign success line.
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD' && /migrate/.test(i.message))).toBe(false);
+  });
+
+  it('a genuinely healthy migrate (exit 0, DB in sync) is NOT flagged DB_UNREACHABLE', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npx prisma migrate dev --name init', exitCode: 0, stdout: 'Your database is now in sync with your schema.', durationMs: 5000 });
+    const r = d.report();
+    expect(r.issues.some((i) => i.code === 'DB_UNREACHABLE')).toBe(false);
+  });
+
   it('derives a TOOL_ERROR from a failed tool_result event', () => {
     const d = fresh();
     d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: false, summary: 'npm install failed: ERESOLVE', ts: 1 } as AgentEvent);
@@ -108,6 +154,25 @@ describe('BuildDiagnostics', () => {
     expect(r.ok).toBe(true);
     expect(r.issues.every((i) => i.autoResolved)).toBe(true);
     expect(r.counts.unresolved).toBe(0);
+  });
+
+  it('finish(ok=true) back-fills recovered SANDBOX_CMD_FAILED as auto-resolved (PaisaTrack: no phantom unresolved)', () => {
+    const d = fresh();
+    // Two intermediate `tsc → exit 2` failures the agent then fixed; the build ultimately SUCCEEDED.
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.finish(true, 'Build complete.');
+    const r = d.report();
+    expect(r.ok).toBe(true);
+    expect(r.counts.unresolved).toBe(0); // recovered → not a phantom "unresolved" on a passing build
+    expect(r.issues.filter((i) => i.code === 'SANDBOX_CMD_FAILED').every((i) => i.autoResolved)).toBe(true);
+  });
+
+  it('finish(ok=false) keeps SANDBOX_CMD_FAILED unresolved (a genuinely failed build still names it)', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'build failed', durationMs: 3000 });
+    d.finish(false, 'failed');
+    expect(d.report().counts.unresolved).toBeGreaterThanOrEqual(1);
   });
 
   it('finish(ok=false) keeps tool errors/nudges UNRESOLVED', () => {
@@ -152,6 +217,32 @@ describe('BuildDiagnostics', () => {
     const r = d.report();
     expect(r.counts.total).toBe(0);
     expect(renderDiagnosticsText(r)).toContain('No problems recorded');
+  });
+});
+
+describe('hasRuntimeCrashBlocker — the render-rescue veto (real report 8a6e4585)', () => {
+  const mk = () => new BuildDiagnostics({ now: (() => { let t = 0; return () => (t += 10); })() });
+
+  it('true for an unresolved Rules-of-Hooks READINESS_BLOCKER ("crash at runtime")', () => {
+    const d = mk();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '1 React Rules-of-Hooks violation(s) (crash at runtime): useMemo@src/hooks/useChartData.ts:86', autoResolved: false });
+    expect(d.hasRuntimeCrashBlocker()).toBe(true);
+  });
+
+  it('true for undefined-JSX-component / undefined-hook crash blockers too', () => {
+    const d = mk();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '2 undefined JSX component(s) — used but never imported/defined (crash at runtime): <Foo>', autoResolved: false });
+    expect(d.hasRuntimeCrashBlocker()).toBe(true);
+  });
+
+  it('false for a non-crash readiness blocker (unresolved imports, low score)', () => {
+    const d = mk();
+    d.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '3 unresolved import(s) — the build will fail: ./x', autoResolved: false });
+    expect(d.hasRuntimeCrashBlocker()).toBe(false);
+  });
+
+  it('false when there is no readiness blocker at all', () => {
+    expect(mk().hasRuntimeCrashBlocker()).toBe(false);
   });
 });
 
@@ -303,6 +394,55 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     expect(deriveRootCause({ issues })).toBe('npm install failed');
   });
 
+  it('names INFRA honestly when the only failure is a dead sandbox — never blames the app (ShopSphere autopsy)', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'SANDBOX_UNAVAILABLE', message: '$ npx --no-install tsc --noEmit → could not run — the build sandbox was unavailable (reaped/expired/unreachable). Infrastructure condition, not an app error.', autoResolved: false },
+    ];
+    const rc = deriveRootCause({ issues, ok: false });
+    expect(rc).toMatch(/sandbox became unavailable/i);
+    expect(rc).toMatch(/infrastructure condition/i);
+    expect(rc).not.toMatch(/tsc/); // must NOT surface the raw "tsc → exit -1" as if the app failed to compile
+  });
+
+  it('an unresolved ERROR outranks an earlier unresolved WARNING (EstateNest: DB error, not the read_file warning)', () => {
+    // Real EstateNest timeline: two benign architect read_file-not-found WARNINGS (reading a file before it
+    // was written — build continued fine) appear BEFORE the terminal DB_UNREACHABLE ERROR. The old
+    // first-match order blamed "useAuth.ts does not exist"; severity must lead so the real killer wins.
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: "Tool call failed: path 'src/hooks/useAuth.ts' does not exist", autoResolved: false },
+      { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: "Tool call failed: path 'src/types/index.ts' does not exist", autoResolved: false },
+      { ts: 3, phase: 'build' as const, severity: 'error' as const, code: 'DB_UNREACHABLE', message: 'prisma migrate → the database was NOT reachable (P1001).', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: false })).toContain('database was NOT reachable');
+  });
+
+  it('a REAL app error still wins over a co-occurring sandbox-unavailable event', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED', message: '$ npm run build → exit 1 (TS2304)', autoResolved: false },
+      { ts: 2, phase: 'build' as const, severity: 'warning' as const, code: 'SANDBOX_UNAVAILABLE', message: 'sandbox went away', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: false })).toContain('npm run build');
+  });
+
+  it('a fast-lane handoff (SIMPLE_BUILD_OUTCOME) is NOT a terminal outcome — no false "BUILD_FAILED" (CollabDesk autopsy)', () => {
+    // The fast lane timed out and handed off to the full builder; the report was captured MID-full-builder.
+    // The handoff must NOT read as the build's rootCause — a cut/partial snapshot should say "still running",
+    // never "BUILD_FAILED" for a build that was progressing fine.
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_FALLBACK', message: 'Simple build timed out after generating 8 file(s) — the full builder continues from them.', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_OUTCOME', message: 'Fast-lane outcome (handed off to the full builder): BUILD_FAILED', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues })).toBeUndefined(); // ok not yet set → honest "still running", not a failure
+  });
+
+  it('the FULL builder\'s real OUTCOME_ still wins once it settles', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_OUTCOME', message: 'Fast-lane outcome (handed off to the full builder): BUILD_FAILED', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'OUTCOME_BUILD_SUCCESS', message: 'Build outcome: BUILD_SUCCESS', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build outcome: BUILD_SUCCESS');
+  });
+
   it('reports an honest "no problems" once the build settled clean', () => {
     expect(deriveRootCause({ issues: [], ok: true })).toBe('Build completed successfully with no problems recorded.');
   });
@@ -333,6 +473,95 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
       { ts: 2, phase: 'build' as const, severity: 'error' as const, code: 'BUILD_ERROR', message: 'transient error, later recovered', autoResolved: true },
     ];
     expect(deriveRootCause({ issues })).toBe('transient error, later recovered');
+  });
+
+  // PaisaTrack "fix all error" autopsy 2026-07-21: the build SUCCEEDED (app live, ok:true) yet the report
+  // named a recovered transient — "Tool call failed: Unterminated string in JSON" (a truncated large
+  // tool-call the agent retried) — as the build's rootCause, and showed the two benign exit-1 tool probes
+  // as unresolved. On a successful build a recovered transient is NEVER the root cause.
+  it('on ok:true, a recovered TOOL_ERROR is NOT the root cause — the success message wins', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: Unterminated string in JSON at position 98299', autoResolved: true },
+      { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: exit status 1', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('on ok:true, a recovered TOOL_ERROR is skipped even if its autoResolved flag was never back-filled', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: Unterminated string in JSON', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('on ok:true, a GENUINE unresolved non-recoverable error STILL wins (never hide a real defect)', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: retried', autoResolved: false },
+      { ts: 2, phase: 'build' as const, severity: 'error' as const, code: 'DB_UNREACHABLE', message: 'prisma migrate → the database was NOT reachable (P1001).', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toContain('database was NOT reachable');
+  });
+
+  it('when ok is NOT true, a recovered-code fallback is unchanged (still surfaces something on a failure)', () => {
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'npm install failed', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues })).toBe('npm install failed'); // ok undefined → today's behaviour
+    expect(deriveRootCause({ issues, ok: false })).toBe('npm install failed');
+  });
+});
+
+// PaisaTrack "fix all error" autopsy 2026-07-21 — the end-to-end honesty of a SUCCESSFUL build's report.
+describe('recovered-on-success honesty (PaisaTrack: an ok:true build never shows false "unresolved")', () => {
+  const fresh = () => new BuildDiagnostics({ now: () => 1, buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'fix the all error', model: 'x', framework: 'react' });
+
+  it('finish(true) resolves recovered TOOL_ERRORs → 0 unresolved, success root cause', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: false, summary: 'Unterminated string in JSON at position 98299', ts: 1 } as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c2', ok: false, summary: 'exit status 1', ts: 2 } as AgentEvent);
+    d.finish(true, '✅ All Errors Fixed!');
+    const r = d.report();
+    expect(r.counts.unresolved).toBe(0);
+    expect(r.counts.errors).toBe(0);
+    expect(r.rootCause).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('SERIALIZATION-time normalization: even without finish(), an ok:true report is honest (the bypassed-finalize bug)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: false, summary: 'Unterminated string in JSON at position 98299', ts: 1 } as AgentEvent);
+    // The `done` event flips ok:true but does NOT run finish()'s back-fill — the exact path that produced
+    // the dishonest downloaded report. report() must still normalize at serialization time.
+    d.ingestEvent({ type: 'done', ok: true, summary: 'live', ts: 2 } as AgentEvent);
+    const r = d.report();
+    expect(r.counts.unresolved).toBe(0);
+    expect(r.rootCause).not.toMatch(/Unterminated string/);
+  });
+});
+
+// PaisaTrack "fix all error" autopsy 2026-07-21: "Now I'll fix both errors: … Fix the TypeScript type
+// error" is the agent DOING remediation work — not a failure. It was recorded severity=error, inflating a
+// successful build's count to "1 error" under an "All Errors Fixed!" summary. Remediation intent with no
+// real failure verb is a STEP, not a problem.
+describe('AGENT_NOTE — remediation narration is progress, not an error', () => {
+  const fresh = () => new BuildDiagnostics({ now: () => 1 });
+  it('"Now I\'ll fix both errors" is a plain AGENT_STEP, not an AGENT_NOTE error', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'frontend', text: "Now I'll fix both errors: remove the unused Expense import and fix the TypeScript type error.", ts: 1 } as AgentEvent);
+    const r = d.report();
+    expect(r.issues.filter((i) => i.code === 'AGENT_NOTE')).toHaveLength(0);
+    expect(r.issues.filter((i) => i.code === 'AGENT_STEP')).toHaveLength(1);
+    expect(r.counts.errors).toBe(0);
+  });
+  it('"Removed the unused useEffect import" is a step, not a problem', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'frontend', text: 'Removed the unused useEffect import — no more warning.', ts: 1 } as AgentEvent);
+    expect(d.report().issues.filter((i) => i.code === 'AGENT_STEP')).toHaveLength(1);
+  });
+  it('but a GENUINE failure the agent is fixing STAYS a problem (real failure verb present)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'frontend', text: 'The build failed — fixing the missing import now.', ts: 1 } as AgentEvent);
+    const note = d.report().issues.find((i) => i.code === 'AGENT_NOTE');
+    expect(note?.severity).toBe('error');
   });
 });
 
@@ -922,5 +1151,197 @@ describe('AGENT_NOTE — benign compounds are never problems', () => {
     const notes = d.report().issues.filter((i) => i.code === 'AGENT_NOTE');
     expect(notes).toHaveLength(1);
     expect(notes[0].severity).toBe('error');
+  });
+});
+
+describe('userFacingReport (Fix 68) — a non-admin user sees NO provider/model name anywhere', () => {
+  const FORBIDDEN = /\b(glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|xai|openai|gpt|deepseek|moonshot|z\.?ai|bedrock)\b|(glm|kimi|claude|gemini|grok|gpt)[-/][\w.:-]+|\bE2B\b/i;
+
+  // A report with a real provider/model name planted in EVERY provider-bearing field.
+  const raw = {
+    schema: 'navbharatai.v3.build-diagnostics/1',
+    startedAt: 1000,
+    endedAt: 2000,
+    ok: true,
+    prompt: 'build me a Claude-style chat app', // the USER's own words — must survive verbatim
+    framework: 'react',
+    model: 'claude-opus-4-8',
+    summary: 'Built by GLM with 2 Claude (Sonnet) fallbacks; Gemini vision used.',
+    rootCause: 'Provider GLM failed (429 from Z.ai), fell back to claude-opus-4-8.',
+    review: 'Kimi (Moonshot) flagged a bug; Vertex confirmed.',
+    counts: { total: 3, errors: 1, warnings: 1, autoResolved: 1, unresolved: 0 },
+    builtBy: 'GLM',
+    providerDelivery: { GLM: 18, CLAUDE: 2 },
+    providerFailures: { GLM: 3, VERTEX: 1 },
+    providerTokens: { GLM: { inputTokens: 100, outputTokens: 50 }, CLAUDE: { inputTokens: 10, outputTokens: 5 } },
+    cacheReadInputTokens: 42,
+    issues: [
+      { ts: 1, phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'Provider GLM failed — falling back to claude-sonnet-4-6', autoResolved: true, detail: 'xai grok timed out' },
+    ],
+    problems: [
+      { ts: 1, phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'kimi-k2.7-code unavailable, Vertex fallback', autoResolved: true },
+    ],
+    errors: [{ ts: 1, phase: 'build', message: 'openai gpt-4o quota exceeded', stack: 'at anthropic.sdk (claude.ts)' }],
+    previewErrors: [{ ts: 1, source: 'in-browser', message: 'gemini-2.5-pro rate limited' }],
+    dataLossEvents: [{ ts: 1, cause: 'GLM sandbox recycled', detail: 'bedrock region reset' }],
+    generatedFiles: [{ path: 'src/App.tsx', content: 'export const App = () => null;' }],
+    llmCalls: [{ ts: 1, provider: 'GLM', model: 'glm-5.2', ok: true }],
+    commands: [{ ts: 1, command: 'npm i @anthropic-ai/sdk', output: 'ok' }],
+    billing: { billedUsd: 1, realCostUsd: 0.04, provider: 'GLM' },
+    manifest: { routing: { model: 'claude-opus-4-8', provider: 'CLAUDE' } },
+  } as unknown as BuildDiagnosticsReport;
+
+  it('THE INVARIANT: the entire user-facing report JSON contains no provider/model/infra name', () => {
+    const view = userFacingReport(raw);
+    // Scan every string in the serialized user view — but exclude the user's own prompt (their words are theirs).
+    const scrubbed = { ...view, prompt: undefined };
+    expect(JSON.stringify(scrubbed)).not.toMatch(FORBIDDEN);
+  });
+
+  it('OMITS the admin-only provider/forensic sections entirely', () => {
+    const view = userFacingReport(raw) as Record<string, unknown>;
+    for (const k of ['model', 'providerDelivery', 'builtBy', 'providerFailures', 'providerTokens', 'cacheReadInputTokens', 'llmCalls', 'commands', 'billing', 'manifest']) {
+      expect(view[k], `leaked admin-only field ${k}`).toBeUndefined();
+    }
+  });
+
+  it('KEEPS the user-relevant, provider-free content (their prompt + their generated files + counts + ok)', () => {
+    const view = userFacingReport(raw);
+    expect(view.prompt).toBe('build me a Claude-style chat app'); // verbatim — not corrupted
+    expect(view.generatedFiles?.[0].path).toBe('src/App.tsx');
+    expect(view.counts.errors).toBe(1);
+    expect(view.ok).toBe(true);
+    expect(view.framework).toBe('react');
+    // scrubbed prose still conveys the problem, just without the vendor name
+    expect(view.rootCause).toMatch(/failed|fell back|NavBharatAI|the model/i);
+  });
+
+  it('is idempotent and safe on a minimal report', () => {
+    const minimal = { schema: 'navbharatai.v3.build-diagnostics/1', startedAt: 1, counts: { total: 0, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 }, issues: [], problems: [] } as BuildDiagnosticsReport;
+    const once = userFacingReport(minimal);
+    expect(JSON.stringify(userFacingReport(once))).toBe(JSON.stringify(once));
+  });
+});
+
+// ── importTurnObservation — a survey turn's findings are OBSERVATIONS, not our unresolved defects ──
+// ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): a successful survey-only turn
+// ("Import this app … Do not change any files yet") reported 14 UNRESOLVED problems and named an
+// unused-dependency hint about the USER'S OWN repo as the build's rootCause — while the scan itself
+// ran on a knowingly partial file map (165 of the repo's 316 files landed).
+describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
+  const MSG = '"date-fns" is declared in package.json dependencies but no project file imports it.';
+
+  it('leaves a real build/edit turn completely unchanged', () => {
+    expect(importTurnObservation(false, MSG)).toEqual({ autoResolved: false, message: MSG });
+  });
+
+  it('marks an import-turn finding advisory so it can never count as unresolved', () => {
+    expect(importTurnObservation(true, MSG).autoResolved).toBe(true);
+  });
+
+  it('states BOTH honesty caveats: we changed nothing, and the scan may be incomplete', () => {
+    const out = importTurnObservation(true, MSG).message;
+    expect(out).toContain('nothing was changed');
+    expect(out).toContain('may not be accurate');
+    expect(out).toContain(MSG); // never hides the original finding
+  });
+
+  it('an advisory import-turn finding is never chosen as the build rootCause', () => {
+    const adv = importTurnObservation(true, MSG);
+    const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...adv }];
+    // ok:true + all findings autoResolved → the report says the build succeeded, not "unused dep".
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('the SAME finding on a real build turn still surfaces as the rootCause (no regression)', () => {
+    const real = importTurnObservation(false, MSG);
+    const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...real }];
+    expect(deriveRootCause({ issues, ok: true })).toBe(MSG);
+  });
+});
+
+// honestModelLabel — the report must name the model that ACTUALLY ran (autopsy 2026-07-27).
+// The reported build showed `model: "claude-sonnet-4-6"` while noClaude:true, builtBy:"KIMI" and
+// all 8 delivered turns were kimi-k2.5. Naming a model that never executed misdirects the one
+// person who reads this field: whoever is debugging routing.
+describe('honestModelLabel (autopsy 2026-07-27)', () => {
+  it('reports what actually delivered, not the router intent', () => {
+    expect(honestModelLabel('claude-sonnet-4-6', [
+      { model: 'kimi-k2.5', ok: true }, { model: 'kimi-k2.5', ok: true },
+    ])).toBe('kimi-k2.5');
+  });
+
+  it('uses the LAST successful call (the one that produced the delivered result)', () => {
+    expect(honestModelLabel('planned', [
+      { model: 'glm-4.7', ok: true }, { model: 'kimi-k2.5', ok: true },
+    ])).toBe('kimi-k2.5');
+  });
+
+  it('skips failed calls — a provider that errored did not deliver anything', () => {
+    expect(honestModelLabel('planned', [
+      { model: 'glm-5.2', ok: true }, { model: 'kimi-k2.5', ok: false },
+    ])).toBe('glm-5.2');
+  });
+
+  it('falls back to the planned label when nothing ran (never blank)', () => {
+    expect(honestModelLabel('claude-sonnet-4-6', [])).toBe('claude-sonnet-4-6');
+    expect(honestModelLabel(undefined, [])).toBeUndefined();
+  });
+});
+
+describe('counts — an OBSERVATION is neither a self-heal nor an unresolved defect (mitrify 2026-08-04)', () => {
+  it('importTurnObservation marks the entry as an observation on an import turn', () => {
+    const o = importTurnObservation(true, 'x is unused');
+    expect(o.autoResolved).toBe(true);
+    expect(o.observation).toBe(true);
+    expect(o.message).toContain('nothing was changed');
+  });
+
+  it('leaves a real build turn untouched — no observation flag, not auto-resolved', () => {
+    const o = importTurnObservation(false, 'x is unused');
+    expect(o.autoResolved).toBe(false);
+    expect(o.observation).toBeUndefined();
+    expect(o.message).toBe('x is unused');
+  });
+
+  it('does not inflate the auto-resolved tally — the reported build claimed 32 self-heals for ~0 fixes', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'import my repo' });
+    // one genuine self-heal …
+    d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed it', autoResolved: true });
+    // … and three advisory notes about the user's pre-existing code
+    for (const dep of ['stripe', 'ws', 'date-fns']) {
+      d.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...importTurnObservation(true, `"${dep}" is declared but unused`) });
+    }
+    // … and one thing genuinely still owed
+    d.record({ phase: 'build', severity: 'warning', code: 'COMPLIANCE_LOG_LEAK_FOUND', message: 'credential in a console log', autoResolved: false });
+
+    const c = d.report().counts;
+    expect(c.total).toBe(5);
+    expect(c.autoResolved).toBe(1);   // NOT 4 — the notes are not fixes
+    expect(c.unresolved).toBe(1);     // NOT 4 — the notes are not our defects either
+    expect(c.observations).toBe(3);
+  });
+
+  it('omits the observations key entirely when there are none (no change to a normal build report)', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'build me an app' });
+    d.record({ phase: 'build', severity: 'warning', code: 'X', message: 'y', autoResolved: true });
+    expect(d.report().counts.observations).toBeUndefined();
+  });
+
+  // Mitrify autopsy #2 (2026-08-04): a read-only import+survey turn with ZERO real heals reported
+  // healCount 32 — heartbeats, tool calls and narration lines are all `severity:'info',
+  // autoResolved:true`, and every one of them was counted as a "self-heal". Narration is not a fix.
+  it('info-severity timeline events (heartbeats, tool calls, narration) never count as self-heals', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'import my repo' });
+    d.heartbeat();                                                     // info, autoResolved:true
+    d.ingestEvent({ type: 'tool_call', tool: 'read_file', callId: 'c1', ts: 1 } as unknown as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: true, summary: 'ok', ts: 2 } as AgentEvent);
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Reading your files…', ts: 3 } as AgentEvent);
+    // … one GENUINE heal: a real warning v5 resolved.
+    d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed a broken import', autoResolved: true });
+
+    const c = d.report().counts;
+    expect(c.autoResolved).toBe(1); // NOT 5 — the timeline is activity, not fixes
+    expect(c.unresolved).toBe(0);   // and excluding info from heals must not turn it into "unresolved"
   });
 });

@@ -127,6 +127,65 @@ describe('parseOpenAiCompletion', () => {
     expect(r.rawContent).toEqual([{ type: 'text', text: 'Done!' }]);
   });
 
+  it('a text-only length stop is truncated (stopReason max_tokens + truncated flag)', () => {
+    const r = parseOpenAiCompletion({
+      choices: [{ message: { role: 'assistant', content: 'half a thought…' }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 100, completion_tokens: 32000 },
+    });
+    expect(r.stopReason).toBe('max_tokens');
+    expect(r.truncated).toBe(true);
+  });
+
+  it('UNMASKS a truncation that happened DURING a tool call (the CargoPilot kimi case)', () => {
+    // finish_reason 'length' + a tool_call → stopReason is forced to 'tool_use', but `truncated` must
+    // still be true so the guard sees the mid-write cutoff instead of being blind to it.
+    const r = parseOpenAiCompletion({
+      choices: [{
+        message: { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'write_file', arguments: '{"path":"big.tsx","content":"export const A = () =>' } }] },
+        finish_reason: 'length',
+      }],
+      usage: { prompt_tokens: 100, completion_tokens: 32000 },
+    });
+    expect(r.stopReason).toBe('tool_use'); // masked, as before (the loop still runs the tool)
+    expect(r.truncated).toBe(true);        // …but the truncation is now visible
+  });
+
+  it('SALVAGES the file path from a write_file whose content was cut off at the token limit', () => {
+    // The exact "Unterminated string in JSON" case: the JSON is sliced mid-content, so it no longer
+    // parses — but `path` came first and survived. The salvaged input carries the path and NO content,
+    // so the truncation guard can name the lost file and dispatch can only error honestly (never write).
+    const r = parseOpenAiCompletion({
+      choices: [{
+        message: { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'write_file', arguments: '{"path":"src/App.tsx","content":"import React from \\"react\\";\\nexport default function App(' } }] },
+        finish_reason: 'length',
+      }],
+      usage: { prompt_tokens: 100, completion_tokens: 64000 },
+    });
+    expect(r.truncated).toBe(true);
+    expect((r.toolUses[0].input as { path?: string }).path).toBe('src/App.tsx');
+    expect((r.toolUses[0].input as { content?: string }).content).toBeUndefined(); // partial content never carried through
+  });
+
+  it('does NOT salvage a path from malformed args when the turn was NOT truncated (stays {})', () => {
+    const r = parseOpenAiCompletion({
+      choices: [{
+        message: { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'write_file', arguments: '{"path":"src/App.tsx","content":"broken' } }] },
+        finish_reason: 'tool_calls', // not a length stop → no salvage, preserve prior {} behavior
+      }],
+      usage: { prompt_tokens: 100, completion_tokens: 20 },
+    });
+    expect(r.toolUses[0].input).toEqual({});
+  });
+
+  it('a normal completed tool call is NOT truncated', () => {
+    const r = parseOpenAiCompletion({
+      choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'write_file', arguments: '{"path":"a.ts","content":"export const A = 1;"}' } }] }, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 100, completion_tokens: 20 },
+    });
+    expect(r.stopReason).toBe('tool_use');
+    expect(r.truncated).toBeUndefined();
+  });
+
   it('captures the prefix-cache hit from prompt_tokens_details.cached_tokens (GLM/Kimi)', () => {
     const r = parseOpenAiCompletion({
       choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],

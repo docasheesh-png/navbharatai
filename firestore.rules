@@ -155,5 +155,84 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
+
+    // Live Collaboration rooms (src/components/ide/LiveCollaboration.tsx).
+    // Access model (admin-decided 2026-07-28): SIGNED-IN users only + OWNER APPROVAL to join. The
+    // 6-char Room ID lets a signed-in user find the room and REQUEST to join (a pending member doc);
+    // they cannot read the shared code / chat / AI / presence, or write anything, until the owner
+    // approves them. The owner can approve, reject, or KICK any member — all enforced here (not just
+    // in the UI). Rooms can't be enumerated. Sizes are capped under Firestore's 1 MB doc limit.
+    function isValidRoomCode(data) {
+      return !('code' in data) || (data.code is string && data.code.size() <= 700000);
+    }
+    function collabOwner(rid) {
+      return isSignedIn() && get(/databases/$(database)/documents/collab_rooms/$(rid)).data.createdBy == request.auth.uid;
+    }
+    function collabApproved(rid) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/collab_rooms/$(rid)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/collab_rooms/$(rid)/members/$(request.auth.uid)).data.status == 'approved';
+    }
+    function canAccessCollab(rid) { return collabOwner(rid) || collabApproved(rid); }
+    match /collab_rooms/{roomId} {
+      // Metadata only (createdBy / ownerName) — readable by any signed-in user so they can find the
+      // room and request to join. The shared CODE is NOT here; it lives in the approval-gated
+      // content subcollection, so a non-approved user can never read it.
+      allow get: if isSignedIn();
+      allow list: if false; // no enumerating all rooms — a room is reachable only by its exact ID
+      allow create: if isSignedIn() && isValidId(roomId) && incoming().createdBy == request.auth.uid;
+      allow update: if collabOwner(roomId) && incoming().createdBy == existing().createdBy; // only the owner edits room metadata
+      allow delete: if false; // rooms are cleaned up server-side (TTL), never client-deleted
+
+      // Shared code — APPROVAL-GATED (only the owner + approved members can read or edit it).
+      match /content/{docId} {
+        allow read: if canAccessCollab(roomId);
+        allow write: if canAccessCollab(roomId) && isValidRoomCode(incoming());
+      }
+
+      // Membership + join requests. A user creates their OWN pending request; only the OWNER
+      // approves (status→approved) or kicks (delete). A user may delete their own doc (leave).
+      match /members/{memberId} {
+        // Owner + approved members see the full roster; a requester can always read their OWN doc.
+        allow read: if canAccessCollab(roomId) || memberId == request.auth.uid;
+        allow create: if isSignedIn() && memberId == request.auth.uid
+                         && incoming().status in ['pending', 'approved']
+                         && (incoming().status == 'approved' ? collabOwner(roomId) : true);
+        allow update: if collabOwner(roomId); // only the owner approves/changes a member
+        allow delete: if collabOwner(roomId) || memberId == request.auth.uid; // owner kicks; a user can leave
+      }
+
+      // Live cursors — approval-gated read; you may only write your OWN presence doc.
+      match /presence/{memberId} {
+        allow read: if canAccessCollab(roomId);
+        allow write: if isOwner(memberId) && canAccessCollab(roomId);
+      }
+      // Team chat — approval-gated; you may only author your own messages; immutable after.
+      match /chat/{msgId} {
+        allow read: if canAccessCollab(roomId);
+        allow create: if canAccessCollab(roomId)
+                         && incoming().authorId == request.auth.uid
+                         && incoming().text is string && incoming().text.size() <= 2000;
+        allow update, delete: if false;
+      }
+      // Line-anchored comments — approval-gated; author your own; any member may resolve.
+      match /comments/{commentId} {
+        allow read: if canAccessCollab(roomId);
+        allow create: if canAccessCollab(roomId)
+                         && incoming().authorId == request.auth.uid
+                         && incoming().text is string && incoming().text.size() <= 1000;
+        allow update: if canAccessCollab(roomId);
+        allow delete: if false;
+      }
+      // Shared in-room AI thread (Phase 1a) — approval-gated. The member who triggers a turn writes
+      // BOTH the user prompt and the AI reply (authorId == their uid); billed to their own account.
+      match /ai_chat/{msgId} {
+        allow read: if canAccessCollab(roomId);
+        allow create: if canAccessCollab(roomId)
+                         && incoming().authorId == request.auth.uid
+                         && incoming().text is string && incoming().text.size() <= 20000;
+        allow update, delete: if false;
+      }
+    }
   }
 }

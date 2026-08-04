@@ -1,20 +1,27 @@
 import { Sandbox } from 'e2b';
+import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
-import { isDeadSandboxSignal, isDeadSandboxError } from './sandboxHealth';
+import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
+import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
+import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
+import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
 // idle sweep fires before E2B kills the sandbox on its own.
-const IDLE_LIMIT_MS = 45 * 60 * 1000;
+//
+// The limit itself now lives in sandboxReaper.ts (15 minutes, env-tunable) — it was 45, which meant a
+// five-minute build was followed by three quarters of an hour of billed idle VM, usually for someone
+// who had already closed the tab.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
@@ -143,9 +150,14 @@ const {chromium}=require('playwright');
 // Long-lived browser the agent drives across multiple interaction steps.
 // Launched once in the background; exposes a CDP port that action scripts
 // connect to. The DOM/cookies/current-URL persist between actions.
-// It also attaches console/pageerror/requestfailed listeners to every page
-// (existing and future) and appends runtime errors to CONSOLE_LOG as NDJSON —
+// It also attaches console/pageerror/requestfailed/response listeners to every
+// page (existing and future) and appends runtime errors to CONSOLE_LOG as NDJSON —
 // this is how the agent SEES runtime errors, not just compile/build errors.
+// The 'response' listener captures HTTP 5xx SERVER errors: a fetch/XHR that
+// COMPLETES with a 500 does NOT fire 'requestfailed' (that is transport-only), so
+// a broken API call is otherwise invisible to the auto-fix loop unless the app
+// happens to console.error it. Only 5xx is captured — 4xx (401/403/404) is left
+// out on purpose (auth/probing is routinely intentional and would be noise).
 const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');
 const fs=require('fs');
@@ -159,6 +171,7 @@ function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(
     page.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
     page.on('pageerror',e=>rec('pageerror',e&&e.message||e));
     page.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
+    page.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
   }
   setInterval(()=>{ try{ for(const ctx of browser.contexts()){ for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
   setInterval(()=>{}, 1<<30);
@@ -231,6 +244,10 @@ function extractDevPort(command: string): number {
   if (/\bexpress\b/.test(command)) return 3000;             // Express
   if (/\bfastify\b/.test(command)) return 3000;             // Fastify
   if (/\bserve\b/.test(command) && !/npm/.test(command)) return 3000; // http-server/serve
+  // A direct Node server launcher (`tsx server/index.ts`, `node dist/server.js`, `nodemon app.js`) carries
+  // no framework keyword, so it used to fall through to Vite's 5173 while the Express/Fastify server bound
+  // a Node port — the exact Mitrify "did not come up on port 5173" import failure. Treat it as a Node port.
+  if (isNodeServerCommand(command)) return 3000;
   return 5173; // Vite default
 }
 
@@ -258,6 +275,14 @@ export class E2BActuator implements IEngineerActuator {
   // the write-tracking hook, so the route drains them (takeSeededScaffold) and persists them durably —
   // otherwise package.json only reaches durable via a flaky end scan ("No package.json found" preview bug).
   private _seededScaffold = new Map<string, Record<string, string>>();
+  // Last time each workspace's DURABLE record was refreshed, so a live build's timestamp says "in use"
+  // to the cross-instance orphan reaper. Throttled — see shouldTouchDurable.
+  private _lastDurableTouch = new Map<string, number>();
+  // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
+  // WALL-CLOCK, which is a completely different cost shape from token spend — a build that used almost
+  // no tokens but held a VM for forty minutes still cost real money, and nothing in the build report
+  // showed it. See sandboxCost.ts.
+  private _sandboxStartedAt = new Map<string, number>();
 
   /**
    * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
@@ -352,22 +377,83 @@ export class E2BActuator implements IEngineerActuator {
     return { success: false, log: installLog };
   }
 
-  /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
+  /** Pause sandboxes with no activity for the idle limit (abandoned sessions). */
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
+    const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
       const last = this._lastActivity.get(workspaceId) ?? now;
-      if (now - last > IDLE_LIMIT_MS) {
+      if (now - last > limit) {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
+        this._lastDurableTouch.delete(workspaceId);
+        this._sandboxStartedAt.delete(workspaceId);
         this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
+        await sandboxStore.markPaused(workspaceId).catch(() => {});
+      }
+    }
+    await this._sweepOrphanSandboxes().catch(() => {});
+  }
+
+  /**
+   * Pause sandboxes NO instance can see any more — the leak the sweep above cannot reach.
+   *
+   * The in-memory sweep only knows about sandboxes in THIS process's map. Cloud Run runs several
+   * instances and recycles them, and NavBharatAI redeploys on every merge to main, so the instance
+   * that created a sandbox routinely disappears while the sandbox keeps running and keeps billing —
+   * until E2B's own hour-long lifetime finally expires. Nothing was pausing those.
+   *
+   * This pass reads the DURABLE record instead, so an orphan is visible whichever instance made it.
+   * Sandbox.pause is a static cloud-side call, so this instance can stop a VM it never held.
+   *
+   * Safety: the cut-off is held a whole max-length build plus a margin past the last recorded
+   * activity (reapAfterMs), a live build refreshes that record every few minutes, and anything this
+   * instance is actively holding is skipped outright. Every step is best-effort and swallowed — a
+   * cost sweep must never be able to fail a build.
+   */
+  private async _sweepOrphanSandboxes(): Promise<void> {
+    // The durable record only exists when warm resume is on — with it off there is nothing to read.
+    if (!sandboxResumeEnabled()) return;
+    const now = Date.now();
+    const records = await sandboxStore.listStale(now - reapAfterMs()).catch(() => []);
+    if (!records.length) return;
+    for (const rec of sandboxesToReap(records, now)) {
+      if (this.sandboxes.has(rec.workspaceId)) continue; // in use here — the sweep above owns it
+      const paused = await this.pauseSandbox(rec.sandboxId).catch(() => false);
+      // Stamp it either way. If the pause succeeded the compute is stopped; if it failed the sandbox
+      // is already gone or already paused. Re-trying it every two minutes forever helps in neither
+      // case, and the record stays so a returning user can still resume by id.
+      await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
+      if (paused) {
+        this._lastActivity.delete(rec.workspaceId);
+        this._lastDurableTouch.delete(rec.workspaceId);
+        this._sandboxStartedAt.delete(rec.workspaceId);
+        this._fileCache.delete(rec.workspaceId);
       }
     }
   }
 
+  /**
+   * Tell the DURABLE record this sandbox is in use right now, so the cross-instance orphan reaper can
+   * tell a running build apart from an abandoned VM.
+   *
+   * The record used to be written only when a build FINISHED, which meant a build in progress looked
+   * exactly like one that ended long ago. Throttled to one write per few minutes and deliberately not
+   * awaited — the caller is on the hot path of every file write and command, and a slow Firestore must
+   * never add latency to a build. (It writes no userId: a record created here is filled in by the
+   * end-of-build record(), and nothing about resume or reaping depends on that field.)
+   */
+  private _touchDurable(workspaceId: string, sandboxId: string): void {
+    if (!sandboxResumeEnabled() || !workspaceId || !sandboxId) return;
+    const now = Date.now();
+    if (!shouldTouchDurable(this._lastDurableTouch.get(workspaceId), now)) return;
+    this._lastDurableTouch.set(workspaceId, now);
+    void sandboxStore.touch(workspaceId, sandboxId).catch(() => {});
+  }
+
   private async getSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     // Refresh activity FIRST so any in-flight operation protects its sandbox from
-    // the idle sweep for the full IDLE_LIMIT_MS window.
+    // the idle sweep for its full window.
     this._lastActivity.set(workspaceId, Date.now());
 
     const existing = this.sandboxes.get(workspaceId);
@@ -375,6 +461,7 @@ export class E2BActuator implements IEngineerActuator {
       // Reset the E2B cloud-side countdown on every activity so a long build never
       // gets killed mid-run. Fire-and-forget — failure is non-fatal.
       existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+      this._touchDurable(workspaceId, existing.sandboxId);
       return existing;
     }
 
@@ -399,6 +486,11 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
+    // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
+    // what made a running build indistinguishable from an abandoned one.
+    this._lastDurableTouch.delete(workspaceId);
+    this._touchDurable(workspaceId, sandbox.sandboxId);
     // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY. When we hold a cached copy of the
     // source files this workspace already wrote (the dead sandbox that was just evicted), replay them so
     // the build continues instead of losing everything. No-op on the very first create (cache empty).
@@ -725,9 +817,18 @@ export class E2BActuator implements IEngineerActuator {
           } catch { /* best-effort — never block the dev server on a config patch */ }
         }
       }
-      const devCommand = redirectDevServerOutput(
+      let devCommand = redirectDevServerOutput(
         disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework)),
       );
+      // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
+      // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
+      // the launch never loaded it. Auto-export every KEY=value from .env into the process env before
+      // starting, so ANY app (dotenv or not) sees its env. `set -a` auto-exports; sourcing is guarded with
+      // `2>/dev/null || true` so a malformed user line can never abort the launch (worst case = today's
+      // behaviour). Kill switch: AGENTV3_DEVSERVER_LOAD_DOTENV=off.
+      if ((process.env.AGENTV3_DEVSERVER_LOAD_DOTENV ?? '').trim().toLowerCase() !== 'off') {
+        devCommand = `set -a; if [ -f .env ]; then . ./.env 2>/dev/null || true; fi; set +a; ${devCommand}`;
+      }
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the
       // scaffold/agent declared a new dep (e.g. tailwindcss) but node_modules is stale,
@@ -791,22 +892,72 @@ export class E2BActuator implements IEngineerActuator {
       const MAX_RECOVERY = 2;
       for (let attempt = 1; !portUp && attempt <= MAX_RECOVERY; attempt++) {
         devLog = await readDevLog();
-        const diag = planDevServerRecovery(devLog, attempt, MAX_RECOVERY);
+        // ROOT CAUSE (mitrify autopsy 2026-08-04, buildId ca5a4ca8): this used to call
+        // planDevServerRecovery(devLog, attempt, MAX_RECOVERY), which escalates to `give_up` as soon as
+        // `attempt >= maxAttempts`. With MAX_RECOVERY = 2 that made the LAST attempt do NOTHING: it was
+        // diagnosed, then broke out before the recovery ran. So "2 recovery attempts" only ever performed
+        // ONE action — and worse, the give_up branch printed the diagnosis detail verbatim, which for a
+        // db_unreachable reads "provisioning PostgreSQL, writing DATABASE_URL, and retrying". The user was
+        // told we were provisioning a database while we provisioned nothing. Announcing an action we do
+        // not take is exactly the fake-success the second absolute rule forbids.
+        // The escalation is now decided AFTER the loop (below), so every attempt inside it performs a real
+        // recovery. `code_fix` still short-circuits — a source error fails identically on every restart.
+        const diag = classifyDevServerFailure(devLog);
         lastDiagnosis = diag;
-        if (diag.recovery === 'code_fix' || diag.recovery === 'give_up') {
-          // A syntax/transform error fails identically on every restart, and give_up means attempts are
-          // spent — surface the real cause and stop wasting the build budget on restarts.
+        if (diag.recovery === 'code_fix') {
           stdout += `\n[health-check] ${diag.detail}`;
           break;
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {
+          // PARTIAL-INSTALL REPAIR (mitrify autopsy 2026-08-04): when the log proves ONE package
+          // installed only partially (its own file could not resolve a sibling — e.g. lucide-react's
+          // barrel importing ./icons/*.js that never landed), a plain `npm install` is a NO-OP: the
+          // dependency is already in package.json and the directory already exists, so npm has nothing
+          // to do and the next restart fails identically. The broken tree must be REMOVED first, or the
+          // "heal" runs, reports success, and changes nothing — the fake-heal this rule forbids.
+          if (diag.corruptPackage && /^(?:@[\w.-]+\/)?[\w.-]+$/.test(diag.corruptPackage)) {
+            await sandbox.commands
+              .run(`rm -rf ${WORKSPACE_ROOT}/node_modules/${diag.corruptPackage}`, { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 })
+              .catch(() => { /* best-effort — the reinstall below still runs */ });
+            stdout += ` (removed the incomplete "${diag.corruptPackage}" so it reinstalls cleanly)`;
+          }
           const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
           stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
+        }
+        // DB reaped/never-started (EstateNest autopsy 2026-07-20): a from-scratch Prisma+Postgres app can
+        // preview many minutes after the build began, by which point the sandbox Postgres has been reaped —
+        // `npm run dev` then crashes on boot with P1001 and a blind restart can never revive it. Restart the
+        // DB itself (provisionBackend is idempotent: it re-runs `pg_ctlcluster … start` in the same sandbox,
+        // fast when Postgres is already installed) BEFORE relaunching, so the dev server can connect. The
+        // .env DATABASE_URL written when the DB was first provisioned still points at the same local Postgres.
+        if (diag.recovery === 'reprovision_db') {
+          try {
+            const prov = await this.provisionBackend(workspaceId, ['db']);
+            // FIRST-TIME provision (Mitrify autopsy 2026-08-02): a from-scratch Drizzle/Express app was never
+            // provisioned, so there is no DATABASE_URL anywhere. provisionBackend restarted Postgres AND
+            // returned the URL — write it into .env (merge, preserving the user's other vars) so the app can
+            // read it. For a previously-provisioned app whose DB was merely reaped, .env already has the same
+            // URL and this merge is a harmless no-op. The relaunch below loads .env into the dev-server env.
+            const url = prov?.envVars?.DATABASE_URL;
+            if (url) {
+              const envPath = `${WORKSPACE_ROOT}/.env`;
+              const current = await sandbox.files.read(envPath).catch(() => '');
+              await sandbox.files.write(envPath, mergeEnvVar(current, 'DATABASE_URL', url)).catch(() => {});
+            }
+            stdout += ' (PostgreSQL provisioned + DATABASE_URL written to .env).';
+          } catch {
+            stdout += ' (PostgreSQL provision reported errors — retrying anyway).';
+          }
         }
         // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).
         await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 }).catch(() => {});
         portUp = await launchAndWait(20);
+      }
+      // Attempts are spent and the server is still down: NOW escalate to give_up, with a detail that
+      // states the terminal truth instead of the "here is what I am about to do" text the loop used.
+      if (!portUp && lastDiagnosis && lastDiagnosis.recovery !== 'code_fix') {
+        lastDiagnosis = planDevServerRecovery(devLog, MAX_RECOVERY + 1, MAX_RECOVERY);
       }
 
       // The dev server's output goes to a FILE (redirectDevServerOutput), so read it for drift detection
@@ -868,13 +1019,16 @@ export class E2BActuator implements IEngineerActuator {
         const result = await sb.commands.run(command, { cwd: WORKSPACE_ROOT, timeoutMs: cmdTimeoutMs });
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       } catch (err: any) {
-        const dead = isDeadSandboxSignal({ exitCode: -1, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
+        // A non-zero exit REJECTS here (E2B CommandExitError) — recover the REAL exit code so a genuine
+        // command failure (tsc exit 2) is reported honestly, not flattened to the -1 dead-sandbox sentinel.
+        const realExit = resolveThrownCommandExit(err);
+        const dead = isDeadSandboxSignal({ exitCode: realExit, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
         if (attempt === 0 && dead && this.sandboxes.get(workspaceId) === sb) {
           this.sandboxes.delete(workspaceId); // drop the reaped sandbox reference
           try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
           catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
         }
-        return { exitCode: -1, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
+        return { exitCode: realExit, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
       }
     }
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };
@@ -934,6 +1088,80 @@ const {chromium}=require('playwright');
   async getPortUrl(workspaceId: string, port: number): Promise<string> {
     const sandbox = await this.getSandbox(workspaceId);
     return `https://${sandbox.getHost(port)}`;
+  }
+
+  /**
+   * Scan the RENDERED page and return every visible element with the facts needed to locate it in the
+   * source: its class string (greppable verbatim), text, position, computed colours, and the
+   * `data-nbai-src` stamp when the preview provides one.
+   *
+   * WHY (mitrify autopsy 2026-08-04): the agent could screenshot a page but had no pixel→file path, so
+   * a request to remove a small green dot became ~30 blind greps over 20 minutes and then a destructive
+   * guess. This is the missing half — see UiElementFinder.ts for the matching + the honest
+   * proof-of-absence. Bounded and best-effort: an unavailable browser returns an empty list, and the
+   * caller reports that honestly rather than pretending the element is absent.
+   */
+  async scanUiElements(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    if (!this._playwrightReady.has(workspaceId)) this._kickoffPlaywright(sandbox, workspaceId);
+    const ready = await Promise.race([
+      this._playwrightReady.get(workspaceId)!,
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 60_000)),
+    ]).catch(() => false);
+    // NO BROWSER ⇒ scanned:false, NOT "no elements". The difference matters: an empty list from a real
+    // scan is evidence the thing is absent; an empty list from a failed scan is evidence of nothing.
+    if (!ready) return { elements: [], scanned: false };
+
+    // domcontentloaded + settle, never networkidle: a Vite dev server's HMR socket never goes idle, so
+    // networkidle times out and captures the un-hydrated shell (the exact false-negative that made the
+    // preview self-check report "Present: none" for every React build).
+    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
+const {chromium}=require('playwright');
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+  await p.setViewportSize({width:1280,height:800});
+  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+  await p.waitForTimeout(1800);
+  const out=await p.evaluate(()=>{
+    var res=[];
+    var all=document.querySelectorAll('body *');
+    for(var i=0;i<all.length && res.length<600;i++){
+      var e=all[i];
+      var r=e.getBoundingClientRect();
+      if(r.width<=0||r.height<=0) continue;              // invisible: no box
+      var cs=getComputedStyle(e);
+      if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0) continue;
+      var host=e.closest?e.closest('[data-nbai-src]'):null;
+      var own=e.children.length===0?(e.textContent||'').trim():'';
+      res.push({
+        tag:e.tagName.toLowerCase(),
+        className:typeof e.className==='string'?e.className.slice(0,240):'',
+        id:e.id||undefined,
+        text:own?own.slice(0,120):undefined,
+        selector:(e.id?('#'+e.id):(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
+        source:host?(host.getAttribute('data-nbai-src')||undefined):undefined,
+        rect:{x:r.x,y:r.y,w:r.width,h:r.height},
+        bg:cs.backgroundColor,
+        color:cs.color,
+        borderRadius:cs.borderRadius,
+        src:e.tagName==='IMG'?(e.getAttribute('src')||undefined):undefined
+      });
+    }
+    return res;
+  }).catch(function(){return [];});
+  process.stdout.write(JSON.stringify(out));
+  await b.close();
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
+" 2>/dev/null`;
+    const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 }).catch(() => null);
+    if (!run || run.exitCode !== 0 || !run.stdout.trim()) return { elements: [], scanned: false };
+    try {
+      const parsed = JSON.parse(run.stdout.trim());
+      return Array.isArray(parsed) ? { elements: parsed, scanned: true } : { elements: [], scanned: false };
+    } catch {
+      return { elements: [], scanned: false };
+    }
   }
 
   async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
@@ -1057,13 +1285,15 @@ const {chromium}=require('playwright');
   async getConsoleErrors(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured: boolean }> {
     const sandbox = await this.getSandbox(workspaceId);
     let raw = '';
     try {
       raw = await withTimeout(sandbox.files.read(CONSOLE_LOG), 15_000, 'files.read(console)');
     } catch {
-      return { errors: [] }; // no browser session yet / no errors logged / read stalled
+      // No CONSOLE_LOG (no live browser session was ever opened) / read stalled → we did NOT actually
+      // capture the console. captured:false so the caller records "runtime unchecked", not a false clean.
+      return { errors: [], captured: false };
     }
     const errors: { t: number; kind: string; text: string }[] = [];
     for (const line of raw.split('\n')) {
@@ -1076,13 +1306,99 @@ const {chromium}=require('playwright');
         }
       } catch { /* skip malformed line */ }
     }
-    // Cap to the most recent 20 to keep the AI prompt bounded
-    return { errors: errors.slice(-20) };
+    // The log file existed and was read → the console WAS captured (empty errors here = genuinely clean).
+    // Cap to the most recent 20 to keep the AI prompt bounded.
+    return { errors: errors.slice(-20), captured: true };
+  }
+
+  /**
+   * Seconds this instance has held a sandbox for the workspace, or null when it never created one
+   * (a build served entirely from another instance's sandbox, or no sandbox at all). Null means
+   * "not measured" — the report says exactly that rather than showing a zero that looks like a fact.
+   */
+  sandboxHeldSeconds(workspaceId: string): number | null {
+    const started = this._sandboxStartedAt.get(workspaceId);
+    if (!started) return null;
+    return Math.max(0, Math.round((Date.now() - started) / 1000));
   }
 
   async getSandboxId(workspaceId: string): Promise<string | null> {
     const sandbox = this.sandboxes.get(workspaceId);
     return sandbox ? sandbox.sandboxId : null;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // PtyHost — real, persistent shells for Code Studio (see ShellSessions.ts for the why).
+  //
+  // `runCommand` above runs one command to completion and returns; these four run a genuine TTY that
+  // stays alive between commands, which is what makes `cd`, Ctrl+C, colours and interactive prompts
+  // work at all. The PTY is a process inside the sandbox that is ALREADY running for this workspace,
+  // so a shell costs a process, not a machine.
+  // ---------------------------------------------------------------------------------------------
+
+  /** Live PTY handles by pid, so the shell can be killed and so the process isn't garbage-collected. */
+  private ptys = new Map<number, { handle: CommandHandle; workspaceId: string }>();
+
+  async openPty(
+    workspaceId: string,
+    opts: { cols: number; rows: number; onData: (chunk: string) => void; onExit: (code?: number) => void },
+  ): Promise<{ pid: number }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'command');
+
+    // A STREAMING decoder, not `new TextDecoder().decode(chunk)` per callback. PTY output arrives in
+    // arbitrary byte-sized pieces, so a multi-byte character (₹, an emoji, a box-drawing glyph in a
+    // progress bar) is routinely split across two chunks. Decoding each chunk independently would
+    // turn every such split into a replacement character — the terminal would look subtly corrupted
+    // for exactly the output that matters most to an Indian user.
+    const decoder = new TextDecoder('utf-8');
+
+    const handle = await sandbox.pty.create({
+      cols: opts.cols,
+      rows: opts.rows,
+      cwd: WORKSPACE_ROOT,
+      // Interactive programs read TERM to decide whether they may use colour and cursor movement.
+      // Without it they fall back to dumb output and the shell looks nothing like a real terminal.
+      envs: { TERM: 'xterm-256color' },
+      // The SDK default is 60 SECONDS — a persistent shell needs an hour. ShellSessions reaps idle
+      // shells long before this; this is the sandbox-side backstop against a forgotten process.
+      timeoutMs: 60 * 60 * 1000,
+      onData: (data: Uint8Array) => {
+        try { opts.onData(decoder.decode(data, { stream: true })); } catch { /* never break the stream */ }
+      },
+    });
+
+    this.ptys.set(handle.pid, { handle, workspaceId });
+    // `wait()` rejects with CommandExitError on a non-zero exit — for a shell that is the ORDINARY
+    // case (`exit 1`, or Ctrl+D after a failed command), not an error to log. Either way the shell is
+    // over, and the reader is told honestly.
+    void handle
+      .wait()
+      .then((r) => opts.onExit(typeof r.exitCode === 'number' ? r.exitCode : undefined))
+      .catch((e: unknown) => opts.onExit(typeof (e as { exitCode?: number })?.exitCode === 'number' ? (e as { exitCode: number }).exitCode : undefined))
+      .finally(() => { this.ptys.delete(handle.pid); });
+
+    return { pid: handle.pid };
+  }
+
+  async writePty(workspaceId: string, pid: number, data: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    await sandbox.pty.sendInput(pid, new TextEncoder().encode(data));
+  }
+
+  async resizePty(workspaceId: string, pid: number, cols: number, rows: number): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    await sandbox.pty.resize(pid, { cols, rows });
+  }
+
+  async killPty(workspaceId: string, pid: number): Promise<boolean> {
+    this.ptys.delete(pid);
+    try {
+      const sandbox = await this.getSandbox(workspaceId);
+      return await sandbox.pty.kill(pid);
+    } catch {
+      return false; // sandbox already gone ⇒ the PTY is gone with it
+    }
   }
 
   async searchFiles(workspaceId: string, terms: string[]): Promise<string[]> {
@@ -1189,23 +1505,49 @@ const {chromium}=require('playwright');
     if (features.includes('db')) {
       // Install PostgreSQL if missing, then start it and create the app database.
       // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
+      // Idempotent: installs Postgres only if missing, (re)starts the cluster, then POLLS pg_isready until
+      // the server actually accepts connections before declaring success. The readiness poll (not a flat
+      // `sleep 2`) is what makes this reliable both on first provision AND as a boot-time restart of a
+      // reaped Postgres (EstateNest autopsy 2026-07-20) — a slow start is waited for instead of abandoned,
+      // and the "DB_URL:" marker is emitted ONLY when the DB is genuinely reachable, so a failed start is
+      // not masked as ready. `createdb` is retried after readiness so the app database always exists.
       const pgResult = await sandbox.commands.run(
-        `set -e
-if ! which psql > /dev/null 2>&1; then
+        `if ! which psql > /dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq 2>&1 | tail -2
   apt-get install -y -qq postgresql 2>&1 | tail -5
 fi
 PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main status 2>/dev/null || pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3
-sleep 2
-su postgres -c "createdb myapp 2>/dev/null || true"
-echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
+pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
+for i in $(seq 1 20); do
+  if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
+  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
+  sleep 1
+done
+if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+  su postgres -c "createdb myapp 2>/dev/null || true"
+  echo "DB_URL:postgresql://postgres@localhost:5432/myapp"
+else
+  echo "DB_NOT_READY"
+fi`,
         { timeoutMs: 120_000 },
       ).catch(() => null);
 
       const match = pgResult?.stdout?.match(/DB_URL:(postgresql:\/\/\S+)/);
+      // Only trust a DB_URL the sandbox confirmed reachable. If the poll never saw pg_isready succeed
+      // (DB_NOT_READY / null result), fall back to the canonical URL so the .env still points at the
+      // local Postgres — the downstream P1001 detector (dev-server reprovision + mid-build lock-release)
+      // then handles a genuinely-dead DB honestly rather than this masking a failure as ready.
       dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
+      // KEEPALIVE WATCHDOG (last-5-reports class fix, 2026-07-20): the sandbox reaps the Postgres daemon
+      // minutes after provision — the root class behind builds #14→#18. Arm ONE in-sandbox loop (pgrep-
+      // guarded against duplicates) that restarts the cluster within ~20s of it dying, so a reap
+      // self-heals BEFORE any migrate/seed/preview can hit P1001. Armed here — the single provisioning
+      // choke point — so first provision, mid-build revival, and preview-boot revival all re-arm it.
+      // Best-effort: if nohup/setsid can't detach in this sandbox, the reactive nets still stand.
+      if (match) {
+        await sandbox.commands.run(postgresWatchdogCommand(), { timeoutMs: 15_000 }).catch(() => null);
+      }
     }
 
     const jwtSecret = `jwt_${Math.random().toString(36).slice(2)}_${Date.now()}`;

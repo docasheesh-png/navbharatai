@@ -9,9 +9,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
+// The route calls runProfessionalChatWithUsage — the variant that returns the turn's COST alongside the
+// reply, because the wallet is one currency now and a professional answer draws on the same balance a
+// build does (aiTurnCharge.ts). The identity and tier arguments are unchanged, which is what these
+// tests are actually about.
 const runChatMock = vi.fn();
 vi.mock('../src/server/professionals/engine', () => ({
-  runProfessionalChat: (...args: unknown[]) => runChatMock(...args),
+  runProfessionalChatWithUsage: (...args: unknown[]) => runChatMock(...args),
+}));
+
+// The charge is fire-and-forget after the answer. Stubbed so these tests never touch the money path;
+// that it cannot be reached before the reply exists is asserted in aiTurnCharge.test.ts.
+const chargeMock = vi.fn().mockResolvedValue({ charge: false, reason: 'disabled', billedInr: 0, debited: false, tokensDebited: 0 });
+vi.mock('../src/server/lib/aiTurnCharge', async (importOriginal) => ({
+  // Keep the REAL flag helper: passGate imports it too, and the gate's inert-by-default behaviour is
+  // part of what these tests exercise. Only the charge itself is stubbed.
+  ...(await importOriginal<typeof import('../src/server/lib/aiTurnCharge')>()),
+  chargeForAiTurn: (...args: unknown[]) => chargeMock(...args),
 }));
 
 const verifyIdentityMock = vi.fn();
@@ -38,7 +52,7 @@ function chatHandler() {
 
 describe('professional chat route — verified identity only', () => {
   beforeEach(() => {
-    runChatMock.mockReset().mockResolvedValue('teacher reply');
+    runChatMock.mockReset().mockResolvedValue({ reply: 'teacher reply', spend: {} });
     verifyIdentityMock.mockReset().mockResolvedValue(null);
   });
 

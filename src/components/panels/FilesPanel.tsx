@@ -9,7 +9,8 @@
  * Owns the hidden file input ref internally.
  */
 import React, { useRef, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy } from 'lucide-react';
+import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy, Eye } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';
 import { SkeletonList } from '../ui/Skeleton';
@@ -96,6 +97,10 @@ export function FilesPanel({
   // Touch mode: which file's inline action menu is open, + honest copy feedback ("Copied ✓" /
   // the real failure) — a copy that silently did nothing would be a fake success.
   const [actionPath, setActionPath] = useState<string | null>(null);
+  // READ-ONLY VIEWER (admin 2026-08-02): "See" shows the file exactly as it is, without opening the
+  // Code Studio editor — so a user can read a file (on a phone especially) with zero risk of a stray
+  // tap changing it. "Open" keeps its existing behaviour (edit in Code Studio).
+  const [viewPath, setViewPath] = useState<string | null>(null);
   const [copyNote, setCopyNote] = useState<string | null>(null);
   const copyToClipboard = (text: string, what: string) => {
     navigator.clipboard.writeText(text).then(
@@ -148,7 +153,7 @@ export function FilesPanel({
   };
 
   return (
-    <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
+    <div className="relative flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
       {/* Upload conflict popup */}
       {fileUploadConflict && (
         <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => onResolveConflict('merge')}>
@@ -310,6 +315,15 @@ export function FilesPanel({
                             {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete. Hover-revealed on
                                 desktop; on touch layouts they stay visible (hover doesn't exist there). */}
                             <div className="flex items-center gap-0.5 pr-2 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                              {/* "See" (admin 2026-08-02) — read-only view, parity with the touch menu so
+                                  desktop users can read a file without opening the editor either. */}
+                              <button
+                                onClick={() => setViewPath(path)}
+                                title="View read-only"
+                                className="p-1 text-[#484f58] hover:text-emerald-400 rounded transition-colors"
+                              >
+                                <Eye className="w-2.5 h-2.5" />
+                              </button>
                               <button
                                 onClick={() => navigator.clipboard.writeText(path).catch(() => {})}
                                 title="Copy file path"
@@ -359,6 +373,13 @@ export function FilesPanel({
                           Copy path · Delete. Real full-width buttons (guaranteed tap→click on iOS). */}
                       {tapActions && actionPath === path && !isRenaming && (
                         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5">
+                          <button
+                            onClick={() => { setActionPath(null); setViewPath(path); }}
+                            title="View this file read-only (no editing)"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-[10px] font-semibold text-emerald-300 touch-manipulation"
+                          >
+                            <Eye className="w-3 h-3" /> See
+                          </button>
                           <button
                             onClick={() => { setActionPath(null); onOpenFile(path); }}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-[10px] font-semibold text-indigo-300 touch-manipulation"
@@ -441,7 +462,7 @@ export function FilesPanel({
                       title={`Restore to version ${versions.length - i}`}
                     >
                       {restoringId === v.id ? (
-                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        <TirangaLoader className="w-2.5 h-2.5" />
                       ) : (
                         <RotateCcw className="w-2.5 h-2.5" />
                       )}
@@ -452,6 +473,61 @@ export function FilesPanel({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* READ-ONLY FILE VIEWER (admin 2026-08-02) — the "See" action. Shows the file exactly as stored,
+          with NO editable surface at all: it renders into a <pre>, so there is no input, no textarea and
+          no save path a stray tap could reach. "Open" still hands the file to the Code Studio editor. */}
+      {viewPath !== null && (
+        <div
+          className="absolute inset-0 z-30 flex flex-col bg-[#0d1117]"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Viewing ${viewPath}`}
+        >
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/10 bg-[#161b22]">
+            <Eye className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+            <span className="text-[11px] font-semibold text-[#c9d1d9] truncate flex-1" title={viewPath}>
+              {viewPath}
+            </span>
+            <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30">
+              READ ONLY
+            </span>
+            <button
+              onClick={() => copyToClipboard(typeof files[viewPath] === 'string' ? files[viewPath] : '', 'File')}
+              title="Copy file contents"
+              className="flex-shrink-0 p-1.5 rounded-lg text-[#8b949e] hover:text-white hover:bg-white/5 transition-colors touch-manipulation"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewPath(null)}
+              title="Close"
+              aria-label="Close file viewer"
+              className="flex-shrink-0 p-1.5 rounded-lg text-[#8b949e] hover:text-white hover:bg-white/5 transition-colors touch-manipulation"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto custom-scrollbar">
+            <pre className="p-3 text-[11px] leading-relaxed text-[#c9d1d9] font-mono whitespace-pre-wrap break-words select-text">
+              {typeof files[viewPath] === 'string' && files[viewPath].length > 0
+                ? files[viewPath]
+                : '(this file is empty)'}
+            </pre>
+          </div>
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-white/10 bg-[#161b22]">
+            {copyNote
+              ? <span className="text-[10px] text-emerald-400">{copyNote}</span>
+              : <span className="text-[10px] text-[#484f58]">Viewing only — nothing here can change the file.</span>}
+            <button
+              onClick={() => { const p = viewPath; setViewPath(null); onOpenFile(p); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-[10px] font-semibold text-indigo-300 touch-manipulation"
+            >
+              <FileCode className="w-3 h-3" /> Edit in Code Studio
+            </button>
+          </div>
         </div>
       )}
     </div>

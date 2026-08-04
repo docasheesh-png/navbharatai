@@ -2,8 +2,8 @@ import React, { lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database,
-  GitFork, Terminal, Activity, GitBranch, Bot, Mic, MessageSquare, Wand2, Bug, Code,
-  TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Camera, Layout, Puzzle, LayoutTemplate,
+  GitFork, Terminal, Activity, GitBranch, Bot, MessageSquare, Wand2, Bug, Code,
+  TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Layout, Puzzle, LayoutTemplate,
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
@@ -15,6 +15,7 @@ import {
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
 } from '../../lib/a11y';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
+import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -25,6 +26,20 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 
 const SecretManager    = _lz(() => import('../SecretManager'),             'SecretManager');
 const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'DatabaseSettings');
+const StorageSettings  = _lz(() => import('../settings/StorageSettings'),  'StorageSettings');
+const AuthSettings     = _lz(() => import('../settings/AuthSettings'),     'AuthSettings');
+// Multi-Cloud Deploy — moved into App Settings (admin 2026-07-29). Deploy the built app to
+// NavBharat Hosting, Vercel, Netlify, Firebase, Cloud Run, Railway or Render.
+const MultiCloudDeploy = _lz(() => import('../ide/MultiCloudDeploy'),      'MultiCloudDeploy');
+// "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
+// App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
+const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
+// The REAL sandbox terminal (same component Code Studio mounts) — runs actual commands in the
+// user's warm v5.0 sandbox via POST /api/agentv3/exec. Rendered by the 'shell' settings screen so
+// users can run a quick command without opening the full Code Studio.
+const TerminalPanel    = _lz(() => import('../ide/TerminalPanel'),         'TerminalPanel');
+// REAL workspace logs — live v5.0 build events + the app's own captured runtime errors.
+const WorkspaceLogs    = _lz(() => import('../ide/WorkspaceLogs'),         'WorkspaceLogs');
 
 // Inlined theme-classes shape (matches getThemeClasses return type)
 type ThemeClasses = {
@@ -53,6 +68,10 @@ export interface SettingsPanelProps {
   setSettingsScreen: (s: SettingsScreen) => void;
   toggleTab: (view: ViewType) => void;
   setActiveView: (view: ViewType) => void;
+
+  // The current app's generated code — passed through to the Multi-Cloud Deploy sub-screen so a real
+  // deploy (NavBharat Hosting / Vercel-with-token) has the app bundle to publish (admin 2026-07-29).
+  generatedCode?: string;
 
   // settings state
   deviceMode: 'auto' | 'mobile' | 'tablet' | 'desktop';
@@ -130,7 +149,7 @@ function MotionModeControl() {
     { id: 'system',   label: 'System',  hint: 'Follow your OS setting' },
   ];
   return (
-    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 mb-4">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🇮🇳</div>
         <div>
@@ -167,7 +186,7 @@ function FontScaleControl() {
   const set = (next: number) => setScale(applyFontScale(next));
   const pct = Math.round(scale * 100);
   return (
-    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🔠</div>
@@ -224,7 +243,7 @@ function AppSignatureToggle() {
     });
   };
   return (
-    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="flex items-center justify-between p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 min-w-0">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center shrink-0">
           <Heart className="w-5 h-5 text-indigo-400" />
@@ -255,6 +274,7 @@ export function SettingsPanel({
   setSettingsScreen,
   toggleTab,
   setActiveView,
+  generatedCode,
   deviceMode,
   setDeviceMode,
   preferredLanguage,
@@ -300,7 +320,8 @@ export function SettingsPanel({
         {settingsScreen !== 'root' && (
           <button
             onClick={() => setSettingsScreen('root')}
-            className="p-2 hover:bg-white/5 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
+            aria-label="Back to Settings"
+            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
           >
             <ChevronRight className="w-5 h-5 rotate-180" />
           </button>
@@ -315,15 +336,20 @@ export function SettingsPanel({
         </div>
         <button
           onClick={() => toggleTab('nbi_chat')}
-          className="ml-auto p-2 hover:bg-white/5 rounded-xl text-[#8b949e] transition-all"
+          aria-label="Close Settings"
+          className="ml-auto p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] transition-all"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Settings Content Area */}
+      {/* Settings Content Area.
+          The ROOT screen widens on desktop (lg+) and flows its section cards into a multi-column
+          masonry grid (see the root motion.div) so a wide screen no longer shows the narrow,
+          stretched-mobile column. Sub-screens (General, Connections, …) are designed for a single
+          reading column, so they stay capped at max-w-xl. */}
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117]">
-        <div className="max-w-xl mx-auto p-4 sm:p-6 pb-20">
+        <div className={cn("mx-auto p-4 sm:p-6 pb-20", settingsScreen === 'root' ? "max-w-xl lg:max-w-5xl xl:max-w-6xl" : "max-w-xl")}>
           <AnimatePresence mode="wait">
             {settingsScreen === 'root' && (
               <motion.div
@@ -331,7 +357,10 @@ export function SettingsPanel({
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="space-y-4"
+                /* Mobile: a single stacked column (space-y-4). Desktop (lg+): the section cards flow
+                   into a 2-column (lg) / 3-column (xl) masonry so the wide screen is filled attractively
+                   instead of showing one narrow mobile-style list. break-inside-avoid keeps each card whole. */
+                className="space-y-4 lg:space-y-0 lg:columns-2 xl:columns-3 lg:gap-4 [&>*]:break-inside-avoid lg:[&>*]:mb-4"
               >
                 {/* G2: User profile card */}
                 {user && (
@@ -364,7 +393,7 @@ export function SettingsPanel({
                       { id: 'desktop', label: '💻 Desktop' },
                     ].map(m => (
                       <button key={m.id} onClick={() => setDeviceMode(m.id as any)}
-                        className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
+                        className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20 active:bg-white/5'}`}>
                         {m.label}
                       </button>
                     ))}
@@ -373,12 +402,18 @@ export function SettingsPanel({
                     Auto follows your screen size. Mobile shows the compact layout (menu + bottom bar); Tablet & Desktop show the side rail.
                   </p>
                 </div>
-                {/* 6 grouped sections */}
+                {/* Grouped settings sections.
+                    "App Settings" holds EVERYTHING a real, working website needs, in ONE place
+                    (admin 2026-07-29): Domain (+ DNS + SSL), Hosting & Deploy (Multi-Cloud — the single
+                    publish surface), Database, Authentication, Storage, Secrets & API Keys, plus the
+                    developer tools General, Terminal and Logs. Frontend + Backend CODE is built for the
+                    user by NavBharatAI Pro, so they are not settings — see the honest note below. */}
                 {[
                   {
                     title: 'Account',
                     color: 'text-indigo-400',
                     icon: User as any,
+                    desc: '',
                     items: [
                       // Opens the SAME real profile page as the top-right avatar → Profile (view
                       // 'my_profile'). It used to point at a non-existent 'profile' view → blank page.
@@ -386,92 +421,60 @@ export function SettingsPanel({
                     ],
                   },
                   {
+                    // GET MY APP AS AN ANDROID FILE (admin 2026-08-04). The APK Builder already lived in
+                    // Other AI → Publish & Deploy, but a user who has just built an app is looking for it
+                    // HERE — in the "More" tab of the app they are standing in — not two screens away in a
+                    // tool directory. `tab: true` routes through the SAME toggleTab('apk') destination the
+                    // Other AI tile uses, so there is one APK Builder and no second copy to drift.
+                    title: 'Your App',
+                    color: 'text-green-400',
+                    icon: Smartphone as any,
+                    desc: 'Turn the app you built into a real Android file you can install',
+                    items: [
+                      { id: 'apk', label: 'Download APK', icon: Smartphone as any, tab: true },
+                    ],
+                  },
+                  {
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,
+                    desc: 'Everything your app needs — website, data & tools',
                     items: [
-                      { id: 'general', label: 'General', icon: LayoutDashboard },
-                      { id: 'secrets', label: 'Secrets & Keys', icon: Lock },
+                      // The real-website essentials, in one hub. Domain covers DNS + SSL (auto). Database
+                      // also provides login + storage when you connect Firebase/Supabase; the dedicated
+                      // Authentication (Clerk/Auth0) + Storage (S3/Cloudinary) tiles cover standalone providers.
+                      { id: 'domain', label: 'Domain', icon: Globe },
+                      { id: 'cloudeploy', label: 'Hosting & Deploy', icon: CloudUpload },
                       { id: 'database', label: 'Database', icon: Database },
-                      { id: 'connections', label: 'Connections', icon: GitFork },
+                      { id: 'auth', label: 'Authentication', icon: ShieldCheck },
+                      { id: 'storage', label: 'Storage', icon: HardDrive },
+                      { id: 'secrets', label: 'Secrets & API Keys', icon: Lock },
+                      // Developer tools stay right here in App Settings (admin 2026-07-29:
+                      // "app settings me se terminal aur logs ko hatana mat").
+                      { id: 'general', label: 'General', icon: LayoutDashboard },
                       { id: 'shell', label: 'Terminal', icon: Terminal },
                       { id: 'logs', label: 'Logs', icon: Activity },
-                      { id: 'git', label: 'Git', icon: GitBranch },
                     ],
                   },
-                  {
-                    title: 'AI Tools',
-                    color: 'text-violet-400',
-                    icon: Bot,
-                    items: [
-                      { id: 'sda_chat', label: 'Doctor AI', icon: Activity, tab: true },
-                      { id: 'voice', label: 'Voice to App', icon: Mic, tab: true },
-                      { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, tab: true },
-                      { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, tab: true },
-                      { id: 'debugger', label: 'AI Debugger', icon: Bug, tab: true },
-                      { id: 'codereview', label: 'Code Review', icon: Code, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Developer Tools',
-                    color: 'text-emerald-400',
-                    icon: Code,
-                    items: [
-                      { id: 'testing', label: 'Test Runner', icon: TestTube, tab: true },
-                      { id: 'api', label: 'API Tester', icon: Globe, tab: true },
-                      { id: 'diff', label: 'Diff Viewer', icon: GitMerge, tab: true },
-                      { id: 'versioning', label: 'Versioning', icon: GitBranch, tab: true },
-                      { id: 'performance', label: 'Performance', icon: Gauge, tab: true },
-                      { id: 'minifier', label: 'Minifier', icon: Minimize2, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Design & Build',
-                    color: 'text-pink-400',
-                    icon: Palette,
-                    items: [
-                      { id: 'screenshot', label: 'Screenshot→Code', icon: Camera, tab: true },
-                      { id: 'multipages', label: 'Multi-Page', icon: Layout, tab: true },
-                      { id: 'components', label: 'Components', icon: Puzzle, tab: true },
-                      { id: 'designsys', label: 'Design System', icon: LayoutTemplate, tab: true },
-                      { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, tab: true },
-                      { id: 'figma', label: 'Figma Import', icon: Figma, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Publish & Deploy',
-                    color: 'text-cyan-400',
-                    icon: Rocket,
-                    items: [
-                      { id: 'apk', label: 'APK Builder', icon: Smartphone, tab: true },
-                      { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, tab: true },
-                      { id: 'cloudeploy', label: 'Multi-Cloud', icon: CloudUpload, tab: true },
-                      { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, tab: true },
-                      { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, tab: true },
-                      { id: 'appstore', label: 'App Store', icon: Package, tab: true },
-                    ],
-                  },
-                  {
-                    title: 'Monetization & Team',
-                    color: 'text-amber-400',
-                    icon: IndianRupee,
-                    items: [
-                      { id: 'monetize', label: 'Monetize', icon: IndianRupee, tab: true },
-                      { id: 'team', label: 'Team', icon: Users2, tab: true },
-                      { id: 'collab', label: 'Live Collab', icon: Users2, tab: true },
-                      { id: 'whitelabel', label: 'Whitelabel', icon: Palette, tab: true },
-                      { id: 'analytics', label: 'Analytics', icon: TrendingUp, tab: true },
-                      { id: 'insights', label: 'Insights & Webhooks', icon: TrendingUp, tab: true },
-                      { id: 'database', label: 'Database', icon: Database, tab: true },
-                    ],
-                  },
+                  // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
+                  // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card
+                  // (admin 2026-07-23) — see src/components/home/homeToolGroups.ts. Settings now keeps
+                  // only genuine settings (Account & Profile, App Settings). The tool destinations
+                  // (toggleTab ids) are unchanged; only the doorway moved.
                 ].map(group => (
                   <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className={cn('flex items-center gap-2', group.desc ? 'mb-1' : 'mb-3')}>
                       <group.icon className={`w-3.5 h-3.5 ${group.color}`} />
                       <span className={`text-[10px] font-black uppercase tracking-widest ${group.color}`}>{group.title}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    {group.desc && (
+                      <p className="text-[10px] text-[#586069] font-bold mb-3 leading-relaxed">{group.desc}</p>
+                    )}
+                    {/* Mobile-friendly tiles (admin 2026-07-21): a comfortable ≥52px tap target, labels
+                        WRAP instead of truncating (so "Insights & Webhooks"/"Screenshot→Code" read fully on
+                        a phone), and the icon is visible at rest (no hover on touch). 2 columns fit a phone
+                        fine because each group is small. */}
+                    <div className="grid grid-cols-2 gap-2.5">
                       {group.items.map(item => (
                         <button
                           key={item.id}
@@ -480,15 +483,32 @@ export function SettingsPanel({
                             else if ((item as any).nav) { setActiveView(item.id as any); }
                             else { setSettingsScreen(item.id as any); }
                           }}
-                          className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
+                          className="flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
                         >
-                          <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-                          <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-colors truncate">{item.label}</span>
+                          <item.icon className="w-4 h-4 text-[#8b949e] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                          <span className="text-[11px] font-bold text-[#8b949e] group-hover:text-white transition-colors leading-tight">{item.label}</span>
                         </button>
                       ))}
                     </div>
                   </div>
                 ))}
+
+                {/* Honest note (admin 2026-07-29): of the 10 things a real website needs, the FRONTEND
+                    (the UI code) and the BACKEND (the API/server code) are not settings you configure —
+                    NavBharatAI Pro builds them for you. So they get an honest info line here, not a fake
+                    tile that does nothing (real-features rule). */}
+                <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-white leading-relaxed">Frontend &amp; Backend — built for you</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5 leading-relaxed">
+                      Your app&apos;s screens (frontend) and its server/API (backend) are written automatically by
+                      NavBharatAI Pro when you build. There&apos;s nothing to configure here — just describe your app.
+                    </p>
+                  </div>
+                </div>
 
                 {/* Support — direct email to the NavBharatAI team. An <a href="mailto:"> anchor is used
                     (not a JS handler) because Capacitor's native WebView opens the device mail app for
@@ -545,7 +565,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Application Identity & Preferences</p>
                 </div>
 
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl space-y-8">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 shadow-2xl space-y-6 sm:space-y-8">
                   <div className="flex flex-col items-center text-center space-y-4">
                      <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl relative group cursor-pointer overflow-hidden">
                         <Bot className="w-10 h-10 text-white group-hover:scale-110 transition-transform" />
@@ -605,12 +625,12 @@ export function SettingsPanel({
                        <textarea
                          id="settings-app-desc"
                          defaultValue="The ultimate specialized AI developer workspace for Bharat."
-                         className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
+                         className="w-full bg-[#0d1117] border border-white/10 rounded-2xl sm:rounded-[1.5rem] px-4 sm:px-6 py-4 sm:py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
                        />
                      </div>
-                     <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
-                       <div className="flex items-center gap-4">
-                         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center">
+                     <div className="flex items-center justify-between gap-3 p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
+                       <div className="flex items-center gap-3 min-w-0">
+                         <div className="w-10 h-10 shrink-0 bg-indigo-600/10 rounded-xl flex items-center justify-center">
                            <Terminal className="w-5 h-5 text-indigo-400" />
                          </div>
                          <div>
@@ -626,9 +646,9 @@ export function SettingsPanel({
                      {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
                      <AppSignatureToggle />
 
-                     <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner space-y-3">
+                     <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner space-y-3">
                        <div className="flex items-center gap-3 mb-2">
-                         <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                         <div className="w-10 h-10 shrink-0 bg-amber-500/10 rounded-xl flex items-center justify-center">
                            <Languages className="w-5 h-5 text-amber-400" />
                          </div>
                          <div>
@@ -644,7 +664,7 @@ export function SettingsPanel({
                              <button
                                key={lang}
                                onClick={() => setPreferredLanguage(lang)}
-                               className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-white/5 border-white/10 text-[#8b949e] hover:border-amber-500/30'}`}
+                               className={`px-3 py-2.5 min-h-[44px] rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-white/5 border-white/10 text-[#8b949e] hover:border-amber-500/30 active:bg-white/10'}`}
                              >
                                {labels[lang]}
                              </button>
@@ -718,7 +738,7 @@ export function SettingsPanel({
                 </div>
 
                 {/* Brain Engine Card */}
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl overflow-hidden relative">
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
                        <Cpu className="w-6 h-6 text-indigo-400" />
@@ -777,8 +797,26 @@ export function SettingsPanel({
                   </div>
                 </div>
 
+                {/* Git & Deployment — moved here from the sidebar (admin 2026-08-01). Opens the real Git /
+                    DevOps engine view (GitHub connect, commit/push, ZIP export, deploy targets). */}
+                <button
+                  onClick={() => toggleTab('git' as ViewType)}
+                  className="w-full text-left bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl hover:border-indigo-500/40 transition-colors active:scale-[0.99]"
+                >
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
+                         <GitBranch className="w-6 h-6 text-indigo-400" />
+                      </div>
+                      <div className="flex-1">
+                         <h3 className="font-black text-white text-sm uppercase tracking-wider">Git &amp; Deployment</h3>
+                         <p className="text-[10px] text-[#8b949e] font-medium italic">Connect GitHub, commit &amp; push, export a ZIP, and deploy — open the DevOps engine</p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-[#484f58]" />
+                   </div>
+                </button>
+
                 {/* Workspace Panels Toggle */}
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl">
                    <div className="flex items-center gap-4 mb-6">
                       <div className="w-12 h-12 bg-emerald-600/10 rounded-2xl flex items-center justify-center">
                          <Monitor className="w-6 h-6 text-emerald-400" />
@@ -790,7 +828,7 @@ export function SettingsPanel({
                    </div>
 
                    <div className="grid gap-2">
-                      {menuItems.map(item => (
+                      {menuItems.filter(item => item.id !== 'git').map(item => (
                         <button
                           key={item.id}
                           onClick={() => setEnabledModules(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
@@ -842,6 +880,169 @@ export function SettingsPanel({
               </motion.div>
             )}
 
+            {/* Authentication (admin 2026-07-29): connect a login/signup provider (Clerk / Auth0 /
+                Supabase / Firebase). Credentials are encrypted in Secrets & Keys; the server's
+                userAuthContext tells the builder to wire that exact provider for all login/session.
+                Supabase/Firebase auth also comes with the Database connection. */}
+            {settingsScreen === 'auth' && (
+              <motion.div
+                key="auth"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                {user ? (
+                  <Suspense fallback={null}><AuthSettings userId={user.uid} /></Suspense>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to connect authentication</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Storage (admin 2026-07-29): connect a STANDALONE file-storage provider (S3-compatible /
+                Cloudinary) for real uploads. Credentials are encrypted in Secrets & Keys; the server's
+                userStorageContext + StorageGenerator wire real direct-to-storage uploads into the built
+                app. Firebase/Supabase storage already comes with the Database connection. */}
+            {settingsScreen === 'storage' && (
+              <motion.div
+                key="storage"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                {user ? (
+                  <Suspense fallback={null}><StorageSettings userId={user.uid} /></Suspense>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to connect your storage</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Domain (admin 2026-07-29): the ONE real "connect my website" flow — pick the app you
+                built, enter your purchased domain, get the exact DNS records, press Check until Live.
+                DNS + SSL are handled inside this flow (SSL auto-provisions once DNS verifies). Same
+                real component used by Sidebar → More and Home → Other AI → Custom Domain. */}
+            {settingsScreen === 'domain' && (
+              <motion.div
+                key="domain"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                {user ? (
+                  <Suspense fallback={null}>
+                    <ConnectMyWebsitePanel onBack={() => setSettingsScreen('root')} uid={user.uid} />
+                  </Suspense>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to connect a domain to your app</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Hosting & Deploy (admin 2026-07-29): the ONE publish surface. The standalone "Hosting &
+                Publish" info-screen was a duplicate of this (admin: "koi option duplicate to nahi hai?")
+                — it only explained auto-hosting and linked here — so it was merged in. The honest
+                auto-hosting note now sits atop the real Multi-Cloud Deploy component (NavBharat Hosting &
+                Vercel deploy for real; other platforms show honest CLI steps). Needs the app's
+                generatedCode to have a bundle to publish, threaded from App.tsx. */}
+            {settingsScreen === 'cloudeploy' && (
+              <motion.div
+                key="cloudeploy"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="bg-[#161b22] border border-emerald-500/20 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
+                    <CloudUpload className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <p className="text-[11px] text-[#8b949e] font-medium leading-relaxed">
+                    <span className="text-white font-bold">Your app is already hosted.</span> Every app you build on
+                    NavBharatAI gets a live, shareable URL with HTTPS/SSL the moment it builds — no server to set up.
+                    Use the options below to deploy it elsewhere (Vercel, Netlify, Firebase…), or connect your own
+                    domain from the <span className="text-white font-bold">Domain</span> tile.
+                  </p>
+                </div>
+                <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading deploy…</div>}>
+                  <MultiCloudDeploy generatedCode={generatedCode} />
+                </Suspense>
+              </motion.div>
+            )}
+
+            {/* REAL sandbox terminal (admin 2026-07-20): the same TerminalPanel Code Studio mounts,
+                pointed at the SAME v5.0 workspace (shared agentv3_session_{uid} key) — so commands run
+                in the exact sandbox where NavBharatAI Pro v5.0 builds the user's app, without opening
+                the full Code Studio. Since 2026-08-04 that means REAL persistent shells here too: a
+                genuine TTY where `cd` persists, output streams live and Ctrl+C interrupts, and "+ New"
+                opens as many independent terminals as you need. Settings deliberately mounts the SAME
+                component rather than its own copy — two terminal implementations is exactly how one of
+                them quietly rots into the weaker one. Honest by construction: when the sandbox is cold
+                it says so and explains how to warm it — it never fakes output. */}
+            {settingsScreen === 'shell' && (
+              <motion.div
+                key="shell"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="px-1 pt-4">
+                  <h2 className="text-2xl font-black text-white tracking-tight">Terminal</h2>
+                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Run real commands in your app&apos;s sandbox</p>
+                </div>
+                {user ? (
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
+                    <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading terminal…</div>}>
+                      <TerminalPanel
+                        workspaceId={getAgentV3WorkspaceId(user.uid)}
+                        userId={user.uid}
+                        email={user.email || ''}
+                        onClose={() => setSettingsScreen('root')}
+                      />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to use the terminal</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* REAL workspace logs (admin 2026-07-20): live build events from the durable v5.0 live
+                channel + runtime errors captured from the app's own preview console. Same shared
+                workspaceId as Pro v5.0 / Code Studio / Files / Preview, so this screen always shows
+                the app the user is actually building. Honest empty states — nothing simulated. */}
+            {settingsScreen === 'logs' && (
+              <motion.div
+                key="logs"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="px-1 pt-4">
+                  <h2 className="text-2xl font-black text-white tracking-tight">Logs</h2>
+                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Live build log &amp; runtime errors of your app</p>
+                </div>
+                {user ? (
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
+                    <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading logs…</div>}>
+                      <WorkspaceLogs
+                        workspaceId={getAgentV3WorkspaceId(user.uid)}
+                        userId={user.uid}
+                        email={user.email || ''}
+                      />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to see your app&apos;s logs</div>
+                )}
+              </motion.div>
+            )}
+
             {settingsScreen === 'connections' && (
               <motion.div
                 key="connections"
@@ -855,7 +1056,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Sync your external services</p>
                  </div>
 
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
                     <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                       <Github className="w-24 h-24 text-white" />
                     </div>
@@ -984,7 +1185,7 @@ export function SettingsPanel({
                  </div>
 
                  {/* G3 — E2B API key: unlocks real cloud VM for Pro builds */}
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-5">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-5">
                     <div className="flex items-center gap-5">
                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-all ${userE2bKey ? 'bg-green-600/10 border-green-500/30' : 'bg-white/5 border-white/5'}`}>
                           <Cpu className={`w-7 h-7 ${userE2bKey ? 'text-green-400' : 'text-[#484f58]'}`} />
@@ -1011,7 +1212,7 @@ export function SettingsPanel({
                     </div>
                  </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
                     <div className="flex items-center gap-5">
                        <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center border border-white/5">
                           <Database className="w-7 h-7 text-indigo-400" />
@@ -1047,7 +1248,7 @@ export function SettingsPanel({
                     </div>
                  </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] overflow-hidden shadow-2xl">
                     <div className="p-6 border-b border-white/5 bg-white/2 flex items-center gap-4">
                        <Search className="w-4 h-4 text-[#484f58]" />
                        <input
@@ -1106,7 +1307,7 @@ export function SettingsPanel({
                    <motion.div
                      initial={{ opacity: 0, y: 20 }}
                      animate={{ opacity: 1, y: 0 }}
-                     className="bg-indigo-600 border border-white/20 rounded-[2.5rem] p-8 space-y-6 shadow-3xl relative overflow-hidden"
+                     className="bg-indigo-600 border border-white/20 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6 shadow-3xl relative overflow-hidden"
                    >
                       <div className="absolute top-0 right-0 p-8 opacity-10">
                         <GitBranchIcon className="w-24 h-24 text-white" />
@@ -1154,7 +1355,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Collaborate with the world</p>
                 </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
                     <div className="flex items-center gap-5">
                        <div className="w-16 h-16 bg-indigo-600/10 rounded-[2rem] flex items-center justify-center border border-indigo-600/20">
                           <Globe className="w-8 h-8 text-indigo-400" />
@@ -1166,8 +1367,8 @@ export function SettingsPanel({
                     </div>
 
                     <div className="p-2 bg-[#0d1117] border border-white/10 rounded-[2rem] flex items-center h-[72px] shadow-inner">
-                       <span className="flex-1 text-[11px] font-mono text-indigo-400 truncate px-6">navbharat.ai/s/project-592</span>
-                       <button className="h-full px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
+                       <span className="flex-1 min-w-0 text-[11px] font-mono text-indigo-400 truncate px-3 sm:px-6">navbharat.ai/s/project-592</span>
+                       <button className="h-full shrink-0 px-4 sm:px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
                           <div className="relative z-10">Copy Link</div>
                           <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform"></div>
                         </button>
@@ -1193,7 +1394,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Contribute to the project</p>
                 </div>
 
-                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-[3rem] p-10 space-y-10 text-center relative overflow-hidden group shadow-3xl">
+                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-3xl sm:rounded-[3rem] p-5 sm:p-10 space-y-6 sm:space-y-10 text-center relative overflow-hidden group shadow-3xl">
                    <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center border border-indigo-500/30 shadow-2xl mx-auto group-hover:scale-110 transition-all duration-700">
                      <Heart className="w-10 h-10 text-indigo-400 group-hover:animate-bounce-slow" />
                    </div>
@@ -1210,15 +1411,15 @@ export function SettingsPanel({
                    </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                   <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 transition-colors">
                         <HardDrive className="w-6 h-6 text-emerald-400 group-hover:text-white" />
                      </div>
                      <h4 className="text-[10px] font-black text-white uppercase tracking-widest">ZIP Export</h4>
                      <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Source Files</p>
                    </button>
-                   <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
+                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
                      <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-amber-600 transition-colors">
                         <Smartphone className="w-6 h-6 text-amber-500 group-hover:text-white" />
                      </div>
@@ -1242,7 +1443,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage team access & safety</p>
                 </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
                     <div className="flex items-center justify-between">
                        <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Collaborators</h4>
                        <button className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors border-b border-indigo-500/20 pb-0.5">+ Invite Pro</button>
@@ -1263,7 +1464,7 @@ export function SettingsPanel({
                        </div>
                     </div>
 
-                    <div className="bg-amber-500/5 border border-amber-500/20 p-6 rounded-[1.5rem] flex gap-4 items-start shadow-inner">
+                    <div className="bg-amber-500/5 border border-amber-500/20 p-4 sm:p-6 rounded-2xl sm:rounded-[1.5rem] flex gap-3 sm:gap-4 items-start shadow-inner">
                        <div className="p-2 bg-amber-500/20 rounded-lg">
                           <Zap className="w-4 h-4 text-amber-500" />
                         </div>
@@ -1273,40 +1474,9 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {settingsScreen === 'git' && (
-              <motion.div
-                key="git"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
-              >
-                <div className="px-1 py-4">
-                  <h2 className="text-2xl font-black text-white tracking-tight">Git & Version Control</h2>
-                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage branches, commits and deployments</p>
-                </div>
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-6 shadow-2xl">
-                  <div className="w-20 h-20 bg-indigo-600/10 border border-indigo-600/20 rounded-[2rem] flex items-center justify-center">
-                    <GitBranchIcon className="w-10 h-10 text-indigo-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-white uppercase tracking-widest">Git Panel</h3>
-                    <p className="text-[10px] text-[#8b949e] max-w-[240px] mx-auto mt-2 leading-relaxed">
-                      {selectedRepo
-                        ? `Active: ${selectedRepo.full_name} (${currentBranch})`
-                        : 'Connect GitHub first to use Git features'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => { setActiveView('git'); setSettingsScreen('root'); }}
-                    className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] font-black uppercase tracking-widest transition-all shadow-2xl flex items-center justify-center gap-3"
-                  >
-                    <GitBranchIcon className="w-4 h-4" />
-                    Open Git Panel
-                  </button>
-                </div>
-              </motion.div>
-            )}
+            {/* The 'git' sub-screen was removed with its tile (admin 2026-07-20): it only relaunched
+                the sidebar's Git panel (setActiveView('git')), a redundant hop. Git lives in the
+                sidebar menu — the one real GitViewPanel/GitPanel surface. */}
 
             {/* G2 — Admin Live Metrics Dashboard */}
             {settingsScreen === 'metrics' && (
@@ -1319,7 +1489,7 @@ export function SettingsPanel({
                 onViewportEnter={() => {
                   if (!adminLiveMetrics && !loadingAdminMetrics) {
                     setLoadingAdminMetrics(true);
-                    const token = sessionStorage.getItem('admin_token') || '';
+                    const token = localStorage.getItem('admin_token') || '';
                     fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
                       .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
                   }
@@ -1352,9 +1522,9 @@ export function SettingsPanel({
                       </div>
                     )}
                     {/* Build Stats */}
-                    <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
+                    <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6">
                       <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Build Stats</h4>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         {[
                           { label: 'Total Builds', value: adminLiveMetrics.builds?.total ?? 0, color: 'text-white' },
                           { label: 'Success Rate', value: `${Math.round((adminLiveMetrics.builds?.successRate ?? 0) * 100)}%`, color: (adminLiveMetrics.builds?.successRate ?? 0) >= 0.8 ? 'text-emerald-400' : 'text-amber-400' },
@@ -1369,7 +1539,7 @@ export function SettingsPanel({
                       </div>
                     </div>
                     {/* AI Cost by Provider */}
-                    <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-4">
+                    <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Cost by Provider</h4>
                         <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)} total</span>
@@ -1391,7 +1561,7 @@ export function SettingsPanel({
                     <button
                       onClick={() => {
                         setLoadingAdminMetrics(true);
-                        const token = sessionStorage.getItem('admin_token') || '';
+                        const token = localStorage.getItem('admin_token') || '';
                         fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
                           .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
                       }}
@@ -1403,7 +1573,7 @@ export function SettingsPanel({
                   </div>
                 )}
                 {!adminLiveMetrics && !loadingAdminMetrics && (
-                  <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-4">
+                  <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-4">
                     <BarChart2 className="w-10 h-10 text-[#484f58]" />
                     <p className="text-[10px] text-[#484f58]">Admin login required to view metrics.</p>
                   </div>

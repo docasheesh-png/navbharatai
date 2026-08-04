@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
 import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
+import { sendSafeError } from '../lib/httpError';
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the
@@ -16,10 +17,15 @@ export function registerTelemetryRoutes(app: Express): void {
   app.get('/api/analyze/pagespeed', async (req: Request, res: Response) => {
     const { url } = req.query;
     if (!url || typeof url !== 'string') return res.status(400).json({ error: 'url required' });
+    // Wired into the Performance Analyzer tool (admin 2026-07-25) — a `strategy` toggle + extra vitals
+    // (Speed Index, TTI) were added; every original flat field is unchanged (back-compatible). `key`
+    // env alias GOOGLE_PAGESPEED_KEY kept alongside PAGESPEED_API_KEY.
+    const strategy = req.query.strategy === 'desktop' ? 'desktop' : 'mobile';
     try {
-      const apiKey = process.env.PAGESPEED_API_KEY || '';
-      const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile${apiKey ? '&key=' + apiKey : ''}`;
-      const r = await fetch(endpoint, { signal: AbortSignal.timeout(20000) });
+      const apiKey = process.env.PAGESPEED_API_KEY || process.env.GOOGLE_PAGESPEED_KEY || '';
+      const cat = ['performance', 'accessibility', 'seo', 'best-practices'].map((c) => `&category=${c}`).join('');
+      const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}${cat}${apiKey ? '&key=' + apiKey : ''}`;
+      const r = await fetch(endpoint, { signal: AbortSignal.timeout(60000) });
       const data = await r.json() as any;
       if (!r.ok) return res.status(r.status).json({ error: data.error?.message || 'PageSpeed API error' });
       const cats = data.lighthouseResult?.categories || {};
@@ -33,9 +39,13 @@ export function registerTelemetryRoutes(app: Express): void {
         lcp: audits['largest-contentful-paint']?.displayValue,
         cls: audits['cumulative-layout-shift']?.displayValue,
         tbt: audits['total-blocking-time']?.displayValue,
+        si: audits['speed-index']?.displayValue,
+        tti: audits['interactive']?.displayValue,
+        strategy,
+        finalUrl: data.lighthouseResult?.finalUrl || url,
       });
     } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Failed to analyze' });
+      return sendSafeError(res, 500, 'Failed to analyze. Please try again.', err, 'telemetry analyze');
     }
   });
 

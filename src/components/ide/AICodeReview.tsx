@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, RefreshCw, Copy, Star, Info, X, Check, Download, Play, Lightbulb } from 'lucide-react';
+import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, ChevronDown, RefreshCw, Copy, Star, Info, X, Check, Download, Play, Lightbulb, Github, Box } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
+import type { ChatSession } from '../../types';
 
 type Severity = 'critical' | 'warning' | 'info' | 'suggestion';
 type Category = 'bugs' | 'performance' | 'security' | 'bestpractice' | 'accessibility';
@@ -18,6 +20,51 @@ interface ReviewIssue {
 interface Props {
   generatedCode: string;
   onCodeUpdate: (code: string) => void;
+  /** The user's NavBharatAI apps (each session carries its real files) — source #1 for Connect App. */
+  sessions?: ChatSession[];
+  /** GitHub OAuth token (localStorage gh_token, lifted by App) — source #2 for Connect App. */
+  githubToken?: string;
+}
+
+// ── Connect App: server review result shapes (from POST /api/app-review/review → reviewCode) ──
+type ServerSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+type ServerCategory = 'security' | 'quality' | 'performance' | 'tech_debt' | 'accessibility';
+interface ServerFinding {
+  file: string;
+  line?: number;
+  severity: ServerSeverity;
+  category: ServerCategory;
+  description: string;
+  fix: string;
+}
+interface ServerReview {
+  findings: ServerFinding[];
+  summary: string;
+  score: number;
+  techDebt: string[];
+}
+interface GithubRepo { fullName: string; owner: string; name: string; defaultBranch: string; private: boolean; }
+
+// Map the real AI reviewer's findings onto this tool's existing issue UI.
+function mapServerFindings(r: ServerReview): ReviewIssue[] {
+  const sevMap: Record<ServerSeverity, Severity> = {
+    critical: 'critical', high: 'critical', medium: 'warning', low: 'suggestion', info: 'info',
+  };
+  const catMap: Record<ServerCategory, Category> = {
+    security: 'security', quality: 'bestpractice', performance: 'performance', tech_debt: 'bestpractice', accessibility: 'accessibility',
+  };
+  return (Array.isArray(r.findings) ? r.findings : []).map((f, i) => {
+    const desc = typeof f.description === 'string' ? f.description : '';
+    return {
+      id: String(i + 1),
+      severity: sevMap[f.severity] || 'info',
+      category: catMap[f.category] || 'bestpractice',
+      title: desc.length > 90 ? desc.slice(0, 90) + '…' : (desc || 'Finding'),
+      description: desc,
+      lineHint: f.line ? `${f.file}:${f.line}` : f.file,
+      fix: typeof f.fix === 'string' ? f.fix : undefined,
+    };
+  });
 }
 
 const SEV_CONFIG: Record<Severity, { label: string; color: string; bg: string; border: string; icon: any }> = {
@@ -316,7 +363,7 @@ function scoreToGrade(score: number): { grade: string; color: string; bg: string
   return { grade: 'F', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' };
 }
 
-export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
+export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToken }: Props) {
   const [issues, setIssues] = useState<ReviewIssue[]>([]);
   const [reviewing, setReviewing] = useState(false);
   const [reviewed, setReviewed] = useState(false);
@@ -326,14 +373,133 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
   // D12: dismissed finding IDs
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
+  // ── Connect App flow ──
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [source, setSource] = useState<'nbai' | 'github' | null>(null);
+  const [selectedKey, setSelectedKey] = useState(''); // NavBharatAI session id OR "owner/repo"
+  const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [reposLoading, setReposLoading] = useState(false);
+  const [connectError, setConnectError] = useState('');
+  const [serverScore, setServerScore] = useState<number | null>(null); // real 0-100 from the AI reviewer
+  const [serverSummary, setServerSummary] = useState('');
+  const [reviewedApp, setReviewedApp] = useState(''); // name of the connected app that was reviewed
+
+  // The user's NavBharatAI apps that actually carry code (source #1).
+  const nbaiApps = (sessions || [])
+    .filter(s => s.files && Object.keys(s.files).length > 0)
+    .map(s => ({ id: s.id, title: s.title || 'Untitled app', files: s.files as Record<string, string> }));
+
+  const resetReviewState = () => {
+    setReviewed(false);
+    setIssues([]);
+    setServerScore(null);
+    setServerSummary('');
+    setReviewedApp('');
+    setSelectedCategory('all');
+    setDismissedIds(new Set());
+  };
+
+  const selectSource = async (src: 'nbai' | 'github') => {
+    setSource(src);
+    setSelectedKey('');
+    setConnectError('');
+    if (src === 'github') {
+      if (!githubToken) {
+        setConnectError('Connect your GitHub account first: Settings → GitHub.');
+        setRepos([]);
+        return;
+      }
+      setReposLoading(true);
+      try {
+        const r = await fetch('/api/github/repos', { headers: { Authorization: `Bearer ${githubToken}` } });
+        if (!r.ok) throw new Error('Could not load your repositories. Please reconnect GitHub.');
+        const data = await r.json();
+        const list: GithubRepo[] = (Array.isArray(data) ? data : [])
+          .filter((x: any) => x && x.full_name && x.owner?.login)
+          .map((x: any) => ({ fullName: x.full_name, owner: x.owner.login, name: x.name, defaultBranch: x.default_branch || 'main', private: !!x.private }));
+        setRepos(list);
+        if (list.length === 0) setConnectError('No repositories found on your GitHub account.');
+      } catch (e) {
+        setConnectError(e instanceof Error ? e.message : 'Could not load your repositories.');
+        setRepos([]);
+      } finally {
+        setReposLoading(false);
+      }
+    }
+  };
+
+  // The real, connected review: fetch the app's actual source files, then run the real AI reviewer.
+  const runConnectedReview = async () => {
+    setConnectError('');
+    let files: Record<string, string> = {};
+    let name = '';
+
+    if (source === 'nbai') {
+      const app = nbaiApps.find(a => a.id === selectedKey);
+      if (!app) { setConnectError('Select an app to review.'); return; }
+      files = app.files;
+      name = app.title;
+    } else if (source === 'github') {
+      const repo = repos.find(r => r.fullName === selectedKey);
+      if (!repo) { setConnectError('Select a repository to review.'); return; }
+      name = repo.fullName;
+      resetReviewState();
+      setReviewing(true);
+      try {
+        const fr = await fetch('/api/github/fetch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${githubToken}` },
+          body: JSON.stringify({ owner: repo.owner, repo: repo.name, recursive: true, branch: repo.defaultBranch }),
+        });
+        const fd = await fr.json().catch(() => null);
+        if (!fr.ok || !fd || !fd.files || Object.keys(fd.files).length === 0) {
+          throw new Error((fd && fd.error) || 'Could not fetch the repository files.');
+        }
+        files = fd.files;
+      } catch (e) {
+        setConnectError(e instanceof Error ? e.message : 'Could not fetch the repository.');
+        setReviewing(false);
+        return;
+      }
+    } else {
+      setConnectError('Choose a source (NavBharatAI or GitHub) first.');
+      return;
+    }
+
+    resetReviewState();
+    setReviewing(true);
+    try {
+      const rr = await fetch('/api/app-review/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      });
+      const rd = await rr.json().catch(() => null);
+      if (!rr.ok || !rd) {
+        throw new Error((rd && rd.error) || 'Code review could not complete. Please try again.');
+      }
+      setIssues(mapServerFindings(rd as ServerReview));
+      setServerScore(typeof rd.score === 'number' ? Math.max(0, Math.min(100, rd.score)) : null);
+      setServerSummary(typeof rd.summary === 'string' ? rd.summary : '');
+      setReviewedApp(name);
+      setReviewed(true);
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'Code review could not complete.');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  const canRunConnected = !!source && !!selectedKey && !reviewing;
+
   const runReview = async () => {
     if (!generatedCode.trim()) return;
     setReviewing(true);
-    setReviewed(false);
-    setIssues([]);
+    resetReviewState();
     await new Promise(r => setTimeout(r, 1200));
     const found = analyzeCode(generatedCode);
     setIssues(found);
+    setReviewedApp('');
     setReviewed(true);
     setReviewing(false);
   };
@@ -348,8 +514,10 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
   const exportReport = () => {
     const lines = [
       '# AI Code Review Report',
+      reviewedApp ? `App: ${reviewedApp}` : '',
       `Date: ${new Date().toLocaleString('en-IN')}`,
       `Score: ${score}/100`,
+      serverSummary ? `Summary: ${serverSummary}` : '',
       '',
       ...issues.map(i =>
         `## [${SEV_CONFIG[i.severity].label}] ${i.title}\nCategory: ${CAT_CONFIG[i.category].label}\n${i.description}${i.lineHint ? '\nLine: ' + i.lineHint : ''}${i.fix ? '\nFix: ' + i.fix : ''}${i.fixCode ? '\n\n```\n' + i.fixCode + '\n```' : ''}\n`
@@ -362,7 +530,9 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
     URL.revokeObjectURL(url);
   };
 
-  const score = issues.length ? calcScore(issues) : 0;
+  // Prefer the real 0-100 score from the AI reviewer (connected review); fall back to the
+  // local heuristic score for the in-editor quick check.
+  const score = serverScore != null ? serverScore : (issues.length ? calcScore(issues) : 0);
   const categories: { key: string; label: string }[] = [
     { key: 'all', label: 'All' },
     ...Object.entries(CAT_CONFIG).map(([k, v]) => ({ key: k, label: v.label })),
@@ -386,7 +556,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">AI Code Review</h2>
-          <p className="text-xs text-white/40">Analyze your code — bugs, security, and performance checks</p>
+          <p className="text-xs text-white/40">Connect a NavBharatAI app or GitHub repo for a real AI review — security, quality, performance</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {/* D13: quality grade badge */}
@@ -401,14 +571,85 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
             </button>
           )}
           <button
-            onClick={runReview}
-            disabled={reviewing || !generatedCode.trim()}
-            className="flex items-center gap-1.5 text-sm px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-medium transition-all"
+            onClick={() => setConnectOpen(o => !o)}
+            className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl font-medium transition-all border ${connectOpen ? 'bg-red-600 border-red-500 text-white' : 'bg-[#0d1117] border-white/10 text-white/70 hover:text-white'}`}
           >
-            {reviewing ? <><RefreshCw className="w-4 h-4 animate-spin" /> Analyzing...</> : <><Play className="w-4 h-4" /> Review Code</>}
+            <Zap className="w-4 h-4" /> Connect App
           </button>
         </div>
       </div>
+
+      {/* Connect App panel — pick a real app source, then run a real AI review on its actual code */}
+      {connectOpen && (
+        <div className="px-6 py-4 border-b border-white/5 bg-[#0f141b] space-y-3">
+          {/* Step 1 — choose the source (exactly one) */}
+          <div>
+            <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Source</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => selectSource('nbai')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-all ${source === 'nbai' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10'}`}
+              >
+                <Box className="w-4 h-4" /> NavBharatAI apps
+              </button>
+              <button
+                onClick={() => selectSource('github')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-all ${source === 'github' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10'}`}
+              >
+                <Github className="w-4 h-4" /> GitHub apps
+              </button>
+            </div>
+          </div>
+
+          {/* Step 2 — dependent dropdown, populated by the chosen source */}
+          {source && (
+            <div>
+              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">
+                {source === 'nbai' ? 'Your NavBharatAI apps' : 'Your GitHub repositories'}
+              </p>
+              <div className="relative">
+                <select
+                  value={selectedKey}
+                  onChange={e => setSelectedKey(e.target.value)}
+                  disabled={reposLoading || reviewing}
+                  className="w-full appearance-none bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 pr-9 text-sm text-white focus:outline-none focus:border-red-500/50 disabled:opacity-50"
+                >
+                  <option value="">
+                    {source === 'nbai'
+                      ? (nbaiApps.length ? 'Select an app…' : 'No NavBharatAI apps found — build one first')
+                      : (reposLoading ? 'Loading repositories…' : repos.length ? 'Select a repository…' : 'No repositories')}
+                  </option>
+                  {source === 'nbai'
+                    ? nbaiApps.map(a => (
+                        <option key={a.id} value={a.id}>{a.title} ({Object.keys(a.files).length} files)</option>
+                      ))
+                    : repos.map(r => (
+                        <option key={r.fullName} value={r.fullName}>{r.fullName}{r.private ? ' 🔒' : ''}</option>
+                      ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-white/30 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+          )}
+
+          {connectError && (
+            <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-lg">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {connectError}
+            </div>
+          )}
+
+          {/* Step 3 — the REAL review (real fetch + real AI review of the connected app's code) */}
+          {source && (
+            <button
+              onClick={runConnectedReview}
+              disabled={!canRunConnected}
+              className="flex items-center gap-1.5 text-sm px-4 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-medium transition-all"
+            >
+              {reviewing ? <><TirangaLoader className="w-4 h-4" /> Reviewing…</> : <><Play className="w-4 h-4" /> Review Code</>}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Score + Filters */}
@@ -433,16 +674,24 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
           {!reviewed && !reviewing && (
             <div className="flex flex-col items-center gap-3 py-4 text-center">
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20">
-                <Code className="w-7 h-7 text-red-400" />
+                <Zap className="w-7 h-7 text-red-400" />
               </div>
-              <p className="text-xs text-white/30">Generate code first, then press the Review button</p>
+              <p className="text-xs text-white/30">Press <span className="text-white/60 font-medium">Connect App</span> to review a NavBharatAI app or a GitHub repo</p>
+              {generatedCode.trim() && (
+                <button
+                  onClick={runReview}
+                  className="text-[11px] text-white/40 hover:text-white/70 underline underline-offset-2"
+                >
+                  Or quick-check the current in-editor code
+                </button>
+              )}
             </div>
           )}
 
           {reviewing && (
             <div className="flex flex-col items-center gap-3 py-4 text-center">
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20 animate-pulse">
-                <RefreshCw className="w-7 h-7 text-red-400 animate-spin" />
+                <TirangaLoader className="w-7 h-7" />
               </div>
               <p className="text-xs text-white/40">Analyzing code...</p>
             </div>
@@ -484,13 +733,26 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
                 ))}
               </div>
               <p className="text-sm text-white/30 text-center max-w-xs">
-                AI will scan your code — finding bugs, security holes, and performance issues
+                Connect a NavBharatAI app or a GitHub repo — the AI reviews its real code for security, quality, and performance issues
               </p>
-              {!generatedCode.trim() && (
-                <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-4 py-2 rounded-xl">
-                  <AlertCircle className="w-3.5 h-3.5" /> Generate code first
-                </div>
+              <button
+                onClick={() => setConnectOpen(true)}
+                className="flex items-center gap-2 text-sm px-4 py-2 bg-red-600 hover:bg-red-500 rounded-xl font-medium transition-all"
+              >
+                <Zap className="w-4 h-4" /> Connect App
+              </button>
+            </div>
+          )}
+
+          {/* Real AI summary of the connected app that was reviewed */}
+          {reviewed && (reviewedApp || serverSummary) && (
+            <div className="mb-3 bg-[#161b22] border border-white/10 rounded-xl px-4 py-3">
+              {reviewedApp && (
+                <p className="text-xs text-white/80 font-medium flex items-center gap-1.5 mb-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Reviewed: {reviewedApp}
+                </p>
               )}
+              {serverSummary && <p className="text-[11px] text-white/50 leading-relaxed">{serverSummary}</p>}
             </div>
           )}
 

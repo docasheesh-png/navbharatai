@@ -38,11 +38,24 @@ describe('ActionGroupRow — Claude-style collapsed action row (real render)', (
     if (b.kind !== 'actions') throw new Error('expected actions');
     const html = renderToStaticMarkup(<ActionGroupRow block={b} />);
     expect(html).toContain('12/33 files');
-    expect(html).toContain('animate-spin');
+    expect(html).toContain('<canvas'); // the live spinner is now the freeze-proof TirangaLoader (a canvas)
   });
 
   it('a failed group renders with the failure accent', () => {
     const html = renderToStaticMarkup(<ActionGroupRow block={actionsBlock([tool('c1', 1, 'running: npm test', { ok: false })])} />);
     expect(html).toContain('border-red-500/30');
+  });
+
+  it('NEVER auto-opens the diff (admin 2026-07-23) — the patch body stays collapsed behind "View changes"', () => {
+    // A small (1-file) change used to auto-open the inline diff; now it must stay collapsed until the user
+    // taps "View changes". The +/- stats stay in the button; only the patch BODY is hidden by default.
+    const block = actionsBlock(
+      [file('f1', 1, 'edited src/App.tsx')],
+      { 'src/App.tsx': '+++ b/x\n+ZZUNIQUEDIFFMARKER\n-old\n' },
+    );
+    const html = renderToStaticMarkup(<ActionGroupRow block={block} />);
+    expect(html).toContain('View'); // the collapsed "View changes" button (not "Hide")
+    expect(html).toContain('changes');
+    expect(html).not.toContain('ZZUNIQUEDIFFMARKER'); // the patch body is NOT rendered by default
   });
 });

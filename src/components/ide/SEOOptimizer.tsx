@@ -12,15 +12,22 @@ import {
   Plus,
   Trash2,
   Eye,
-  Tag as TagIcon,
+  Tag as TagIcon, Loader2
 } from 'lucide-react';
+import { applySeoHead } from '../../lib/seoHead';
+import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
+import { resolveAppSource } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SEOOptimizerProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
   appName?: string;
   onCodeUpdate?: (html: string) => void;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
 }
 
 interface MetaFormData {
@@ -215,9 +222,9 @@ const MetaTab: React.FC<{
     setMeta(prev => ({ ...prev, [k]: e.target.value }));
 
   return (
-    <div className="flex gap-4 h-full">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
       {/* Form */}
-      <div className="w-[360px] flex-shrink-0 space-y-4 overflow-y-auto pr-2">
+      <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         {/* Auto-extract toggle */}
         {generatedCode && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
@@ -355,9 +362,9 @@ const OGTab: React.FC<{
   const displaySite = dOG.ogSiteName || 'example.com';
 
   return (
-    <div className="flex gap-4 h-full">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
       {/* Form */}
-      <div className="w-[360px] flex-shrink-0 space-y-4 overflow-y-auto pr-2">
+      <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         <div>
           <label className={labelCls}>OG Title (auto-filled from meta title)</label>
           <input className={inputCls} value={og.ogTitle} onChange={set('ogTitle')} placeholder={metaTitle || 'Page title'} />
@@ -401,7 +408,7 @@ const OGTab: React.FC<{
       </div>
 
       {/* Previews + Code */}
-      <div className="flex-1 min-w-0 space-y-4 overflow-y-auto">
+      <div className="flex-1 min-w-0 space-y-4 md:overflow-y-auto">
         {/* Google SERP preview */}
         <div>
           <p className="text-xs text-white/40 mb-2 font-medium uppercase tracking-wide">Google Search Preview</p>
@@ -530,8 +537,8 @@ ${dPages.map(p => `  <url>
 </urlset>`;
 
   return (
-    <div className="flex gap-4 h-full">
-      <div className="w-[360px] flex-shrink-0 space-y-4 overflow-y-auto pr-2">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
+      <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         <div>
           <label className={labelCls}>Base URL</label>
           <input className={inputCls} value={siteUrl} onChange={e => setSiteUrl(e.target.value)} placeholder="https://example.com" />
@@ -563,7 +570,7 @@ ${dPages.map(p => `  <url>
                   <Trash2 size={14} />
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <input type="date" className={`${inputCls} text-xs`} value={p.lastmod} onChange={e => updatePage(p.id, 'lastmod', e.target.value)} />
                 <select className={`${inputCls} text-xs`} value={p.priority} onChange={e => updatePage(p.id, 'priority', e.target.value)}>
                   {['1.0','0.9','0.8','0.7','0.6','0.5','0.4','0.3'].map(v => <option key={v}>{v}</option>)}
@@ -627,8 +634,8 @@ const RobotsTab: React.FC<{
   const toggle = (k: keyof RobotsConfig) => setRobots(prev => ({ ...prev, [k]: !prev[k as keyof RobotsConfig] }));
 
   return (
-    <div className="flex gap-4 h-full">
-      <div className="w-[360px] flex-shrink-0 space-y-4 overflow-y-auto pr-2">
+    <div className="flex flex-col md:flex-row gap-4 md:h-full md:overflow-visible">
+      <div className="w-full md:w-[360px] flex-shrink-0 space-y-4 md:overflow-y-auto md:pr-2">
         <div className="space-y-2">
           {([
             { k: 'allowAll', label: 'Allow all crawlers' },
@@ -689,7 +696,7 @@ const RobotsTab: React.FC<{
 const ScoreSidebar: React.FC<{ meta: MetaFormData; og: OGFormData; pages: SitemapPage[] }> = ({ meta, og, pages }) => {
   const { total, items } = calcScore(meta, og, pages);
   return (
-    <div className="w-[240px] flex-shrink-0 bg-[#161b22] rounded-xl border border-white/10 p-4 flex flex-col gap-4">
+    <div className="w-full md:w-[240px] flex-shrink-0 bg-[#161b22] rounded-xl border border-white/10 p-4 flex flex-col gap-4">
       <p className="text-xs font-semibold text-white/50 uppercase tracking-wider">SEO Score</p>
       <div className="flex justify-center">
         <ScoreGauge score={total} />
@@ -716,8 +723,28 @@ const ScoreSidebar: React.FC<{ meta: MetaFormData; og: OGFormData; pages: Sitema
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appName, onCodeUpdate }) => {
+export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files, appName, onCodeUpdate, sessionId }) => {
+  // Analyse the REAL app (admin autopsy 2026-07-21): the retired generatedCode is the "Waiting for
+  // magic…" placeholder in v5.0, so auto-extract used to read the placeholder's title/text. Resolve
+  // the real source; appHtml is '' when there's no built app (so the auto-extract guards go false).
+  const appHtml = resolveAppSource(generatedCode, files).html;
   const [tab, setTab] = useState(0);
+
+  // Saving into the user's REAL page (admin 2026-07-27). "Apply to App" used to call onCodeUpdate,
+  // which only changed the on-screen preview — so the SEO tags a user carefully filled in were gone
+  // the moment they closed the tab, and search engines never saw any of it.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [targetPath, setTargetPath] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  useEffect(() => {
+    if (targetPath && appFiles.some((f) => f.path === targetPath)) return;
+    const pages = appFiles.filter((f) => f.writable && /\.html?$/i.test(f.path)).map((f) => f.path);
+    setTargetPath(pages.find((p) => /(^|\/)index\.html?$/i.test(p)) || pages[0] || '');
+  }, [appFiles, targetPath]);
   const { copied, copy } = useCopy();
 
   const [meta, setMeta] = useState<MetaFormData>({
@@ -740,6 +767,76 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
     twitterCard: 'summary_large_image',
     twitterHandle: '',
   });
+
+  /**
+   * Write the SEO tags into the chosen page of the chosen app.
+   *
+   * The page is re-read first so the tags are merged into its CURRENT content, and the tag building
+   * itself now escapes every value — a description containing a quote used to break the page it was
+   * meant to describe.
+   */
+  const saveSeoToApp = useCallback(async () => {
+    if (!targetSession || !targetPath || saving) return;
+    setSaving(true);
+    setSaveNote('');
+    setSaveFailed(false);
+    try {
+      const current = await readAppFile(targetSession, targetPath);
+      if (current === null) {
+        setSaveFailed(true);
+        setSaveNote('Could not open that page, so nothing was changed.');
+        return;
+      }
+      const titleFull = meta.siteName
+        ? `${meta.siteName}${meta.pageTitle ? ` | ${meta.pageTitle}` : ''}`
+        : meta.pageTitle;
+      const applied = applySeoHead(current, {
+        title: titleFull,
+        description: meta.description,
+        keywords: meta.keywords,
+        robots: meta.robots,
+        author: meta.author,
+        canonicalUrl: meta.canonicalUrl,
+        ogTitle: og.ogTitle,
+        ogDescription: og.ogDescription,
+        ogImage: og.ogImage,
+        ogType: og.ogType,
+        ogSiteName: og.ogSiteName,
+        twitterCard: og.twitterCard,
+        twitterHandle: og.twitterHandle,
+      });
+      if (!applied.ok) {
+        setSaveFailed(true);
+        setSaveNote(applied.error || 'Those tags could not be added to that page.');
+        return;
+      }
+
+      const outcome = await saveFilesToApp(
+        targetSession,
+        { [targetPath]: applied.code },
+        `Before adding SEO tags to ${targetPath}`,
+      );
+      if (!outcome.ok) {
+        setSaveFailed(true);
+        setSaveNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      if (outcome.unchanged) {
+        setSaveNote('Your page already has exactly these tags — nothing needed changing.');
+        return;
+      }
+      setSaveNote(
+        `SEO tags saved into ${targetPath}${applied.replaced ? ` (${applied.replaced} old tag${applied.replaced === 1 ? '' : 's'} replaced)` : ''}. ${outcome.undoHint || ''}`.trim(),
+      );
+      void reloadFiles(targetSession);
+      onCodeUpdate?.(applied.code);
+    } catch {
+      setSaveFailed(true);
+      setSaveNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setSaving(false);
+    }
+  }, [targetSession, targetPath, saving, meta, og, onCodeUpdate, reloadFiles]);
 
   const [pages, setPages] = useState<SitemapPage[]>([
     { id: '1', url: '/', lastmod: new Date().toISOString().split('T')[0], priority: '1.0', changefreq: 'daily' },
@@ -770,9 +867,10 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
   ];
 
   return (
-    <div className="flex h-full bg-[#0d1117] text-white overflow-hidden">
+    // Mobile: single vertical scroll, sidebar stacks below. Desktop: bounded two-pane with inner scroll.
+    <div className="flex flex-col md:flex-row h-full bg-[#0d1117] text-white overflow-y-auto md:overflow-hidden">
       {/* Main area */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <div className="w-full md:flex-1 min-w-0 flex flex-col md:overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 px-5 pt-4 pb-0 border-b border-white/10">
           <div className="flex items-center gap-2 mb-3">
@@ -780,8 +878,8 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
             <h2 className="text-sm font-semibold text-white/90">SEO Optimizer</h2>
             <span className="text-xs text-white/30 ml-1">— meta tags, OG, sitemap &amp; robots</span>
           </div>
-          {/* Tabs */}
-          <div className="flex gap-1">
+          {/* Tabs — scroll horizontally on narrow phones instead of clipping */}
+          <div className="flex gap-1 overflow-x-auto no-scrollbar">
             {tabs.map((t, i) => (
               <button
                 key={i}
@@ -799,65 +897,54 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
           </div>
         </div>
 
-        {/* Apply to App button */}
-        {onCodeUpdate && generatedCode && (
-          <div className="flex-shrink-0 px-5 py-2 border-b border-white/10 bg-blue-500/5">
-            <button
-              onClick={() => {
-                // Build the full head injection string
-                const titleFull = meta.siteName
-                  ? `${meta.siteName}${meta.pageTitle ? ` | ${meta.pageTitle}` : ''}`
-                  : meta.pageTitle;
-                const headTags = [
-                  titleFull ? `<title>${titleFull}</title>` : '',
-                  meta.pageTitle ? `<meta name="title" content="${meta.pageTitle}" />` : '',
-                  meta.description ? `<meta name="description" content="${meta.description}" />` : '',
-                  meta.keywords ? `<meta name="keywords" content="${meta.keywords}" />` : '',
-                  `<meta name="robots" content="${meta.robots}" />`,
-                  meta.author ? `<meta name="author" content="${meta.author}" />` : '',
-                  meta.canonicalUrl ? `<link rel="canonical" href="${meta.canonicalUrl}" />` : '',
-                  og.ogTitle || meta.pageTitle ? `<meta property="og:title" content="${og.ogTitle || meta.pageTitle}" />` : '',
-                  og.ogDescription || meta.description ? `<meta property="og:description" content="${og.ogDescription || meta.description}" />` : '',
-                  og.ogImage ? `<meta property="og:image" content="${og.ogImage}" />` : '',
-                  og.ogType ? `<meta property="og:type" content="${og.ogType}" />` : '',
-                  og.ogSiteName ? `<meta property="og:site_name" content="${og.ogSiteName}" />` : '',
-                  og.twitterCard ? `<meta property="twitter:card" content="${og.twitterCard}" />` : '',
-                  og.twitterHandle ? `<meta property="twitter:site" content="${og.twitterHandle}" />` : '',
-                ].filter(Boolean).join('\n');
-
-                // Inject into generatedCode — replace existing tags or add before </head>
-                let newHtml = generatedCode;
-                // Remove existing title + seo meta tags
-                newHtml = newHtml.replace(/<title[^>]*>.*?<\/title>/gi, '');
-                newHtml = newHtml.replace(/<meta\s+name=["'](title|description|keywords|robots|author)["'][^>]*>/gi, '');
-                newHtml = newHtml.replace(/<meta\s+property=["']og:[^"']*["'][^>]*>/gi, '');
-                newHtml = newHtml.replace(/<meta\s+property=["']twitter:[^"']*["'][^>]*>/gi, '');
-                newHtml = newHtml.replace(/<link\s+rel=["']canonical["'][^>]*>/gi, '');
-                // Inject before </head>
-                if (newHtml.includes('</head>')) {
-                  newHtml = newHtml.replace('</head>', `${headTags}\n</head>`);
-                } else {
-                  newHtml = headTags + '\n' + newHtml;
-                }
-                onCodeUpdate(newHtml);
-              }}
-              className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
-            >
-              <Check size={12} /> Apply to App
-            </button>
-          </div>
-        )}
+        {/* Save into the user's REAL page. This used to update only the on-screen preview, so the
+            SEO tags never reached the file — and search engines never saw any of them. */}
+        <div className="flex-shrink-0 border-b border-white/10 bg-blue-500/5">
+          <AppTargetPicker
+            apps={apps}
+            appsLoading={appsLoading}
+            files={appFiles}
+            filesLoading={filesLoading}
+            sessionId={targetSession}
+            onSessionChange={(sid) => { setTargetSession(sid); setTargetPath(''); setSaveNote(''); }}
+            selectedPath={targetPath}
+            onPathChange={(pth) => { setTargetPath(pth); setSaveNote(''); }}
+            fileFilter={(f) => /\.html?$/i.test(f.path)}
+            fileLabel="Add the SEO tags to"
+          />
+          {apps.length > 0 && (
+            <div className="px-3 pb-3">
+              <button
+                onClick={() => void saveSeoToApp()}
+                disabled={!targetSession || !targetPath || saving}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
+              >
+                {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                {saving ? 'Saving into your app…' : 'Save SEO tags into my app'}
+              </button>
+              <p className="mt-2 text-[11px] text-white/40 leading-snug">
+                A restore point is saved first, so you can undo this from Versioning. Running it again
+                replaces the same tags rather than adding a second copy.
+              </p>
+              {saveNote && (
+                <p className={`mt-2 px-3 py-2 rounded-lg text-xs leading-relaxed ${saveFailed ? 'text-amber-300 bg-amber-500/10' : 'text-green-300 bg-green-500/10'}`}>
+                  {saveNote}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Tab content */}
-        <div className="flex-1 overflow-hidden p-4">
+        <div className="flex-1 md:overflow-hidden p-4">
           {tab === 0 && (
-            <MetaTab meta={meta} setMeta={setMeta} generatedCode={generatedCode} copy={copy} copied={copied} />
+            <MetaTab meta={meta} setMeta={setMeta} generatedCode={appHtml} copy={copy} copied={copied} />
           )}
           {tab === 1 && (
             <OGTab og={og} setOG={setOG} metaTitle={meta.pageTitle} metaDesc={meta.description} copy={copy} copied={copied} />
           )}
           {tab === 2 && (
-            <SitemapTab pages={pages} setPages={setPages} generatedCode={generatedCode} copy={copy} copied={copied} />
+            <SitemapTab pages={pages} setPages={setPages} generatedCode={appHtml} copy={copy} copied={copied} />
           )}
           {tab === 3 && (
             <RobotsTab robots={robotsCfg} setRobots={setRobotsCfg} copy={copy} copied={copied} />
@@ -866,7 +953,7 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
       </div>
 
       {/* Score sidebar */}
-      <div className="flex-shrink-0 p-4 border-l border-white/10 overflow-y-auto">
+      <div className="w-full md:w-auto flex-shrink-0 p-4 border-t border-white/10 md:border-t-0 md:border-l md:overflow-y-auto pb-24 md:pb-4">
         <ScoreSidebar meta={meta} og={og} pages={pages} />
       </div>
     </div>

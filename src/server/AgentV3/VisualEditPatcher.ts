@@ -105,6 +105,112 @@ export async function applyVisualTextEdit(req: VisualEditRequest): Promise<Visua
   }
 }
 
+export interface VisualStyleEditRequest {
+  /** File path exactly as it appears in the workspace VFS (e.g. "src/App.tsx"). */
+  filePath: string;
+  /** Current full source of that file. */
+  source: string;
+  /** 1-based line of the JSX element's opening tag (matches data-nbai-src / _debugSource). */
+  line: number;
+  /** 1-based column of the JSX element's opening tag. */
+  column: number;
+  /**
+   * camelCase CSS property → value to set on the element's inline `style`, e.g.
+   * `{ fontSize: '18px', color: '#ff0000', fontWeight: 'bold', width: '200px' }`. An EMPTY-string value
+   * REMOVES that property (a reset). This one primitive powers the toolbar (font/color/bold/align/
+   * padding), resize (width/height) and safe reposition (margin/transform) — all are inline-style edits.
+   */
+  styleUpdates: Record<string, string>;
+}
+
+// A camelCase CSS property name (fontSize, color, marginLeft, …). No hyphens — React inline styles are
+// camelCase — and nothing that could break out of an identifier position in source.
+const SAFE_STYLE_KEY = /^[A-Za-z][A-Za-z0-9]*$/;
+// A conservative CSS-value charset: letters, digits, spaces, and the punctuation real values use
+// (# % . , ( ) - + / and space). Deliberately EXCLUDES quotes, semicolons, braces, angle brackets and
+// backslash, so the value can be embedded in a single-quoted string literal with zero injection risk.
+const SAFE_STYLE_VALUE = /^[A-Za-z0-9 #%.,()\-+/]*$/;
+
+/**
+ * Merge inline-style changes onto the JSX element at (line, column), via a real AST (ts-morph) — never a
+ * string hack. Adds `style={{ … }}` when absent; merges/updates keys when present; refuses honestly when
+ * the element's `style` is dynamic (`style={x}` / a spread) rather than a plain object literal, so a
+ * wrong guess can never corrupt a file. Pure — the caller durably saves `newSource`.
+ */
+export async function applyVisualStyleEdit(req: VisualStyleEditRequest): Promise<VisualEditResult> {
+  const { filePath, source, line, column, styleUpdates } = req;
+  if (!isJsxFile(filePath)) {
+    return { ok: false, error: `${filePath} is not a JSX/TSX file — visual style edits only apply to JSX elements.` };
+  }
+  if (!Number.isFinite(line) || line < 1 || !Number.isFinite(column) || column < 0) {
+    return { ok: false, error: 'Invalid source position.' };
+  }
+  if (!styleUpdates || typeof styleUpdates !== 'object' || Array.isArray(styleUpdates) || Object.keys(styleUpdates).length === 0) {
+    return { ok: false, error: 'No style changes provided.' };
+  }
+  for (const [k, v] of Object.entries(styleUpdates)) {
+    if (!SAFE_STYLE_KEY.test(k)) return { ok: false, error: `Unsafe style property name: ${k}` };
+    if (typeof v !== 'string' || !SAFE_STYLE_VALUE.test(v) || v.length > 200) return { ok: false, error: `Unsafe style value for ${k}.` };
+  }
+  const loaded = await loadTsMorph();
+  if (!loaded) return { ok: false, error: 'AST tooling unavailable on the server.' };
+
+  try {
+    const project = new TsMorphProject({
+      useInMemoryFileSystem: true,
+      skipFileDependencyResolution: true,
+      compilerOptions: { allowJs: true, jsx: 2 },
+    });
+    const sf = project.createSourceFile(filePath, source, { overwrite: true });
+    const compiler = sf.compilerNode;
+    const lineCount = compiler.getLineStarts().length;
+    if (line > lineCount) return { ok: false, error: 'That line no longer exists in the current file — reload the preview and try again.' };
+    const pos = compiler.getPositionOfLineAndCharacter(line - 1, Math.max(0, column - 1));
+
+    const target = findJsxElementStartingAt(sf, pos);
+    if (!target) {
+      return { ok: false, error: 'Could not find the exact JSX element at that position — it may have moved. Reload the preview and try again.' };
+    }
+    const opening = target.getKindName() === 'JsxElement' ? target.getOpeningElement() : target;
+
+    const styleAttr = typeof opening.getAttribute === 'function' ? opening.getAttribute('style') : undefined;
+    if (styleAttr && styleAttr.getKindName() !== 'JsxAttribute') {
+      return { ok: false, error: 'This element\'s style comes from a spread — cannot safely edit it visually yet.' };
+    }
+
+    // No style attribute yet → add one from the (non-empty) updates.
+    if (!styleAttr) {
+      const parts = Object.entries(styleUpdates).filter(([, v]) => v !== '').map(([k, v]) => `${k}: '${v}'`);
+      if (parts.length === 0) return { ok: true, newSource: sf.getFullText() }; // only resets on a styleless element — no-op
+      opening.addAttribute({ name: 'style', initializer: `{{ ${parts.join(', ')} }}` });
+      return { ok: true, newSource: sf.getFullText() };
+    }
+
+    // Existing style → it MUST be `style={{ … }}` (a JsxExpression wrapping a plain object literal).
+    const init = styleAttr.getInitializer();
+    if (!init || init.getKindName() !== 'JsxExpression') {
+      return { ok: false, error: 'This element\'s style is not a simple object — cannot safely merge it visually yet.' };
+    }
+    const objLit = init.getExpression();
+    if (!objLit || objLit.getKindName() !== 'ObjectLiteralExpression') {
+      return { ok: false, error: 'This element\'s style is dynamic — cannot safely merge it visually yet.' };
+    }
+    for (const [k, v] of Object.entries(styleUpdates)) {
+      const existing = typeof objLit.getProperty === 'function' ? objLit.getProperty(k) : undefined;
+      if (v === '') { if (existing) existing.remove(); continue; }
+      if (existing && existing.getKindName() === 'PropertyAssignment') {
+        existing.setInitializer(`'${v}'`);
+      } else {
+        if (existing) existing.remove(); // shorthand/other → replace cleanly
+        objLit.addPropertyAssignment({ name: k, initializer: `'${v}'` });
+      }
+    }
+    return { ok: true, newSource: sf.getFullText() };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Find the innermost JsxElement/JsxSelfClosingElement whose OPENING tag starts exactly at `pos`. */
 function findJsxElementStartingAt(sf: any, pos: number): any {
   let found: any = null;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { trimReportForStorage, compactReportForRecord, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId, persistWithRetry, emergencyStash, emergencyRecall, emergencyClearForTest, redactReportSecrets } from './DiagnosticsStore';
+import { trimReportForStorage, compactReportForRecord, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId, persistWithRetry, emergencyStash, emergencyRecall, emergencyClearForTest, redactReportSecrets } from './DiagnosticsStore';
 import type { BuildDiagnosticsReport } from './BuildDiagnostics';
 
 function baseReport(over: Partial<BuildDiagnosticsReport> = {}): BuildDiagnosticsReport {
@@ -144,6 +144,19 @@ describe('saveDiagnosticsHistory / listDiagnosticsHistory / getDiagnosticsHistor
 
   it('getDiagnosticsHistoryItem resolves to null (never throws) when Firestore is unreachable', async () => {
     await expect(getDiagnosticsHistoryItem('ws-1', '2000')).resolves.toBeNull();
+  });
+
+  // CrewHub 2026-07-20 ("puri build report save nahi ho rahi"): unlike saveDiagnosticsHistory, the
+  // progress upsert must ACCEPT an in-progress report (endedAt unset) so a turn that never settles still
+  // lands in the whole-session download. Both never throw under the VITEST/no-Firestore contract.
+  it('upsertDiagnosticsHistoryProgress never throws for an IN-PROGRESS report (endedAt unset) — the whole point', async () => {
+    const inProgress = baseReport(); // no endedAt — a turn still running
+    await expect(upsertDiagnosticsHistoryProgress('ws-1', inProgress)).resolves.toBeUndefined();
+  });
+  it('upsertDiagnosticsHistoryProgress never throws for a settled report or bad input', async () => {
+    await expect(upsertDiagnosticsHistoryProgress('ws-1', baseReport({ endedAt: 2000, ok: true }))).resolves.toBeUndefined();
+    // @ts-expect-error — invalid input must be swallowed, never thrown
+    await expect(upsertDiagnosticsHistoryProgress('', null)).resolves.toBeUndefined();
   });
 });
 

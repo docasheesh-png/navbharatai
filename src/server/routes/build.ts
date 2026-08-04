@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, requireUserMatch, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { consumeEngineerQuota } from '../lib/engineerQuota';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
@@ -50,6 +51,7 @@ import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { workspaceLock } from '../project/WorkspaceLock';
 import { userCostStore } from '../lib/UserCostStore';
 import { userBuildHistoryStore, type BuildStatus } from '../lib/UserBuildHistoryStore';
@@ -276,6 +278,18 @@ export function registerBuildRoutes(app: Express): void {
         return res.status(400).json({ error: 'prompt (string) is required' });
       }
 
+      // Per-user daily build quota — an anti-abuse cost guard (a single user can't spin unlimited
+      // sandboxes + model calls). Attributed to the VERIFIED Firebase uid only; fails OPEN on any
+      // infra hiccup; env-tunable via ENGINEER_DAILY_LIMIT (default 50/day, `off` disables). Anon
+      // users are governed by the IP rate-limiter above instead.
+      const quotaUid = resolveAttributionUserId(await verifyFirebaseToken(req));
+      if (quotaUid) {
+        const q = await consumeEngineerQuota(quotaUid);
+        if (!q.allowed) {
+          return res.status(429).json({ error: `Daily build limit reached (${q.used}/${q.limit}). It resets at 00:00 UTC.` });
+        }
+      }
+
       // Model call backed by the shared aiCalls layer — multi-provider with fallback.
       const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
@@ -386,6 +400,17 @@ export function registerBuildRoutes(app: Express): void {
       // SECURITY: attribute cost/history to the VERIFIED Firebase identity only — never the
       // client-supplied req.body.userId (spoofable → griefing a victim's cost/quota/history).
       const reqUserId: string | undefined = resolveAttributionUserId(await verifyFirebaseToken(req));
+
+      // Per-user daily build quota (same anti-abuse cost guard as /api/build; fails open,
+      // env-tunable ENGINEER_DAILY_LIMIT). Refuse over-limit with an honest terminal SSE event.
+      if (reqUserId) {
+        const q = await consumeEngineerQuota(reqUserId);
+        if (!q.allowed) {
+          send({ type: 'error', message: `Daily build limit reached (${q.used}/${q.limit}). It resets at 00:00 UTC.` });
+          cleanup();
+          return res.end();
+        }
+      }
 
       // Foundations (G1) — best-effort lifecycle events (never block the build).
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
@@ -831,6 +856,67 @@ export function registerBuildRoutes(app: Express): void {
       return res.json(version);
     } catch {
       return res.status(500).json({ error: 'failed to load version' });
+    }
+  });
+
+  // Code Versioning — save a MANUAL named restore-point (checkpoint) to the SAME durable, cross-device
+  // build-history store (admin 2026-07-24). This makes the Versioning tool genuinely strong: alongside
+  // the automatic per-build checkpoints, a user can snapshot "this is good" before a risky change and
+  // Restore to it later from any device. Bounded + best-effort; the sessionId is the unguessable
+  // capability, mirroring the GET routes above.
+  app.post('/api/build-history/:sessionId/checkpoint', async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const body = req.body as { name?: unknown; files?: unknown };
+      if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      if (!body?.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
+        return res.status(400).json({ error: 'files map required' });
+      }
+      const files: Record<string, string> = {};
+      let bytes = 0;
+      for (const [k, v] of Object.entries(body.files as Record<string, unknown>)) {
+        if (typeof k !== 'string' || typeof v !== 'string') continue;
+        bytes += k.length + v.length;
+        if (bytes > 5 * 1024 * 1024) break; // hard cap; the store caps again to the Firestore 1MB doc limit
+        files[k] = v;
+      }
+      if (Object.keys(files).length === 0) return res.status(400).json({ error: 'no readable files to checkpoint' });
+      const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 120) : 'Manual checkpoint';
+      await buildHistoryStore.save(sessionId, {
+        commitMessage: name,
+        fileCount: Object.keys(files).length,
+        files,
+        isEdit: true,
+        tier: 'manual',
+        ok: true,
+      });
+      return res.json({ ok: true });
+    } catch {
+      return res.status(500).json({ error: 'failed to save checkpoint' });
+    }
+  });
+
+  // Code Versioning "Time Machine" — list the signed-in user's apps so they can pick WHICH app's
+  // version history to view (admin 2026-07-24). Each Pro v5 app is `agentv3-{uid}-{sessionId}`; we
+  // return the raw sessionId (the build-history key) + a friendly label. Anonymous → empty list.
+  app.get('/api/versioning/apps', async (req: Request, res: Response) => {
+    try {
+      const uid = await verifyFirebaseToken(req);
+      if (!uid) return res.json({ apps: [] });
+      const prefix = `agentv3-${uid}-`;
+      const apps = (await listUserWorkspaceApps(uid)).map((a) => {
+        const sessionId = a.workspaceId.startsWith(prefix) ? a.workspaceId.slice(prefix.length) : a.workspaceId;
+        const when = a.savedAt > 0 ? new Date(a.savedAt).toISOString().slice(0, 10) : '';
+        return {
+          sessionId,
+          label: `App · ${a.fileCount} file${a.fileCount === 1 ? '' : 's'}${when ? ` · ${when}` : ''}`,
+          fileCount: a.fileCount,
+          savedAt: a.savedAt,
+        };
+      });
+      return res.json({ apps });
+    } catch {
+      return res.json({ apps: [] });
     }
   });
 

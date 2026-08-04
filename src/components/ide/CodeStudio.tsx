@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Editor } from './Editor';
 import { FileExplorer } from './FileExplorer';
 import { ActivityBar } from './ActivityBar';
 import { DebugPanel } from './DebugPanel';
-import { RealTerminal } from './RealTerminal';
+import { TerminalPanel } from './TerminalPanel';
 import { ProblemsPanel } from './ProblemsPanel';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { loadBreakpoints, serializeBreakpoints, toggleBreakpoint as toggleBpInMap, BREAKPOINTS_STORAGE_KEY, type BreakpointMap } from '../../lib/breakpoints';
@@ -26,7 +27,8 @@ import {
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
   BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle,
+  Files as FilesIcon, GitBranch, Terminal as TerminalIcon
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -142,7 +144,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [openTabs, setOpenTabs] = useState<Tab[]>(
     Object.keys(files).slice(0, 3).map(path => ({ path }))
   );
-  
+
+  /**
+   * SPLIT EDITOR (admin 2026-08-04: "Code Studio ko sach me VS Code ke barabar chahiye").
+   * Ctrl+\ used to be an honest no-op — the command existed, did nothing, and said so in a comment.
+   *
+   * This is a SECOND, fully independent editor group with its own tabs and its own active file, so
+   * you can read a component beside the hook it calls, or a test beside the code under test. That is
+   * the entire reason split view exists; a split that shows the same file twice is a toy.
+   *
+   * DELIBERATELY ADDITIVE: while `splitTabs` is empty every code path below behaves exactly as it did
+   * before — same layout, same save, same focus. Nothing about the existing single-editor experience
+   * is re-plumbed to make the split possible, so the feature cannot regress the common case.
+   */
+  const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
+  const [splitActive, setSplitActive] = useState<string>('');
+  const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor
+
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isPanelMaximized, setIsPanelMaximized] = useState(false);
   // Real "Problems" panel (esbuild compile errors from the live preview bundle).
@@ -174,9 +192,51 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  // REAL MENU BAR (admin 2026-08-04: "mark kiye huye buttons kaam nahi kar rahe"). The six labels —
+  // File / Edit / Selection / Run / Terminal / Help — were bare <span>s with hover styles and NO
+  // onClick: they looked like VS Code menus and did nothing. That is exactly the "looks done but does
+  // nothing" state the second absolute rule forbids. They are now real dropdown menus, VS Code-style:
+  // click opens, hovering a sibling while one is open switches to it, Escape/click-away closes, and
+  // every item routes through the SAME handleShortcut dispatcher the palette + keyboard already use —
+  // one command path, no parallel fake wiring. Items that have no real implementation are simply not
+  // listed (honesty rule: no dead entries).
+  // The dropdown is rendered through a PORTAL onto document.body, not inline (admin 2026-08-04: the
+  // menus did not visibly open on desktop). Inline, a dropdown is at the mercy of every ancestor: one
+  // `overflow-hidden` or one stacking context anywhere up the tree — and this component has several,
+  // including the root — silently clips or hides it, with no error and nothing to debug. A portal has
+  // no ancestors but <body>, so that entire class of failure cannot happen. The anchor rect is captured
+  // on open and the menu is positioned `fixed` from it.
+  const [openMenu, setOpenMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const menuBarRef = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    // Both the bar and the portalled dropdown carry data-ide-menu, so a click on a MENU ITEM is not
+    // treated as "outside". Without that the mousedown would unmount the dropdown before the item's
+    // click fired, and every entry would silently do nothing — the exact bug this menu is fixing.
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement)?.closest?.('[data-ide-menu]')) setOpenMenu(null);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onEsc); };
+  }, [openMenu]);
   const [isCursorPopupOpen, setIsCursorPopupOpen] = useState(false);
+  /**
+   * The editor every command acts on. With a split open this FOLLOWS FOCUS — both panes report
+   * themselves here when focused — so Find, Format, Undo and the status bar all target the pane the
+   * user is actually typing in. Making one variable truthful is why ~40 existing call sites did not
+   * have to learn about split view at all; the alternative (threading a "which pane?" argument
+   * through every one of them) is how a feature like this quietly breaks half the menu.
+   */
   const [editorInstance, setEditorInstance] = useState<any>(null);
+  /** The LEFT pane specifically — for the effects that belong to the left group, not to focus. */
+  const leftEditorRef = React.useRef<any>(null);
+  /** Which group has focus. Forced to 'left' whenever no split is open. */
+  const [focusedPane, setFocusedPane] = useState<'left' | 'right'>('left');
   const [isMobile, setIsMobile] = useState(false);
+  // Phone bottom-tab bar (admin 2026-07-31): the "More" sheet holding the secondary dev tools.
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [replaceQuery, setReplaceQuery] = useState('');
   // A2-A5: Editor display settings (persisted to localStorage)
@@ -237,15 +297,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     const timer = setTimeout(checkMobile, 100);
     window.addEventListener('resize', checkMobile);
 
-    // Clear the redirect storage after a short delay so subsequent refreshes start fresh
-    const clearTimer = setTimeout(() => {
-      localStorage.removeItem('github_oauth_return_active_screen');
-    }, 1000);
+    // Consume the one-shot OAuth-return screen key IMMEDIATELY so it can never linger to a later mount
+    // and force the Git panel open again. ROOT CAUSE of "Git auto-opens every time": the old clear ran
+    // on a 1000ms timer that unmount (line below) cancelled, so the key survived and re-opened Git on the
+    // next IDE load. The initial `activeScreen`/`isSidebarOpen`/`hasRestoredScreen` reads above already
+    // captured it for the legitimate single post-OAuth open; removing it now keeps that one-time behaviour
+    // while guaranteeing Git only opens from an explicit menu click afterwards.
+    localStorage.removeItem('github_oauth_return_active_screen');
 
     return () => {
       window.removeEventListener('resize', checkMobile);
       clearTimeout(timer);
-      clearTimeout(clearTimer);
     };
   }, []);
 
@@ -256,6 +318,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     }
   }, [activeFile]);
 
+  // When the workspace file SET changes to a new project (e.g. a Cloud Sync GitHub-repo import replaces
+  // all files), make sure the editor actually opens a REAL file: if the current activeFile no longer
+  // exists in `files`, jump to the first file and reset the open tabs. Without this, after an import the
+  // editor kept pointing at the previous project's file (e.g. index.html) — so the imported repo "didn't
+  // show up" even though its files were already in the workspace. A normal edit keeps activeFile in
+  // `files`, so this only fires on an import/replace, never on a keystroke.
+  useEffect(() => {
+    const keys = Object.keys(files);
+    if (keys.length > 0 && (!activeFile || !(activeFile in files))) {
+      setActiveFile(keys[0]);
+      setOpenTabs([{ path: keys[0] }]);
+    }
+  }, [files]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A10: Snapshot file content when a tab is first opened (establishes the "saved" baseline)
   useEffect(() => {
     for (const tab of openTabs) {
@@ -265,11 +341,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     }
   }, [openTabs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // C21: Scroll editor to top whenever the active file changes
+  // C21: Scroll editor to top whenever the active file changes.
+  // Uses the LEFT editor explicitly, not `editorInstance`: that one follows focus, so with a split
+  // open switching a LEFT tab would otherwise yank the RIGHT pane back to line 1 — losing the reader's
+  // place in the very file they split the view to keep watching.
   useEffect(() => {
-    if (editorInstance) {
-      editorInstance.revealLine(1);
-      editorInstance.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
+    const left = leftEditorRef.current;
+    if (left) {
+      left.revealLine(1);
+      left.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
     }
   }, [activeFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -303,19 +383,78 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const autoRunTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => () => { if (autoRunTimer.current) clearTimeout(autoRunTimer.current); }, []);
 
-  const handleFileChange = (content: string) => {
-    const nextFiles = { ...files, [activeFile]: content };
+  /**
+   * Write an edit for ONE path. Extracted so the split pane edits its OWN file rather than whatever
+   * the left pane happens to be showing — the bug that would make split view actively dangerous
+   * (type in the right pane, corrupt the left pane's file).
+   */
+  const writeFileContent = (path: string, content: string) => {
+    if (!path) return;
+    const nextFiles = { ...files, [path]: content };
     onFilesChange(nextFiles);
     // A10: mark tab dirty if content differs from snapshot
-    const savedContent = savedFilesRef.current[activeFile] ?? content;
+    const savedContent = savedFilesRef.current[path] ?? content;
     setDirtyTabs(prev => {
       const next = new Set(prev);
-      if (content !== savedContent) { next.add(activeFile); } else { next.delete(activeFile); }
+      if (content !== savedContent) { next.add(path); } else { next.delete(path); }
       return next;
     });
     if (autoRunTimer.current) clearTimeout(autoRunTimer.current);
     autoRunTimer.current = setTimeout(() => { onRun(nextFiles); }, 900);
   };
+
+  const handleFileChange = (content: string) => writeFileContent(activeFile, content);
+  const handleSplitFileChange = (content: string) => writeFileContent(splitActive, content);
+
+  /** Open the focused file in a second group beside the first (Ctrl+\ / View → Split Editor). */
+  const handleSplitEditor = () => {
+    // Never open a split on a phone: two Monaco panes would be ~180px each. Opening state we then
+    // refuse to render is how a UI ends up with a border to nowhere.
+    if (isMobile) return;
+    const path = focusedPane === 'right' ? splitActive : activeFile;
+    if (!path || files[path] === undefined) return;   // nothing real to split — never fake a pane
+    setSplitTabs(prev => (prev.some(t => t.path === path) ? prev : [...prev, { path }]));
+    setSplitActive(path);
+    setFocusedPane('right');
+  };
+
+  const handleSplitTabClose = (path: string) => {
+    setSplitTabs(prev => {
+      const next = prev.filter(t => t.path !== path);
+      if (path === splitActive) setSplitActive(next[next.length - 1]?.path || '');
+      // Closing the last tab collapses the split, exactly as VS Code closes an empty editor group —
+      // an empty pane taking half the screen is not a state anyone wants to be left in.
+      if (next.length === 0) setFocusedPane('left');
+      return next;
+    });
+  };
+
+  /** Collapse the second group entirely, returning focus to the first. */
+  const closeSplitEditor = () => {
+    setSplitTabs([]);
+    setSplitActive('');
+    setFocusedPane('left');
+  };
+
+  /** Open a path in the split pane (used by the split group's own go-to-definition / file links). */
+  const openInSplit = (path: string) => {
+    if (files[path] === undefined) return;
+    setSplitTabs(prev => (prev.some(t => t.path === path) ? prev : [...prev, { path }]));
+    setSplitActive(path);
+    setFocusedPane('right');
+  };
+
+  // Keep the split group honest when files disappear (deleted, renamed, or a fresh build replaced the
+  // workspace): a tab pointing at a file that no longer exists would render an empty editor that looks
+  // like the file was emptied.
+  useEffect(() => {
+    if (splitTabs.length === 0) return;
+    const surviving = splitTabs.filter(t => files[t.path] !== undefined);
+    if (surviving.length === splitTabs.length) return;
+    setSplitTabs(surviving);
+    if (files[splitActive] === undefined) setSplitActive(surviving[surviving.length - 1]?.path || '');
+    if (surviving.length === 0) setFocusedPane('left');
+  }, [files]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTabClose = (path: string) => {
     const newTabs = openTabs.filter(t => t.path !== path);
@@ -437,11 +576,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         case 'workbench.action.toggleMaximizedPanel':
           setIsPanelOpen(prev => !prev);
           break;
-        case 'workbench.action.files.saveAll':
-          console.log('Save All Files Triggered');
+        case 'workbench.action.files.saveAll': {
+          // REAL save-all (was a console.log stub): apply the same trim/final-newline/format-on-save
+          // rules base.action.save uses, to EVERY dirty tab, in one files update.
+          if (dirtyTabs.size > 0) {
+            const next = { ...files };
+            dirtyTabs.forEach((path) => {
+              let content = next[path] ?? '';
+              if (editorTrimWhitespace) content = content.replace(/[^\S\n]+$/gm, '');
+              if (editorFinalNewline && content.length > 0 && !content.endsWith('\n')) content += '\n';
+              next[path] = content;
+              savedFilesRef.current[path] = content;
+            });
+            onFilesChange(next);
+            // Save All rewrites every buffer; push the result into whichever pane is focused, using
+            // THAT pane's file — pushing activeFile's text into a focused right pane would overwrite
+            // the wrong document on screen.
+            {
+              const visiblePath = splitOpen && focusedPane === 'right' ? splitActive : activeFile;
+              if (next[visiblePath] !== undefined) editorInstance?.setValue(next[visiblePath]);
+            }
+            if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
+            setDirtyTabs(new Set());
+          }
           break;
+        }
         case 'markdown.showPreview':
-          console.log('Markdown Preview Triggered');
+          // REAL: open the live Preview surface (was a console.log stub).
+          setActiveScreen('preview');
           break;
         case 'workbench.action.quickOpen':
           setIsCommandPaletteOpen(true);
@@ -473,10 +635,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           setIsPanelOpen(true);
           break;
         case 'workbench.action.debug.start':
-          console.log('Debug Started');
+          // REAL: open the Debug panel (was a console.log stub).
+          setIsDebugPanelOpen(true);
           break;
         case 'workbench.action.debug.stop':
-          console.log('Debug Stopped');
+          setIsDebugPanelOpen(false);
           break;
         case 'workbench.action.navigateBack':
           window.history.back();
@@ -492,8 +655,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             document.documentElement.requestFullscreen();
           }
           break;
+        case 'explorer.newFile': {
+          // REAL New File (Ctrl+N was advertised but had no handler → did nothing).
+          const name = (window.prompt('New file name (e.g. index.html)') || '').trim();
+          if (name) handleCreateFile(name);
+          break;
+        }
         case 'workbench.action.splitEditor':
-          console.log('Split Editor Triggered');
+          handleSplitEditor();
           break;
         case 'workbench.action.focusFirstEditorGroup':
           if (editorInstance) editorInstance.focus();
@@ -503,42 +672,77 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           console.log('Press F12 or Ctrl+Shift+I to open DevTools');
           break;
         case 'base.action.save': {
-          let finalContent = files[activeFile] || '';
+          // Ctrl+S saves the file you are LOOKING at. With a split open that is the focused pane's
+          // file — saving the left pane's file while the user types in the right one would write the
+          // wrong buffer to disk, which is the worst thing a save button can do.
+          const savePath = splitOpen && focusedPane === 'right' ? splitActive : activeFile;
+          if (!savePath) break;
+          let finalContent = files[savePath] || '';
           // A13: Trim trailing whitespace
           if (editorTrimWhitespace) finalContent = finalContent.replace(/[^\S\n]+$/gm, '');
           // A14: Insert final newline
           if (editorFinalNewline && finalContent.length > 0 && !finalContent.endsWith('\n')) finalContent += '\n';
-          if (finalContent !== (files[activeFile] || '')) {
-            onFilesChange({ ...files, [activeFile]: finalContent });
+          if (finalContent !== (files[savePath] || '')) {
+            onFilesChange({ ...files, [savePath]: finalContent });
             editorInstance?.setValue(finalContent);
           }
           // A12: Format on Save
           if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
           // A10: mark file as saved
-          savedFilesRef.current[activeFile] = finalContent;
-          setDirtyTabs(prev => { const next = new Set(prev); next.delete(activeFile); return next; });
+          savedFilesRef.current[savePath] = finalContent;
+          setDirtyTabs(prev => { const next = new Set(prev); next.delete(savePath); return next; });
           break;
         }
       }
     }
 
-    // Map keys to specific IDE actions if needed (fallback/manual)
-    const shortcutStr = keys.join('+').toLowerCase();
-    
-    if (shortcutStr.includes('ctrl+shift+p')) {
-      setIsCommandPaletteOpen(true);
-    } else if (shortcutStr.includes('ctrl+b')) {
-      setIsSidebarOpen(prev => !prev);
-    } else if (shortcutStr.includes('ctrl+j')) {
-      setIsPanelOpen(prev => !prev);
-    } else if (shortcutStr.includes('ctrl+g')) {
-      // A15: Go to Line
-      editorInstance?.getAction('editor.action.gotoLine')?.run();
-    } else if (shortcutStr.includes('ctrl+d')) {
-      // A18: Select next occurrence (adds cursor to next match)
-      editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run();
+    // Keys-based fallback — ONLY when no command was handled above. ROOT-CAUSE FIX (admin 2026-07-31):
+    // this block used to run UNCONDITIONALLY, so a tap that ALSO passed a command (every VirtualKeyboard
+    // shortcut does) fired twice — e.g. "Toggle Sidebar" (Ctrl+B) toggled on THEN off = a dead no-op,
+    // and "Select Next" (Ctrl+D) selected twice. Gating on `!command` makes each shortcut fire exactly
+    // once, whether it comes from a tap (command given) or the global key listener (keys only).
+    if (!command) {
+      const shortcutStr = keys.join('+').toLowerCase();
+      if (shortcutStr.includes('ctrl+shift+p')) {
+        setIsCommandPaletteOpen(true);
+      } else if (shortcutStr.includes('ctrl+b')) {
+        setIsSidebarOpen(prev => !prev);
+      } else if (shortcutStr.includes('ctrl+j')) {
+        setIsPanelOpen(prev => !prev);
+      } else if (shortcutStr.includes('ctrl+g')) {
+        // A15: Go to Line
+        editorInstance?.getAction('editor.action.gotoLine')?.run();
+      } else if (shortcutStr.includes('ctrl+d')) {
+        // A18: Select next occurrence (adds cursor to next match)
+        editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run();
+      }
     }
   };
+
+  // GLOBAL KEYBOARD SHORTCUTS (admin 2026-07-31): CodeStudio had NO physical-keyboard listener, so the
+  // workbench shortcuts (Ctrl+S / Ctrl+Shift+S / Ctrl+B / Ctrl+J / Ctrl+P / Ctrl+Shift+P) never fired —
+  // the shortcuts looked dead. This wires them for real. We deliberately do NOT intercept the
+  // editor-native combos (Ctrl+F find, Ctrl+G go-to-line, Ctrl+D add-selection) — Monaco already
+  // handles those when the editor is focused (and the toolbar buttons cover them otherwise), so
+  // intercepting here would double-fire. A ref keeps the listener pinned once while always calling the
+  // latest handleShortcut closure (fresh files/activeFile/editor state).
+  const shortcutHandlerRef = React.useRef(handleShortcut);
+  shortcutHandlerRef.current = handleShortcut;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const call = (keys: string[], command?: string) => { e.preventDefault(); shortcutHandlerRef.current(keys, command); };
+      switch (e.key.toLowerCase()) {
+        case 'p': e.shiftKey ? call(['ctrl', 'shift', 'p']) : call(['ctrl', 'p'], 'workbench.action.quickOpen'); break;
+        case 's': e.shiftKey ? call(['ctrl', 'shift', 's'], 'workbench.action.files.saveAll') : call(['ctrl', 's'], 'base.action.save'); break;
+        case 'b': call(['ctrl', 'b']); break;
+        case 'j': call(['ctrl', 'j']); break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleCommandAction = (id: string) => {
     // Map palette command ids onto the existing shortcut/screen handlers.
@@ -688,7 +892,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         // engine as the main v5.0 panel, not the separate "Free" chat AI. Root-caused 2026-07-01: this
         // used to render <AIChat> wired to the Free-tier text-only endpoint, which has zero file
         // access and is explicitly instructed server-side to never write code — so it could only talk
-        // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for RealTerminal below)
+        // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for the terminal below)
         // give it the same identity; getAgentV3SessionId/getAgentV3WorkspaceId (shared with
         // AgentV3Panel via the same localStorage key) put it on the exact same workspace.
         return <AgentV3MiniChat userId={v3UserId} email={v3Email} />;
@@ -755,17 +959,128 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       {/* IDE Top Helper Bar (Quick Access) */}
       <div className="h-9 bg-[var(--theme-card)] flex items-center justify-between px-3 shrink-0 border-b border-black/10 select-none">
          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 cursor-pointer hover:bg-white/5 px-2 py-1 rounded transition-colors" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            {/* IDE menu (☰ NavBharat IDE): opens the IDE's FILE EXPLORER sidebar — NOT the AI chat (admin
+                2026-07-31). It used to only toggle isSidebarOpen, so if activeScreen was left on 'ai' the
+                menu showed the AI panel. Force the 'files' screen; a second tap while already on files closes it. */}
+            <div className="flex items-center gap-1.5 cursor-pointer hover:bg-white/5 px-2 py-1 rounded transition-colors" onClick={() => { if (isSidebarOpen && activeScreen === 'files') { setIsSidebarOpen(false); } else { setActiveScreen('files'); setIsSidebarOpen(true); } }}>
                <MenuIcon className="w-4 h-4 text-white/70" />
                <span className="text-[11px] text-white/80 font-medium">NavBharat IDE</span>
             </div>
-            <div className="hidden md:flex items-center gap-4 text-[11px] text-white/50 font-medium">
-               <span className="hover:text-white cursor-pointer transition-colors">File</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Edit</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Selection</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Run</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Terminal</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Help</span>
+            <div ref={menuBarRef} data-ide-menu className="hidden md:flex items-center gap-0.5 text-[11px] text-white/60 font-medium relative">
+               {([
+                 { name: 'File', items: [
+                   { label: 'New File…', shortcut: 'Ctrl+N', run: () => handleShortcut([], 'explorer.newFile') },
+                   { label: 'New Window', run: () => handleShortcut([], 'workbench.action.newWindow') },
+                   { divider: true },
+                   { label: 'Save', shortcut: 'Ctrl+S', run: () => handleShortcut([], 'base.action.save') },
+                   { label: 'Save All', shortcut: 'Ctrl+Shift+S', run: () => handleShortcut([], 'workbench.action.files.saveAll') },
+                   { divider: true },
+                   { label: 'Close Editor', shortcut: 'Ctrl+W', run: () => handleShortcut([], 'workbench.action.closeActiveEditor') },
+                   { divider: true },
+                   { label: 'Settings', run: () => handleShortcut([], 'workbench.action.openSettings') },
+                   { label: 'Keyboard Shortcuts', run: () => handleShortcut([], 'workbench.action.openGlobalKeybindings') },
+                 ] },
+                 { name: 'Edit', items: [
+                   { label: 'Undo', shortcut: 'Ctrl+Z', run: () => handleShortcut([], 'undo') },
+                   { label: 'Redo', shortcut: 'Ctrl+Y', run: () => handleShortcut([], 'redo') },
+                   { divider: true },
+                   { label: 'Cut', shortcut: 'Ctrl+X', run: () => handleShortcut([], 'editor.action.clipboardCutAction') },
+                   { label: 'Copy', shortcut: 'Ctrl+C', run: () => handleShortcut([], 'editor.action.clipboardCopyAction') },
+                   { label: 'Paste', shortcut: 'Ctrl+V', run: async () => {
+                     // A menu click loses the native paste gesture, so read the clipboard explicitly (the
+                     // browser may ask permission once) and insert at the cursor — a REAL paste, not a stub.
+                     try {
+                       const text = await navigator.clipboard.readText();
+                       const sel = editorInstance?.getSelection();
+                       if (text && sel) { editorInstance?.executeEdits('menu-paste', [{ range: sel, text, forceMoveMarkers: true }]); editorInstance?.focus(); }
+                     } catch { /* clipboard permission denied — Ctrl+V still works in the editor */ }
+                   } },
+                   { divider: true },
+                   { label: 'Find', shortcut: 'Ctrl+F', run: () => editorInstance?.getAction('actions.find')?.run() },
+                   { label: 'Replace', shortcut: 'Ctrl+H', run: () => editorInstance?.getAction('editor.action.startFindReplaceAction')?.run() },
+                   { label: 'Find in Files', shortcut: 'Ctrl+Shift+F', run: () => handleShortcut([], 'workbench.action.findInFiles') },
+                   { divider: true },
+                   { label: 'Toggle Line Comment', shortcut: 'Ctrl+/', run: () => editorInstance?.getAction('editor.action.commentLine')?.run() },
+                   { label: 'Format Document', shortcut: 'Shift+Alt+F', run: () => editorInstance?.getAction('editor.action.formatDocument')?.run() },
+                 ] },
+                 { name: 'Selection', items: [
+                   { label: 'Select All', shortcut: 'Ctrl+A', run: () => editorInstance?.getAction('editor.action.selectAll')?.run() },
+                   { label: 'Expand Selection', shortcut: 'Shift+Alt+→', run: () => editorInstance?.getAction('editor.action.smartSelect.expand')?.run() },
+                   { label: 'Add Next Occurrence', shortcut: 'Ctrl+D', run: () => editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run() },
+                   { divider: true },
+                   { label: 'Add Cursor Above', shortcut: 'Ctrl+Alt+↑', run: () => editorInstance?.getAction('editor.action.insertCursorAbove')?.run() },
+                   { label: 'Add Cursor Below', shortcut: 'Ctrl+Alt+↓', run: () => editorInstance?.getAction('editor.action.insertCursorBelow')?.run() },
+                   { divider: true },
+                   { label: 'Move Line Up', shortcut: 'Alt+↑', run: () => editorInstance?.getAction('editor.action.moveLinesUpAction')?.run() },
+                   { label: 'Move Line Down', shortcut: 'Alt+↓', run: () => editorInstance?.getAction('editor.action.moveLinesDownAction')?.run() },
+                   { label: 'Copy Line Down', shortcut: 'Shift+Alt+↓', run: () => editorInstance?.getAction('editor.action.copyLinesDownAction')?.run() },
+                 ] },
+                 { name: 'View', items: [
+                   // Split view was reachable only by Ctrl+\ — a feature nobody can find is a feature
+                   // nobody has. It lives in View, exactly where VS Code puts it.
+                   { label: splitOpen ? 'Close Split Editor' : 'Split Editor', shortcut: 'Ctrl+\\', run: () => (splitOpen ? closeSplitEditor() : handleSplitEditor()) },
+                   { divider: true },
+                   { label: 'Explorer', run: () => { setIsSidebarOpen(true); setActiveScreen('files'); } },
+                   { label: 'Problems', run: () => handleShortcut([], 'workbench.actions.view.problems') },
+                   { label: 'Terminal', shortcut: 'Ctrl+J', run: () => handleShortcut([], 'workbench.action.terminal.toggleTerminal') },
+                   { divider: true },
+                   { label: 'Command Palette', shortcut: 'Ctrl+Shift+P', run: () => setIsCommandPaletteOpen(true) },
+                 ] },
+                 { name: 'Run', items: [
+                   { label: 'Open Preview', run: () => handleShortcut([], 'markdown.showPreview') },
+                   { divider: true },
+                   { label: 'Start Debugging', shortcut: 'F5', run: () => handleShortcut([], 'workbench.action.debug.start') },
+                   { label: 'Stop Debugging', shortcut: 'Shift+F5', run: () => handleShortcut([], 'workbench.action.debug.stop') },
+                   { divider: true },
+                   { label: 'Problems Panel', run: () => handleShortcut([], 'workbench.actions.view.problems') },
+                 ] },
+                 { name: 'Terminal', items: [
+                   { label: 'New Terminal', run: () => handleShortcut([], 'workbench.action.terminal.new') },
+                   { label: 'Toggle Terminal', shortcut: 'Ctrl+J', run: () => handleShortcut([], 'workbench.action.terminal.toggleTerminal') },
+                 ] },
+                 { name: 'Help', items: [
+                   { label: 'Command Palette', shortcut: 'Ctrl+Shift+P', run: () => setIsCommandPaletteOpen(true) },
+                   { label: 'Keyboard Shortcuts', run: () => setIsShortcutsOpen(true) },
+                   { divider: true },
+                   { label: 'Toggle Full Screen', run: () => handleShortcut([], 'workbench.action.toggleZenMode') },
+                 ] },
+               ] as Array<{ name: string; items: Array<{ label?: string; shortcut?: string; run?: () => void; divider?: boolean }> }>).map((menu) => (
+                 <div key={menu.name} className="relative">
+                   <button
+                     className={`px-2 py-1 rounded transition-colors ${openMenu?.name === menu.name ? 'bg-white/10 text-white' : 'hover:text-white hover:bg-white/5'}`}
+                     onClick={(e) => {
+                       if (openMenu?.name === menu.name) { setOpenMenu(null); return; }
+                       const r = e.currentTarget.getBoundingClientRect();
+                       setOpenMenu({ name: menu.name, x: r.left, y: r.bottom + 4 });
+                     }}
+                     onMouseEnter={(e) => {
+                       if (!openMenu || openMenu.name === menu.name) return;
+                       const r = e.currentTarget.getBoundingClientRect();
+                       setOpenMenu({ name: menu.name, x: r.left, y: r.bottom + 4 });
+                     }}
+                   >{menu.name}</button>
+                   {openMenu?.name === menu.name && createPortal(
+                     <div
+                       data-ide-menu
+                       style={{ position: 'fixed', left: openMenu.x, top: openMenu.y }}
+                       className="min-w-[230px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
+                       {menu.items.map((item, i) => item.divider ? (
+                         <div key={i} className="h-px bg-white/10 my-1 mx-2" />
+                       ) : (
+                         <button
+                           key={i}
+                           className="w-full flex items-center justify-between gap-6 px-3 py-1.5 text-left text-[11px] text-white/80 hover:bg-indigo-600 hover:text-white transition-colors"
+                           onClick={() => { setOpenMenu(null); item.run?.(); }}
+                         >
+                           <span>{item.label}</span>
+                           {item.shortcut && <span className="text-[9px] opacity-50 font-mono">{item.shortcut}</span>}
+                         </button>
+                       ))}
+                     </div>,
+                     document.body,
+                   )}
+                 </div>
+               ))}
             </div>
          </div>
          
@@ -909,9 +1224,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          <div className="flex items-center gap-2">
             <button
               id="ide-social-chat-trigger"
-              onClick={() => { handleScreenChange('ai'); setIsSidebarOpen(true); }}
+              // Admin 2026-07-31: this must open the FULL NavBharatAI Pro v5.0 (the main nbi_pro_chat
+              // surface — same workspace + memory, 100% synced), not the in-IDE mini panel. Wired via
+              // onSocialChatTrigger; the internal mini stays only as a fallback if the parent doesn't wire it.
+              onClick={() => { if (onSocialChatTrigger) onSocialChatTrigger(); else { handleScreenChange('ai'); setIsSidebarOpen(true); } }}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="AI Chat — NavBharatAI Pro v5.0"
+              title="Open NavBharatAI Pro v5.0 (full)"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>
@@ -993,6 +1311,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 </div>
              </div>
           ) : (
+             /* One group, or two side by side. With `splitOpen` false this renders exactly the single
+                Editor it always did — the wrapper is a plain flex row with one child. */
+             <div className="flex-1 flex min-w-0 min-h-0">
+             <div className={`flex-1 min-w-0 min-h-0 flex flex-col ${splitOpen && !isMobile ? 'border-r border-white/10' : ''}`}>
              <Editor
                 content={files[activeFile] || ''}
                 fileName={activeFile}
@@ -1002,7 +1324,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onChange={handleFileChange}
                 onTabChange={setActiveFile}
                 onTabClose={handleTabClose}
-                onMount={setEditorInstance}
+                onMount={(ed: any) => {
+                  leftEditorRef.current = ed;
+                  setEditorInstance(ed);
+                  if (!ed) return;   // Editor reports null on unmount
+                  // Report focus so every editor command targets the pane being typed in.
+                  try { ed.onDidFocusEditorText(() => { setFocusedPane('left'); setEditorInstance(ed); }); } catch { /* older monaco */ }
+                }}
                 allFiles={files}
                 onNavigateOpen={(path) => { if (files[path] !== undefined) setActiveFile(path); }}
                 activeBreakpoints={breakpoints[activeFile] ?? []}
@@ -1018,6 +1346,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   tabSize: editorTabSize,
                   stickyScroll: { enabled: true },
                   trimAutoWhitespace: editorTrimWhitespace,
+                  // PHONE-FIRST editor (admin 2026-07-31): on a narrow screen a desktop editor is
+                  // unusable — the minimap + sticky-scroll eat width/height, lines run off-screen, and
+                  // the thin scrollbars are impossible to grab. These overrides make Monaco genuinely
+                  // touch-friendly: no minimap, no sticky scroll, always word-wrap, a bigger font, and
+                  // fat (14px) touch scrollbars. Desktop is untouched.
+                  ...(isMobile ? {
+                    minimap: { enabled: false },
+                    stickyScroll: { enabled: false },
+                    wordWrap: 'on' as const,
+                    fontSize: Math.max(15, editorFontSize),
+                    lineNumbersMinChars: 3,
+                    lineDecorationsWidth: 6,
+                    overviewRulerLanes: 0,
+                    folding: true,
+                    padding: { top: 8, bottom: 8 },
+                    scrollbar: { verticalScrollbarSize: 14, horizontalScrollbarSize: 14, useShadows: false },
+                  } : {}),
                 }}
                 onRevealInExplorer={(path) => {
                   setIsSidebarOpen(true);
@@ -1025,6 +1370,60 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   setActiveFile(path);
                 }}
               />
+             </div>
+
+             {/* SECOND EDITOR GROUP. Its own tabs, its own active file, its own edits — the point of a
+                 split is reading two DIFFERENT files at once. Desktop only: two Monaco panes on a phone
+                 would leave each about 180px wide, which is worse than no split at all, so the command
+                 simply never opens one there rather than shipping an unusable layout. */}
+             {splitOpen && !isMobile && (
+               <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+                 <Editor
+                   content={files[splitActive] || ''}
+                   fileName={splitActive}
+                   activeTab={splitActive}
+                   openTabs={splitTabs}
+                   language=""
+                   onChange={handleSplitFileChange}
+                   onTabChange={setSplitActive}
+                   onTabClose={handleSplitTabClose}
+                   onMount={(ed: any) => {
+                     if (!ed) {
+                       // This pane is going away. Hand command focus back to the left editor —
+                       // otherwise every menu action would keep firing at a disposed Monaco instance.
+                       setFocusedPane('left');
+                       setEditorInstance(leftEditorRef.current);
+                       return;
+                     }
+                     try { ed.onDidFocusEditorText(() => { setFocusedPane('right'); setEditorInstance(ed); }); } catch { /* older monaco */ }
+                   }}
+                   allFiles={files}
+                   onNavigateOpen={openInSplit}
+                   activeBreakpoints={breakpoints[splitActive] ?? []}
+                   onBreakpointToggle={handleToggleBreakpoint}
+                   onRun={() => onRun(files)}
+                   onDebug={() => setIsDebugPanelOpen(true)}
+                   dirtyTabs={dirtyTabs}
+                   editorTheme={editorTheme}
+                   editorOptions={{
+                     wordWrap: editorWordWrap ? 'on' : 'off',
+                     // A split halves the available width, so the minimap costs proportionally twice as
+                     // much of what you are reading. VS Code makes the same call.
+                     minimap: { enabled: false },
+                     fontSize: editorFontSize,
+                     tabSize: editorTabSize,
+                     stickyScroll: { enabled: true },
+                     trimAutoWhitespace: editorTrimWhitespace,
+                   }}
+                   onRevealInExplorer={(path) => {
+                     setIsSidebarOpen(true);
+                     setActiveScreen('files');
+                     setActiveFile(path);
+                   }}
+                 />
+               </div>
+             )}
+             </div>
           )}
 
           <AnimatePresence>
@@ -1113,7 +1512,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      exit={{ height: 0 }}
                      className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
-                      <RealTerminal
+                      {/* MULTI-TERMINAL (admin 2026-08-04): one panel, many independent sessions, with
+                          the "+ New" dropdown inside the terminal itself. */}
+                      <TerminalPanel
                         onClose={() => {
                           setIsPanelOpen(false);
                           setIsPanelMaximized(false);
@@ -1193,14 +1594,67 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       </div>
 
       {/* Activity Bar (Mobile Position) */}
+      {/* PHONE BOTTOM-TAB IDE (admin 2026-07-31): a native-app-style bottom bar with the essentials —
+          Code · Files · Preview · AI · More — instead of the shrunk desktop ActivityBar. Each tab reuses
+          the same proven state transitions the desktop uses; "More" holds the secondary dev tools so
+          nothing is lost. Hidden while the AI overlay is open (its own X returns), matching prior
+          behaviour so the chat input is never covered. Desktop is unaffected. */}
       {isMobile && activeScreen !== 'ai' && (
-         <ActivityBar 
-            isMobile
-            activeScreen={activeScreen}
-            onScreenChange={handleScreenChange}
-            isShortcutsOpen={isShortcutsOpen}
-            isCursorPopupOpen={isCursorPopupOpen}
-         />
+         <>
+           {mobileMoreOpen && (
+             <>
+               <div className="fixed inset-0 z-[55]" onClick={() => setMobileMoreOpen(false)} aria-hidden="true" />
+               <div className="absolute right-2 bottom-[68px] z-[56] w-56 rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl py-1.5">
+                 {([
+                   { label: 'Search', Icon: Search, onTap: () => handleScreenChange('search') },
+                   { label: 'Source Control', Icon: GitBranch, onTap: () => handleScreenChange('git') },
+                   { label: 'Terminal', Icon: TerminalIcon, onTap: () => setIsPanelOpen(true) },
+                   { label: 'Security', Icon: ShieldCheck, onTap: () => handleScreenChange('security') },
+                   { label: 'Shortcuts', Icon: Keyboard, onTap: () => setIsShortcutsOpen(true) },
+                 ]).map(({ label, Icon, onTap }) => (
+                   <button
+                     key={label}
+                     onClick={() => { setMobileMoreOpen(false); onTap(); }}
+                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[#c9d1d9] hover:bg-white/5 active:bg-white/10"
+                   >
+                     <Icon className="w-4 h-4 text-[#8b949e]" />
+                     <span className="font-medium">{label}</span>
+                   </button>
+                 ))}
+               </div>
+             </>
+           )}
+           {/* Code Studio's own footer is now the BOTTOM-MOST bar on mobile — the global app footer is
+               hidden inside the IDE (App.tsx, admin 2026-08-04), so this row sits directly on the device
+               edge and must reserve the home-indicator inset itself. Without it the tap targets fall
+               under the iPhone home bar. Content height stays a fixed 4rem; the inset is added below it. */}
+           <div
+             className="flex border-t border-[var(--theme-border)] bg-[var(--theme-card)] shrink-0 relative z-[57] select-none"
+             style={{ height: 'calc(4rem + env(safe-area-inset-bottom, 0px))', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+           >
+             {([
+               { id: 'code', label: 'Code', Icon: Code2, active: !isSidebarOpen && activeScreen !== 'preview', onTap: () => { setMobileMoreOpen(false); if (activeScreen === 'preview') setActiveScreen('files'); setIsSidebarOpen(false); } },
+               { id: 'files', label: 'Files', Icon: FilesIcon, active: isSidebarOpen && activeScreen === 'files', onTap: () => { setMobileMoreOpen(false); setActiveScreen('files'); setIsSidebarOpen(true); } },
+               { id: 'preview', label: 'Preview', Icon: Monitor, active: activeScreen === 'preview', onTap: () => { setMobileMoreOpen(false); setActiveScreen('preview'); setIsSidebarOpen(false); } },
+               { id: 'ai', label: 'AI', Icon: Bot, active: false, onTap: () => { setMobileMoreOpen(false); setActiveScreen('ai'); setIsSidebarOpen(true); } },
+               { id: 'more', label: 'More', Icon: MenuIcon, active: mobileMoreOpen, onTap: () => setMobileMoreOpen(v => !v) },
+             ]).map(({ id, label, Icon, active, onTap }) => (
+               <button
+                 key={id}
+                 onClick={onTap}
+                 aria-label={label}
+                 className={cn(
+                   'flex-1 flex flex-col items-center justify-center gap-1 transition-all relative min-h-[44px]',
+                   active ? 'text-indigo-400' : 'text-[#484f58] active:text-[#8b949e]'
+                 )}
+               >
+                 <Icon className="w-5 h-5" />
+                 <span className="text-[9px] font-black uppercase tracking-tight">{label}</span>
+                 {active && <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full" />}
+               </button>
+             ))}
+           </div>
+         </>
       )}
 
     </div>

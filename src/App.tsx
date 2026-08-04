@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
-import { ProductTour } from './components/ProductTour';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
@@ -31,7 +30,7 @@ import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
-import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
+import { ConnectMyWebsitePanel } from './components/panels/ConnectMyWebsitePanel';
 import { fetchBuildSession } from './services/buildService';
 import {
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -49,10 +48,15 @@ import {
   Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
   Wand2, Package,
   Kanban, CloudUpload, LayoutTemplate, HeartPulse,
-  Briefcase, FileText
+  Briefcase, FileText, LayoutGrid, Layers
 } from 'lucide-react';
+import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 import { AdminDashboard } from './components/AdminDashboard';
+// Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
+// native shell so the Play Console health declarations stay truthful. Web is untouched.
+import { isNativeApp } from './lib/mobileNative';
+import { medicalViewBlocked } from './lib/playCompliance';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
@@ -72,9 +76,11 @@ import { firebaseConfig } from './config/firebase';
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
-import { auth, db, signOutEverywhere } from './lib/firebase';
+import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
+import { authGateDecision, isAuthGatedView } from './lib/authGate';
+import { initPushNotifications, teardownPushNotifications } from './lib/pushNotifications';
 
 /**
  * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync
@@ -101,7 +107,6 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
-const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
 import { motion, AnimatePresence } from 'motion/react';
@@ -140,11 +145,13 @@ export { sanitizeFirestoreData };
 // ReportProblemComponent → lazy above
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
+import { OtherAIView } from './components/home/OtherAIView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
 import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
+import { chunkFilesForSync, totalFilesBytes } from './lib/chunkFilesForSync';
 import type { PreviewProblem } from './lib/previewProblems';
 import {
   type ApnapanProfile,
@@ -364,7 +371,18 @@ export default function App() {
   // source of truth. index.css defines the semantic palette per theme and theme-compat.css remaps the
   // app's hardcoded palette to it — so this one attribute recolours the WHOLE app, on desktop AND mobile
   // (fixes "themes only work on mobile / only header changes"). Portalled modals at <body> inherit it too.
-  useEffect(() => { try { document.documentElement.setAttribute('data-theme', theme); } catch { /* no document */ } }, [theme]);
+  useEffect(() => {
+    try { document.documentElement.setAttribute('data-theme', theme); } catch { /* no document */ }
+    // NATIVE FEEL (admin 2026-07-26): follow the theme on the NATIVE status bar too. It used to be
+    // pinned to light at startup, so switching to dark mode left a bright status bar sitting above a
+    // dark app — a mismatch no real app has. No-op on web; best-effort, never blocks the theme switch.
+    void (async () => {
+      try {
+        const { loadNativeShellContext, syncStatusBarToTheme } = await import('./lib/nativeShell');
+        await syncStatusBarToTheme(await loadNativeShellContext(), theme);
+      } catch { /* polish only */ }
+    })();
+  }, [theme]);
 
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());
@@ -392,9 +410,24 @@ export default function App() {
   const readAdminRoute = (): boolean => {
     try { return typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/admin'; } catch { return false; }
   };
+  // Nav App Store deep-link (admin 2026-08-01): navbharatai.com/?view=appstore (or /store) opens the
+  // Nav App Store panel straight away, so a shareable link can drop someone directly on the store's
+  // Browse tab (public, no login needed) instead of them hunting through Other AI → Publish & Deploy.
+  // It reuses the existing 'appstore' view — no duplicate wiring. A trailing slash on /store is tolerated.
+  const readStoreRoute = (): boolean => {
+    try {
+      if (typeof window === 'undefined') return false;
+      if (window.location.pathname.replace(/\/+$/, '') === '/store') return true;
+      return new URLSearchParams(window.location.search).get('view') === 'appstore';
+    } catch { return false; }
+  };
   const [activeView, setActiveView] = useState<ViewType>(() =>
-    readAdminRoute() ? 'admin' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home'),
+    readAdminRoute() ? 'admin' : (readStoreRoute() ? 'appstore' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home')),
   );
+  // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
+  // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.
+  const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free'>('all');
+  useEffect(() => { if (activeView !== 'history') setHistoryInitialFilter('all'); }, [activeView]);
   // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
   useEffect(() => {
@@ -419,7 +452,7 @@ export default function App() {
   // Task 1.4 — messagesMap: single source of truth per tab
   const LANGUAGE_PICKER_MSG: Message = {
     id: 'lang-picker',
-    text: `👋 **Welcome to navBharatAI!**\n\nAap kaunsi language mein baat karna chahte ho?\n_(You can always change this later in Settings)_\n\n[🇮🇳 Hindi] [🔀 Hinglish] [🇬🇧 English] [🌐 Auto-detect]`,
+    text: `👋 **Welcome to NavBharatAI!**\n\nWhich language would you like to chat in?\n_(You can always change this later in Settings)_\n\n[🇮🇳 Hindi] [🔀 Hinglish] [🇬🇧 English] [🌐 Auto-detect]`,
     sender: 'ai',
     timestamp: new Date(),
     modelUsed: 'navBharatAI',
@@ -1008,7 +1041,14 @@ export default function App() {
       let data: any = {};
       try { data = JSON.parse(raw); } catch { /* non-JSON response (rate-limit text, HTML error, etc.) */ }
       if (res.ok && data.ok) {
-        sessionStorage.setItem('admin_token', data.token);
+        // ROOT-CAUSE FIX (admin 2026-07-25: "mobile app open karo to login karna pad raha hai" — the
+        // admin dashboard's fetches were silently 401ing after every cold app restart with "Admin
+        // session expired — please log out and log in again"). sessionStorage is tied to the WebView's
+        // current top-level navigation and is GUARANTEED empty after a fresh launch (a full app kill +
+        // reopen is a brand-new navigation, on both iOS and Android, every single time) — unlike
+        // localStorage, which is disk-backed and survives a cold restart. The `isAdmin` flag was
+        // already correctly in localStorage; the token that flag's dashboard actually needs was not.
+        localStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
         setAdminMfaRequired(false);
         setAdminTotp('');
@@ -1054,39 +1094,57 @@ export default function App() {
     // that started it is gone on return — getRedirectResult MUST run here at the app
     // root to complete it. For a GitHub redirect we also capture the OAuth token so
     // NavBharatAI can connect to the user's repos.
-    // WEB ONLY: the native app never uses the redirect flow (it signs in via the native plugin), and its
-    // auth instance is deliberately created WITHOUT the popup/redirect resolver (src/lib/firebase.ts —
-    // the WKWebView init-hang root fix), so calling getRedirectResult there would throw on every launch.
-    if (Capacitor.isNativePlatform()) return;
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          try {
-            const ghCred = GithubAuthProvider.credentialFromResult(result);
-            if (ghCred?.accessToken) {
-              localStorage.setItem('gh_token', ghCred.accessToken);
-              rememberGithubOwner(result.user.uid); // this token belongs to THIS user
-              setGithubToken(ghCred.accessToken);
-            }
-          } catch { /* not a GitHub sign-in — ignore */ }
-          setUser(result.user);
-          setLoadingUser(false);
-          setShowAuth(false);
-        }
-      })
-      .catch((e) => {
-        const code = e?.code || '';
-        console.error('[auth] social redirect failed:', code || e?.message || e);
-        // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
-        if (code && code !== 'auth/no-auth-event') {
-          addToast('Sign-in failed. Please try again.', 'error');
-        }
-      });
+    // WEB ONLY — getRedirectResult: the native app never uses the redirect flow (it signs in via the
+    // native plugin), and its auth instance is deliberately created WITHOUT the popup/redirect resolver
+    // (src/lib/firebase.ts — the WKWebView init-hang root fix), so calling getRedirectResult there would
+    // throw on every launch.
+    //
+    // ⚠️ ROOT CAUSE of the "iOS app opens logged-out after every restart" bug (admin 2026-08-02, survived
+    // 8 fix attempts): this web-only guard used to be `if (Capacitor.isNativePlatform()) return;` — an
+    // EARLY RETURN that also skipped the onAuthStateChanged subscription below. On the native app NOTHING
+    // listened to Firebase auth: a restored session (and the cold-restart persistence heal wired inside
+    // the listener) never reached the UI, so every relaunch looked logged-out even when the session was
+    // saved. In-session login only appeared to work because AuthComponent flips the UI directly. The
+    // guard must therefore wrap ONLY getRedirectResult — the listener below runs on BOTH platforms.
+    if (!Capacitor.isNativePlatform()) {
+      getRedirectResult(auth)
+        .then((result) => {
+          if (result?.user) {
+            try {
+              const ghCred = GithubAuthProvider.credentialFromResult(result);
+              if (ghCred?.accessToken) {
+                localStorage.setItem('gh_token', ghCred.accessToken);
+                rememberGithubOwner(result.user.uid); // this token belongs to THIS user
+                setGithubToken(ghCred.accessToken);
+              }
+            } catch { /* not a GitHub sign-in — ignore */ }
+            setUser(result.user);
+            setLoadingUser(false);
+            setShowAuth(false);
+          }
+        })
+        .catch((e) => {
+          const code = e?.code || '';
+          console.error('[auth] social redirect failed:', code || e?.message || e);
+          // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
+          if (code && code !== 'auth/no-auth-event') {
+            addToast('Sign-in failed. Please try again.', 'error');
+          }
+        });
+    }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
       if (currentUser) {
         setShowAuth(false);
+        // Native push notifications (admin 2026-07-26): register this device's FCM token now that a
+        // real, verified session exists. No-op on web; best-effort — never blocks sign-in.
+        void initPushNotifications(currentUser.uid);
+        // COLD-RESTART LOGOUT FIX (admin 2026-07-25) — verify the signed-in session was written to a
+        // DURABLE store and self-heal it if it was not (the native auth instance can silently be running
+        // in-memory, which is what made every app relaunch come back logged out). Fire-and-forget: it is
+        // best-effort, never throws, and must never delay the UI reacting to a successful sign-in.
+        void ensureNativeSessionPersisted();
         // GITHUB CONNECTION IS PER-USER: pick up this user's OWN GitHub token, but NEVER inherit a
         // token authorized by a different NavBharatAI user on this browser (the "every user sees my
         // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.
@@ -1115,6 +1173,16 @@ export default function App() {
   useEffect(() => {
     if (user) setShowAuth(false);
   }, [user]);
+
+  // STABLE LOGIN, part 2 (admin 2026-07-20): the gates above open protected views OPTIMISTICALLY while
+  // the saved session is still restoring (so a returning user never sees a login flash). This is the
+  // honest other half: the moment the restore SETTLES genuinely logged-out while a protected view is
+  // open (tapped during the window, or a reload that restored straight into Pro v5.0), ask for sign-in
+  // NOW. A signed-in restore hits the `if (user) setShowAuth(false)` effect above instead — zero friction.
+  useEffect(() => {
+    if (loadingUser || user) return;
+    if (isAuthGatedView(activeView)) setShowAuth(true);
+  }, [loadingUser, user, activeView]);
 
   // Admin login = full app access. When the admin is signed in (separate server
   // password auth), treat them as a logged-in user so the app never forces the
@@ -1153,6 +1221,10 @@ export default function App() {
   };
 
   const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
+    // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
+    // the render guards below) means a medical view cannot open in the native shell no matter which
+    // button, deep link, or restored state asked for it.
+    if (medicalViewBlocked(view, isNativeApp())) return;
     // Pre-warm server when user opens chat tabs (fire-and-forget)
     if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
@@ -1171,22 +1243,21 @@ export default function App() {
       }
     }
 
-    if (view === 'security' && !user) {
+    // STABLE LOGIN (admin 2026-07-20: "har baar login karna pad raha hai"): these gates used to check
+    // only `!user` — but on every app open Firebase restores the saved session ASYNCHRONOUSLY, so for
+    // the first ~0.3–2s `user` is null even for a signed-in returning user, and tapping a protected tab
+    // flashed the LOGIN screen (users then logged in again — every single open). authGateDecision opens
+    // optimistically while the restore is still running (never flash login at a returning user); a
+    // genuinely signed-out user is prompted the moment the restore SETTLES (the effect below toggleTab).
+    if (authGateDecision(view, !!user, loadingUser) === 'login') {
+      if (view === 'history') pendingViewAfterLoginRef.current = view;
       setShowAuth(true);
-      addLog('Security Audit requires an active session. Please login.', 'warn');
-      return;
-    }
-
-    if (view === 'history' && !user) {
-      pendingViewAfterLoginRef.current = view;
-      setShowAuth(true);
-      addLog('Chat history requires an active session. Please login.', 'warn');
-      return;
-    }
-
-    if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
-      setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro v5.0' : view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v5.0'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(
+        view === 'security' ? 'Security Audit requires an active session. Please login.'
+          : view === 'history' ? 'Chat history requires an active session. Please login.'
+          : `${view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v5.0'} is available for logged-in users only. Please sign in.`,
+        'warn',
+      );
       return;
     }
 
@@ -1195,7 +1266,7 @@ export default function App() {
       // Remember which tab OPENED this one when it is launched from inside Settings or Professionals,
       // so ✕-closing that parent also closes the option it spawned (admin bug 2026-07-11). Opened from
       // anywhere else → no parent link (it's an independent tab).
-      if ((activeView === 'settings' || activeView === 'professionals') && view !== activeView) {
+      if ((activeView === 'settings' || activeView === 'professionals' || activeView === 'other_ai') && view !== activeView) {
         setTabOpeners(prev => ({ ...prev, [view]: activeView }));
       }
     }
@@ -1731,31 +1802,62 @@ export default function App() {
   // also gates on v5.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
   // non-v5.0 users. The workspace id is the SAME one the v5.0 chat panel uses (shared localStorage
   // session), so the IDE and v5.0 operate on one workspace.
+  //
+  // ROOT-CAUSE FIX (report 2026-07-27, "100MB/1GB zip upload complete ho jaata hai lekin files
+  // v5.0 me nahi aati"): this used to send the ENTIRE file map as one JSON POST, which silently
+  // failed once the extracted content crossed the server's ~30MB body limit — true for almost any
+  // real app regardless of the original ZIP's size — and the failure was swallowed with no user
+  // feedback. Now the file map is split into safely-sized chunks (chunkFilesForSync) sent
+  // sequentially, so total project size no longer determines success; only genuine network/server
+  // failures are reported, honestly, instead of a fake "complete".
   const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>, opts?: { silent?: boolean; source?: 'ide-edit' | 'import' }): Promise<void> => {
     const uid = user?.uid;
     if (!uid) return;
     const paths = Object.keys(filesToSync || {});
     if (paths.length === 0) return;
+    const workspaceId = getAgentV3WorkspaceId(uid);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const workspaceId = getAgentV3WorkspaceId(uid);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const tok = await auth.currentUser?.getIdToken();
+      if (tok) headers.Authorization = `Bearer ${tok}`;
+    } catch { /* token optional — server falls back to claimed userId */ }
+    const chunks = chunkFilesForSync(filesToSync);
+    const totalBytes = totalFilesBytes(filesToSync);
+    let imported = 0;
+    let notEnabled = false;
+    let failedChunks = 0;
+    let githubUrl: string | null = null;
+    let needsGithub = false;
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
       try {
-        const tok = await auth.currentUser?.getIdToken();
-        if (tok) headers.Authorization = `Bearer ${tok}`;
-      } catch { /* token optional — server falls back to claimed userId */ }
-      const res = await fetch('/api/agentv3/import-files', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', files: filesToSync, ...(opts?.source ? { source: opts.source } : {}) }),
-      });
-      if (res.ok) {
+        const res = await fetch('/api/agentv3/import-files', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            workspaceId, userId: uid, email: user?.email || '', files: chunks[i],
+            ...(opts?.source ? { source: opts.source } : {}),
+            ...(isLast ? { finalize: true, totalBytes, githubToken: githubToken || undefined } : {}),
+          }),
+        });
+        if (res.status === 404) { notEnabled = true; break; } // v5.0 not enabled — silent no-op
+        if (!res.ok) { failedChunks++; continue; }
         const j = await res.json().catch(() => ({} as any));
-        const n = typeof j?.imported === 'number' ? j.imported : paths.length;
-        if (!opts?.silent) addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v5.0 ✓`, 'success');
-      }
-      // 404 (v5.0 not enabled) / other statuses: silent best-effort — IDE still has the files.
-    } catch { /* network/best-effort — never block the upload flow */ }
-  }, [user, addToast]);
+        imported += typeof j?.imported === 'number' ? j.imported : Object.keys(chunks[i]).length;
+        if (j?.github?.url) githubUrl = j.github.url;
+        if (j?.needsGithub) needsGithub = true;
+      } catch { failedChunks++; }
+    }
+    if (notEnabled || opts?.silent) return;
+    if (failedChunks === 0) {
+      addToast(`Synced ${imported} file${imported === 1 ? '' : 's'} to v5.0 ✓${githubUrl ? ' — also backed up to GitHub' : ''}`, 'success');
+    } else {
+      addToast(`⚠️ Synced ${imported} file(s), but ${failedChunks} batch${failedChunks === 1 ? '' : 'es'} failed — check your connection and try importing again`, 'warning');
+    }
+    if (needsGithub) {
+      addToast('This project is large — connect GitHub (⚙ → GitHub) so every file stays safely backed up', 'info');
+    }
+  }, [user, addToast, githubToken]);
 
   // Phase S1 — IDE↔v5.0 edit sync: a debounced, echo-suppressed syncer that durably pushes a user's
   // Code Studio edits into the v5.0 workspace (silent, best-effort). Re-created when syncFilesToV3
@@ -1824,11 +1926,7 @@ export default function App() {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      if (bucket === 'github') {
-        setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
-        return;
-      }
-      // < 50 MB: proceed with normal conflict check + import
+      // Up to 5 GB: proceed with the normal conflict check + import (chunked transport handles size)
       const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
       if (hasExisting) {
         setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
@@ -1919,6 +2017,10 @@ export default function App() {
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v5.0', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
+    // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
+    // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
+    // header window. Same LayoutGrid icon as its Home card, for consistency.
+    { id: 'other_ai',     label: 'Other AI',           icon: LayoutGrid },
     { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
@@ -1955,6 +2057,12 @@ export default function App() {
   // v5.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
   const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number } | null>(null);
+  // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
+  // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
+  const [v3DeployRequest, setV3DeployRequest] = useState<{ provider: string; nonce: number } | null>(null);
+  // Snapshot of the workspace files taken right BEFORE each v5.0 build (admin autopsy 2026-07-21) —
+  // the Diff Viewer's "previous version" so it shows exactly what the last build changed.
+  const [previousFiles, setPreviousFiles] = useState<Record<string, string>>({});
 
   const resumeSession = (session: ChatSession) => {
     // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
@@ -2450,7 +2558,7 @@ export default function App() {
         <Suspense fallback={
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-indigo-500/40 border-t-indigo-500 rounded-full animate-spin" />
+              <TirangaLoader className="w-8 h-8" />
               <span className="text-xs text-[#8b949e] font-mono uppercase tracking-widest">Loading module…</span>
             </div>
           </div>
@@ -2461,7 +2569,7 @@ export default function App() {
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
           // rendered — leaving an empty dead strip under the v5.0 composer, above the phone browser bar.
-          effectiveDeviceMode === 'mobile' && !focusMode ? "pb-14" : ""
+          effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
              <HomeView
@@ -2474,6 +2582,7 @@ export default function App() {
                  toggleTab('nbi_pro_chat');
                }}
                onStartProfessionals={() => toggleTab('professionals')}
+               onOpenOtherAI={() => toggleTab('other_ai')}
                isAdmin={isAdmin}
                data={homeData}
                onUpdate={(newData) => setHomeData(newData)}
@@ -2482,6 +2591,13 @@ export default function App() {
                onShowLogin={() => setShowAuth(true)}
              />
           )}
+          {activeView === 'other_ai' && (
+            <OtherAIView
+              theme={theme}
+              onBack={() => toggleTab('home')}
+              onOpenTool={(id) => { if (user) { toggleTab(id as any); } else { setShowAuth(true); } }}
+            />
+          )}
           {activeView === 'settings' && (
             <SettingsPanel
               themeClasses={themeClasses}
@@ -2489,6 +2605,7 @@ export default function App() {
               setSettingsScreen={setSettingsScreen}
               toggleTab={toggleTab}
               setActiveView={setActiveView}
+              generatedCode={generatedCode}
               deviceMode={deviceMode}
               setDeviceMode={setDeviceMode}
               preferredLanguage={preferredLanguage}
@@ -2590,10 +2707,11 @@ export default function App() {
               /* Phase S3 conflict guard: before a v5.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
                  hand edits are what v5.0 reads/acknowledges). Best-effort — never blocks the build. */
-              onBeforeBuild={() => workspaceSyncerRef.current?.flush() ?? Promise.resolve()}
+              onBeforeBuild={() => { setPreviousFiles({ ...files }); return workspaceSyncerRef.current?.flush() ?? Promise.resolve(); }}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
               pendingFix={v3PendingFix}
+              pendingDeploy={v3DeployRequest}
               /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v5.0
                  "Files" tab and the sidebar "Files" are ONE feature with two gates — same component,
                  same data (uploads + v5.0 builds), same actions. */
@@ -2642,8 +2760,8 @@ export default function App() {
           </div>
           )}
 
-          {/* ── Senior Doctor Assistant ── */}
-          {activeView === 'sda_chat' && (
+          {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
+          {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <SDAChat key={sdaResetKey} userId={user?.uid} />
             </div>
@@ -2848,7 +2966,7 @@ export default function App() {
               <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'pharmacist_ai' && (
+          {activeView === 'pharmacist_ai' && !medicalViewBlocked('pharmacist_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} />
             </div>
@@ -2968,12 +3086,12 @@ export default function App() {
               <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'maternity_ai' && (
+          {activeView === 'maternity_ai' && !medicalViewBlocked('maternity_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.maternity_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'firstaid_ai' && (
+          {activeView === 'firstaid_ai' && !medicalViewBlocked('firstaid_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.firstaid_ai} userId={user?.uid} />
             </div>
@@ -3124,7 +3242,7 @@ export default function App() {
               onPasswordChange={setAdminPassword}
               onSubmit={handleAdminLogin}
               onLogout={() => setIsAdmin(false)}
-              adminToken={sessionStorage.getItem('admin_token') || ''}
+              adminToken={localStorage.getItem('admin_token') || ''}
               adminTotp={adminTotp}
               onTotpChange={setAdminTotp}
               mfaRequired={adminMfaRequired}
@@ -3191,8 +3309,10 @@ export default function App() {
                   signOut: () => signOutEverywhere(), // clears the NATIVE plugin session too (app), not just the web SDK
                   clearStorage: defaultClearAuthStorage,
                   // The GitHub connection must NOT outlive the session — else the next user on this
-                  // browser would inherit it (and see/push to this user's GitHub account).
-                  extraCleanup: clearGithubConnection,
+                  // browser would inherit it (and see/push to this user's GitHub account). Also
+                  // unregister this device's push token so a signed-out device stops receiving pushes
+                  // meant for this account (best-effort, async — never blocks logout).
+                  extraCleanup: () => { clearGithubConnection(); void teardownPushNotifications(); },
                   deleteAuthDb: () => deleteFirebaseAuthDb(),
                   reload: () => window.location.reload(),
                 });
@@ -3238,6 +3358,7 @@ export default function App() {
                 onToggleView={toggleTab}
                 onActivatePreview={handleTriggerPreviewBuild}
                 onActivateWorkspace={handleActivateWorkspace}
+                onDeployViaV5={(provider) => { setV3DeployRequest({ provider, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
               />
             )}
 
@@ -3267,14 +3388,8 @@ export default function App() {
               gates (sidebar "NavBharatAI Pro v5.0" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
 
-          {activeView === 'entertainment' && (
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
-              <SocialHub />
-            </div>
-          )}
-
           {activeView === 'connect_domain' && (
-            <ConnectDomainPanel onBack={() => toggleTab('home')} />
+            <ConnectMyWebsitePanel onBack={() => toggleTab('home')} uid={user?.uid} />
           )}
 
           {activeView === 'donation' && (
@@ -3293,7 +3408,7 @@ export default function App() {
 
 
           {activeView === 'report' && <ReportsListView user={user} />}
-          {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} />}
+          {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} />}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel
@@ -3305,7 +3420,29 @@ export default function App() {
 
           <ViewPanels
             v3Preview={v3Preview}
+            previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
+            onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
+            onAutoFixInV5={(workspaceId, text) => {
+              // Open the SCANNED Pro v5 app's session (so v5 fixes THAT app's files) with the fix
+              // prompt prefilled — a fresh fix conversation in the v5 page (admin 2026-07-24).
+              const uid = user?.uid || 'anon';
+              const prefix = `agentv3-${uid}-`;
+              const sid = workspaceId.startsWith(prefix) ? workspaceId.slice(prefix.length) : workspaceId;
+              setV3Resume({ sessionId: sid, messages: [], nonce: Date.now() });
+              v3ResumeInFlightRef.current = true; // retarget that app's session, don't bump a fresh-open
+              setV3PendingFix({ text, nonce: Date.now() });
+              toggleTab('nbi_pro_chat');
+            }}
+            onSwitchApp={(sid: string) => {
+              // Time Machine: switch the workspace to another of the user's apps so its versions become
+              // restorable (reuses the proven session-resume path). The Versioning view stays open and
+              // reloads that app's history via the updated currentProSessionId.
+              if (!sid || sid === currentProSessionId) return;
+              setCurrentProSessionId(sid);
+              setV3Resume({ sessionId: sid, messages: [], nonce: Date.now() });
+              v3ResumeInFlightRef.current = true;
+            }}
             problems={problems}
             activeView={activeView}
             generatedCode={generatedCode}
@@ -3432,18 +3569,19 @@ export default function App() {
         setPreviewBuildError={setPreviewBuildError}
       />
 
-      {/* P-UX.4 — Product Tour overlay (dependency-free; renders its own launcher). Navigates via the
-          app's guarded toggleTab and gracefully skips any target not present on the current view.
-          currentView gates the floating launcher to the home view only, so it never overlaps the
-          controls on other surfaces (e.g. the v5.0 chat composer). */}
-      <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} currentView={activeView} />
-
       {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too).
           DYNAMIC PER-VIEW FOOTER (admin 2026-07-07): the bar is ONE component (same design, same
           gating) but its ITEMS follow the active view. v5.0 active → its own six items (History ·
           Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
           via onFooterApi. Every other view keeps the default items. */}
-      {effectiveDeviceMode === 'mobile' && !focusMode && (
+      {/* CODE STUDIO OWNS ITS OWN FOOTER (admin 2026-08-04, with screenshot). Code Studio already renders
+          a full IDE footer of its own — CODE · FILES · PREVIEW · AI · MORE — so on mobile the screen was
+          showing TWO stacked navigation bars: the IDE's, and this global one right below it. Two footers
+          is not a cosmetic annoyance on a phone; it eats a double slice of the smallest screen we have,
+          and the two rows disagree about where you are (the IDE says CODE, the global bar says STUDIO).
+          Inside the IDE, the IDE's own bar is the correct and only one. `botbuilder` is excluded here for
+          the same reason and has been for a while. */}
+      {effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio' && (
         <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.
@@ -3460,7 +3598,11 @@ export default function App() {
               { key: 'chat',    icon: MessageSquare,  label: 'Pro Chat', onTap: v3FooterApi.openChat,    active: v3FooterApi.section === 'chat' },
               { key: 'preview', icon: Monitor,        label: 'Preview',  onTap: v3FooterApi.openPreview, active: v3FooterApi.section === 'preview', dot: v3FooterApi.previewReady },
               { key: 'files',   icon: FolderOpen,     label: 'Files',    onTap: v3FooterApi.openFiles,   active: v3FooterApi.section === 'files', count: v3FooterApi.fileCount },
-              { key: 'report',  icon: FileText,       label: 'Report',   onTap: v3FooterApi.buildReport, active: false, busy: v3FooterApi.reportBusy },
+              // Code Studio (admin 2026-08-04): replaces the footer's old "Report" item, which merely
+              // duplicated the action already in the More sheet. Studio edits the SAME live file map
+              // v5.0 builds into (files state + workspace syncer), so this is one feature reached from
+              // two places — not a second editor.
+              { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => toggleTab('studio'), active: false },
               { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history' },
             ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number }) => (
               <button
@@ -3472,7 +3614,7 @@ export default function App() {
               >
                 <span className="relative inline-flex">
                   {busy
-                    ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+                    ? <TirangaLoader className="w-5 h-5 shrink-0" />
                     : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
                   {/* Admin 2026-07-07: green dot = the app is genuinely viewable (real state, never a timer). */}
                   {dot && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_5px_rgba(52,211,153,0.9)]" aria-label="Preview ready" />}
@@ -3485,6 +3627,39 @@ export default function App() {
                 {active && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             ))
+          ) : (activeView === 'nbi_chat' || activeView === 'professionals') ? (
+            // Per-AI footer (admin 2026-07-28): NavBharatAI Free and Professional get a focused, dynamic
+            // nav — History / AI / Mode (coming soon) / Settings. Home stays reachable from the ☰ / logo above.
+            [
+              { key: 'history',  id: 'history' as ViewType,  icon: History,   label: 'History',  comingSoon: false },
+              { key: 'ai',       id: (activeView === 'professionals' ? 'professionals' : 'nbi_chat') as ViewType, icon: activeView === 'professionals' ? Briefcase : MessageSquare, label: 'AI', comingSoon: false },
+              { key: 'mode',     id: null,                    icon: Layers,    label: 'Mode',     comingSoon: true },
+              { key: 'settings', id: 'settings' as ViewType, icon: Settings,  label: 'Settings', comingSoon: false },
+            ].map(({ key, id, icon: Icon, label, comingSoon }) => {
+              const isActive = !comingSoon && id != null && activeView === id;
+              return (
+                <button
+                  key={key}
+                  disabled={comingSoon}
+                  onClick={() => {
+                    if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; }
+                    // History from the NavBharatAI Free footer shows ONLY Free sessions (not the whole app).
+                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : 'all');
+                    if (id) toggleTab(id);
+                  }}
+                  aria-label={label}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-indigo-400' : comingSoon ? 'text-white/20' : 'text-[#484f58]'}`}
+                >
+                  <span className="relative inline-flex">
+                    <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
+                    {comingSoon && <span className="absolute -top-2 -right-3 text-[6px] font-black text-amber-400/80 uppercase tracking-tight">soon</span>}
+                  </span>
+                  <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                  {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
+                </button>
+              );
+            })
           ) : (
           [
             { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },

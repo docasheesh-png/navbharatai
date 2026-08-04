@@ -17,12 +17,19 @@
 
 // Derived/vendor folders across the stacks users actually migrate from (Node, Python, Rust/Java,
 // mobile/Expo, PHP) — all re-created by the stack's own install/build, never worth importing.
-const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea)(\/|$)/;
+// Exported (2026-07-24) so the api.github.com repo materializer (GithubApiTree.materializeRepoViaApi)
+// filters files with the EXACT same rules as the zip path — ONE source of truth, no drift.
+// `.local|.claude|.cursor|…` (via NON_APP_DIR_RE) are AI-assistant/tool state directories. They are
+// never part of the running app, and `.local/skills/**` in particular ships COMPLETE app scaffolds —
+// importing them gave one project five React roots and five copies of index.css, which the integrity
+// gate then reported as the user's defects and "repaired" by editing template files the user never
+// wrote (mitrify autopsy 2026-08-04). Dropped at the import boundary so they never enter at all.
+export const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea|\.local|\.claude|\.cursor|\.windsurf|\.continue|\.codeium|\.aider)(\/|$)/;
 // OS/editor junk files that ride along in almost every user-made zip.
-const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+export const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 // Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep.
-const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
-const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
+export const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
+export const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
 // Small binary ASSETS worth keeping (an imported app's logo/favicon/icons/fonts) so the preview
 // isn't full of broken images. Everything ELSE that matches BINARY_EXT_RE (video/audio/archives/
 // binaries) stays dropped — too large and never needed to boot a preview. ext → MIME for a data URI.
@@ -61,10 +68,17 @@ export const IMPORT_MAX_DECOMPRESSED_BYTES = 300 * 1024 * 1024;
  *  only truly enormous ones are dropped. */
 export const IMPORT_MAX_LOCKFILE_BYTES = 3 * 1024 * 1024;
 /** Per-asset RAW-byte cap — a small logo/favicon/icon/font, not a hero video. */
-export const IMPORT_MAX_ASSET_BYTES = 200 * 1024;
+export const IMPORT_MAX_ASSET_BYTES = 640 * 1024; // raised 200KB → 640KB (base64 ~853KB < the 900KB Firestore-doc cap)
 /** Bounds on the kept-asset set so a media-heavy zip can't blow the budget. */
 export const IMPORT_MAX_ASSETS = 200;
-export const IMPORT_MAX_ASSET_TOTAL_BYTES = 20 * 1024 * 1024;
+export const IMPORT_MAX_ASSET_TOTAL_BYTES = 30 * 1024 * 1024;
+/** SANDBOX-ONLY image tier (admin 2026-08-03: "88 large images not imported — will the app break?"):
+ *  images too big for the durable store (>640KB) are still materialized in the LIVE sandbox so the
+ *  preview isn't full of broken pictures — NOT persisted (a cold restart re-imports, exactly like the
+ *  big-lockfile tier). Bounded so a photo/video-heavy repo can't exhaust memory. Non-image binaries
+ *  (video/audio/archives — no image MIME) are never kept either way. */
+export const IMPORT_MAX_SANDBOX_ASSET_BYTES = 5 * 1024 * 1024;
+export const IMPORT_MAX_SANDBOX_ASSET_TOTAL_BYTES = 50 * 1024 * 1024;
 
 export interface ExtractedProject {
   files: Record<string, string>;
@@ -81,6 +95,12 @@ export interface ExtractedProject {
    * Written to the sandbox only — the durable store skips them by design (honest, not silent:
    * the summary says so), and a restore simply re-resolves via install.
    */
+  /**
+   * IMAGES too big for the durable asset store (>640KB) but renderable — materialized in the LIVE
+   * sandbox as real bytes so the preview isn't full of broken pictures, NOT persisted durably (a cold
+   * restart re-imports, like sandboxOnly lockfiles). `data:` URIs, same shape as `assets`.
+   */
+  sandboxAssets: Record<string, string>;
   sandboxOnly: Record<string, string>;
   /** Paths intentionally not imported, grouped by the honest reason. */
   dropped: { dir: number; junk: number; secret: number; binary: number; tooLarge: number; unsafe: number; overCap: number; outsideAppRoot: number };
@@ -186,23 +206,38 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
 
   const files: Record<string, string> = {};
   const assets: Record<string, string> = {};
+  const sandboxAssets: Record<string, string> = {};
   const sandboxOnly: Record<string, string> = {};
   let totalBytes = 0;
   let assetBytes = 0;
+  let sandboxAssetBytes = 0;
   for (const { path, entry } of entries) {
     if (!path) continue; // re-rooted away above (already counted)
     if (SKIP_DIR_RE.test(path)) { dropped.dir++; continue; }
     if (JUNK_FILE_RE.test(path)) { dropped.junk++; continue; }
     if (SECRET_FILE_RE.test(path)) { dropped.secret++; continue; }
     if (BINARY_EXT_RE.test(path)) {
-      // A small image/font asset is KEPT (as a data URI); every other binary is dropped.
+      // IMAGE/FONT assets are KEPT (as data URIs); every other binary (video/audio/archive) is dropped.
       const mime = assetMimeFor(path);
-      if (mime && Object.keys(assets).length < IMPORT_MAX_ASSETS) {
+      // MEMORY GUARD: never DECODE a binary we could not keep anyway — an entry that DECLARES more than
+      // the sandbox cap is dropped without inflating it into memory (protects against a giant image).
+      const declaredBin = zipEntryDeclaredBytes(entry);
+      if (mime && !(declaredBin > IMPORT_MAX_SANDBOX_ASSET_BYTES)) {
         const b64 = await entry.async('base64');
         const rawBytes = Math.floor((b64.length * 3) / 4); // base64 → raw byte estimate
-        if (rawBytes <= IMPORT_MAX_ASSET_BYTES && assetBytes + rawBytes <= IMPORT_MAX_ASSET_TOTAL_BYTES) {
-          assets[path] = `data:${mime};base64,${b64}`;
+        const dataUri = `data:${mime};base64,${b64}`;
+        // TIER 1 — DURABLE: fits the Firestore-backed asset store, within its budget + count.
+        if (rawBytes <= IMPORT_MAX_ASSET_BYTES && Object.keys(assets).length < IMPORT_MAX_ASSETS
+            && assetBytes + rawBytes <= IMPORT_MAX_ASSET_TOTAL_BYTES) {
+          assets[path] = dataUri;
           assetBytes += rawBytes;
+          continue;
+        }
+        // TIER 2 — SANDBOX-ONLY: too big to persist but renderable — materialize for the live preview.
+        if (rawBytes <= IMPORT_MAX_SANDBOX_ASSET_BYTES
+            && sandboxAssetBytes + rawBytes <= IMPORT_MAX_SANDBOX_ASSET_TOTAL_BYTES) {
+          sandboxAssets[path] = dataUri;
+          sandboxAssetBytes += rawBytes;
           continue;
         }
       }
@@ -229,7 +264,7 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
     totalBytes += bytes;
     files[path] = content;
   }
-  return { files, assets, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
+  return { files, assets, sandboxAssets, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
 }
 
 /**
@@ -353,6 +388,180 @@ export function detectImportedFramework(files: Record<string, string>): string {
 }
 
 /**
+ * The set of meta-framework ids whose scaffold/toolchain differs FUNDAMENTALLY from vite-react — the
+ * class where a wrong `vite-react` label is catastrophic (the builder fights the scaffold, the preview
+ * boots on the wrong command/port, the analyzers run against the wrong framework). Detecting one of
+ * these from the real files must OVERRIDE a stale `vite-react` label.
+ */
+const META_FRAMEWORKS = new Set(['nextjs', 'nuxt', 'remix', 'sveltekit', 'astro', 'angular']);
+
+/**
+ * Detect the framework of an EXISTING workspace from its real files, for correcting a stale/wrong label
+ * on a continue/edit turn (PulseBoard autopsy 2026-07-20: a Next.js app was scaffolded/labelled
+ * `vite-react`, so the builder burned ~15 min reconciling package.json vs Next.js code, the preview
+ * booted with Vite assumptions, and the report mislabelled the framework). Unlike `detectImportedFramework`
+ * (package.json deps only — which LAGS while the builder is still converting the app), this ALSO reads
+ * STRUCTURAL signals (a `next.config`/`nuxt.config`/… file, or an app-router layout + route-handler
+ * pair under `app/`) so a half-converted app is still recognised. Returns a META-framework id ONLY when
+ * a confident signal is present, else null (the caller then keeps the current label — this NEVER downgrades
+ * a real framework to vite-react on a weak signal). Pure + unit-testable.
+ */
+export function detectFrameworkFromWorkspace(files: Record<string, string>): string | null {
+  if (!files || typeof files !== 'object') return null;
+  const paths = Object.keys(files);
+  if (paths.length === 0) return null;
+  // 1) DEPENDENCY signal (strongest when present): a real meta-framework dep in package.json.
+  const byDeps = detectImportedFramework(files);
+  if (META_FRAMEWORKS.has(byDeps)) return byDeps;
+  // 2) CONFIG-FILE signal (definitive even when package.json still lags — the exact PulseBoard case):
+  //    a framework's own config file is unambiguous. Mirrors isViteReactTarget's "next.config ⇒ Next.js".
+  const hasFile = (re: RegExp) => paths.some((p) => re.test(p));
+  if (hasFile(/(?:^|\/)next\.config\.[cm]?[jt]s$/i)) return 'nextjs';
+  if (hasFile(/(?:^|\/)nuxt\.config\.[cm]?[jt]s$/i)) return 'nuxt';
+  if (hasFile(/(?:^|\/)astro\.config\.[cm]?[jt]s$/i)) return 'astro';
+  if (hasFile(/(?:^|\/)svelte\.config\.[cm]?[jt]s$/i)) return 'sveltekit';
+  if (hasFile(/(?:^|\/)remix\.config\.[cm]?[jt]s$/i)) return 'remix';
+  if (hasFile(/(?:^|\/)angular\.json$/i)) return 'angular';
+  // 3) STRUCTURE signal for Next.js App Router (a config file can be absent on a fresh app): a file
+  //    UNDER an `app/` (or `src/app/`) directory whose basename is `layout.*` PLUS one that is `route.*`
+  //    is the unmistakable App-Router shape. Required TOGETHER so a stray `layout.tsx` elsewhere in a
+  //    Vite app never false-flips. Uses path segments (not a regex with `/` in a char class).
+  const underAppDir = (p: string, base: RegExp): boolean => {
+    const segs = p.split('/');
+    const i = segs.indexOf('app');
+    if (i === -1) return false;            // no `app/` segment
+    if (i > 1) return false;               // must be at repo root or directly under one dir
+    if (i === 1 && segs[0] !== 'src') return false; // the only allowed parent is `src/`
+    if (segs.length - 1 <= i) return false; // must be a file BELOW app/, not `app` itself
+    return base.test(segs[segs.length - 1]);
+  };
+  const hasAppLayout = paths.some((p) => underAppDir(p, /^layout\.[jt]sx?$/i));
+  const hasRouteHandler = paths.some((p) => underAppDir(p, /^route\.[jt]s$/i));
+  if (hasAppLayout && hasRouteHandler) return 'nextjs';
+  return null;
+}
+
+export type FrameworkFamily = 'react' | 'vue' | 'svelte' | 'angular' | 'solid' | 'other';
+
+/** Collapse a framework id to its toolchain FAMILY, so nextjs+react source (same family) is NOT a mismatch
+ *  but svelte source + react package (different families) IS. Pure. */
+export function frameworkFamily(fw: string | null | undefined): FrameworkFamily {
+  switch (fw) {
+    case 'vite-react':
+    case 'nextjs':
+    case 'remix':
+    case 'gatsby':
+      return 'react';
+    case 'vue':
+    case 'nuxt':
+      return 'vue';
+    case 'svelte':
+    case 'sveltekit':
+      return 'svelte';
+    case 'angular':
+      return 'angular';
+    case 'solid':
+      return 'solid';
+    default:
+      return 'other';
+  }
+}
+
+/**
+ * Classify a workspace by its SOURCE FILE signals (extensions + framework-specific markers), independently
+ * of package.json. This is the missing counterpart to detectImportedFramework (which reads package.json deps
+ * only): nothing else in the engine maps `.svelte`/`.vue`/Angular source to a framework, which is why a
+ * Svelte source tree on a React package.json read as `vite-react`. Returns a framework id ONLY on an
+ * UNAMBIGUOUS extension signal (`.svelte`, `.vue`, an Angular component + @angular/core), else null — it
+ * never tries to claim `react` from a `.tsx` file (too weak; react is already the default). Pure.
+ */
+export function detectFrameworkFromSourceExtensions(files: Record<string, string>): string | null {
+  if (!files || typeof files !== 'object') return null;
+  const paths = Object.keys(files);
+  if (paths.some((p) => /\.svelte$/i.test(p))) {
+    // SvelteKit vs plain Svelte: routing/marker files or SvelteKit-only imports.
+    const svelteKit = paths.some((p) => /(?:^|\/)\+(page|layout|server|error)\.(svelte|[jt]sx?)$/i.test(p))
+      || Object.values(files).some(
+        (c) => typeof c === 'string' && /(from\s+['"]\$(app|lib|env)\/|['"]@sveltejs\/kit['"]|['"]\.\/\$types['"])/.test(c),
+      );
+    return svelteKit ? 'sveltekit' : 'svelte';
+  }
+  if (paths.some((p) => /\.vue$/i.test(p))) return 'vue';
+  const hasNgComponent = paths.some((p) => /\.component\.ts$/i.test(p));
+  const hasNgImport = Object.values(files).some((c) => typeof c === 'string' && /from\s+['"]@angular\/core['"]/.test(c));
+  if (hasNgComponent && hasNgImport) return 'angular';
+  return null;
+}
+
+export interface FrameworkCoherence {
+  ok: boolean;
+  sourceFramework: string | null;
+  packageFramework: string | null;
+  evidence: string[];
+}
+
+/**
+ * Detect a "Frankenstein" workspace whose SOURCE files are one framework but whose package.json/build config
+ * genuinely CANNOT build that framework (autopsy buildId a4be5a05: a `.svelte`/`+page.server.ts`/`$lib`
+ * source tree on a React package.json with `tsc && vite build` — so `tsc` isn't found, `$types` is never
+ * generated, `$lib` is unresolvable, and the builder thrashes for ~18 min then fails). Conservative by
+ * construction — flags ONLY when ALL hold: (1) the source framework is unambiguous (.svelte/.vue/Angular),
+ * (2) package.json genuinely LACKS that framework's toolchain (a real Svelte app HAS `svelte`/`@sveltejs/kit`
+ * deps, so it never fires on a legitimate project), and (3) the package framework is a DIFFERENT family.
+ * Pure + unit-testable. Never mutates.
+ */
+export function checkFrameworkCoherence(files: Record<string, string>): FrameworkCoherence {
+  const coherent = (): FrameworkCoherence => ({ ok: true, sourceFramework: null, packageFramework: null, evidence: [] });
+  if (!files || typeof files !== 'object' || typeof files['package.json'] !== 'string') return coherent();
+  const sourceFramework = detectFrameworkFromSourceExtensions(files);
+  if (!sourceFramework) return coherent();
+  const packageFramework = detectImportedFramework(files);
+  const srcFam = frameworkFamily(sourceFramework);
+  if (srcFam === frameworkFamily(packageFramework)) return coherent();
+  let deps: Record<string, unknown> = {};
+  try {
+    const pkg = JSON.parse(files['package.json']) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+    deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  } catch {
+    return coherent();
+  }
+  const has = (n: string) => Object.prototype.hasOwnProperty.call(deps, n);
+  // Does package.json actually carry the SOURCE framework's toolchain? If so, it's buildable → coherent.
+  const buildableForSource =
+    srcFam === 'svelte' ? has('svelte') || has('@sveltejs/kit')
+    : srcFam === 'vue' ? has('vue') || has('nuxt')
+    : srcFam === 'angular' ? has('@angular/core')
+    : srcFam === 'solid' ? has('solid-js')
+    : true;
+  if (buildableForSource) return coherent();
+  const evidence: string[] = [];
+  if (srcFam === 'svelte') {
+    const n = Object.keys(files).filter((p) => /\.svelte$/i.test(p)).length;
+    evidence.push(`${n} .svelte file(s)${sourceFramework === 'sveltekit' ? ' + SvelteKit markers ($lib/$app/+page)' : ''}`);
+  } else if (srcFam === 'vue') {
+    evidence.push(`${Object.keys(files).filter((p) => /\.vue$/i.test(p)).length} .vue file(s)`);
+  } else if (srcFam === 'angular') {
+    evidence.push('Angular component files + @angular/core imports');
+  }
+  evidence.push(`package.json declares ${packageFramework} and lacks ${srcFam} tooling`);
+  return { ok: false, sourceFramework, packageFramework, evidence };
+}
+
+/** Build the agent-facing warning for an incoherent workspace (empty string when coherent). Non-mutating —
+ *  it tells the builder to reconcile to ONE framework BEFORE writing features, instead of thrashing. Pure. */
+export function frameworkCoherenceGuidance(c: FrameworkCoherence): string {
+  if (c.ok || !c.sourceFramework) return '';
+  return [
+    `[WORKSPACE FRAMEWORK MISMATCH — read before writing any code]`,
+    `This project's SOURCE files are ${c.sourceFramework} (${c.evidence.join('; ')}), but its package.json / build config is ${c.packageFramework}. As-is it CANNOT build — the two toolchains conflict.`,
+    `Do NOT pile new files of either framework on top, and do NOT mass-rewrite every source file to "reconcile" them (that thrashes and usually fails). FIRST commit to ONE framework:`,
+    `• To extend THIS project, keep the framework its source files already use (${c.sourceFramework}) and fix package.json + the dev/build scripts + config to match it (add the right deps, correct the build script), then write features.`,
+    `• If the user's request clearly wants a different framework, rebuild BOTH the config and the sources consistently in that one framework — never a mix.`,
+    `Make package.json, the build config, and the source files all agree on ONE framework and verify the dev server actually starts BEFORE writing feature code.`,
+  ].join('\n');
+}
+
+/**
  * Validate that an extracted project is something v5.0 can actually run — fail FAST and honestly
  * (before any sandbox time is spent) instead of producing a mystery dead preview later.
  */
@@ -435,14 +644,89 @@ function existingModuleByTail(base: string, paths: Set<string>): string | undefi
   return found.size === 1 ? [...found][0] : undefined;
 }
 
+/**
+ * Blank out everything that only LOOKS like code: line/block comments and template literals.
+ *
+ * ROOT CAUSE (self-import autopsy 2026-08-03): importing NavBharatAI itself reported "This import
+ * looks INCOMPLETE — 20 file(s) its code references are missing", naming things like
+ * `src/server/AgentV3/Missing`, `src/server/AgentV3/b`, `src/lib/App` and `src/components/ide/component`.
+ * NONE of them were real imports:
+ *   • `ArchitectureAnalysis.test.ts` holds FIXTURES — `"import { X } from './Missing';"` inside a string,
+ *     which is the very input that test feeds the analyzer;
+ *   • `AITestingSuite.tsx` holds a TEMPLATE LITERAL of example test code containing `from './component'`;
+ *   • `firebase.ts` mentions ``import { auth } from './App'`` inside a // COMMENT.
+ * So the scanner cried wolf on a perfectly complete repo — and the offer it makes ("say 'create the
+ * missing files' and I'll build them") would have had the AI CREATE `Missing.ts`, `b.ts`, `App.ts`…
+ * i.e. actively pollute the user's codebase on the strength of a false alarm. A warning that fires on
+ * a healthy import is worse than no warning: it burns the trust the real signal depends on.
+ *
+ * Length is preserved (replace with spaces/newlines) so any offset stays meaningful. Deliberately does
+ * NOT touch ordinary '…'/"…" strings: a real import specifier lives in one, and the `import ⟨spec⟩`
+ * grammar the caller matches already requires the import keyword to precede it. Pure.
+ */
+export function maskNonCodeRegions(src: string): string {
+  // ONE left-to-right pass, not a chain of independent regexes. Chained regexes DESYNCHRONISE: a
+  // template literal holding generated code (our own Scaffold/Generator files do exactly this) contains
+  // `/* … */` and `//` comments, so a comment-regex run first eats across the template's boundaries,
+  // its closing backtick disappears, and the template's contents are then scanned AS CODE — which is
+  // how "import App from './App';" inside a scaffold string became a phantom missing file. Scanning
+  // once, honouring whichever region opens first, is the only way the boundaries stay correct.
+  //
+  // Ordinary '…' / "…" strings are TOKENISED but their text is PRESERVED: a real import specifier lives
+  // in one. Skipping over them still matters — a quote-embedded backtick or `//` must not be mistaken
+  // for the start of a template/comment. Length is preserved (newlines kept) so offsets stay meaningful.
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  const blankTo = (from: number, to: number) => {
+    for (let k = from; k < to; k++) out += src[k] === '\n' ? '\n' : ' ';
+  };
+  while (i < n) {
+    const c = src[i];
+    const c2 = src[i + 1];
+    if (c === '/' && c2 === '*') {                      // /* block comment */
+      let j = src.indexOf('*/', i + 2);
+      j = j < 0 ? n : j + 2;
+      blankTo(i, j); i = j; continue;
+    }
+    if (c === '/' && c2 === '/') {                      // // line comment
+      let j = src.indexOf('\n', i);
+      j = j < 0 ? n : j;
+      blankTo(i, j); i = j; continue;
+    }
+    if (c === '`') {                                    // `template literal` (escape-aware)
+      let j = i + 1;
+      while (j < n && src[j] !== '`') j += src[j] === '\\' ? 2 : 1;
+      j = Math.min(j + 1, n);
+      blankTo(i, j); i = j; continue;
+    }
+    if (c === '"' || c === "'") {                       // '…' / "…" — skipped over, text KEPT
+      let j = i + 1;
+      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      j = Math.min(j + 1, n);
+      out += src.slice(i, j); i = j; continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
 export function findUnresolvedLocalImports(files: Record<string, string>): Array<{ missing: string; importedBy: string; existsAt?: string }> {
   const paths = new Set(Object.keys(files));
   const hasSrc = [...paths].some((p) => p === 'src' || p.startsWith('src/'));
   const out: Array<{ missing: string; importedBy: string; existsAt?: string }> = [];
   const seen = new Set<string>();
-  const importRe = /(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"]([^'"\n]+)['"]/g;
-  for (const [path, content] of Object.entries(files)) {
-    if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof content !== 'string') continue;
+  // A REAL import/export is a STATEMENT: it starts its own line. The `^[ \t]*` anchor (with /m) is what
+  // separates it from the same text quoted INSIDE a string — which is how every analyzer test fixture in
+  // a repo is written (`'src/a.ts': "import { b } from './b';\n…"`). Without the anchor, importing a repo
+  // that merely CONTAINS import-parsing tests reported 20 phantom "missing files" (self-import autopsy
+  // 2026-08-03). Combined with maskNonCodeRegions (comments + template literals), only real code is read.
+  const importRe = /^[ \t]*(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"]([^'"\n]+)['"]/gm;
+  for (const [path, rawContent] of Object.entries(files)) {
+    if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof rawContent !== 'string') continue;
+    // Only scan REAL code — comments and template literals routinely contain example/fixture imports
+    // that do not exist and must never be reported as a missing file (see maskNonCodeRegions).
+    const content = maskNonCodeRegions(rawContent);
     let m: RegExpExecArray | null;
     importRe.lastIndex = 0;
     while ((m = importRe.exec(content))) {
@@ -577,4 +861,50 @@ export function importSummaryLine(extracted: ExtractedProject, framework: string
   const tail = droppedDetailNote(extracted);
   if (tail) parts.push(tail);
   return parts.join(' ');
+}
+
+/**
+ * The COMPLETE, durable accounting of an import: every archive entry, accounted for.
+ *
+ * ROOT CAUSE (admin 2026-08-03, mitrify GitHub import): the repo listing said "316 files", the build
+ * then said "166 source files", and NOTHING in the build report explained the gap — so the only
+ * possible conclusion was "10% bhi import nahi ho paya". The engine already COUNTS every dropped
+ * entry by reason (`extracted.dropped`) and then throws those numbers away: the honest note lives
+ * only in an ephemeral chat narration, which is not what the admin diagnoses from. Worse, the
+ * integrity warnings that DO reach the report hedge with "if part of the repo was too large to
+ * import, this may not be accurate" — telling the user something might be missing while withholding
+ * the numbers that would settle it.
+ *
+ * This returns one line where the numbers ADD UP, so "where did my files go?" is always answerable
+ * from the report alone. Pure.
+ */
+export function importAccountingLine(extracted: ExtractedProject): string {
+  const d = extracted.dropped;
+  const source = Object.keys(extracted.files).length;
+  const assets = Object.keys(extracted.assets).length;
+  const sandboxAssets = Object.keys(extracted.sandboxAssets ?? {}).length;
+  const sandboxOnly = Object.keys(extracted.sandboxOnly).length;
+  const droppedTotal = d.dir + d.junk + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap + d.outsideAppRoot;
+  const kept: string[] = [`${source} source file${source === 1 ? '' : 's'}`];
+  if (assets) kept.push(`${assets} image/font asset${assets === 1 ? '' : 's'}`);
+  if (sandboxAssets) kept.push(`${sandboxAssets} large image${sandboxAssets === 1 ? '' : 's'} (preview only)`);
+  if (sandboxOnly) kept.push(`${sandboxOnly} lockfile${sandboxOnly === 1 ? '' : 's'} (sandbox only)`);
+
+  // Every reason, always — a zero bucket is omitted, but nothing that happened is hidden.
+  const why: string[] = [];
+  if (d.dir) why.push(`${d.dir} dependency/build files (node_modules, dist — re-created by install)`);
+  if (d.junk) why.push(`${d.junk} OS/editor junk`);
+  if (d.secret) why.push(`${d.secret} secret file${d.secret === 1 ? '' : 's'} (.env/keys — never imported, re-enter your own)`);
+  if (d.binary) why.push(`${d.binary} large binaries (images/video over the asset limit)`);
+  if (d.tooLarge) why.push(`${d.tooLarge} over the 900KB per-file limit`);
+  if (d.unsafe) why.push(`${d.unsafe} with unsafe paths`);
+  if (d.overCap) why.push(`${d.overCap} over the import size cap`);
+  if (d.outsideAppRoot) why.push(`${d.outsideAppRoot} outside the app folder`);
+
+  const head = `IMPORT ACCOUNTING — ${extracted.totalEntries} archive entr${extracted.totalEntries === 1 ? 'y' : 'ies'} → KEPT ${kept.join(' + ')}`;
+  const tail = droppedTotal > 0
+    ? `; NOT imported ${droppedTotal} (${why.join(', ')})`
+    : '; nothing was dropped';
+  const root = extracted.appRoot ? ` [app landed from "${extracted.appRoot}/"]` : '';
+  return `${head}${tail}.${root} Source files are what the AI reads and edits; the rest are either re-created by \`npm install\` or not code.`;
 }

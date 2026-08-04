@@ -122,7 +122,7 @@ export const PREVIEW_BOOTSTRAP = `
     if(/\\.json$/.test(path)){cache[path]={exports:JSON.parse(src)};return cache[path].exports;}
     if(/\\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(path)){cache[path]={exports:{default:src,__esModule:true}};return cache[path].exports;}
     var isTs=/\\.tsx?$/.test(path),isTsx=/\\.tsx$/.test(path);
-    var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true}]]:[['react',{runtime:'automatic'}]];
+    var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true,allowDeclareFields:true}]]:[['react',{runtime:'automatic'}]];
     // Replace import.meta.* — not valid inside new Function() (non-module context)
     src=src.replace(/import\\.meta\\.env\\b/g,'(window.__importMetaEnv__||{})');
     src=src.replace(/import\\.meta\\.url\\b/g,'location.href');
@@ -146,22 +146,29 @@ export const PREVIEW_BOOTSTRAP = `
     Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/'&&!(s.charAt(0)==='@'&&s.charAt(1)==='/'))found[s]=true;}});
     return Object.keys(found);
   }
-  // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
-  function specUrl(spec){
+  // Resolve a bare import spec against an importmap: map hit first, then esm.sh.
+  function specUrlFrom(map,spec){
     // Already a full URL (https://) or protocol-relative (//) — use as-is
     if(spec.indexOf('://')>0||spec.slice(0,2)==='//')return spec;
-    if(IMAP[spec])return IMAP[spec];
+    if(map[spec])return map[spec];
     var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
-    if(IMAP[root]){
+    // Sub-path insertion only works on esm.sh bases — a vendored same-origin facade module has no
+    // sub-path files, so an unmapped deep import of a vendored root goes to plain esm.sh instead.
+    if(map[root]&&map[root].indexOf(ESM)===0){
       // Insert the subpath BEFORE any query string, else "zustand/middleware"
       // becomes ".../zustand@4?external=react,react-dom/middleware" (subpath
       // swallowed into the query) → wrong module → "persist is not a function".
-      var b=IMAP[root],q='',qi=b.indexOf('?');
+      var b=map[root],q='',qi=b.indexOf('?');
       if(qi>=0){q=b.slice(qi);b=b.slice(0,qi);}
       return b+spec.slice(root.length)+q;
     }
     return ESM+spec;
   }
+  // Primary map (may point React at the same-origin vendored runtime) and the pure-CDN map the
+  // per-spec fallback retries from when a vendored facade fails to load.
+  var CDNIMAP=window.__CDN_IMAP||IMAP;
+  function specUrl(spec){return specUrlFrom(IMAP,spec);}
+  function specUrlCdn(spec){return specUrlFrom(CDNIMAP,spec);}
   var forced=['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime'];
   window.__nbLoading=true;
   (async function(){
@@ -176,7 +183,16 @@ export const PREVIEW_BOOTSTRAP = `
       var failedDeps=[];
       await Promise.all(bare.map(async function(spec){
         try{bareCache[spec]=interop(await import(specUrl(spec)));}
-        catch(e){failedDeps.push(spec);console.warn('[preview] failed to load',spec,e&&e.message);}
+        catch(e){
+          // The primary URL failed (e.g. the same-origin vendored React facade could not load its
+          // UMD). Retry ONCE from the pure-CDN map before recording the dep as failed.
+          var alt=specUrlCdn(spec);
+          if(alt!==specUrl(spec)){
+            try{bareCache[spec]=interop(await import(alt));console.warn('[preview] loaded',spec,'from the CDN after the same-origin runtime failed');return;}
+            catch(e2){failedDeps.push(spec);console.warn('[preview] failed to load',spec,e2&&e2.message);return;}
+          }
+          failedDeps.push(spec);console.warn('[preview] failed to load',spec,e&&e.message);
+        }
       }));
       // BUG A2 FIX: Only hard-fail on React load error if the app actually imports React.
       // Vanilla ES module apps don't need React — killing them here was wrong.
@@ -470,7 +486,6 @@ export function buildSourceAppPreview(f: FileSystem): string {
     if (!imapEntries[pkg]) imapEntries[pkg] = ESM + pkg + ver(pkg) + '?external=react,react-dom';
   });
 
-  const importmap = JSON.stringify({ imports: imapEntries });
   // Safe JSON for embedding in <script> tags: escape </ to prevent </script> from
   // closing the tag early when file content contains that string.
   const sj = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
@@ -478,12 +493,35 @@ export function buildSourceAppPreview(f: FileSystem): string {
   // Load the compiler from NavBharatAI's OWN origin first (self-hosted, never
   // third-party-CDN-blocked); the bootstrap falls back to CDNs if this 404s.
   const ORIGIN = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+  // VENDORED SAME-ORIGIN REACT (same design as ReactPreview.ts, admin 2026-08-03): serve React 18
+  // itself from OUR origin (public/vendor/react18 — official UMD builds + ESM facades) so the
+  // preview's foundation never depends on a third-party CDN. The un-overridden CDN importmap is
+  // kept alongside (window.__CDN_IMAP) so the bootstrap can fall back to esm.sh per-specifier if a
+  // facade fails. Only for React-18/unpinned apps — never silently substitute under React 19/17.
+  // Escape hatch (client code — no server env here): window.__NBAI_VENDOR_REACT_OFF = true.
+  const cdnImap = { ...imapEntries };
+  const vendorEligible = !!ORIGIN
+    && parseInt(reactVer.slice(1), 10) === 18
+    && !(typeof window !== 'undefined' && (window as { __NBAI_VENDOR_REACT_OFF?: boolean }).__NBAI_VENDOR_REACT_OFF === true);
+  let vendorScripts = '';
+  if (vendorEligible) {
+    const vb = ORIGIN + '/vendor/react18';
+    imapEntries['react'] = vb + '/react.mjs';
+    imapEntries['react-dom'] = vb + '/react-dom.mjs';
+    imapEntries['react-dom/client'] = vb + '/react-dom-client.mjs';
+    imapEntries['react/jsx-runtime'] = vb + '/jsx-runtime.mjs';
+    imapEntries['react/jsx-dev-runtime'] = vb + '/jsx-dev-runtime.mjs';
+    vendorScripts = '<script src="' + vb + '/react.production.min.js"></' + 'script>'
+      + '<script src="' + vb + '/react-dom.production.min.js"></' + 'script>';
+  }
+  const importmap = JSON.stringify({ imports: imapEntries });
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + PREVIEW_HARNESS
+    + vendorScripts
     + '<script type="importmap">' + importmap + '</' + 'script>'
     + '<script src="' + ORIGIN + '/vendor/babel.min.js"></' + 'script>'
     + '</head><body>' + bodyInner
-    + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';</' + 'script>'
+    + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';window.__CDN_IMAP=' + sj(cdnImap) + ';</' + 'script>'
     + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
     + '</body></html>';
 }

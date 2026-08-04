@@ -5,6 +5,7 @@ import {
   Bug, Lock, FileCode, CheckCircle2, Loader2,
   RefreshCcw, Globe, FileJson, Terminal, Shield, ChevronUp, ChevronDown
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
@@ -150,7 +151,7 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                 isScanning ? "bg-indigo-600/50 text-white cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 active:scale-95"
               )}
             >
-              {isScanning ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Play className="w-2.5 h-2.5 fill-current" />}
+              {isScanning ? <TirangaLoader className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5 fill-current" />}
               <span className={isHeaderCollapsed ? "hidden md:inline" : ""}>
                 {isScanning ? 'Scanning...' : 'Start Audit'}
               </span>
@@ -176,7 +177,7 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                   <RefreshCcw className="w-4 h-4 text-indigo-400 animate-spin" />
+                   <TirangaLoader className="w-4 h-4" />
                    <span className="text-xs font-black uppercase tracking-widest text-[#8b949e]">{status}</span>
                 </div>
                 <span className={cn("text-xs font-bold", theme === 'dark' ? "text-white" : "text-gray-900")}>{Math.round(progress)}%</span>
@@ -231,7 +232,7 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
               </motion.div>
             ) : (
               <div className={cn("border rounded-3xl p-12 text-center space-y-4 transition-colors", theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200 shadow-sm")}>
-                 <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mx-auto" />
+                 <TirangaLoader className="w-12 h-12 mx-auto" />
                  <h4 className={cn("font-bold uppercase tracking-widest", theme === 'dark' ? "text-white" : "text-gray-900")}>Auditing In Progress</h4>
                  <p className="text-[#8b949e] text-[10px] font-black uppercase">Executing Defensive Protocols...</p>
               </div>

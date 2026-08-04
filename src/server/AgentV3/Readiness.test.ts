@@ -1,11 +1,59 @@
 import { describe, it, expect } from 'vitest';
-import { assessReadiness, readinessVerdict } from './Readiness';
+import { assessReadiness, readinessVerdict, maturityTier, maturityTierLabel } from './Readiness';
+import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import type { ArchitectureReport } from './ArchitectureAnalysis';
 import type { SecurityFinding } from './SecurityAnalysis';
 
 const cleanArch: ArchitectureReport = {
   fileCount: 5, edgeCount: 6, cycles: [], unresolvedImports: [], layeringViolations: [], nodeBuiltinsInFrontend: [], orphanComponents: [],
 };
+
+describe('readiness compile-honesty (autopsy 2026-08-02 — "READY 70/100" for a build whose preview will not compile)', () => {
+  // The health card is computed WITHOUT the in-browser preview compiler, so a build whose ENTRY file will
+  // not compile scored "READY · 70/100" while the live preview white-screened. The classic case: the
+  // duplicate `ErrorBoundary` import that BABEL (the preview compiler) rejects but esbuild/tsc/vite ACCEPT.
+  // The gate now runs the same babel dry-compile and feeds an ENTRY-file divergence in as a HIGH blocker.
+  it('BABEL rejects the duplicate ErrorBoundary import that esbuild accepts (the real compiler divergence)', () => {
+    const main = 'import ErrorBoundary from \'./ErrorBoundary\';\nimport { ErrorBoundary } from "./ErrorBoundary";\nexport default ErrorBoundary;\n';
+    const pc = checkPreviewCompiles({ 'src/main.tsx': main });
+    expect(pc.ok).toBe(false);
+    expect(previewDivergenceBlocksDelivery(pc.errors)).toBe(true); // it is an ENTRY file → blocks delivery
+  });
+  it('an entry-file preview divergence, fed in as a HIGH finding, forces NOT READY', () => {
+    const main = 'import ErrorBoundary from \'./ErrorBoundary\';\nimport { ErrorBoundary } from "./ErrorBoundary";\nexport default ErrorBoundary;\n';
+    const pc = checkPreviewCompiles({ 'src/main.tsx': main });
+    const entryErr = pc.errors.find((e) => previewDivergenceBlocksDelivery([e]));
+    const extra = [{ severity: 'high' as const, label: `the live preview will not compile — ${entryErr?.file}: ${entryErr?.message}` }];
+    const r = assessReadiness(cleanArch, [], extra);
+    expect(r.ready).toBe(false);
+    expect(r.blockers.some((b) => /the live preview will not compile/.test(b))).toBe(true);
+  });
+  it('a clean, compiling app is UNAFFECTED — no divergence, still READY (no false block)', () => {
+    const pc = checkPreviewCompiles({ 'src/main.tsx': 'import App from \'./App\';\nexport default App;\n', 'src/App.tsx': 'export default function App(){ return null; }\n' });
+    expect(pc.ok).toBe(true);
+    expect(assessReadiness(cleanArch, [], []).ready).toBe(true);
+  });
+});
+
+describe('maturityTier', () => {
+  it('a not-ready build (a blocker or a sub-floor score) is at most a prototype', () => {
+    expect(maturityTier({ ready: false, score: 95, blockers: ['x'] })).toBe('prototype');
+    expect(maturityTier({ ready: true, score: 40, blockers: [] })).toBe('prototype'); // below MIN_READY_SCORE
+  });
+  it('climbs hackathon → production → enterprise as the score rises', () => {
+    expect(maturityTier({ ready: true, score: 60, blockers: [] })).toBe('hackathon');
+    expect(maturityTier({ ready: true, score: 80, blockers: [] })).toBe('production');
+    expect(maturityTier({ ready: true, score: 100, blockers: [] })).toBe('enterprise');
+  });
+  it('every tier has an honest, non-empty label', () => {
+    for (const t of ['prototype', 'hackathon', 'production', 'enterprise'] as const) {
+      expect(maturityTierLabel(t).length).toBeGreaterThan(0);
+    }
+  });
+  it('assessReadiness attaches the tier (a clean project is enterprise-grade)', () => {
+    expect(assessReadiness(cleanArch, []).tier).toBe('enterprise');
+  });
+});
 
 describe('assessReadiness', () => {
   it('scores a clean project 100 and READY', () => {
@@ -15,11 +63,22 @@ describe('assessReadiness', () => {
     expect(r.blockers).toEqual([]);
   });
 
-  it('an unresolved import is a hard blocker (not ready)', () => {
+  it('an unresolved import is a hard blocker (not ready) AND names the specifier so it can be diagnosed', () => {
     const r = assessReadiness({ ...cleanArch, unresolvedImports: ['a.ts -> ./missing'] }, []);
     expect(r.ready).toBe(false);
     expect(r.score).toBeLessThan(100);
     expect(r.blockers.join(' ')).toContain('unresolved');
+    // ShopSphere autopsy: the blocker must include WHICH import (not just a count) — undiagnosable otherwise.
+    expect(r.blockers.join(' ')).toContain('a.ts -> ./missing');
+  });
+
+  it('lists up to 3 unresolved specifiers with an ellipsis for the rest', () => {
+    const r = assessReadiness({ ...cleanArch, unresolvedImports: ['a -> ./1', 'b -> ./2', 'c -> ./3', 'd -> ./4'] }, []);
+    const blocker = r.blockers.find((b) => b.includes('unresolved import'))!;
+    expect(blocker).toContain('a -> ./1');
+    expect(blocker).toContain('c -> ./3');
+    expect(blocker).toContain('…');
+    expect(blocker).not.toContain('d -> ./4'); // capped at 3 + ellipsis
   });
 
   it('a server-only Node builtin in front-end code is a hard blocker (browser-build-breaker, not READY)', () => {

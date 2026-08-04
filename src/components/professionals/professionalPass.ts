@@ -41,15 +41,16 @@ export async function fetchPassStatus(): Promise<PassStatus | null> {
 export async function buyProfessionalPass(priceInr: number, passDays: number): Promise<'redirecting' | 'granted'> {
   const user = auth.currentUser;
   if (!user) throw new Error('Please sign in to buy the Professional Pass.');
+  // The server derives BOTH the owner (from this token) and the number of days (from the amount it
+  // verifies with the gateway) — `passDays` is sent only as a record of what the screen offered.
   const res = await axios.post('/api/payment/create-order', {
     amount: priceInr,
-    userId: user.uid,
     userEmail: user.email || '',
     userName: user.displayName || 'NavBharat Client',
     productType: 'professional_pass',
     passPlan: 'monthly',
     passDays,
-  });
+  }, { headers: await authedHeaders() });
   if (res.data?.isSimulator) {
     // Dev only: no real gateway — verify directly so the pass is granted for testing.
     await axios.post('/api/payment/verify-payment', { orderId: res.data.orderId });

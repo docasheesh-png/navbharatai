@@ -39,6 +39,18 @@ describe('Prisma relation guidance (deep-test App #10 — 7 wasted `prisma gener
   });
 });
 
+describe('ErrorBoundary class-field guidance (build autopsy 2026-07-21 — 6 rewrites in one edit turn)', () => {
+  it('gives the canonical constructor-based ErrorBoundary and names the useDefineForClassFields cause', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('ERROR BOUNDARY');
+    expect(p).toContain('useDefineForClassFields');
+    expect(p).toContain('constructor');
+    expect(p).toContain('getDerivedStateFromError');
+    // it must steer AWAY from the thrash (functional-component workaround / repeated rewrites)
+    expect(p).toContain('do NOT loop');
+  });
+});
+
 describe('Node-only backend libs in frontend guidance (deep-test App #12 — jsonwebtoken in the browser)', () => {
   it('forbids jsonwebtoken/bcrypt/etc. in browser code and keeps JWT sign/verify server-side', () => {
     const p = architectSystemPrompt();
@@ -47,6 +59,26 @@ describe('Node-only backend libs in frontend guidance (deep-test App #12 — jso
     // the correct client behaviour: store token + Authorization header, never verify in the browser
     expect(p).toContain('Authorization: Bearer');
     expect(p).toContain('SERVER-only');
+  });
+});
+
+describe('Design-kit guidance (M2-S2.1 — reuse the scaffold component kit for a premium look)', () => {
+  it('points the architect at the ready-made kit classes and palette vars', () => {
+    const p = architectSystemPrompt();
+    expect(p).toMatch(/DESIGN KIT/i);
+    expect(p).toContain('.card');
+    expect(p).toContain('.badge');
+    expect(p).toContain('.container');
+  });
+});
+
+describe('React Rules-of-Hooks guidance (M1-S1.3 — prevent the #1 runtime crash upstream)', () => {
+  it('tells the architect to call hooks unconditionally at the top level, not after an early return', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('RULES OF HOOKS');
+    expect(p).toMatch(/top level/i);
+    expect(p).toMatch(/early return/i);
+    expect(p).toMatch(/useMemo|useEffect|useState/);
   });
 });
 
@@ -188,6 +220,32 @@ describe('editModePrefix', () => {
     expect(p).toContain('glob');
   });
 
+  // MITRIFY AUTOPSY 2026-08-04 — the worst outcome in the report: asked to remove a small green dot
+  // from the home page, the engine searched ~30 times, never found it, then DELETED the app's LOGO and
+  // reported "done — I removed the green dot". The user lost their logo AND still had the dot. A
+  // not-found target must end the turn honestly, never be swapped for a different (destructive) edit.
+  it('forbids substituting a different change when the named target cannot be found', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('NEVER SUBSTITUTE A DIFFERENT CHANGE');
+    expect(p).toContain('STOP');
+    expect(p).toMatch(/could not find/i);
+  });
+
+  it('points a not-found VISUAL detail at image/CSS assets instead of the nearest element', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toMatch(/IMAGE\/SVG\s+ASSET/i);
+    expect(p).toMatch(/stylesheet|CSS class/i);
+  });
+
+  // The tool that removes the NEED to guess: without this instruction find_ui_element exists but is
+  // never reached, and the engine goes back to ~30 blind class-name greps (mitrify, 27 min / ₹393).
+  it('directs a visual request to find_ui_element FIRST, not to hand-guessed class names', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('find_ui_element');
+    expect(p).toMatch(/visual request/i);
+    expect(p).toMatch(/Do not start guessing Tailwind class names/i);
+  });
+
   it('forbids rebuilding from scratch and demands minimum changes', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('NEVER REBUILD FROM SCRATCH');
@@ -211,10 +269,12 @@ describe('editModePrefix', () => {
   it('makes "never break the app" the #1 absolute edit rule and demands post-edit verification', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('YOUR EDIT MUST NEVER BREAK THE APP');
-    // It must demand actually proving the app still builds/runs after editing — via the
-    // --no-install form (bare `npx tsc` fetches an unrelated squatter package; 2026-07-13 autopsy).
-    expect(p).toContain('npx --no-install tsc --noEmit');
+    // It must demand actually proving the app still builds/runs after editing — via the LOCAL binary
+    // `./node_modules/.bin/tsc` (build report 2026-07-21: even `npx --no-install tsc` cancels without
+    // typechecking when typescript is absent, and bare `npx tsc` runs the `tsc@2.0.4` squatter's help page).
+    expect(p).toContain('./node_modules/.bin/tsc --noEmit');
     expect(p).not.toContain('run `npx tsc --noEmit`'); // never the squatter-prone bare form
+    expect(p).not.toMatch(/npx\s+--no-install\s+tsc/); // upgraded away from the npx form entirely
     expect(p).toContain('prove it still works');
   });
 
@@ -254,6 +314,22 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     const p = architectSystemPrompt();
     expect(p).toContain('write_file');
     expect(p).toContain('edit_file');
+  });
+
+  it('AP-4: parallel-build flag makes fix-dispatch guidance parallel-aware; default is byte-identical serial', () => {
+    const off = architectSystemPrompt();
+    const offExplicit = architectSystemPrompt(undefined, { parallelBuild: false });
+    const on = architectSystemPrompt(undefined, { parallelBuild: true });
+    // Default / off: original serial-writer guidance, no parallel-fix wording.
+    expect(off).toContain('one file at a time, so fixes never collide');
+    expect(off).not.toContain('per-file write lock');
+    // Off must be byte-identical whether the flag is omitted or explicitly false (cache-prefix stable).
+    expect(offExplicit).toBe(off);
+    // On: different-file fixes may dispatch together; same-file still serial.
+    expect(on).toContain('per-file write lock');
+    expect(on).toContain('DIFFERENT files can go together');
+    expect(on).toContain('SAME file');
+    expect(on).not.toContain('one file at a time, so fixes never collide');
   });
 
   it('plan prompt instructs planning only (no file writes yet)', () => {
@@ -317,5 +393,22 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('go run main.go');
     expect(p).toContain('8080');
     expect(p).toContain('go mod tidy');
+  });
+});
+
+describe('WRITE-IT-RIGHT prevention (build-report 1327b405: hooks crash + hardcoded token + Math.random token)', () => {
+  const prompt = architectSystemPrompt();
+  it('tells the builder never to call a hook conditionally (Rules of Hooks — the crash that closed the preview port)', () => {
+    expect(prompt).toContain('Rules of Hooks');
+    expect(prompt.toLowerCase()).toContain('conditionally');
+    expect(prompt).toContain('unconditionally at the');
+  });
+  it('tells the builder never to hardcode a real-format token — use an obvious placeholder', () => {
+    expect(prompt).toContain('sk_test_YOUR_KEY_HERE');
+    expect(prompt.toLowerCase()).toContain('never hardcode a real-format api token');
+  });
+  it('tells the builder never to use Math.random() for a token/OTP/secret', () => {
+    expect(prompt).toContain('crypto.randomUUID()');
+    expect(prompt).toContain('Math.random()');
   });
 });

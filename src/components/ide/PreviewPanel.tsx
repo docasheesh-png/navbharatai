@@ -196,9 +196,16 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
     try {
       const titleMatch = generatedCode.match(/<title[^>]*>([^<]+)<\/title>/i);
       const name = titleMatch ? titleMatch[1].trim() : 'My NavBharat App';
+      // Hosting is durable now (Firestore-backed) so the save endpoint requires a signed-in user.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const { auth } = await import('../../lib/firebase');
+        const tok = await auth.currentUser?.getIdToken();
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+      } catch { /* best-effort; the server answers 401 with an honest message */ }
       const res = await fetch('/api/pwa/save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ html: generatedCode, name })
       });
       const data = await res.json();

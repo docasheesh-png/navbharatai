@@ -179,4 +179,4 @@ jobs:
             echo "Download the **navbharatai-release-aab** artifact above and upload \`app-release.aab\` to Google Play Console. (Tip: re-run with **upload_to_play** checked to publish automatically once \`PLAY_SERVICE_ACCOUNT_JSON\` is set.)" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "versionCode = ${{ github.run_number }} (auto-increments each run, as Play requires). Hosted mode: the app loads https://navbharatai.com — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"
+          echo "versionCode = ${{ github.run_number }} (auto-increments each run, as Play requires). Bundled mode: the app runs from the bundle built in this workflow (API calls still hit navbharatai.com) — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

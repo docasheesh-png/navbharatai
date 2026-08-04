@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { fileDocId, loadWorkspaceFiles, capPathsToDocLimit, isEssentialManifest, essentialManifestsToCarry } from './WorkspaceFileStore';
+import { ensureViteReactFoundation } from './FrameworkFoundation';
 import type { ToolUse } from './ClaudeClient';
 
 const call = (name: string, input: Record<string, unknown>): ToolUse => ({ id: 't1', name, input });
@@ -156,5 +157,38 @@ describe('essential-manifest carry-forward (the "No package.json found" preview 
     const existing = ['package.json', 'src/App.tsx', 'src/util.ts'];
     const incoming = ['package.json']; // shrink guard handles this class; carry-forward only adds manifests
     expect(essentialManifestsToCarry(existing, incoming)).toEqual([]);
+  });
+});
+
+describe('preview self-heal — the LAST line of defense when package.json was NEVER in durable (admin 2026-07-21)', () => {
+  // Carry-forward (above) protects a package.json that EXISTS in durable from being dropped on a partial
+  // save. But it cannot resurrect one that was NEVER written (a scaffold gap, or an imported project that
+  // lacked one) — and that is when the Diagnose/preview path used to dead-end with "No package.json found".
+  // The fix hydrates such a project through ensureViteReactFoundation before the structure check; this test
+  // locks the recovery contract that path now relies on.
+  it('a durable React project with source but NO package.json is recovered (package.json synthesized)', () => {
+    const durable: Record<string, string> = {
+      'src/App.tsx': "import React from 'react';\nexport default function App(){ return <div>Hi</div>; }",
+      'src/main.tsx': "import { createRoot } from 'react-dom/client';",
+    };
+    const f = ensureViteReactFoundation(durable, { framework: 'vite-react' });
+    expect(f.added).toContain('package.json');
+    expect(f.files['package.json']).toContain('"react"'); // synthesized from the code's real imports
+  });
+
+  it('is idempotent — a project that ALREADY has package.json is left untouched (no spurious rewrite)', () => {
+    const durable: Record<string, string> = {
+      'package.json': '{"name":"app","dependencies":{"react":"^18.0.0"}}',
+      'src/App.tsx': 'export default function App(){ return null; }',
+    };
+    expect(ensureViteReactFoundation(durable, { framework: 'vite-react' }).added).not.toContain('package.json');
+  });
+
+  it('the function self-guards a non-React / no-signal project (no spurious vite scaffold)', () => {
+    // With no framework signal and no React source, isViteReactTarget → false → nothing synthesized.
+    expect(ensureViteReactFoundation({}).added).toEqual([]);
+    expect(ensureViteReactFoundation({ 'main.py': 'print(1)' }).added).toEqual([]);
+    // The Diagnose path ADDITIONALLY guards `saved.length > 0`, so a genuinely-empty durable set never
+    // reaches the heal at all — the honest "couldn't find your saved files" message still shows for it.
   });
 });

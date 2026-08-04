@@ -8,7 +8,7 @@ import { safeLocalJson } from '../lib/safeLocalJson';
 const DEFAULT_MODULES: Record<string, boolean> = {
   chat: true, history: true, files: true, preview: true, shell: true,
   git: true, logs: true, templates: true, donation: true,
-  entertainment: true, studio: true, security: true,
+  studio: true, security: true,
 };
 
 export type PreferredLanguage = 'hindi' | 'hinglish' | 'english' | 'auto';

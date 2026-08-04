@@ -185,12 +185,12 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setIsRecharging(true);
     setRechargeStatus('Requesting Cashfree checkout protocol...');
     try {
+      // The server derives the order's owner from this token (it no longer trusts a body `userId`).
       const res = await axios.post('/api/payment/create-order', {
         amount,
-        userId: user.uid,
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client'
-      });
+      }, { headers: await authedHeaders() });
       setPaymentSession(res.data);
       if (res.data.isSimulator) {
         setShowCheckoutModal(true);
@@ -215,13 +215,12 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       const amount = (buyPass ? passPrice : 0) + tokenAmount;
       const res = await axios.post('/api/payment/create-order', {
         amount,
-        userId: user.uid,
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client',
         isVishwakarmaOrder: true,
         buyPass,
         tokenAmount
-      });
+      }, { headers: await authedHeaders() });
       setPaymentSession(res.data);
       if (res.data.isSimulator) {
         setShowCheckoutModal(true);
@@ -286,6 +285,73 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     }
   };
 
+  /**
+   * Ask the server what really happened to an order, and report only that.
+   *
+   * ONE implementation for every redirect branch (2026-07-27): the 'success' and 'check' returns used
+   * to be handled separately, and only 'check' actually verified — so 'success' announced a credit that
+   * may never have landed. Sharing this also fixes a second defect that would have surfaced the day the
+   * Professional Pass went live: a pass purchase resolves with `professionalPass`, not `balanceAdded`,
+   * so the old check reported a genuinely-successful pass as "not yet verified — contact support".
+   */
+  const verifyOrderAndReport = useCallback(async (orderRef: string) => {
+    try {
+      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef });
+      const data = res.data || {};
+      if (data.professionalPass) {
+        addLog(`Professional Pass activated for Order #${orderRef} (${data.days} days).`, 'success');
+        alert(`🎉 Your Professional Pass is active${data.expiresAt ? ` until ${new Date(data.expiresAt).toLocaleDateString()}` : ''}. Every professional is now unlimited.`);
+      } else if (data.balanceAdded) {
+        addLog(`Payment for Order #${orderRef} verified successfully! Credited ₹${data.balanceAdded}.`, 'success');
+        fetchWallet();
+        alert(`🎉 Payment of Order #${orderRef} verified! Wallet credited.`);
+      } else if (data.alreadyProcessed) {
+        addLog(`Payment for Order #${orderRef} was already processed.`, 'info');
+        fetchWallet();
+      } else {
+        addLog(`Payment for Order #${orderRef} check completed: status not yet success.`, 'warn');
+        alert(`🤔 Payment for Order #${orderRef} is not yet verified. Please wait or contact support if funds were deducted.`);
+      }
+    } catch (err: any) {
+      const serverMsg = err?.response?.data?.error;
+      addLog(`Error verifying payment for Order #${orderRef}: ${serverMsg || err.message}`, 'error');
+      alert(`❌ ${serverMsg || `Error verifying payment: ${err.message}`} Please contact support if money was deducted.`);
+    } finally {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [addLog, fetchWallet]);
+
+  /**
+   * On sign-in, ask the server to settle any payment of this user's that never reached their wallet.
+   *
+   * A payment used to arrive by two routes only: the server webhook (which is rejected entirely unless
+   * a webhook secret is configured) and the redirect below (which needs the user to come back to the
+   * app carrying `?payment=…`). Someone who pays by UPI and closes the app — the normal thing on a
+   * phone, since the UPI app is a different app — satisfied neither, and had genuinely paid without
+   * ever being credited.
+   *
+   * Runs once per sign-in and stays SILENT unless money actually arrived: the server returns a message
+   * only when it credited something, so a user who never paid sees nothing at all.
+   */
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.post('/api/payment/reconcile', {});
+        const data = res.data || {};
+        if (cancelled || !data.message) return;
+        addLog(`Recovered ${data.creditedOrders} unsettled payment(s) totalling ₹${data.creditedInr}.`, 'success');
+        fetchWallet();
+        alert(`🎉 ${data.message}`);
+      } catch {
+        // Never surface this — it is a background safety net, and a user who has no pending payment
+        // must not be shown a payment error for simply opening the app.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
   // Handle URL Payment Success/Failure callbacks from Cashfree redirect return url
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -294,37 +360,21 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
 
     if (paymentStatus && orderRef && user) {
       if (paymentStatus === 'success') {
-        addLog(`External Cashfree Redirect: Order #${orderRef} processed successfully!`, 'success');
-        fetchWallet();
+        // A URL parameter is NOT proof of payment — anyone can type `?payment=success`, and even a
+        // genuine redirect arrives before we know the credit landed. This branch used to announce
+        // "your wallet has been credited" on the parameter alone, which is a fake success whenever the
+        // credit had not actually happened. It now verifies with the server exactly like the 'check'
+        // branch, and only says what the server confirms.
+        addLog(`External Cashfree Redirect: Order #${orderRef} returned — verifying with the server...`, 'info');
         window.history.replaceState({}, document.title, window.location.pathname);
-        alert(`🎉 Payment of Order #${orderRef} was successful! Your navBharatAI Wallet has been credited.`);
+        verifyOrderAndReport(orderRef);
       } else if (paymentStatus === 'failed') {
         addLog(`External Cashfree Redirect: Order #${orderRef} marked as FAILED.`, 'error');
         window.history.replaceState({}, document.title, window.location.pathname);
         alert(`❌ Payment failed or cancelled for Order #${orderRef}. Please retry.`);
       } else if (paymentStatus === 'check') {
         addLog(`Verifying payment for Order #${orderRef}...`, 'info');
-        axios.post('/api/payment/verify-payment', { orderId: orderRef })
-          .then(res => {
-            if (res.data.balanceAdded) {
-              addLog(`Payment for Order #${orderRef} verified successfully! Credited ₹${res.data.balanceAdded}.`, 'success');
-              fetchWallet();
-              alert(`🎉 Payment of Order #${orderRef} verified! Wallet credited.`);
-            } else if (res.data.alreadyProcessed) {
-              addLog(`Payment for Order #${orderRef} was already processed.`, 'info');
-              fetchWallet();
-            } else {
-              addLog(`Payment for Order #${orderRef} check completed: status not yet success.`, 'warn');
-              alert(`🤔 Payment for Order #${orderRef} is not yet verified. Please wait or contact support if funds were deducted.`);
-            }
-          })
-          .catch(err => {
-            addLog(`Error verifying payment for Order #${orderRef}: ${err.message}`, 'error');
-            alert(`❌ Error verifying payment: ${err.message}. Please contact support.`);
-          })
-          .finally(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          });
+        void verifyOrderAndReport(orderRef);
       }
     }
   }, [user]);

@@ -172,13 +172,44 @@ export function mapFinishReason(reason: string | null | undefined): string {
   }
 }
 
-/** Parse one tool call's arguments JSON; tolerate empty / malformed by returning {}. */
-function parseArgs(args: string | undefined): Record<string, unknown> {
+/**
+ * Salvage the FILE PATH from a tool-call arguments JSON that was cut off mid-string by the provider's
+ * output-token limit (finish_reason 'length'). A truncated write_file looks like
+ * `{"path":"src/App.tsx","content":"…(cut off here` — the `path` is short and comes FIRST, so it
+ * survives the truncation even though the whole payload no longer parses. Recovering it lets the
+ * truncation guard NAME the exact file that was lost (instead of a bare "Unterminated string in JSON"
+ * with no file identity) so the very next turn rewrites it. Deliberately salvages ONLY the path — never
+ * the partial `content` — so a half-written file can never be persisted from a truncated call. PURE.
+ */
+export function salvageTruncatedPath(args: string | undefined): string | null {
+  if (!args) return null;
+  // First top-level "path": "<value>" — bounded so a pathological payload can't hang the regex.
+  const m = args.match(/"path"\s*:\s*"((?:[^"\\]|\\.){1,400})"/);
+  if (!m) return null;
+  try {
+    // The captured value may contain JSON escapes (\/, \\) — decode it the same way JSON.parse would.
+    return JSON.parse(`"${m[1]}"`);
+  } catch {
+    return m[1] || null;
+  }
+}
+
+/**
+ * Parse one tool call's arguments JSON; tolerate empty / malformed by returning {}. When `salvage` is on
+ * (the turn was truncated at the token limit) and strict parse fails, recover just the file PATH so the
+ * truncation guard can name the cut-off file — the call still carries no `content`, so it can only error
+ * honestly at dispatch (never write a partial file).
+ */
+function parseArgs(args: string | undefined, salvage = false): Record<string, unknown> {
   if (!args || !args.trim()) return {};
   try {
     const parsed = JSON.parse(args);
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
+    if (salvage) {
+      const path = salvageTruncatedPath(args);
+      if (path) return { path };
+    }
     return {};
   }
 }
@@ -193,11 +224,15 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
   const message = choice?.message ?? { role: 'assistant', content: null };
   const text = typeof message.content === 'string' ? message.content : '';
 
+  // A `length` finish means the output was cut at the token limit — a write_file's `content` arg can be
+  // sliced mid-string, so its arguments no longer parse. Salvage just the path in that case so the
+  // truncation guard can name the lost file (never the partial content → no half-written file persists).
+  const truncatedTurn = choice?.finish_reason === 'length';
   const toolUses: ToolUse[] = Array.isArray(message.tool_calls)
     ? message.tool_calls.map((tc) => ({
         id: tc.id,
         name: tc.function?.name ?? '',
-        input: parseArgs(tc.function?.arguments),
+        input: parseArgs(tc.function?.arguments, truncatedTurn),
       }))
     : [];
 
@@ -223,6 +258,9 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
 
   // If the model returned tool calls, the agent loop must run them: force tool_use.
   const stopReason = toolUses.length ? 'tool_use' : mapFinishReason(choice?.finish_reason);
+  // Surface the REAL finish reason even when it was masked to 'tool_use' above — a `length` stop that
+  // cut off a write_file mid-arguments must be visible to the truncation guard (CargoPilot kimi case).
+  const truncated = choice?.finish_reason === 'length';
 
-  return { text, toolUses, stopReason, usage, rawContent, ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}) };
+  return { text, toolUses, stopReason, ...(truncated ? { truncated } : {}), usage, rawContent, ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}) };
 }

@@ -20,7 +20,7 @@ interface Plugin {
 
 const PLUGINS: Plugin[] = [
   // Analytics
-  { id: 'google-analytics', name: 'Google Analytics 4', author: 'Google', version: '4.0.0', description: 'Track user behavior, page views, events aur conversions with GA4', category: 'Analytics', icon: '📊', stars: 4.8, installs: 125000, free: true, popular: true, setupCode: `<!-- GA4 Tag -->
+  { id: 'google-analytics', name: 'Google Analytics 4', author: 'Google', version: '4.0.0', description: 'Track user behavior, page views, events and conversions with GA4', category: 'Analytics', icon: '📊', stars: 4.8, installs: 125000, free: true, popular: true, setupCode: `<!-- GA4 Tag -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -29,7 +29,7 @@ const PLUGINS: Plugin[] = [
   gtag('config', 'G-XXXXXXXXXX');
 </script>`, configKeys: ['GA4_MEASUREMENT_ID'], tags: ['analytics', 'tracking'] },
 
-  { id: 'hotjar', name: 'Hotjar Heatmaps', author: 'Hotjar', version: '3.2.1', description: 'User heatmaps, session recordings aur feedback polls', category: 'Analytics', icon: '🔥', stars: 4.5, installs: 45000, free: false, popular: true, setupCode: `<!-- Hotjar Tracking Code -->
+  { id: 'hotjar', name: 'Hotjar Heatmaps', author: 'Hotjar', version: '3.2.1', description: 'User heatmaps, session recordings and feedback polls', category: 'Analytics', icon: '🔥', stars: 4.5, installs: 45000, free: false, popular: true, setupCode: `<!-- Hotjar Tracking Code -->
 <script>
   (function(h,o,t,j,a,r){
     h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
@@ -47,7 +47,7 @@ mixpanel.init(process.env.MIXPANEL_TOKEN, { debug: false });
 // Track event:
 mixpanel.track('Button Clicked', { button: 'signup', page: 'home' });`, configKeys: ['MIXPANEL_TOKEN'], tags: ['events', 'funnel'] },
 
-  { id: 'clarity', name: 'Microsoft Clarity', author: 'Microsoft', version: '1.0.0', description: 'Free session recordings aur heatmaps — no data limits', category: 'Analytics', icon: '🎯', stars: 4.6, installs: 78000, free: true, popular: true, setupCode: `<script type="text/javascript">
+  { id: 'clarity', name: 'Microsoft Clarity', author: 'Microsoft', version: '1.0.0', description: 'Free session recordings and heatmaps — no data limits', category: 'Analytics', icon: '🎯', stars: 4.6, installs: 78000, free: true, popular: true, setupCode: `<script type="text/javascript">
   (function(c,l,a,r,i,t,y){
     c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
     t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
@@ -70,7 +70,7 @@ ui.start('#firebaseui-auth-container', {
 
   { id: 'clerk', name: 'Clerk Auth', author: 'Clerk', version: '4.29.0', description: 'Complete user management — beautiful pre-built auth components', category: 'Authentication', icon: '🔑', stars: 4.8, installs: 55000, free: false, popular: true, setupCode: `import { ClerkProvider, SignIn, UserButton } from '@clerk/nextjs';
 
-// App wrap karo:
+// Wrap your app:
 <ClerkProvider publishableKey={process.env.CLERK_PUBLISHABLE_KEY}>
   <App />
 </ClerkProvider>
@@ -80,7 +80,7 @@ ui.start('#firebaseui-auth-container', {
 <UserButton />  // Avatar + dropdown`, configKeys: ['CLERK_PUBLISHABLE_KEY'], tags: ['auth', 'ui-components'] },
 
   // Payment
-  { id: 'razorpay-plugin', name: 'Razorpay Checkout', author: 'Razorpay', version: '1.6.0', description: 'India ka best payment gateway — UPI, cards, EMI sab kuch', category: 'Payments', icon: '💳', stars: 4.6, installs: 68000, free: false, popular: true, setupCode: `// Load Razorpay script
+  { id: 'razorpay-plugin', name: 'Razorpay Checkout', author: 'Razorpay', version: '1.6.0', description: 'India\'s best payment gateway — UPI, cards, EMI and more', category: 'Payments', icon: '💳', stars: 4.6, installs: 68000, free: false, popular: true, setupCode: `// Load Razorpay script
 const script = document.createElement('script');
 script.src = 'https://checkout.razorpay.com/v1/checkout.js';
 document.body.appendChild(script);
@@ -103,7 +103,7 @@ const stripePromise = loadStripe(process.env.STRIPE_PUBLISHABLE_KEY);
 </Elements>`, configKeys: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_SECRET_KEY'], tags: ['payment', 'global', 'subscription'] },
 
   // Storage
-  { id: 'cloudinary-plugin', name: 'Cloudinary Media', author: 'Cloudinary', version: '2.5.0', description: 'Image/video upload, optimize aur deliver — CDN included', category: 'Storage', icon: '🖼️', stars: 4.5, installs: 42000, free: true, popular: true, setupCode: `import { CldUploadWidget, CldImage } from 'next-cloudinary';
+  { id: 'cloudinary-plugin', name: 'Cloudinary Media', author: 'Cloudinary', version: '2.5.0', description: 'Image/video upload, optimize and deliver — CDN included', category: 'Storage', icon: '🖼️', stars: 4.5, installs: 42000, free: true, popular: true, setupCode: `import { CldUploadWidget, CldImage } from 'next-cloudinary';
 
 <CldUploadWidget uploadPreset="your_preset">
   {({ open }) => (
@@ -126,9 +126,9 @@ const { data: { publicUrl } } = supabase.storage
   .getPublicUrl('public/avatar.png');`, configKeys: ['SUPABASE_URL', 'SUPABASE_ANON_KEY'], tags: ['storage', 's3', 'files'] },
 
   // UI
-  { id: 'shadcn', name: 'shadcn/ui Components', author: 'shadcn', version: '0.8.0', description: 'Beautiful, accessible React components — copy-paste ke liye ready', category: 'UI Library', icon: '🎨', stars: 5.0, installs: 200000, free: true, popular: true, setupCode: `npx shadcn-ui@latest init
+  { id: 'shadcn', name: 'shadcn/ui Components', author: 'shadcn', version: '0.8.0', description: 'Beautiful, accessible React components — ready to copy-paste', category: 'UI Library', icon: '🎨', stars: 5.0, installs: 200000, free: true, popular: true, setupCode: `npx shadcn-ui@latest init
 
-# Components add karo:
+# Add components:
 npx shadcn-ui@latest add button
 npx shadcn-ui@latest add dialog
 npx shadcn-ui@latest add input
@@ -137,7 +137,7 @@ npx shadcn-ui@latest add input
 import { Button } from "@/components/ui/button"
 <Button variant="outline">Click me</Button>`, configKeys: [], tags: ['ui', 'components', 'tailwind'] },
 
-  { id: 'framer-motion', name: 'Framer Motion', author: 'Framer', version: '11.0.0', description: 'Smooth animations aur gestures — production-grade React animations', category: 'UI Library', icon: '✨', stars: 4.9, installs: 180000, free: true, popular: true, setupCode: `import { motion, AnimatePresence } from 'framer-motion';
+  { id: 'framer-motion', name: 'Framer Motion', author: 'Framer', version: '11.0.0', description: 'Smooth animations and gestures — production-grade React animations', category: 'UI Library', icon: '✨', stars: 4.9, installs: 180000, free: true, popular: true, setupCode: `import { motion, AnimatePresence } from 'framer-motion';
 
 <motion.div
   initial={{ opacity: 0, y: 20 }}
@@ -161,7 +161,7 @@ function UserProfile() {
   return <div>{data.name}</div>;
 }`, configKeys: [], tags: ['data-fetching', 'cache', 'react'] },
 
-  { id: 'react-query', name: 'TanStack Query', author: 'TanStack', version: '5.0.0', description: 'Powerful async state management — server state ke liye best', category: 'Performance', icon: '🔄', stars: 4.9, installs: 170000, free: true, popular: true, setupCode: `import { useQuery, useMutation, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+  { id: 'react-query', name: 'TanStack Query', author: 'TanStack', version: '5.0.0', description: 'Powerful async state management — best for server state', category: 'Performance', icon: '🔄', stars: 4.9, installs: 170000, free: true, popular: true, setupCode: `import { useQuery, useMutation, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const queryClient = new QueryClient();
 
@@ -174,7 +174,7 @@ const queryClient = new QueryClient();
 const { data } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });`, configKeys: [], tags: ['state', 'server-state', 'cache'] },
 
   // Security
-  { id: 'recaptcha', name: 'reCAPTCHA v3', author: 'Google', version: '3.0.0', description: 'Invisible bot protection — forms aur sensitive actions ke liye', category: 'Security', icon: '🛡️', stars: 4.3, installs: 88000, free: true, popular: true, setupCode: `import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
+  { id: 'recaptcha', name: 'reCAPTCHA v3', author: 'Google', version: '3.0.0', description: 'Invisible bot protection — for forms and sensitive actions', category: 'Security', icon: '🛡️', stars: 4.3, installs: 88000, free: true, popular: true, setupCode: `import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 const { executeRecaptcha } = useGoogleReCaptcha();
 
@@ -184,16 +184,16 @@ const handleSubmit = async () => {
   await fetch('/api/verify', { method: 'POST', body: JSON.stringify({ token }) });
 };`, configKeys: ['RECAPTCHA_SITE_KEY'], tags: ['security', 'bot-protection', 'forms'] },
 
-  { id: 'zod', name: 'Zod Validation', author: 'Colin McDonnell', version: '3.22.0', description: 'TypeScript-first schema validation — safe aur declarative', category: 'Security', icon: '✅', stars: 4.9, installs: 220000, free: true, popular: true, setupCode: `import { z } from 'zod';
+  { id: 'zod', name: 'Zod Validation', author: 'Colin McDonnell', version: '3.22.0', description: 'TypeScript-first schema validation — safe and declarative', category: 'Security', icon: '✅', stars: 4.9, installs: 220000, free: true, popular: true, setupCode: `import { z } from 'zod';
 
-// Schema define karo:
+// Define your schema:
 const UserSchema = z.object({
   name: z.string().min(2).max(50),
   email: z.string().email(),
   age: z.number().min(18).max(120),
 });
 
-// Validate karo:
+// Validate:
 const result = UserSchema.safeParse(formData);
 if (!result.success) console.log(result.error.issues);`, configKeys: [], tags: ['validation', 'typescript', 'forms'] },
 ];
@@ -246,7 +246,7 @@ export function PluginSystem() {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Plugin System</h2>
-          <p className="text-xs text-white/40">{PLUGINS.length} plugins — install karke app mein features add karo</p>
+          <p className="text-xs text-white/40">{PLUGINS.length} plugins — install to add features to your app</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowInstalledOnly(!showInstalledOnly)} className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${showInstalledOnly ? 'border-violet-500/40 bg-violet-500/10 text-violet-300' : 'border-white/10 bg-white/5 text-white/40'}`}>
@@ -276,7 +276,7 @@ export function PluginSystem() {
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Puzzle className="w-10 h-10 text-white/10" />
-              <p className="text-sm text-white/30">{showInstalledOnly ? 'Koi plugin install nahi' : 'Koi plugin nahi mila'}</p>
+              <p className="text-sm text-white/30">{showInstalledOnly ? 'No plugins installed' : 'No plugins found'}</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -314,7 +314,7 @@ export function PluginSystem() {
           {!selectedPlugin ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
               <Puzzle className="w-12 h-12 text-white/5" />
-              <p className="text-sm text-white/20">Plugin select karo detail dekhne ke liye</p>
+              <p className="text-sm text-white/20">Select a plugin to see details</p>
             </div>
           ) : (
             <>
@@ -378,7 +378,7 @@ export function PluginSystem() {
                 {installed.includes(selectedPlugin.id) && (
                   <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
                     <p className="text-xs text-emerald-400 flex items-center gap-1.5 mb-1"><Check className="w-3.5 h-3.5" /> Plugin Installed</p>
-                    <p className="text-[10px] text-white/40">Setup code apne project mein add karo aur config keys .env mein set karo.</p>
+                    <p className="text-[10px] text-white/40">Add the setup code to your project and set the config keys in .env.</p>
                   </div>
                 )}
               </div>

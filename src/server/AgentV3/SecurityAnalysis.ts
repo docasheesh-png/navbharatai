@@ -24,6 +24,42 @@ interface Rule {
   /** Optional guard to suppress obvious false positives (e.g. placeholders). Receives the full match
    *  array so it can test the captured CREDENTIAL VALUE, not the whole line (see PLACEHOLDER note). */
   ignore?: (m: RegExpExecArray, fullLine: string) => boolean;
+  /** A hardcoded-CREDENTIAL-VALUE rule (a secret string baked into data), as opposed to a code
+   *  vulnerability. In an obvious mock/fixture/demo file these are almost always DEMO fixtures, not a
+   *  real leak — so they are downgraded to 'low' there (still reported, never a build-failing 'high').
+   *  Real code vulns (eval, jwt-none, aws-key, private-key) are NOT marked and stay high everywhere. */
+  demoDowngrade?: boolean;
+}
+
+// Obvious mock / fixture / demo / seed / test data files. A hardcoded credential VALUE here (a demo
+// password, a mock API key, a `postgres://user:pass@localhost` sample URL) is fixture data — NOT a
+// production secret — so a demo app must never FAIL its readiness gate on its own mock login creds
+// (deep-test SaaS dashboard, build 6f87751d: `hardcoded-secret @ src/data/mockData.ts:240` forced 0/100).
+// PURE. Precise on purpose: a bare `src/data/config.ts` or `src/lib/api.ts` is NOT a fixture → stays high.
+export function isFixtureFile(file: string): boolean {
+  const f = (file || '').toLowerCase();
+  if (/\.(?:test|spec|stories)\.[cm]?[jt]sx?$/.test(f)) return true;             // *.test.ts / *.stories.tsx
+  if (/(?:^|\/)(?:__mocks__|__fixtures__|mocks|fixtures|seeds?|samples?|demos?|stubs?|examples?)\//.test(f)) return true; // a mock/fixture/… directory
+  const base = f.split('/').pop() || f;
+  if (/(?:^|[._-])(?:mock|fixture|seed|sample|demo|dummy|stub|fake)/.test(base)) return true; // mockData.ts, seed-users.ts, demo.data.ts
+  return false;
+}
+
+// A dotenv secrets file (`.env`, `.env.local`, `.env.production`, …) is the DESIGNATED, gitignored place
+// for real credentials — a `DATABASE_URL=postgres://user:pass@host/db`, an API key, a JWT secret all BELONG
+// here. Flagging them as a build-BLOCKING 'high' is a false positive whose "fix" is circular ("move to an
+// environment variable" — `.env` IS the environment file) and has no valid auto-fix, so the reviewer loops
+// on it to the wall-clock timeout and marks a working app broken (autopsy build 6478f94d: a `continue` turn
+// failed ok:false on `connection-string-credentials @ .env:2`, then timed out at the 1740s cap). So, exactly
+// like a fixture file, credential-VALUE findings (demoDowngrade rules) in an env file are downgraded to
+// 'low' — still REPORTED (honest, visible), never build-failing. `.env.example`/`.sample`/`.template` are
+// EXCLUDED: those are committed templates that must carry only placeholders (a real secret there IS a leak).
+// Real code vulns (private-key, aws-key, jwt-none, eval, …) are NOT demoDowngrade → they stay high here too.
+// PURE.
+export function isEnvSecretsFile(file: string): boolean {
+  const base = (file || '').toLowerCase().split('/').pop() || '';
+  if (!/^\.env(?:\.[a-z0-9_.-]+)?$/.test(base)) return false;          // .env, .env.local, .env.production, …
+  return !/\.(?:example|sample|template|dist|tpl)$/.test(base);        // but NOT a committed .env.example template
 }
 
 // Placeholder / non-real-credential markers. MUST be tested against the captured credential VALUE
@@ -32,6 +68,47 @@ interface Rule {
 // common file type here) and `test` matches `latest`/`fastest`/a `// …test…` comment. Scoped to the
 // value, `<` only fires on `<your-key>` and `test` only on a `test…` value — which is the intent.
 const PLACEHOLDER = /(your[_-]?|example|placeholder|xxx+|<|\$\{|process\.env|import\.meta\.env|changeme|dummy|test)/i;
+
+// TEMPLATE FIELD NAMES used AS the value — the other half of "this is not a real credential"
+// (autopsy build 56ee622f, 2026-08-04).
+//
+// What went wrong: the reviewer told the agent to get live DB + payment credentials out of `.env`. The
+// agent did exactly the right thing — replaced them with placeholders and wrote a canonical
+// `.env.example` template:
+//     DATABASE_URL=postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+// The connection-string rule then captured `PASSWORD` as the password and asked PLACEHOLDER whether it
+// looked fake. PLACEHOLDER has `your_`, `example`, `xxx`, `changeme`, `dummy`, `test` … but NOT the single
+// most obvious template word of all: `PASSWORD`. So the finding fired at HIGH on `.env.example` — a file
+// that by definition contains nothing but placeholders — and became a READINESS_BLOCKER. The build was
+// marked NOT working and the user was told their app was broken.
+//
+// The engine punished itself for doing the right thing. Worse, it was inconsistent: the REAL `.env` was
+// only 'low' (correctly downgraded by isEnvSecretsFile) while the dummy TEMPLATE was 'high'.
+//
+// So a value that is merely the FIELD'S OWN NAME is a placeholder. Kept deliberately narrow — an exact
+// full-value match against a curated word list, never a substring — so a genuine secret that happens to
+// contain "user" (`user_a8f3k2`) is still caught. `.env.example` keeps its "real secrets here ARE a leak"
+// policy; it just can no longer mistake the template itself for the leak.
+const TEMPLATE_FIELD_VALUE = new Set([
+  'user', 'username', 'user_name', 'youruser', 'your_user', 'your_username',
+  'password', 'passwd', 'pass', 'yourpassword', 'your_password', 'db_password', 'dbpassword',
+  'host', 'hostname', 'your_host', 'yourhost', 'localhost',
+  'db', 'dbname', 'db_name', 'database', 'database_name', 'mydb', 'yourdb',
+  'port', 'secret', 'mysecret', 'key', 'apikey', 'api_key', 'token', 'credentials',
+  'replace_me', 'replaceme', 'none', 'null', 'todo', 'redacted',
+]);
+
+/**
+ * Is this captured credential VALUE a placeholder rather than a live secret? Combines the substring
+ * markers (`your-key`, `xxx`, `${…}`) with an EXACT match against the template-field word list, so the
+ * standard `scheme://USER:PASSWORD@HOST/DB` template is recognised for what it is. PURE.
+ */
+export function isPlaceholderValue(value: string | undefined | null): boolean {
+  const v = (value ?? '').trim();
+  if (!v) return true;
+  if (PLACEHOLDER.test(v)) return true;
+  return TEMPLATE_FIELD_VALUE.has(v.toLowerCase().replace(/[<>{}$]/g, ''));
+}
 
 // A security-sensitive context: the value being built is a secret/identity token, not a
 // throwaway. Used to keep the "weak randomness / weak hash" rules high-precision — they
@@ -54,7 +131,8 @@ const RULES: Rule[] = [
     // false positive of a validation/UI message (password = "Password must be 8 characters").
     re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/i,
     message: 'Hardcoded credential — load it from an environment variable instead.',
-    ignore: (m) => PLACEHOLDER.test(m[2] ?? m[0]),
+    ignore: (m) => isPlaceholderValue(m[2] ?? m[0]),
+    demoDowngrade: true,
   },
   {
     rule: 'connection-string-credentials',
@@ -63,7 +141,8 @@ const RULES: Rule[] = [
     // The assignment-based hardcoded-secret rule misses this URI form entirely.
     re: /\b(mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|rediss?|amqps?):\/\/[^\s:'"`@/]*:([^\s:'"`@/]{3,})@/i,
     message: 'Credentials embedded in a connection string — move the user/password to environment variables; never commit live DB/queue credentials.',
-    ignore: (m) => PLACEHOLDER.test(m[2] ?? m[0]),
+    ignore: (m) => isPlaceholderValue(m[2] ?? m[0]),
+    demoDowngrade: true,
   },
   {
     rule: 'client-exposed-secret',
@@ -85,6 +164,7 @@ const RULES: Rule[] = [
     re: /\bhttps?:\/\/[^\s:'"`@/]+:([^\s:'"`@/]{3,})@/i,
     message: 'Credentials embedded in an http(s) URL (https://user:pass@host) — this leaks the credential and is deprecated in browsers; send them in an Authorization header from an environment variable instead.',
     ignore: (m) => PLACEHOLDER.test(m[1] ?? m[0]),
+    demoDowngrade: true,
   },
   {
     rule: 'hardcoded-jwt-secret',
@@ -96,6 +176,7 @@ const RULES: Rule[] = [
     re: /\b(?:jwt|jsonwebtoken)\.sign\s*\(.*?,\s*(['"`])[^'"`]{4,}\1\s*[,)]/,
     message: 'Hardcoded JWT signing secret — anyone with the source can forge tokens; load it from an environment variable.',
     ignore: (m) => PLACEHOLDER.test(m[0]),
+    demoDowngrade: true,
   },
   {
     rule: 'jwt-none-algorithm',
@@ -577,13 +658,22 @@ const RULES: Rule[] = [
 export function scanSecurity(file: string, content: string): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
   const lines = content.split('\n');
+  // A hardcoded credential VALUE inside an obvious mock/fixture/demo file is demo data, not a real
+  // leak — downgrade those (demoDowngrade rules) from 'high' to 'low' so a demo app never FAILS its
+  // readiness gate on its own mock login creds, while a real secret in real source still blocks. Real
+  // code vulns (aws-key, private-key, jwt-none, eval, …) are NOT demoDowngrade → they stay high here too.
+  // Credentials are EXPECTED (not a leak) in a fixture/demo file OR a dotenv secrets file — a value rule
+  // there is downgraded to 'low' so a correct app never FAILS its readiness gate on credentials that belong
+  // exactly where they are. A real secret hardcoded in real source still blocks.
+  const credsBelongHere = isFixtureFile(file) || isEnvSecretsFile(file);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length > 4000) continue; // skip minified/huge lines
     for (const r of RULES) {
       const m = r.re.exec(line);
       if (m && !(r.ignore && r.ignore(m, line))) {
-        findings.push({ file, line: i + 1, severity: r.severity, rule: r.rule, message: r.message });
+        const severity: Severity = credsBelongHere && r.demoDowngrade ? 'low' : r.severity;
+        findings.push({ file, line: i + 1, severity, rule: r.rule, message: r.message });
       }
     }
   }

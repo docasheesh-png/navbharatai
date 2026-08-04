@@ -1,5 +1,12 @@
 import fs from 'fs';
 import { setCorsHeaders } from '../lib/cors';
+// LARGE-FILE SOURCE (admin 2026-08-04): this route's yauzl extraction already STREAMS from a temp file
+// — its only ceiling was the transport, because the archive arrived as ONE request body and the
+// platform caps any single request at ~32 MB. With X-Upload-Id the client first moves the file through
+// the chunked uploader (every request well under the cap, up to 5 GB), and this route CLAIMS the
+// assembled temp file instead of reading a body. Same extraction, same SSE stream — the ceiling gone.
+import { claimUpload } from './zipUpload';
+import { verifyFirebaseToken } from '../lib/authMiddleware';
 import path from 'path';
 import crypto from 'crypto';
 import type { Express, Request, Response, RequestHandler } from 'express';
@@ -35,7 +42,23 @@ export function registerZipRoutes(app: Express, limiter: RequestHandler = passth
 
     const os = await import('os');
     const tmpId = (crypto as any).randomBytes(8).toString('hex');
-    const tmpZip = path.join(os.default.tmpdir(), `nbt-${tmpId}.zip`);
+    let tmpZip = path.join(os.default.tmpdir(), `nbt-${tmpId}.zip`);
+
+    // ── Chunk-uploaded source? Claim the assembled file instead of reading a request body. ──
+    // Ownership is enforced by claimUpload (the VERIFIED uid must be the uploader), so a large import
+    // requires sign-in; the direct-body path below stays available to small anonymous uploads.
+    const uploadId = String(req.headers['x-upload-id'] || '');
+    let claimedSource = false;
+    if (uploadId) {
+      const uid = await verifyFirebaseToken(req);
+      const claimed = claimUpload(uploadId, uid);
+      if (!claimed) {
+        res.status(403).json({ error: 'Unknown or expired upload — please retry the import.' });
+        return;
+      }
+      tmpZip = claimed.filePath;
+      claimedSource = true;
+    }
 
     // Assets embedded as base64 data-URLs so the preview can use them directly (images + web fonts)
     const ASSET_MIME: Record<string, string> = {
@@ -70,14 +93,16 @@ export function registerZipRoutes(app: Express, limiter: RequestHandler = passth
     let totalBytes = 0;
 
     try {
-      // ── Step 1: Stream raw binary body to disk (no memory limit) ──────────
-      await new Promise<void>((resolve, reject) => {
-        const ws = fs.createWriteStream(tmpZip);
-        req.pipe(ws);
-        ws.on('finish', resolve);
-        ws.on('error', reject);
-        req.on('error', reject);
-      });
+      // ── Step 1: Stream raw binary body to disk — skipped when the file arrived via chunks ──────
+      if (!claimedSource) {
+        await new Promise<void>((resolve, reject) => {
+          const ws = fs.createWriteStream(tmpZip);
+          req.pipe(ws);
+          ws.on('finish', resolve);
+          ws.on('error', reject);
+          req.on('error', reject);
+        });
+      }
 
       const zipSize = fs.statSync(tmpZip).size;
       console.log(`[extract-zip] ${fileName} received: ${(zipSize / 1024 / 1024).toFixed(1)} MB`);

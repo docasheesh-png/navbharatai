@@ -80,9 +80,12 @@ export type AgentV3WireEvent =
   // A read-only role chat (planner/advisor) proposed concrete build steps — shown for the USER to
   // approve into the executor's queue (never auto-enqueued).
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
+  // ASK-USER (opt-in): non-blocking clarifications the engine assumed defaults for — shown as a
+  // dismissible card the user MAY answer via a follow-up; the build never waits for it.
+  | { type: 'clarify'; domain: string; questions: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -131,6 +134,11 @@ export interface AgentV3ClientState {
   narration: NarrationLine[];
   /** Live "working…" activity log (the expandable indicator) — ordered, capped, real events only. */
   activity: ActivityEntry[];
+  /** PRIOR turns' activity (admin 2026-07-21 — "diff gayab na ho"): each new send used to wipe
+   *  `activity`, so the finished build's action rows ("Created 33 files +812 -0" + its diffs)
+   *  vanished from the chat. The hook archives the settled turn's entries here (deactivated,
+   *  capped) so the chat timeline keeps decorating past prose forever within the session. */
+  activityLog: ActivityEntry[];
   /** File explorer surface — current change set. */
   files: FileChange[];
   /** Todo surface (editable in P4). */
@@ -154,6 +162,9 @@ export interface AgentV3ClientState {
   /** Steps a read-only role chat (planner/advisor) proposed this turn — the user approves them into
    *  the executor's queue via the queue UI (never auto-enqueued). */
   proposedSteps?: { role: 'planner' | 'advisor'; steps: string[] };
+  /** ASK-USER (opt-in): non-blocking clarifications the engine assumed defaults for on a fresh domain
+   *  build — the panel shows a dismissible card; the build never waits for an answer. */
+  pendingClarify?: { domain: string; questions: string[] };
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The sandbox workspace id for this build (enables History → restore). */
@@ -189,6 +200,9 @@ export interface AgentV3ClientState {
   /** SPM-3 (project mode): modules not yet done after this turn — drives the progress-monotone
    *  auto-continue guard (continue only while this number strictly decreases). */
   planRemaining?: number;
+  /** FleetOps: total files written by this build so far, reported on a wall-clock PAUSE — the
+   *  progress signal for the classic auto-continue (keep going while it strictly increases). */
+  filesWritten?: number;
   /** P-UX.7 — total tokens (in + out) the finished build used, for the usage badge. */
   tokens?: number;
   /** Billing Phase 1 — tokens actually deducted from the user's wallet for this build. */
@@ -210,6 +224,7 @@ export function initialAgentV3State(): AgentV3ClientState {
   return {
     narration: [],
     activity: [],
+    activityLog: [],
     files: [],
     todos: [],
     diffs: {},

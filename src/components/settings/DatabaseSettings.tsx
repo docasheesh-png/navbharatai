@@ -1,5 +1,8 @@
-import { useState } from 'react';
-import { Database, ExternalLink, CheckCircle2, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
+import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
+import { SupabaseConnectCard } from './SupabaseConnectCard';
 
 type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
 
@@ -13,56 +16,59 @@ const DB_PROVIDERS: {
   id: DbProvider;
   label: string;
   keyLink: string;
-  fields: { key: string; label: string; placeholder: string }[];
+  // `where` is a short, per-field navigation hint (admin 2026-07-18): shown next to each input so the
+  // user knows EXACTLY where in their provider's dashboard that specific value lives — not just one link
+  // for the whole provider. Written from the real provider consoles.
+  fields: { key: string; label: string; placeholder: string; where?: string }[];
 }[] = [
   {
     id: 'supabase', label: 'Supabase',
     keyLink: 'https://supabase.com/dashboard/project/_/settings/api',
     fields: [
-      { key: 'url',     label: 'Project URL', placeholder: 'https://xxxx.supabase.co' },
-      { key: 'anonKey', label: 'Anon Key',     placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…' },
+      { key: 'url',     label: 'Project URL', placeholder: 'https://xxxx.supabase.co', where: 'Project Settings → API → Project URL' },
+      { key: 'anonKey', label: 'Anon Key',     placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…', where: 'Project Settings → API → Project API keys → anon / public' },
     ],
   },
   {
     id: 'firebase', label: 'Firebase',
     keyLink: 'https://console.firebase.google.com/',
     fields: [
-      { key: 'apiKey',            label: 'API Key',             placeholder: 'AIzaSy…' },
-      { key: 'authDomain',        label: 'Auth Domain',         placeholder: 'your-project.firebaseapp.com' },
-      { key: 'projectId',         label: 'Project ID',          placeholder: 'your-project-id' },
-      { key: 'storageBucket',     label: 'Storage Bucket',      placeholder: 'your-project.appspot.com' },
-      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789' },
-      { key: 'appId',             label: 'App ID',              placeholder: '1:123:web:abc' },
+      { key: 'apiKey',            label: 'API Key',             placeholder: 'AIzaSy…',                         where: 'Project Settings → General → Your apps → SDK setup and configuration → apiKey' },
+      { key: 'authDomain',        label: 'Auth Domain',         placeholder: 'your-project.firebaseapp.com',    where: 'Project Settings → General → Your apps → authDomain' },
+      { key: 'projectId',         label: 'Project ID',          placeholder: 'your-project-id',                 where: 'Project Settings → General → Project ID' },
+      { key: 'storageBucket',     label: 'Storage Bucket',      placeholder: 'your-project.appspot.com',        where: 'Project Settings → General → Your apps → storageBucket' },
+      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789',                       where: 'Project Settings → Cloud Messaging → Sender ID' },
+      { key: 'appId',             label: 'App ID',              placeholder: '1:123:web:abc',                   where: 'Project Settings → General → Your apps → appId' },
     ],
   },
   {
     id: 'mongodb', label: 'MongoDB Atlas',
     keyLink: 'https://cloud.mongodb.com/',
     fields: [
-      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb' },
+      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb', where: 'Atlas → Database → Connect → Drivers → copy the SRV string (replace <password> with your DB user password)' },
     ],
   },
   {
     id: 'neon', label: 'Neon (Postgres)',
     keyLink: 'https://console.neon.tech/',
     fields: [
-      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb' },
+      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb', where: 'Neon Console → your project → Dashboard → Connection Details → Connection string (Pooled)' },
     ],
   },
   {
     id: 'appwrite', label: 'Appwrite',
     keyLink: 'https://cloud.appwrite.io/',
     fields: [
-      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1' },
-      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id' },
+      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1', where: 'Appwrite Console → your project → Settings → API Endpoint (Cloud users: https://cloud.appwrite.io/v1)' },
+      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id',            where: 'Appwrite Console → your project → Settings → Project ID' },
     ],
   },
   {
     id: 'other', label: 'Other',
     keyLink: '',
     fields: [
-      { key: 'platformName',     label: 'Platform Name',               placeholder: 'e.g. PlanetScale, Turso…' },
-      { key: 'connectionString', label: 'Connection String / API Key',  placeholder: 'mysql://… or your API key' },
+      { key: 'platformName',     label: 'Platform Name',               placeholder: 'e.g. PlanetScale, Turso…', where: 'The name of your database provider — used only as a label so v5.0 knows which SDK to wire' },
+      { key: 'connectionString', label: 'Connection String / API Key',  placeholder: 'mysql://… or your API key', where: "Your provider's dashboard → Connect / Connection string (or API key)" },
     ],
   },
 ];
@@ -107,94 +113,84 @@ interface DatabaseSettingsProps {
   userId: string;
 }
 
+// The ONLY thing kept in localStorage now (SECURITY): the chosen provider marker — never the
+// real credential values (those live ONLY in the encrypted Secrets & Keys vault).
+interface DbMarker { provider: DbProvider; platformName?: string }
+
+function readMarker(userId: string): DbMarker | null {
+  try {
+    const stored = localStorage.getItem(`engineer_db_${userId}`);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as Partial<DbConfig>;
+    if (!parsed?.provider) return null;
+    return { provider: parsed.provider, ...(parsed.platformName ? { platformName: parsed.platformName } : {}) };
+  } catch { return null; }
+}
+
 export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
-  const [provider, setProvider] = useState<DbProvider>(() => {
-    try {
-      const stored = localStorage.getItem(`engineer_db_${userId}`);
-      if (stored) return (JSON.parse(stored) as DbConfig).provider;
-    } catch {}
-    return 'supabase';
-  });
-
-  const [formCreds, setFormCreds] = useState<Record<string, string>>(() => {
-    try {
-      const stored = localStorage.getItem(`engineer_db_${userId}`);
-      if (stored) return (JSON.parse(stored) as DbConfig).credentials ?? {};
-    } catch {}
-    return {};
-  });
-
+  const [provider, setProvider] = useState<DbProvider>(() => readMarker(userId)?.provider ?? 'supabase');
+  // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & Keys.
+  const [formCreds, setFormCreds] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [activeMarker, setActiveMarker] = useState<DbMarker | null>(() => readMarker(userId));
 
-  const [activeConfig, setActiveConfig] = useState<DbConfig | null>(() => {
+  // SECURITY MIGRATION (A): if an older build left plaintext credentials in localStorage, purge them
+  // now — keep only the provider marker. The real values already live encrypted in Secrets & Keys.
+  useEffect(() => {
     try {
-      const stored = localStorage.getItem(`engineer_db_${userId}`);
-      if (stored) return JSON.parse(stored) as DbConfig;
-    } catch {}
-    return null;
-  });
+      const raw = localStorage.getItem(`engineer_db_${userId}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<DbConfig>;
+      if (parsed && (parsed as any).credentials) {
+        const marker: DbMarker = { provider: parsed.provider as DbProvider, ...(parsed.platformName ? { platformName: parsed.platformName } : {}) };
+        localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(marker));
+      }
+    } catch { /* best-effort cleanup */ }
+  }, [userId]);
 
   const handleSave = async () => {
     const providerDef = DB_PROVIDERS.find(p => p.id === provider);
     if (!providerDef) return;
 
-    const credentials: Record<string, string> = {};
+    // Only the fields the user actually filled THIS time. A blank field means "keep the existing
+    // encrypted value" — we never overwrite a saved secret with an empty string.
+    const enteredCreds: Record<string, string> = {};
     for (const field of providerDef.fields) {
-      credentials[field.key] = formCreds[field.key] ?? '';
+      const v = (formCreds[field.key] ?? '').trim();
+      if (v) enteredCreds[field.key] = v;
     }
 
-    const newConfig: DbConfig = {
-      provider,
-      credentials,
-      ...(provider === 'other' && formCreds.platformName ? { platformName: formCreds.platformName } : {}),
-    };
+    // SECURITY (A): persist ONLY the provider marker locally — never the credential values.
+    const marker: DbMarker = { provider, ...(provider === 'other' && (formCreds.platformName ?? '').trim() ? { platformName: formCreds.platformName.trim() } : {}) };
+    try { localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(marker)); } catch {}
+    setActiveMarker(marker);
 
-    // Persist to localStorage — EngineerAIChat reads from here to pass in request body
-    try {
-      localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(newConfig));
-    } catch {}
-    setActiveConfig(newConfig);
-
-    // Sync to Firestore Secrets & Keys (upsert: delete old matching entries, add new ones)
+    // Sync to the encrypted Secrets & Keys vault (upsert only the values the user entered + the
+    // provider marker; blank fields are left untouched so nothing is accidentally wiped).
     setSaving(true);
     try {
-      const existingRes = await fetch(`/api/secrets/${userId}`);
-      const existing: { id: string; secret_name: string }[] = existingRes.ok ? await existingRes.json() : [];
+      // All vault calls go through the authenticated client (attaches the Firebase token) — raw fetches
+      // here previously omitted it, so requireUserMatch rejected the sync (401) and nothing saved.
+      const existing = await listSecrets(userId);
 
-      const envKeys = buildEnvKeys(provider, credentials);
-      const managedNames = [...Object.keys(envKeys), 'ENGINEER_DB_PROVIDER'];
+      const envKeys = buildEnvKeys(provider, enteredCreds);
+      const upserts: { name: string; value: string }[] = [{ name: 'ENGINEER_DB_PROVIDER', value: provider }];
+      for (const [name, value] of Object.entries(envKeys)) if (value) upserts.push({ name, value });
 
-      // Soft-delete any previously saved secrets with the same names
-      await Promise.all(
-        existing
-          .filter(s => managedNames.includes(s.secret_name))
-          .map(s => fetch(`/api/secrets/${userId}/${s.id}`, { method: 'DELETE' }))
-      );
+      // Upsert each: delete any existing secret with that name, then write the new value.
+      for (const u of upserts) {
+        await Promise.all(
+          existing.filter(s => s.secret_name === u.name).map(s => deleteSecret(userId, s.id))
+        );
+        await saveSecret(userId, u.name, u.value);
+      }
 
-      // Save provider name so the agent can read which SDK to scaffold
-      await fetch(`/api/secrets/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ secret_name: 'ENGINEER_DB_PROVIDER', secret_value: provider }),
-      });
-
-      // Save each non-empty env var as an encrypted secret
-      await Promise.all(
-        Object.entries(envKeys)
-          .filter(([, v]) => v)
-          .map(([name, value]) =>
-            fetch(`/api/secrets/${userId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ secret_name: name, secret_value: value }),
-            })
-          )
-      );
-
-      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys and available to Engineer AI.');
+      // Clear the sensitive inputs from memory once they are safely in the encrypted vault.
+      setFormCreds({});
+      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys — NavBharatAI Pro v5.0 uses them automatically when it builds your app.');
     } catch {
-      setSavedMsg('Saved locally. Could not sync to Secrets & Keys — check your connection.');
+      setSavedMsg('Could not reach Secrets & Keys — check your connection and try again.');
     } finally {
       setSaving(false);
       setTimeout(() => setSavedMsg(''), 6000);
@@ -202,6 +198,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
   };
 
   const currentDef = DB_PROVIDERS.find(p => p.id === provider);
+  const hasSavedConfig = !!activeMarker && activeMarker.provider === provider;
 
   return (
     <div className="space-y-6">
@@ -209,6 +206,11 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
         <h2 className="text-2xl font-black text-white tracking-tight">Database</h2>
         <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Connect your own database provider</p>
       </div>
+
+      {/* ONE-TAP path (ROADMAP #1 Phase 1). Renders nothing when this deployment has no Supabase OAuth
+          app configured, so the manual form below stays the whole screen rather than sitting under a
+          button that cannot work. Users who already have a project keep using the form unchanged. */}
+      <SupabaseConnectCard onProvisioned={() => setActiveMarker({ provider: 'supabase' })} />
 
       <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl">
         <div className="flex items-center gap-4">
@@ -218,7 +220,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           <div>
             <h3 className="font-black text-white text-sm uppercase tracking-wider">Your Database</h3>
             <p className="text-[10px] text-[#8b949e] font-medium mt-0.5">
-              Credentials are encrypted in Secrets &amp; Keys. Engineer AI injects them into your app's .env automatically — NavBharatAI never uses them for itself.
+              Credentials are encrypted in Secrets &amp; Keys. NavBharatAI Pro v5.0 detects your connected database and wires that exact provider into your app&apos;s .env automatically — it never creates a new one, and NavBharatAI never uses your database for itself.
             </p>
           </div>
         </div>
@@ -237,6 +239,16 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           </select>
         </div>
 
+        {/* Security note: fields start blank on purpose — saved values live encrypted, not in the browser. */}
+        {hasSavedConfig && (
+          <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-indigo-500/5 border border-indigo-500/15">
+            <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-[#8b949e] leading-relaxed">
+              This database is saved. For your security, values aren&apos;t shown here — leave a field <span className="text-white font-semibold">blank to keep its current value</span>, or type a new one to update it.
+            </p>
+          </div>
+        )}
+
         {/* Per-provider credential fields */}
         <div className="space-y-4">
           {currentDef?.fields.map(field => (
@@ -250,6 +262,14 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
                 autoComplete="off"
                 className="w-full bg-[#0d1117] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500/50 font-mono"
               />
+              {/* Per-field "where to find this" hint (admin 2026-07-18) — points at the exact spot in the
+                  provider's own dashboard where THIS value lives. */}
+              {field.where && (
+                <p className="mt-1.5 text-[11px] text-[#6e7681] leading-relaxed flex items-start gap-1.5">
+                  <ExternalLink className="w-3 h-3 shrink-0 mt-0.5 text-[#484f58]" />
+                  <span>Where to find this: <span className="text-[#8b949e]">{field.where}</span></span>
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -273,7 +293,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           disabled={saving}
           className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-bold rounded-2xl transition-colors"
         >
-          {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Database className="w-5 h-5" />}
+          {saving ? <TirangaLoader className="w-5 h-5" /> : <Database className="w-5 h-5" />}
           {saving ? 'Saving…' : 'Save & Sync to Secrets'}
         </button>
 
@@ -286,11 +306,11 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
         )}
 
         {/* Active config indicator */}
-        {activeConfig && (
+        {activeMarker && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-white/3 border border-white/5">
             <div className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
             <p className="text-sm text-[#8b949e]">
-              Active: <span className="text-white font-bold">{DB_PROVIDERS.find(p => p.id === activeConfig.provider)?.label ?? activeConfig.provider}</span>
+              Active: <span className="text-white font-bold">{DB_PROVIDERS.find(p => p.id === activeMarker.provider)?.label ?? activeMarker.provider}</span>
             </p>
           </div>
         )}
@@ -310,7 +330,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-indigo-400 font-bold shrink-0">3.</span>
-            When Engineer AI builds your app, it scaffolds the SDK file and injects your keys into <code className="text-indigo-300">.env</code> automatically.
+            When <strong className="text-white">NavBharatAI Pro v5.0</strong> builds your app, it detects this connected database, wires that exact provider&apos;s SDK, and injects your keys into <code className="text-indigo-300">.env</code> automatically — it never creates a new or different database.
           </li>
           <li className="flex items-start gap-2">
             <span className="text-indigo-400 font-bold shrink-0">4.</span>

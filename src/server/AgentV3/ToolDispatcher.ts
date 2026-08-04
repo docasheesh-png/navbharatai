@@ -1,14 +1,34 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { pipedGateExitCodeWarning } from './pipedGateExitCode';
+
+/**
+ * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
+ * command?" gate.
+ *
+ * ROOT CAUSE it closes (mitrify autopsy 2026-08-04, and the admin's direct question — "agar user keys daal
+ * bhi de, to kya app un keys ko padh payega?"): the secrets `.env` was written LAZILY, from inside
+ * `run_command`, the first time a command looked like npm/node/vite. But a managed preview — an import
+ * turn, the Diagnose button, `update_preview` — starts the dev server through the ACTUATOR, never through
+ * `run_command`. On those paths no `.env` was ever written, so the app booted with none of the keys the
+ * user had carefully saved in Settings. The keys were stored correctly, the app read `.env` correctly, and
+ * the two were never introduced. Now the write is also driven explicitly, before any dev server can start.
+ */
+export const ALWAYS_WRITE_SECRETS = '__navbharatai_always_write_secrets__';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { robustTscCommand } from './tscCommand';
+import { parseTscErrors } from './EndgameRepair';
+import { pathMissHint } from './suggestFilePath';
+import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
+import { checkPreviewCompiles, previewDivergenceBlocksDelivery } from '../runtime/PreviewCompileCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -34,20 +54,29 @@ import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
+import { scanObservability, observabilitySummary } from './ObservabilityAnalysis';
+import { scanGracefulShutdown, gracefulShutdownSummary } from './GracefulShutdownAnalysis';
+import { scanSecurityHeaders, securityHeadersSummary } from './SecurityHeadersAnalysis';
+import { scanProjectSri, sriSummary } from './SriAnalysis';
+import { scanProjectCsp, cspSummary } from './CspMetaAnalysis';
+import { scanProjectCommentLanguage, commentLanguageSummary } from './CommentLanguageAnalysis';
+import { scanProjectUploadValidation, uploadValidationSummary } from './UploadValidationAnalysis';
 import {
   scanCompliance, complianceSummary,
   detectsPiiCollection, detectsTracker, detectsConsentUI, looksLikePrivacyPolicy,
 } from './ComplianceAnalysis';
 import type { ComplianceIssue, ComplianceSeverity } from './ComplianceAnalysis';
+import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
+import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
-import { applyFullStackGuards } from './FullStackGuards';
+import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, conventionRelative } from './ProjectIntegrityChecks';
 
 /**
@@ -71,13 +100,22 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson } from './DependencyAutoFix';
-import { prismaRepairHint } from './prismaRepairHint';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { quoteShellRouteGroupPaths } from './shellCommandSafety';
+import { resolveStringArg, missingArgMessage } from './toolArgRepair';
+import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
+import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival } from './postgresProvision';
+import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
+import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
+import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
+import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
+import { dedupeDuplicateImports } from './DuplicateImportGuard';
+import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
@@ -90,7 +128,9 @@ import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
+import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
@@ -98,13 +138,140 @@ import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/Mock
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
-import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
+import { generateDeployConfig, isDeployTarget } from '../lib/DeployConfigGenerator';
+import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, generateAnsiblePlaybook, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
+import { dependencyHealthVerdict } from './DependencyHealthGate';
+import { prettierGateResult, prettierAdvisory } from './PrettierGate';
+import { injectObservabilityFixes } from './ObservabilityInjector';
+import { wireOrphanPages } from './orphanPageWiring';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
+import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
+import { generateTotpIntegration } from '../lib/TotpGenerator';
+import { generateIndianValidatorsIntegration } from '../lib/IndianValidatorsGenerator';
+import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/AnalyticsGenerator';
+import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
+import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
+import { generateSchedulerIntegration } from '../lib/SchedulerGenerator';
+import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
+import { generatePasswordIntegration } from '../lib/PasswordGenerator';
+import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
+import { generateApiVersionIntegration } from '../lib/ApiVersionGenerator';
+import { generateCrudResource } from '../lib/CrudGenerator';
+import { generateBookingIntegration } from '../lib/BookingGenerator';
+import { generateInventoryIntegration } from '../lib/InventoryGenerator';
+import { generateCrmIntegration } from '../lib/CrmGenerator';
+import { generateHospitalErpIntegration } from '../lib/HospitalErpGenerator';
+import { generateSchoolErpIntegration } from '../lib/SchoolErpGenerator';
+import { generateCourierIntegration } from '../lib/CourierGenerator';
+import { generateRestaurantPosIntegration } from '../lib/RestaurantPosGenerator';
+import { generateRealEstateIntegration } from '../lib/RealEstateGenerator';
+import { generateFitnessIntegration } from '../lib/FitnessGenerator';
+import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
+import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
+import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
+import { generateEventsIntegration } from '../lib/EventsGenerator';
+import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
+import { generatePollsIntegration } from '../lib/PollsGenerator';
+import { generateBlogIntegration } from '../lib/BlogGenerator';
+import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
+import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
+import { generateReferralsIntegration } from '../lib/ReferralsGenerator';
+import { generateCommentsIntegration } from '../lib/CommentsGenerator';
+import { generateMessagingIntegration } from '../lib/MessagingGenerator';
+import { generateListingsIntegration } from '../lib/ListingsGenerator';
+import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
+import { generateWishlistIntegration } from '../lib/WishlistGenerator';
+import { generateAddressesIntegration } from '../lib/AddressesGenerator';
+import { generateCouponsIntegration } from '../lib/CouponsGenerator';
+import { generateKanbanIntegration } from '../lib/KanbanGenerator';
+import { generateTimesheetIntegration } from '../lib/TimesheetGenerator';
+import { generateLeaderboardIntegration } from '../lib/LeaderboardGenerator';
+import { generateWaitlistIntegration } from '../lib/WaitlistGenerator';
+import { generateTagsIntegration } from '../lib/TagsGenerator';
+import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
+import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
+import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
+import { generateConsentIntegration } from '../lib/ConsentGenerator';
+import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
+import { generateCartIntegration } from '../lib/CartGenerator';
+import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
+import { generateOrdersIntegration } from '../lib/OrdersGenerator';
+import { generateFaqIntegration } from '../lib/FaqGenerator';
+import { generateQuizIntegration } from '../lib/QuizGenerator';
+import { generateAvailabilityIntegration } from '../lib/AvailabilityGenerator';
+import { generateAnnouncementsIntegration } from '../lib/AnnouncementsGenerator';
+import { generateCollectionsIntegration } from '../lib/CollectionsGenerator';
+import { generateContactFormIntegration } from '../lib/ContactFormGenerator';
+import { generatePageViewsIntegration } from '../lib/PageViewsGenerator';
+import { generateGiftCardsIntegration } from '../lib/GiftCardsGenerator';
+import { generateTeamsIntegration } from '../lib/TeamsGenerator';
+import { generateStatusPageIntegration } from '../lib/StatusPageGenerator';
+import { generateSurveyIntegration } from '../lib/SurveyGenerator';
+import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
+import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
+import { generatePaginationIntegration } from '../lib/PaginationGenerator';
+import { generateRbac } from '../lib/RbacGenerator';
+import { generateIdIntegration } from '../lib/IdGenerator';
+import { generateAdmin } from '../lib/AdminGenerator';
+import { generateSettingsScaffoldIntegration } from '../lib/SettingsScaffoldGenerator';
+import { generateDashboard } from '../lib/DashboardGenerator';
+import { generateBackup } from '../lib/BackupGenerator';
+import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
+import { generateI18n } from '../lib/I18nGenerator';
+import { generateUiStates } from '../lib/UiStatesGenerator';
+import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
+import { generateImageOptimization } from '../lib/ImageOptGenerator';
+import { generateSsoIntegration } from '../lib/SsoGenerator';
+import { generateAbac } from '../lib/AbacGenerator';
+import { generateMetrics } from '../lib/MetricsGenerator';
+import { generateTracing } from '../lib/TracingGenerator';
+import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
+import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
+import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
+import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
+import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
+import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
+import { generateCaptchaIntegration } from '../lib/CaptchaGenerator';
+import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
+import { generateRetryIntegration } from '../lib/RetryGenerator';
+import { generateHttpClientIntegration } from '../lib/HttpClientGenerator';
+import { generateIdempotencyIntegration } from '../lib/IdempotencyGenerator';
+import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
+import { generateEmailTemplateIntegration } from '../lib/EmailTemplateGenerator';
+import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
+import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
+import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
+import { generateDateTimeIntegration } from '../lib/DateTimeGenerator';
+import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
+import { generateNotificationCenterIntegration } from '../lib/NotificationCenterGenerator';
+import { generateEnvValidation } from '../lib/EnvValidationGenerator';
+import { generateCorsIntegration } from '../lib/CorsGenerator';
+import { generateCsrfIntegration } from '../lib/CsrfGenerator';
+import { generateSlugIntegration } from '../lib/SlugGenerator';
+import { generateValidationIntegration } from '../lib/ValidationGenerator';
+import { generateSanitizeHtmlIntegration } from '../lib/SanitizeHtmlGenerator';
+import { generateMarkdownIntegration } from '../lib/MarkdownGenerator';
+import { generateQrIntegration } from '../lib/QrGenerator';
+import { generateUpiIntegration } from '../lib/UpiGenerator';
+import { generatePdfIntegration } from '../lib/PdfGenerator';
+import { generateCsvIntegration } from '../lib/CsvGenerator';
+import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
+import { generateSoftDeleteIntegration } from '../lib/SoftDeleteGenerator';
+import { generateImageIntegration } from '../lib/ImageGenerator';
+import { generateLoggingIntegration } from '../lib/LoggingGenerator';
+import { generateRequestIdIntegration } from '../lib/RequestIdGenerator';
+import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
+import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
+import { generateMaintenanceIntegration } from '../lib/MaintenanceModeGenerator';
+import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
+import { generateSeoIntegration } from '../lib/SeoGenerator';
+import { generateWebhookIntegration } from '../lib/WebhookGenerator';
+import { generateWebhookSenderIntegration } from '../lib/WebhookSenderGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -136,8 +303,15 @@ import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
+import { containsSymbol } from './codemodScope';
+import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
+// Where the sandbox browser may go: its own preview, or the real public web — never an internal
+// infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
+// primitive; see lib/browseTarget.ts.
+import { classifyBrowseTarget } from '../lib/browseTarget';
+import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -164,6 +338,13 @@ export interface ActuatorPort {
     workspaceId: string,
     command: string,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  /**
+   * Provision backend services (a local PostgreSQL, auth/storage scaffolds) inside the sandbox and
+   * return the resulting env (e.g. DATABASE_URL). Real sandboxes only (E2BActuator installs + starts
+   * Postgres); LocalActuator throws. Optional — a sandbox without it degrades honestly. Used lazily by
+   * the bash path to give a `provider="postgresql"` build a real DB before `prisma migrate`/seed.
+   */
+  provisionBackend?(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult>;
   /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
   getPortUrl?(workspaceId: string, port: number): Promise<string>;
   /** Capture a PNG screenshot of a URL from inside the sandbox (real sandboxes only). */
@@ -178,11 +359,22 @@ export interface ActuatorPort {
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
-  /** Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`. */
+  /**
+   * Scan the rendered page for visible elements + where they come from (see find_ui_element).
+   * `scanned:false` means the browser could not look — never treat it as "the element is absent".
+   */
+  scanUiElements?(workspaceId: string, url: string): Promise<{ elements: unknown[]; scanned: boolean }>;
+  /**
+   * Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`.
+   * `captured` reports whether a real browser session was actually read: `true` = the console was
+   * captured (an empty `errors` then genuinely means "ran clean"); `false` = no live session, so an empty
+   * `errors` means "could NOT check", NOT "clean"; omitted = unknown (treated as captured for back-compat).
+   * This lets the auto-fix loop tell an honest "runtime clean" from an honest "runtime unchecked".
+   */
   getConsoleErrors?(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
   /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
   downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
 }
@@ -299,9 +491,22 @@ export class ToolDispatcher {
    */
   private userSecretsEnv: Record<string, string> = {};
   private secretsEnvWritten = false;
+  /** Set once a local Postgres has been provisioned for this build's `provider="postgresql"` schema. */
+  private postgresProvisioned = false;
+  /** When the provision (or last successful revival) completed — gates the preflight probe so a freshly
+   *  verified DB isn't immediately re-probed. */
+  private postgresProvisionedAt = 0;
+  /** Set once this app is known to target PostgreSQL — locks the datasource against a silent SQLite downgrade. */
+  private postgresIntended = false;
+  /** Mid-build Postgres revivals attempted so far (bounded by POSTGRES_MAX_REVIVALS — a 60-min two-window
+   *  build can see the sandbox reap Postgres more than once; once-only forced a needless SQLite downgrade). */
+  private postgresReprovisionAttempts = 0;
+  /** Postgres died mid-build and could NOT be brought back — the lock RELEASES so the app can fall to SQLite. */
+  private postgresConfirmedDead = false;
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
+    this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
     this.userSecretsEnv = env && typeof env === 'object' ? env : {};
   }
 
@@ -315,12 +520,15 @@ export class ToolDispatcher {
    * vault OVERRIDES any generated placeholder (mergeDotEnv), and existing .env lines are preserved.
    * Never throws — a failure just means the app runs without the injected keys (honest degradation).
    */
-  private async ensureUserSecretsEnvFile(command: string): Promise<void> {
+  async ensureUserSecretsEnvFile(command: string): Promise<void> {
     if (this.secretsEnvWritten) return;
     const names = Object.keys(this.userSecretsEnv);
     if (names.length === 0) return;
     // Only right before the app actually installs/builds/runs — that is when a .env must be on disk.
-    if (!/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
+    // `ALWAYS` is the explicit bypass used by the pre-flight write below and by update_preview, where a
+    // dev server is about to start WITHOUT any run_command having gone through this gate.
+    if (command !== ALWAYS_WRITE_SECRETS
+      && !/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
     this.secretsEnvWritten = true; // attempt once regardless of outcome — never rewrite on every command
     try {
       let existing = '';
@@ -343,6 +551,87 @@ export class ToolDispatcher {
   }
 
   /**
+   * LAZY POSTGRES PROVISIONING (MediConnect autopsy 2026-07-19). The first time the builder is about to
+   * run a command that needs a LIVE database (`prisma migrate` / `db push` / seed), AND the app's Prisma
+   * schema targets `provider="postgresql"`, provision a real local Postgres in the sandbox and write its
+   * DATABASE_URL into `.env` (Prisma auto-loads `.env`). This is the from-scratch counterpart of the
+   * imported-app provisioning — the exact gap that left MediConnect with nothing at localhost:5432, so
+   * `prisma migrate dev` failed with P1001 and the builder improvised a broken SQLite downgrade.
+   *
+   * Fires at most ONCE per build, only for postgres schemas, and never throws — a provisioning failure
+   * degrades honestly (the migrate then reports its real DB-unreachable error via Slice 1's DB_UNREACHABLE).
+   * Kill switch: AGENTV3_SANDBOX_POSTGRES=off. A sandbox without provisionBackend (LocalActuator) is a no-op.
+   */
+  private async ensureSandboxPostgres(command: string): Promise<void> {
+    if (this.postgresProvisioned) return;
+    if (!sandboxPostgresEnabled()) return;
+    if (!commandNeedsLiveDatabase(command)) return;
+    if (typeof this.actuator.provisionBackend !== 'function') return; // e.g. LocalActuator — honest no-op
+    // Only for a Postgres-targeting schema — a sqlite/mysql app must not trigger a Postgres install.
+    let schema = '';
+    try { schema = await withTimeout(this.actuator.readFile(this.workspaceId, 'prisma/schema.prisma'), 5_000, 'schema-read'); } catch { schema = ''; }
+    if (!schemaTargetsPostgres(schema)) return;
+    this.postgresIntended = true;    // lock the datasource against a later silent SQLite downgrade
+    this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
+    this.postgresProvisionedAt = Date.now();
+    try {
+      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
+      // NOTE: the E2B provisionBackend arms the in-sandbox keepalive watchdog itself (single choke
+      // point) — every provisioning path (first provision, mid-build revival, preview-boot revival)
+      // gets the keepalive without each caller re-wiring it.
+      const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-provision');
+      const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
+      if (Object.keys(lines).length > 0) {
+        let existing = '';
+        try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+        const merged = mergeDotEnv(existing, lines);
+        await this.actuator.writeFile(this.workspaceId, '.env', merged);
+        try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
+        // Keep .env out of git.
+        try {
+          let gi = '';
+          try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
+          const nextGi = gitignoreWithEnv(gi);
+          if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
+        } catch { /* gitignore hardening is best-effort */ }
+        this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
+      }
+    } catch {
+      // Provisioning genuinely failed — do NOT fake it. The migrate command runs next and its real
+      // DB-unreachable output is surfaced honestly (Slice 1 DB_UNREACHABLE). Never block the build.
+    }
+  }
+
+  /**
+   * POSTGRES-PROVIDER LOCK (LedgerLoop autopsy 2026-07-20). Applied to a `prisma/schema.prisma` write
+   * BEFORE the config guards run. Two jobs:
+   *   • learn intent: the FIRST time a schema targets postgresql, remember it (postgresIntended),
+   *   • enforce it: once the app is known to target Postgres, a write that flips the datasource to sqlite
+   *     is reverted to postgresql — killing the silent SQLite downgrade the builder does when it misreads
+   *     a schema/connection error as "no database". The builder is nudged to fix the schema instead.
+   * Runs BEFORE guardConfigContent so the reverted (postgres) content never triggers the sqlite enum-strip.
+   * Only touches schema.prisma; a genuine sqlite app (never postgres) is untouched. Kill switch reuses
+   * AGENTV3_SANDBOX_POSTGRES=off (the same DB-provisioning regime).
+   */
+  private applyPostgresProviderLock(path: string, content: string): string {
+    if (!/(^|\/)schema\.prisma$/.test(path) || typeof content !== 'string') return content;
+    if (!sandboxPostgresEnabled()) return content;
+    // If Postgres died in the sandbox and could not be restarted, the lock RELEASES — forcing a dead DB
+    // is an unwinnable loop (FleetOps autopsy). Let the SQLite fallback through so the app can still run.
+    if (this.postgresConfirmedDead) return content;
+    if (schemaTargetsPostgres(content)) { this.postgresIntended = true; return content; }
+    if (this.postgresIntended && schemaTargetsSqlite(content)) {
+      const { content: fixed, reverted } = revertSqliteToPostgres(content);
+      if (reverted) {
+        getWorkspaceMemory(this.workspaceId).recordAudit('postgres-lock: reverted a schema downgrade to sqlite back to postgresql');
+        this.events?.emit({ type: 'narration', agent: 'architect', text: '🔒 Kept your database on PostgreSQL — it\'s provisioned and ready. A failing migration means the schema needs fixing (a relation or field), not a switch to SQLite. Fixing the schema instead.', ts: Date.now() });
+        return fixed;
+      }
+    }
+    return content;
+  }
+
+  /**
    * The structured readiness verdict from the most recent `evaluate` run. Captured as a
    * side-effect so the mandatory end-of-build gate (assessBuildReadiness) can reuse the exact
    * same objective scan the agent uses — never a second, divergent implementation.
@@ -357,7 +646,7 @@ export class ToolDispatcher {
    * never wrongly fails a real build on an internal error.
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
-    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [] };
+    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [], tier: 'enterprise' };
     try {
       // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
       // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled
@@ -406,6 +695,166 @@ export class ToolDispatcher {
       })(), 45_000, 'assessLintGate');
     } catch {
       return permissive;
+    }
+  }
+
+  /**
+   * P-PIPE — run the project's dependency-health checks (OSV/CVE + strong-copyleft license) at BUILD-END and
+   * return one advisory block for the build summary. ADVISORY-ONLY: never blocks a build. Best-effort +
+   * timeout-bounded (parity with assessLintGate): on no package.json, an unreachable OSV API, an invalid
+   * lockfile, or a slow scan it returns '' (clean) so it can never fail a real build on its own trouble.
+   * AgentRunner only calls this when AGENTV3_DEPHEALTH_GATE is enabled.
+   */
+  async assessDependencyHealthGate(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        let vulnFindings = 0;
+        let vulnSummary = '';
+        let copyleftStrong = 0;
+        let licenseSummary = '';
+
+        // 1) CVE / OSV supply-chain scan (needs package.json; lockfile improves resolution).
+        let pkgJson: string | undefined;
+        try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
+        if (typeof pkgJson === 'string') {
+          let lockJson: string | undefined;
+          try { lockJson = await this.actuator.readFile(this.workspaceId, 'package-lock.json'); } catch { lockJson = undefined; }
+          const deps = resolveDependencies(pkgJson, lockJson);
+          const result = await scanVulnerabilities(deps);
+          if (result.ok && result.findings.length > 0) {
+            vulnFindings = result.findings.length;
+            vulnSummary = vulnScanSummary(result);
+          }
+        }
+
+        // 2) Strong-copyleft license classification (needs package-lock.json; pure, no network).
+        let lockRaw: string | undefined;
+        try { lockRaw = await this.actuator.readFile(this.workspaceId, 'package-lock.json'); } catch { lockRaw = undefined; }
+        if (typeof lockRaw === 'string') {
+          try {
+            const analysis = analyzeAppDependencies(JSON.parse(lockRaw));
+            if (analysis.hasCopyleftRisk) {
+              copyleftStrong = analysis.copyleft.strong.length;
+              licenseSummary = licenseAdvisorySummary(analysis);
+            }
+          } catch { /* invalid lockfile — skip the license half, never throw */ }
+        }
+
+        return dependencyHealthVerdict({ vulnFindings, vulnSummary, copyleftStrong, licenseSummary }).summary;
+      })(), 45_000, 'assessDependencyHealthGate');
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * P-PIPE — build-end PRETTIER advisory (default-OFF, AGENTV3_PRETTIER_GATE=on). Runs the project's own
+   * `prettier --check` (only when prettier is configured) and returns a non-blocking advisory listing the
+   * unformatted files, or '' when clean / not-configured / could-not-run. Timeout-bounded and fully guarded
+   * (parity with assessLintGate / assessDependencyHealthGate): any trouble returns '' so it can never fail a
+   * real build on its own account. AgentRunner only calls this when the gate is enabled.
+   */
+  async assessPrettierGate(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plan = detectLinters(files, pkgRaw).find((p) => p.tool === 'prettier');
+        if (!plan) return ''; // prettier not configured → nothing to advise
+        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+        return prettierAdvisory(prettierGateResult(exitCode, stdout, stderr));
+      })(), 45_000, 'assessPrettierGate');
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Cap-4 injection — deterministically add a `/health` route to an Express server entry that lacks one, then
+   * persist it through the SAME durable write path a normal write_file uses (sandbox + durable mirror +
+   * graph/UI), so nothing downstream diverges. Returns a short honest note when it injected, '' otherwise
+   * (no Express entry, already has a health route, or an ambiguous/multi-entry project — the pure injector
+   * declines those). Best-effort + timeout-bounded — a read/write error degrades to '' and never fails a
+   * build. AgentRunner only calls this when AGENTV3_OBSERVABILITY_INJECT is enabled.
+   */
+  /** HEAL-THEN-JUDGE (CLAUDE.md 50/50 law): wire orphaned page components into the app's react-router
+   *  <Routes> BEFORE the readiness gate judges — so a page the builder created but forgot to route is
+   *  made reachable and stops being an orphan blocker, rather than the gate merely REPORTING it. A real
+   *  deterministic fix, additive-only + idempotent + a no-op on an ambiguous router (orphanPageWiring.ts),
+   *  so it can never break a working router. Best-effort. Kill switch: AGENTV3_ORPHAN_PAGE_GUARD=off. */
+  async healOrphanPages(): Promise<string> {
+    if (process.env.AGENTV3_ORPHAN_PAGE_GUARD === 'off') return '';
+    try {
+      return await withTimeout((async () => {
+        const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const result = wireOrphanPages(files);
+        if (result.wired.length === 0) return '';
+        for (const [path, content] of Object.entries(result.files)) {
+          if (files[path] === content) continue; // only the one router file actually changed
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+        }
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`orphan-page wiring: routed ${result.wired.join(', ')}.`); } catch { /* audit best-effort */ }
+        const names = result.wired.map((w) => (w.split(' ')[0].split('/').pop() || '').replace(/\.(?:t|j)sx$/, '')).filter(Boolean);
+        return `🧭 Wired ${result.wired.length} page(s) into the router so they are actually reachable: ${names.join(', ')}.`;
+      })(), 20_000, 'healOrphanPages');
+    } catch {
+      return '';
+    }
+  }
+
+  /** HEAL-THEN-JUDGE (CLAUDE.md 50/50 law, SaaS-dashboard autopsy 2026-07-22): deterministically redact
+   *  console.* statements that log a credential/token BEFORE the readiness gate judges — so a single
+   *  `pii-in-logs` line (the gate's ONLY high-severity privacy/compliance class, a HARD block) stops
+   *  failing an otherwise-complete app, rather than the gate merely blocking on it. A debug log that
+   *  prints a password is never app logic, so stripping its arguments both removes the real leak AND
+   *  clears the block — a real security fix, not a cosmetic patch. Provably non-breaking (single-line,
+   *  statement-leading, paren-balanced calls only; anything ambiguous is left as an honest finding),
+   *  idempotent, persisted through the same durable write path. Kill switch: AGENTV3_CRED_LOG_GUARD=off. */
+  async healCredentialLogs(): Promise<string> {
+    if (process.env.AGENTV3_CRED_LOG_GUARD === 'off') return '';
+    try {
+      return await withTimeout((async () => {
+        const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const result = redactCredentialLogs(files);
+        if (result.redactions.length === 0) return '';
+        for (const [path, content] of Object.entries(result.files)) {
+          if (files[path] === content) continue; // only the files that actually changed
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+        }
+        const changed = [...new Set(result.redactions.map((r) => r.file))];
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`credential-log redaction: cleared ${result.redactions.length} leak(s) across ${changed.join(', ')}.`); } catch { /* audit best-effort */ }
+        return `🔒 Redacted ${result.redactions.length} console log(s) that leaked a credential/token so nothing sensitive is printed to the browser console (${changed.length} file(s)).`;
+      })(), 20_000, 'healCredentialLogs');
+    } catch {
+      return '';
+    }
+  }
+
+  async injectObservability(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const result = injectObservabilityFixes(files);
+        if (!result) return '';
+        await this.actuator.writeFile(this.workspaceId, result.path, result.newContent);
+        try { this.onFileWrite?.(result.path, result.newContent); } catch { /* durable mirror is best-effort */ }
+        try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+        const labels: Record<'request-logger' | 'health' | 'error-handler', string> = {
+          'request-logger': 'a request logger',
+          health: 'a /health route',
+          'error-handler': 'an error handler',
+        };
+        const what = result.added.map((a) => labels[a]).join(' and ');
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`observability: injected ${result.added.join(' + ')} (on ${result.appVar}) into ${result.path}.`); } catch { /* audit best-effort */ }
+        return `🩺 Observability: added ${what} to ${result.path} so deploy/uptime probes and thrown errors are handled cleanly.`;
+      })(), 20_000, 'injectObservability');
+    } catch {
+      return '';
     }
   }
 
@@ -519,7 +968,9 @@ export class ToolDispatcher {
         // STALE "clean" — a synchronous incremental run is always honest about the current tree.
         const r = await this.actuator.runCommand(
           this.workspaceId,
-          'npx --no-install tsc --noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo 2>&1 | head -80',
+          // Robust tsc — the LOCAL binary (never `npx tsc`, which can hit the `tsc@2.0.4` squatter's
+          // help page and never typecheck; build report 2026-07-21). See tscCommand.ts.
+          robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -80'),
         );
         return `${r.stdout || ''}\n${r.stderr || ''}`.trim();
       },
@@ -683,10 +1134,128 @@ export class ToolDispatcher {
   }
 
   /**
+   * Best-effort observability scan over the project's BACKEND files (Cap-4 advisory
+   * half). Aggregated at the project level — the backend is detected once, then the
+   * health-endpoint / error-handler / request-logging gaps are checked across all its
+   * files. A static front-end SPA (no server) correctly yields zero findings. Wrapped
+   * so any read error degrades to an empty list — never breaks evaluate.
+   */
+  private collectObservabilityIssues(sources: EvalSourceFile[]): ReturnType<typeof scanObservability> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanObservability(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort graceful-shutdown scan over the project's BACKEND files. Detects a long-lived HTTP server
+   * that binds a port but never handles SIGTERM/SIGINT to drain in-flight requests before exit — the defect
+   * that drops requests on every Cloud Run / k8s redeploy. Serverless and framework-managed runtimes are not
+   * flagged. Wrapped so any read error degrades to an empty list — never breaks evaluate.
+   */
+  private collectGracefulShutdownIssues(sources: EvalSourceFile[]): ReturnType<typeof scanGracefulShutdown> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanGracefulShutdown(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort security-headers scan over the project's BACKEND files. Detects an Express/Koa server that
+   * sets no core HTTP security headers (neither helmet() nor manual CSP/X-Frame-Options/HSTS/nosniff),
+   * leaving served pages open to clickjacking/MIME-sniffing/XSS. Fastify/Nest/Hono are not false-flagged.
+   * Wrapped so any read error degrades to an empty list — never breaks evaluate.
+   */
+  private collectSecurityHeaderIssues(sources: EvalSourceFile[]): ReturnType<typeof scanSecurityHeaders> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanSecurityHeaders(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Best-effort security-configuration scan over the project's source files
    * (insecure TLS verification, wildcard CORS). Bounded and wrapped so any
    * listing/read failure degrades to no issues — never breaks evaluate.
    */
+  private collectSriIssues(sources: EvalSourceFile[]): ReturnType<typeof scanProjectSri> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanProjectSri(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort CSP-meta pass: a STATIC SPA (no server) that loads a third-party
+   * `<script src="https://…">` with no `<meta http-equiv="Content-Security-Policy">`.
+   * Advisory (lowers score, never blocks). Any failure degrades to no issues.
+   */
+  private collectCspIssues(sources: EvalSourceFile[]): ReturnType<typeof scanProjectCsp> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanProjectCsp(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort comment-language pass: Hindi/Devanagari in CODE COMMENTS (a NavBharatAI
+   * professional-English-comments standard violation). Hindi UI strings are never flagged.
+   * Advisory (lowers score, never blocks). Any failure degrades to no issues.
+   */
+  private collectCommentLanguageIssues(sources: EvalSourceFile[]): ReturnType<typeof scanProjectCommentLanguage> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanProjectCommentLanguage(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort upload-validation pass: a multer file-upload endpoint with no fileFilter / MIME check
+   * (accepts ANY file type — a path to stored-XSS / malware hosting). Advisory (lowers score, never
+   * blocks). Any failure degrades to no issues.
+   */
+  private collectUploadValidationIssues(sources: EvalSourceFile[]): ReturnType<typeof scanProjectUploadValidation> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanProjectUploadValidation(record);
+    } catch {
+      return [];
+    }
+  }
+
   private collectSecurityConfigIssues(sources: EvalSourceFile[]): SecConfigIssue[] {
     const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
@@ -924,7 +1493,7 @@ export class ToolDispatcher {
     });
     try {
       // Browser tools return a screenshot image alongside their text; everything else is text.
-      const visual = call.name === 'screenshot' || call.name === 'browser_action'
+      const visual = call.name === 'screenshot' || call.name === 'browser_action' || call.name === 'find_ui_element'
         ? await this.runVisual(call)
         : null;
       const content = visual ? visual.content : await this.run(call, agent);
@@ -958,11 +1527,31 @@ export class ToolDispatcher {
    */
   private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
     const input = call.input;
+    if (call.name === 'find_ui_element') {
+      if (!this.actuator.scanUiElements) {
+        return { content: 'find_ui_element requires a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+      }
+      const url = reqStr(input, 'url');
+      const query = reqStr(input, 'query');
+      const target = classifyBrowseTarget(url);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
+      const scan = await this.actuator.scanUiElements(this.workspaceId, url);
+      // A FAILED scan and an EMPTY page are different facts, and conflating them would manufacture a
+      // false "it is not there" — the opposite of what this tool exists to guarantee.
+      if (!scan.scanned) {
+        return { content: `Could not scan ${url} — the headless browser was unavailable or the page did not load. This is NOT evidence that the element is absent; say so honestly and try the preview URL again, rather than concluding anything about the element.` };
+      }
+      return { content: formatUiFindings(scan.elements as ScannedElement[], query) };
+    }
     if (call.name === 'screenshot') {
       if (!this.actuator.screenshot) {
         return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
       }
       const url = reqStr(input, 'url');
+      // The sandbox browser may reach its own dev server or the public web — never an internal
+      // infrastructure address. See lib/browseTarget.ts for why this guard exists.
+      const target = classifyBrowseTarget(url);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
       const width = typeof input.width === 'number' ? input.width : undefined;
       const height = typeof input.height === 'number' ? input.height : undefined;
       const viewport = width && height ? { width, height } : undefined;
@@ -979,6 +1568,11 @@ export class ToolDispatcher {
     const action = reqStr(input, 'action');
     if (!BROWSER_ACTIONS.includes(action as BrowserActionName)) {
       return { content: `browser_action: unknown action "${action}". Valid: ${BROWSER_ACTIONS.join(', ')}.` };
+    }
+    const navUrl = optStr(input, 'url');
+    if (navUrl) {
+      const target = classifyBrowseTarget(navUrl);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
     }
     const dir = input.direction;
     const direction: 'up' | 'down' | undefined = dir === 'up' ? 'up' : dir === 'down' ? 'down' : undefined;
@@ -1017,6 +1611,49 @@ export class ToolDispatcher {
   }
 
   /**
+   * WRITE-TIME Rules-of-Hooks guard (M1-S1.1, prevent-not-heal): after a React file is written/edited,
+   * return a steering note for any Rules-of-Hooks violation so the model fixes the runtime-crashing hook
+   * IN THE SAME TURN — before the build ships it (the post-build readiness gate stays the backstop). The
+   * deterministic AST analysis is fast and gated to React source internally; best-effort ('' on anything),
+   * never blocks a write. Kill switch AGENTV3_HOOKS_WRITE_GUARD=off.
+   */
+  /**
+   * WRITE-TIME duplicate-import guard (build-report autopsy 2026-08-01, buildId 1047276c): a weak model
+   * re-imports a symbol already imported (e.g. main.tsx default-imports ErrorBoundary and the model adds a
+   * named import of the same) — esbuild parses it clean, so nothing catches it, but the in-browser preview
+   * rejects it with "Duplicate declaration" and the user sees a BROKEN preview. Remove the fully-redundant
+   * duplicate here so it is never born. Pure + safe (only drops a binding that already exists); emits an
+   * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
+   */
+  private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
+    if (process.env.AGENTV3_DUP_IMPORT_GUARD === 'off') return content;
+    if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;
+    try {
+      const { content: next, removed } = dedupeDuplicateImports(content);
+      if (removed.length > 0) {
+        this.events?.emit({
+          type: 'narration', agent,
+          text: `🔧 Removed ${removed.length} duplicate import(s) in \`${path}\` that would have broken the preview ("Duplicate declaration").`,
+          ts: Date.now(),
+        });
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`[DUP-IMPORT] removed ${removed.length} duplicate import(s) in ${path}: ${removed.join('; ')}`); } catch { /* audit best-effort */ }
+      }
+      return next;
+    } catch { return content; }
+  }
+
+  private async hookWriteNote(files: Record<string, string>): Promise<string> {
+    if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
+    if (!files || Object.keys(files).length === 0) return '';
+    try {
+      const report = await analyzeHooksRules(files);
+      return hookViolationWriteNote(report);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * Force known-breaking dep versions (Prisma → ^6) to their known-good major when the agent WRITES a
    * package.json — the sibling choke point to pinKnownDepsInInstallCommand (#1526), which only catches
    * explicit install commands. Path-gated (fast no-op for every non-package.json write), best-effort,
@@ -1027,17 +1664,36 @@ export class ToolDispatcher {
     if (process.env.AGENTV3_PKG_PIN_GUARD === 'off') return content;
     if (!/(^|\/)package\.json$/.test(path)) return content;
     try {
-      const pinned = pinKnownDepsInPackageJson(content);
-      if (pinned.changed.length === 0) return content;
-      try {
-        getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
-      } catch { /* audit best-effort */ }
-      this.events?.emit({
-        type: 'narration', agent: 'architect',
-        text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
-        ts: Date.now(),
-      });
-      return pinned.content;
+      let out = content;
+      const pinned = pinKnownDepsInPackageJson(out);
+      if (pinned.changed.length > 0) {
+        out = pinned.content;
+        try {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
+        } catch { /* audit best-effort */ }
+        this.events?.emit({
+          type: 'narration', agent: 'architect',
+          text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
+          ts: Date.now(),
+        });
+      }
+      // FRAMEWORK CORE-DEPS GUARD (CargoPilot autopsy 2026-07-19): a written package.json must never
+      // DROP the framework's own runtime deps (next/react/vite/…). If it does, a later `npm install`
+      // prunes the framework binary from node_modules (`next: not found`) and the dev server dies.
+      // Re-add any fully-absent core dep so the binary can never vanish. Add-only, never downgrades.
+      const core = ensureFrameworkCoreDeps(out, this.framework);
+      if (core.added.length > 0) {
+        out = core.content;
+        try {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-CORE] restored framework core deps in ${path}: ${core.added.join('; ')}`);
+        } catch { /* audit best-effort */ }
+        this.events?.emit({
+          type: 'narration', agent: 'architect',
+          text: `🔧 Kept the framework's core dependencies in package.json (${core.added.join('; ')}) so the dev server can't lose its own runtime.`,
+          ts: Date.now(),
+        });
+      }
+      return out;
     } catch {
       return content; // never let a pin failure block a write
     }
@@ -1051,7 +1707,30 @@ export class ToolDispatcher {
     const input = call.input;
     switch (call.name) {
       case 'read_file': {
-        const full = await this.actuator.readFile(this.workspaceId, reqStr(input, 'path'));
+        const reqPath = reqStr(input, 'path');
+        let full: string;
+        try {
+          full = await this.actuator.readFile(this.workspaceId, reqPath);
+        } catch (err) {
+          // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
+          // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
+          // src/components/X.tsx). Look up the real file by basename across everything the workspace already
+          // knows (cheap, in-memory), then across the on-disk list, and hand back the ACTUAL path(s). Any path
+          // drift — a missing folder segment, a case difference, a .ts↔.tsx mixup — self-corrects on the first
+          // miss instead of stalling. Honest: a suggestion is only ever a path that genuinely exists.
+          const base = (err instanceof Error ? err.message : String(err)) || `read_file: ${reqPath} does not exist.`;
+          let known: string[] = [];
+          try { known = getWorkspaceMemory(this.workspaceId).knownFilePaths(); } catch { /* memory best-effort */ }
+          let hint = pathMissHint(reqPath, known);
+          if (!hint) {
+            // In-memory index missed it — fall back to the actuator's authoritative on-disk list (a miss is
+            // already the stuck/error path, so one listFiles to unstick the agent is worth the latency).
+            try { hint = pathMissHint(reqPath, await this.actuator.listFiles(this.workspaceId)); } catch { /* list best-effort */ }
+          }
+          // Re-throw so the miss stays an honest is_error result (the outer catch formats it), but with the
+          // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
+          throw new Error(`${base}${hint}`.trim());
+        }
         // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
         // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
         // model concluded the FILE was "truncated at exactly N lines" and destructively 'repaired' a
@@ -1067,16 +1746,35 @@ export class ToolDispatcher {
       }
 
       case 'write_file': {
-        const path = reqStr(input, 'path');
+        let path = reqStr(input, 'path');
+        // NEXT.JS MIDDLEWARE LOCATION FIX (CargoPilot autopsy 2026-07-19): Next.js runs middleware ONLY
+        // from the project root (`middleware.ts`) or `src/middleware.ts` — a `app/middleware.*` is
+        // SILENTLY ignored, so the route guards / auth it holds never run and every guarded route is
+        // unprotected while the app looks fine. Relocate the misplaced file to where Next actually reads
+        // it. Deterministic (Next semantics are unambiguous — app/middleware is ALWAYS wrong). Kill
+        // switch AGENTV3_NEXT_MW_FIX=off.
+        if (process.env.AGENTV3_NEXT_MW_FIX !== 'off' && (this.framework === 'nextjs' || this.framework === 'next')) {
+          const corrected = nextMiddlewareCorrectPath(path);
+          if (corrected && corrected !== path) {
+            this.events?.emit({
+              type: 'narration', agent,
+              text: `🔧 Moved \`${path}\` to \`${corrected}\` — Next.js only runs middleware from the project root, so the route guards were silently disabled where it was written.`,
+              ts: Date.now(),
+            });
+            try { getWorkspaceMemory(this.workspaceId).recordAudit(`[NEXT-MW] relocated misplaced middleware ${path} → ${corrected}`); } catch { /* audit best-effort */ }
+            path = corrected;
+          }
+        }
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        let content = guardConfigContent(path, reqStr(input, 'content'));
+        let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
         // version. This is the sibling choke point to the install-command pin (#1526).
         content = this.pinPackageJsonContent(path, content);
+        content = this.dedupeImportsForSource(path, content, agent);
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -1135,6 +1833,9 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint — if a test file exists, suggest running it.
         const testHint = testFileHint(path);
+        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard — steer the model to fix a
+        // runtime-crashing hook THIS turn, before the build ships it (readiness gate stays the backstop).
+        const hooksNote = await this.hookWriteNote({ [path]: content });
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -1152,10 +1853,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint
+            reviewNote + cascadeNote + testHint + hooksNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote;
       }
 
       case 'write_files_batch': {
@@ -1168,7 +1869,7 @@ export class ToolDispatcher {
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           // Same Vite-preview-host backstop as write_file, applied per batched file.
-          return { path: p, content: guardConfigContent(p, reqStr(obj, 'content')) };
+          return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
         });
         // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
         // final state the old serial loop produced), so the parallel writers below never race two
@@ -1224,12 +1925,20 @@ export class ToolDispatcher {
             );
             return { path: file.path, kind, shrink: false, blocked: true };
           }
+          // DUPLICATE-MODULE guard PARITY (admin 2026-08-02: "duplicate file bane hi na"). write_file has
+          // refused a parallel copy under a second convention root (app/ vs src/) since the TaskForge
+          // autopsy — but write_files_batch never did, so the whole guard was one tool call away from being
+          // bypassed and a batch could quietly create the drifting second copy. Same decision, same refusal:
+          // block just this file and let the rest of the batch through.
+          if (kind === 'create' && this.duplicateModuleRefusal(file.path)) {
+            return { path: file.path, kind, shrink: false, blocked: true };
+          }
           // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
           // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
           // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
           // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
-          const writtenContent = this.pinPackageJsonContent(file.path, file.content);
+          const writtenContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content), agent);
           await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
@@ -1270,7 +1979,15 @@ export class ToolDispatcher {
         const dupWarning = dupSkipped.length
           ? `\n[DUPLICATE MODULE BLOCKED] ${dupSkipped.length} file(s) were NOT written — they would create a SECOND copy of a module that already exists under a different directory convention (${dupSkipped.slice(0, 8).join('; ')}${dupSkipped.length > 8 ? '…' : ''}). Two copies drift and break the build — EDIT the existing file(s) in place. Use ONE directory convention for the whole app.`
           : '';
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}`;
+        // M1-S1.2 (prevent-not-heal): write-time Rules-of-Hooks guard on the batch's written files —
+        // the same steering as write_file/edit_file, extended to the multi-file create path so a new
+        // component with a runtime-crashing hook is fixed this turn, not caught post-build. Run across
+        // all written files at once (cross-file context); the note names each violating file.
+        const writtenSet = new Set(written);
+        const writtenRecord: Record<string, string> = {};
+        for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
+        const batchHooksNote = await this.hookWriteNote(writtenRecord);
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchHooksNote}`;
       }
 
       case 'edit_file': {
@@ -1283,7 +2000,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const updated = guardConfigContent(path, edited);
+        const updated = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
@@ -1323,7 +2040,9 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint.
         const editTestHint = testFileHint(path);
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint;
+        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
+        const editHooksNote = await this.hookWriteNote({ [path]: updated });
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editHooksNote;
       }
 
       case 'bash': {
@@ -1375,6 +2094,44 @@ export class ToolDispatcher {
           this.state?.appendTerminal(blockMsg);
           return blockMsg;
         }
+        // STILL-IMPORTED FILE DELETION — BLOCKED (admin 2026-08-02: "galat tarah se file delete ho hi na").
+        // The bulk guard above deliberately allows deleting ONE stale file by name — right for genuinely
+        // dead code, catastrophic for a module other files still import: it vanishes, every importer breaks
+        // and the app stops building. The project's own import graph already knows who depends on what, so
+        // refuse EXACTLY the deletes that would orphan a live importer and allow the rest. Honest cleanup
+        // keeps working; a build-killing delete becomes impossible. Kill switch AGENTV3_DELETE_GUARD=off.
+        if (process.env.AGENTV3_DELETE_GUARD !== 'off') {
+          for (const target of singleSourceDeleteTargets(command)) {
+            let importers: string[] = [];
+            try { importers = getWorkspaceMemory(this.workspaceId).impactRadius(target).direct; } catch { importers = []; }
+            if (importers.length > 0) {
+              const blockMsg = importedFileDeletionMessage(target, importers);
+              try {
+                getWorkspaceMemory(this.workspaceId).recordAudit(
+                  `[BLOCKED-DESTRUCTIVE] refused delete of still-imported file ${target} (${importers.length} importer(s))`,
+                );
+              } catch { /* audit best-effort */ }
+              this.state?.appendTerminal(blockMsg);
+              return blockMsg;
+            }
+          }
+        }
+        // DESTRUCTIVE DEPENDENCY MUTATION — BLOCKED (deep-test SaaS dashboard, build 5ed0424a). The
+        // preview was LIVE (Vite v5, dev server up), then the agent ran `npm audit fix --force` to "fix
+        // vulnerabilities" — which force-upgraded Vite v5→v8 (a MAJOR break), crashed the running dev
+        // server and KILLED the live preview, costing ~7 min to recover. A preview build never needs a
+        // security audit, and force/moving-tag upgrades of a core tool only break the working app. Refuse
+        // it and tell the model to keep the pinned versions. Checked BEFORE the generic risk classifier so
+        // the message is the actionable one (pure guard: DependencyMutationGuard.ts).
+        const depMutation = dependencyMutationGuard(command);
+        if (depMutation) {
+          const blockMsg = dependencyMutationGuardMessage(depMutation);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DEPMUTATION:${depMutation.kind}] refused: ${command.slice(0, 200)}`,
+          );
+          this.state?.appendTerminal(blockMsg);
+          return blockMsg;
+        }
         // HIGH-risk commands are BLOCKED outright — they are irreversible, exfiltrate
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
         const risk = classifyCommandRisk(command);
@@ -1392,10 +2149,40 @@ export class ToolDispatcher {
         // LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then bricks the build.
         // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
         // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
-        const effectiveCommand = pinKnownDepsInInstallCommand(command);
+        // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
+        // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
+        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command));
         // Inject the user's own vault secrets (Settings → Secrets & Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
         await this.ensureUserSecretsEnvFile(effectiveCommand);
+        // Provision a real local Postgres BEFORE a migrate/seed if the app targets postgres (MediConnect
+        // autopsy): without this the from-scratch build hit P1001 at localhost:5432 and downgraded to a
+        // broken SQLite schema. Best-effort + once-per-build; a failure degrades to an honest DB error.
+        await this.ensureSandboxPostgres(effectiveCommand);
+        // PREFLIGHT (last-5-reports class fix, 2026-07-20): a provisioned Postgres is routinely reaped by
+        // the sandbox between touchpoints — five consecutive reports hit some flavour of this. Instead of
+        // letting the command FAIL with P1001 and reviving reactively (a full failed-command cycle plus
+        // the LLM turns spent reading the error), probe liveness for a millisecond BEFORE a live-DB
+        // command and revive first, so the command runs ONCE against a live DB. Shares the bounded
+        // revival budget with the reactive net below; entirely best-effort — a probe/revive failure just
+        // leaves today's reactive behaviour.
+        if (shouldPreflightPostgres({
+          provisioned: this.postgresProvisioned,
+          confirmedDead: this.postgresConfirmedDead,
+          needsLiveDb: commandNeedsLiveDatabase(effectiveCommand),
+          provisionedAtMs: this.postgresProvisionedAt,
+          nowMs: Date.now(),
+        })) {
+          try {
+            const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
+            if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
+              this.postgresReprovisionAttempts += 1;
+              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database had gone to sleep — restarting PostgreSQL before your database step…', ts: Date.now() });
+              await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
+              this.postgresProvisionedAt = Date.now();
+            }
+          } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
+        }
         let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
@@ -1430,6 +2217,36 @@ export class ToolDispatcher {
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
         }
+        // PRISMA-CLI-NOT-INSTALLED SELF-HEAL (Bazaar-era autopsy 2026-07-20): a `prisma generate` (or any
+        // prisma command) fails because the `prisma` CLI is NOT in node_modules — either package.json never
+        // declared it, or a sandbox recycle wiped node_modules. `npx prisma generate` then tries to
+        // auto-FETCH the latest (`prisma@7.8.0`) and, being non-interactive, aborts with
+        // "npx canceled due to missing packages and no YES option". The model brute-forced this ~13 times
+        // over ~10 MINUTES before it finally ran `npm install -D prisma` — burning the build's whole
+        // window so the app shipped incomplete (59 files planned, ~43 built). Deterministic close: on that
+        // exact "prisma package missing" signal, install prisma + @prisma/client (pinned to ^6 by
+        // pinKnownDepsInInstallCommand — never v7) and retry the original command ONCE. Mirrors the other
+        // prisma self-heals; best-effort, never blocks. Kill switch reuses AGENTV3_PRISMA_HINT=off.
+        if (
+          exitCode !== 0 &&
+          process.env.AGENTV3_PRISMA_HINT !== 'off' &&
+          /\bprisma\b/.test(command) &&
+          isPrismaCliMissingError(`${stdout}\n${stderr}`)
+        ) {
+          try {
+            const dirMatch = /^\s*cd\s+([^\s&;|]+)\s*&&/.exec(command);
+            const cd = dirMatch ? `cd ${dirMatch[1]} && ` : '';
+            const installCmd = pinKnownDepsInInstallCommand(`${cd}npm install -D prisma @prisma/client`);
+            const inst = await this.actuator.runCommand(this.workspaceId, installCmd);
+            if (inst.exitCode === 0) {
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (retry.exitCode === 0) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database toolkit wasn\'t installed yet — installed it and re-ran the step successfully.', ts: Date.now() });
+              }
+            }
+          } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
         // PRISMA CLIENT-NOT-GENERATED SELF-HEAL (TaskForge fresh-build autopsy 2026-07-18): a seed step
         // (`prisma db seed`, `tsx prisma/seed.ts`, `ts-node seed`, `node dist/seed.js`, …) that RUNS BEFORE
         // `prisma generate` fails with "@prisma/client did not initialize yet — please run `prisma generate`"
@@ -1458,6 +2275,86 @@ export class ToolDispatcher {
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
         }
+        // PRISMA STRIPPED-ENUM CONSUMER SELF-HEAL (MediConnect autopsy 2026-07-19): a SQLite schema has
+        // no enums, so FullStackGuards strips them to String — but a seed/route that still does
+        // `import { AppointmentStatus } from '@prisma/client'` then crashes at load with
+        // "does not provide an export named 'AppointmentStatus'" and the seed (exit 1) never runs.
+        // Deterministic close: find the files importing the missing enum, make them coherent with a
+        // String enum (drop the import name, `Enum.MEMBER` → 'MEMBER', `: Enum` → `: string`), and retry
+        // the command ONCE. Mirrors the relation/generate self-heals above; best-effort, never blocks.
+        if (exitCode !== 0) {
+          const missingEnums = extractMissingPrismaExports(`${stdout}\n${stderr}`);
+          if (missingEnums.length > 0) {
+            try {
+              const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+              let fixedAny = false;
+              for (const [p, original] of Object.entries(files)) {
+                if (!isEnumConsumerFile(p)) continue;
+                let next = original;
+                for (const enumName of missingEnums) next = fixDanglingEnumConsumer(p, next, enumName);
+                if (next !== original) {
+                  await this.actuator.writeFile(this.workspaceId, p, next);
+                  try { this.onFileWrite?.(p, next); } catch { /* durable sync best-effort */ }
+                  this.state?.recordFileChange({ path: p, kind: 'modify' }, 'architect');
+                  fixedAny = true;
+                }
+              }
+              if (fixedAny) {
+                const retry = await this.actuator.runCommand(this.workspaceId, command);
+                if (retry.exitCode === 0) {
+                  ({ exitCode, stdout, stderr } = retry);
+                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 A database enum wasn't available on SQLite — rewired the code that used it (${missingEnums.join(', ')}) to plain string values and re-ran the step successfully.`, ts: Date.now() });
+                }
+              }
+            } catch { /* self-heal is best-effort — the original failure is still reported */ }
+          }
+        }
+        // POSTGRES DIED MID-BUILD → RE-PROVISION ONCE, then RELEASE the lock (FleetOps autopsy 2026-07-20).
+        // The sandbox Postgres we provisioned was reaped ~2.5 min into the build (P1001). The builder could
+        // not restart it (`pg_ctl`/`pg_ctlcluster` are exit 127 in its shell), and the provider-LOCK then
+        // forced ~4 min of futile postgres retries until the builder escaped via `sed`. The correct
+        // behaviour: (1) the ENGINE re-provisions Postgres via the actuator (the mechanism that actually
+        // works), retry once; (2) if it STILL can't come back, mark it confirmed-dead so the lock releases
+        // and the app degrades to SQLite gracefully instead of an unwinnable loop. Bounded to ONE re-provision.
+        if (
+          this.postgresProvisioned && !this.postgresConfirmedDead &&
+          looksLikeDbUnreachable(`${stdout}\n${stderr}`)
+        ) {
+          if (canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
+            this.postgresReprovisionAttempts += 1;
+            try {
+              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database went away — restarting PostgreSQL in the sandbox…', ts: Date.now() });
+              const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
+              const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
+              if (Object.keys(lines).length > 0) {
+                let existing = '';
+                try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+                await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existing, lines)).catch(() => {});
+              }
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.postgresProvisionedAt = Date.now(); // revival verified — reset the preflight gate
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Database is back — re-ran the step against PostgreSQL.', ts: Date.now() });
+              } else {
+                // The revival itself could not bring the DB back — another attempt would repeat the same
+                // failure, so this is genuinely dead (not merely reaped). Confirm + release the lock now.
+                this.postgresConfirmedDead = true;
+              }
+            } catch {
+              this.postgresConfirmedDead = true;
+            }
+          } else {
+            // Revival budget exhausted (POSTGRES_MAX_REVIVALS) or no provisioner, and it's STILL
+            // unreachable → give up on Postgres for this preview and let the app fall to SQLite
+            // (the lock now releases).
+            this.postgresConfirmedDead = true;
+          }
+          if (this.postgresConfirmedDead) {
+            getWorkspaceMemory(this.workspaceId).recordAudit('postgres confirmed dead in sandbox — releasing the provider lock so the app can use SQLite for the preview');
+            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ NavBharatAI couldn\'t keep PostgreSQL running in the preview sandbox, so the live preview will use SQLite. Your PostgreSQL setup still applies when you deploy to your own database.', ts: Date.now() });
+          }
+        }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
@@ -1467,6 +2364,18 @@ export class ToolDispatcher {
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
         let out =
           `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
+        // THE PIPE ATE THE EXIT CODE (autopsy 56ee622f, 2026-08-04). `tsc --noEmit 2>&1 | head -30`
+        // exits 0 because `head` succeeds — a pipeline reports its LAST command's status. The agent
+        // verified its work with exactly that, was told "exit 0", moved on, and shipped an app with ~10
+        // real TypeScript errors whose preview then refused to start. It asked the only question it could
+        // and got a truthful-looking lie. We do not rewrite the shell (`set -o pipefail` is a bashism this
+        // repo has already been burned by); we read the output the command already produced and tell the
+        // agent the truth. Silent unless a gate tool was piped, exit was 0, AND the output carries a real
+        // compiler/test error. Kill switch AGENTV3_PIPED_GATE_CHECK=off.
+        if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
+          const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
+          if (lie) out = `${out}\n\n${lie}`;
+        }
         // PRISMA SCHEMA REPAIR HINT (widen the relation self-heal beyond the `prisma format` class):
         // when a prisma command STILL fails with a schema-validation error that `prisma format` cannot
         // mechanically fix (ambiguous relation, missing @id/@unique, missing fields/references, SQLite
@@ -1479,6 +2388,29 @@ export class ToolDispatcher {
             const hint = prismaRepairHint(`${stdout}\n${stderr}`);
             if (hint) out = `${out}\n\n[schema-repair hint] ${hint}`;
           } catch { /* hint is best-effort — the raw error is still reported */ }
+        }
+        // NEXT.JS BUILD-ERROR HINT (CargoPilot autopsy 2026-07-19): a `next build` that fails with a
+        // framework-specific error (App-Router `export const config` deprecation, getServerSideProps in
+        // app/, a missing "use client" directive) gets a targeted fix instruction appended so the builder
+        // converges in one directed turn. Guidance only — never edits code. Also runs when the piped exit
+        // is 0 but the output shows "Build error occurred" (next build hides its failure behind `| tail`).
+        if (process.env.AGENTV3_NEXT_HINT !== 'off' && (exitCode !== 0 || /Build error occurred|Failed to compile/i.test(`${stdout}\n${stderr}`))) {
+          try {
+            const nHint = nextBuildRepairHint(`${stdout}\n${stderr}`);
+            if (nHint) out = `${out}\n\n[next-build hint] ${nHint}`;
+          } catch { /* hint is best-effort — the raw error is still reported */ }
+        }
+        // NPM MASKED-FAILURE HONESTY (CargoPilot autopsy 2026-07-19): `npm install … 2>&1 | tail -30`
+        // reports the PIPE's exit 0 while npm actually FAILED (e.g. ERESOLVE) — so a broken install
+        // looks successful and the build proceeds on a corrupt dependency tree until it dies later
+        // (missing `next` binary). When the output betrays an npm failure behind an exit-0 pipe, say so
+        // plainly so the builder re-runs it honestly instead of trusting the fake success.
+        if (exitCode === 0 && process.env.AGENTV3_NPM_HONESTY !== 'off') {
+          try {
+            if (npmInstallMaskedFailure(command, `${stdout}\n${stderr}`)) {
+              out = `${out}\n\n[install honesty] ⚠️ This install is piped to \`tail\`/\`head\`, so the shell reported exit 0 but npm actually FAILED (see the npm error above). The dependency tree is NOT installed. Re-run the install WITHOUT the \`| tail\`/\`| head\` so the real exit code is visible, and resolve the peer conflict (add \`--legacy-peer-deps\`, or pin the offending package to a compatible major) before continuing.`;
+            }
+          } catch { /* honesty hint is best-effort — never blocks the build */ }
         }
         if (risk.level !== 'none') {
           getWorkspaceMemory(this.workspaceId).recordAudit(
@@ -1549,6 +2481,25 @@ export class ToolDispatcher {
         const envIssues = await this.collectEnvVarIssues(snap.sources);
         // Best-effort accessibility pass — never throws.
         const a11yIssues = this.collectAccessibilityIssues(snap.sources);
+        // Best-effort observability pass (Cap-4 advisory) — backend health/error-handler/logging gaps. Never throws.
+        const obsIssues = this.collectObservabilityIssues(snap.sources);
+        // Best-effort graceful-shutdown pass — long-lived server with no SIGTERM drain. Never throws.
+        const shutdownIssues = this.collectGracefulShutdownIssues(snap.sources);
+        // Best-effort security-headers pass — Express/Koa server with no helmet/manual headers. Never throws.
+        const secHeaderIssues = this.collectSecurityHeaderIssues(snap.sources);
+        // Best-effort SRI pass: a third-party <script src="https://cdn…"> without an integrity hash —
+        // a compromised CDN could inject code into the shipped app. Advisory (lowers score, never blocks).
+        const sriIssues = this.collectSriIssues(snap.sources);
+        // Best-effort CSP-meta pass: a static SPA (no server) loading third-party scripts with no
+        // Content-Security-Policy meta — defense-in-depth against injected script. Advisory (lowers
+        // score, never blocks). Complements SRI (integrity of known scripts) + SecurityHeaders (server headers).
+        const cspIssues = this.collectCspIssues(snap.sources);
+        // Best-effort comment-language pass: Hindi/Devanagari in code COMMENTS (standard violation).
+        // Hindi UI text is never flagged. Advisory (lowers score, never blocks).
+        const commentLangIssues = this.collectCommentLanguageIssues(snap.sources);
+        // Best-effort upload-validation pass: a multer upload with no fileFilter/MIME check accepts any
+        // file type (stored-XSS / malware). Advisory (lowers score, never blocks).
+        const uploadIssues = this.collectUploadValidationIssues(snap.sources);
         // Best-effort trust/safety/compliance pass (Layer 77 "Bharosa") — never throws.
         const complianceIssues = this.collectComplianceIssues(snap.sources);
         // Calibrated build confidence (Layer 74 "Sahyog") — an honest synthesis of
@@ -1692,6 +2643,10 @@ export class ToolDispatcher {
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
         if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        if (sriIssues.length) extra.push({ severity: 'medium', label: `${sriIssues.length} third-party <script> without an integrity hash (SRI)` });
+        if (cspIssues.length) extra.push({ severity: 'medium', label: `${cspIssues.length} static-SPA page(s) with third-party scripts but no Content-Security-Policy` });
+        if (commentLangIssues.length) extra.push({ severity: 'medium', label: `${commentLangIssues.length} non-English code comment(s) (professional-English standard)` });
+        if (uploadIssues.length) extra.push({ severity: 'medium', label: `${uploadIssues.length} file-upload endpoint(s) with no MIME/type validation (multer, no fileFilter)` });
         if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         if (viteEnv.length) extra.push({ severity: 'medium', label: `${viteEnv.length} non-VITE_ import.meta.env reference(s) (undefined in the browser)` });
         if (asyncPatterns.length) extra.push({ severity: 'medium', label: `${asyncPatterns.length} forEach(async …) loop(s) that do not await` });
@@ -1786,6 +2741,28 @@ export class ToolDispatcher {
               this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
+          // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
+          // `import ErrorBoundary from './ErrorBoundary'` + `import { ErrorBoundary } from './ErrorBoundary'`
+          // that BABEL rejects as "Duplicate declaration" — but esbuild AND tsc silently ACCEPT (a real
+          // compiler divergence), so the write-time guards and the type-checker miss it, and it white-screens
+          // the preview + refuses the dev-server port. Runs HERE, before the readiness gate, so the duplicate
+          // is removed on EVERY build — success, failure, OR wall-clock-capped alike (the route's post-build
+          // sweep ran too late and only on result.ok, so a 30-min capped build kept the duplicate). Pure +
+          // safe (dedupeSameModuleImports keeps the first binding, drops a later same-module redundant one);
+          // same durable write path; the cleaned file feeds the readiness gate below so its verdict is honest.
+          try {
+            for (const [file, content] of Object.entries(astFiles)) {
+              if (typeof content !== 'string') continue;
+              const deduped = dedupeSameModuleImports(file, content);
+              if (deduped !== content) {
+                astFiles[file] = deduped;
+                try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
+                try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
+                try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
+                this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+              }
+            }
+          } catch { /* best-effort — a failure just leaves the honest blocker below */ }
           // DEPENDENCY RECONCILE (P-PIPE): a package imported but not in package.json fails install/runtime
           // with "Cannot find module". For the curated well-known allowlist (real npm packages, version-
           // pinned; alias-colliding names excluded) add it to package.json deterministically so the app
@@ -1814,7 +2791,13 @@ export class ToolDispatcher {
           analyzeJsxComponents(astFiles),
           analyzeUndefinedHooks(astFiles),
         ]);
-        if (hooksRep.violations.length) {
+        // FRAMEWORK-GATE the React-SPECIFIC analyzers (ShopSphere/Nuxt autopsy 2026-07-19): Rules-of-Hooks,
+        // JSX-component and undefined-hook analysis are about REACT — a Vue/Nuxt `useFetch`/`useProducts`
+        // composable is NOT a React hook, and a Nuxt AUTO-IMPORTED composable is NOT "never imported". Run
+        // against a non-React app these produced FALSE high-severity BLOCKERS that failed a correct build.
+        // Import/export consistency stays (it is framework-neutral: a written import must resolve anywhere).
+        const reactLint = isReactFamilyFramework(this.framework);
+        if (reactLint && hooksRep.violations.length) {
           const sample = hooksRep.violations.slice(0, 3).map((v) => `${v.hook}@${v.file}:${v.line}`).join(', ');
           extra.push({ severity: 'high', label: `${hooksRep.violations.length} React Rules-of-Hooks violation(s) (crash at runtime): ${sample}${hooksRep.violations.length > 3 ? ', …' : ''}` });
         }
@@ -1822,11 +2805,11 @@ export class ToolDispatcher {
           const sample = importRep.mismatches.slice(0, 3).map((m) => `${m.imported}←${m.from}@${m.file}:${m.line}`).join(', ');
           extra.push({ severity: 'high', label: `${importRep.mismatches.length} broken import(s) — a name is imported that the module does not export (the build fails): ${sample}${importRep.mismatches.length > 3 ? ', …' : ''}` });
         }
-        if (jsxRep.undefinedComponents.length) {
+        if (reactLint && jsxRep.undefinedComponents.length) {
           const sample = jsxRep.undefinedComponents.slice(0, 3).map((c) => `<${c.component}>@${c.file}:${c.line}`).join(', ');
           extra.push({ severity: 'high', label: `${jsxRep.undefinedComponents.length} undefined JSX component(s) — used but never imported/defined (crash at runtime): ${sample}${jsxRep.undefinedComponents.length > 3 ? ', …' : ''}` });
         }
-        if (undefHookRep.undefinedHooks.length) {
+        if (reactLint && undefHookRep.undefinedHooks.length) {
           const sample = undefHookRep.undefinedHooks.slice(0, 3).map((h) => `${h.hook}()@${h.file}:${h.line}`).join(', ');
           extra.push({ severity: 'high', label: `${undefHookRep.undefinedHooks.length} hook(s) called but never imported/defined (crash at runtime): ${sample}${undefHookRep.undefinedHooks.length > 3 ? ', …' : ''}` });
         }
@@ -1838,6 +2821,24 @@ export class ToolDispatcher {
             extra.push({ severity: c.severity, label: `Dependency conflict (${c.kind}): ${c.detail}` });
           }
         }
+        // PREVIEW-COMPILE HONESTY BLOCKER (readiness-honesty autopsy 2026-08-02): the "Build health"
+        // verdict was computed WITHOUT the in-browser preview compiler, so a build whose ENTRY file will not
+        // compile still scored "READY · 70/100" while the live preview white-screened and the dev server
+        // refused its port. The classic case is the recurring duplicate `ErrorBoundary` import that BABEL
+        // (the in-browser preview's compiler) rejects as "Duplicate declaration" but esbuild — and thus tsc
+        // and vite — silently ACCEPT (a real compiler divergence, verified). So the esbuild/parse gates miss
+        // it. Run the SAME babel dry-compile the preview uses (checkPreviewCompiles) and, when a guaranteed-
+        // reachable ENTRY file (main/App/index) diverges, feed it in as a HARD blocker — the health card can
+        // then never call a white-screening build READY (it now agrees with the route's already-honest
+        // "preview does not compile → not charged" verdict). A non-entry divergence (a possibly-never-
+        // imported file) stays advisory — no false block, matching PreviewCompileCheck's reachability scoping.
+        try {
+          const pc = checkPreviewCompiles(astFiles);
+          if (!pc.ok && previewDivergenceBlocksDelivery(pc.errors)) {
+            const entryErr = pc.errors.find((e) => previewDivergenceBlocksDelivery([e]));
+            extra.push({ severity: 'high', label: `the live preview will not compile — ${entryErr?.file ?? 'entry file'}: ${(entryErr?.message ?? 'compile error').slice(0, 160)}` });
+          }
+        } catch { /* the preview-compile gate is best-effort — a compiler failure never fabricates a blocker */ }
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;
@@ -1912,7 +2913,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
       }
 
       case 'update_todo': {
@@ -1965,6 +2966,62 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${content.length} bytes).`;
+      }
+
+      case 'generate_dev_guide': {
+        // Roadmap BUILD-NOW #15 — a human DEVELOPER_GUIDE.md (how to run, where code lives, how to add a
+        // page/route/component/endpoint, test, deploy, troubleshoot). Distinct from generate_readme (what the
+        // app IS) and generate_architecture_docs (structure). Derived from the app's REAL package.json +
+        // env refs. Pure gen in DeveloperGuideGenerator.ts. No env keys.
+        const dgPath = optStr(input, 'path') || 'DEVELOPER_GUIDE.md';
+        // Best-effort: read the real package.json for name / scripts / framework detection.
+        let dgName = optStr(input, 'name') || '';
+        let dgScripts: DevGuideScript[] = [];
+        let dgFramework = optStr(input, 'framework') || '';
+        try {
+          const pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json');
+          const pkg = JSON.parse(pkgRaw) as { name?: string; scripts?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+          if (!dgName && typeof pkg.name === 'string') dgName = pkg.name;
+          if (pkg.scripts && typeof pkg.scripts === 'object') {
+            dgScripts = Object.entries(pkg.scripts)
+              .filter(([n, c]) => typeof n === 'string' && typeof c === 'string')
+              .map(([n, c]) => ({ name: n, cmd: c }));
+          }
+          if (!dgFramework) {
+            const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+            if (deps.next) dgFramework = 'next';
+            else if (deps['@sveltejs/kit'] || deps.svelte) dgFramework = 'svelte';
+            else if (deps['solid-js']) dgFramework = 'solid';
+            else if (deps.vue) dgFramework = 'vue';
+            else if (deps.react) dgFramework = 'react';
+            else if (deps.express) dgFramework = 'express';
+            else dgFramework = 'node';
+          }
+        } catch {
+          // no package.json (e.g. a Python app) — fall back to inputs / generic guidance
+        }
+        // Real env keys referenced by the code (same source generate_env_example uses).
+        let dgEnvKeys: string[] = [];
+        try {
+          dgEnvKeys = this.collectEnvRefs((await this.readEvalSnapshot()).sources);
+        } catch {
+          dgEnvKeys = [];
+        }
+        const dg = generateDevGuide({
+          name: dgName || undefined,
+          framework: dgFramework || undefined,
+          packageManager: optStr(input, 'package_manager') || undefined,
+          scripts: dgScripts,
+          envKeys: dgEnvKeys,
+        });
+        const dgContent = dg.files['DEVELOPER_GUIDE.md'];
+        let dgKind: 'create' | 'modify' = 'create';
+        try { await this.actuator.readFile(this.workspaceId, dgPath); dgKind = 'modify'; } catch { dgKind = 'create'; }
+        await this.actuator.writeFile(this.workspaceId, dgPath, dgContent);
+        this.state?.recordFileChange({ path: dgPath, kind: dgKind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(dgPath, dgContent);
+        this.scheduleCheckpoint(`${dgKind} ${dgPath}`);
+        return `${dgKind === 'create' ? 'Created' : 'Updated'} ${dgPath} — a developer onboarding guide (setup, project layout, how to add features, testing, deploy, troubleshooting).\n\n${dg.instructions}`;
       }
 
       case 'generate_env_example': {
@@ -2125,6 +3182,40 @@ export class ToolDispatcher {
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
       }
 
+      case 'generate_integration_tests': {
+        // Roadmap BUILD-NOW #14 — REAL integration tests (not TODO skeletons). Emits a full CRUD lifecycle
+        // supertest suite with real body assertions PLUS a working in-memory reference app, so the suite is
+        // green out of the box; swap the app import to test the real backend. Pure gen in IntegrationTestGenerator.ts.
+        const itRec = (input as Record<string, unknown>) || {};
+        const itResource = optStr(input, 'resource') || undefined;
+        const itBasePath = optStr(input, 'base_path') || undefined;
+        const itFields = Array.isArray(itRec.fields)
+          ? itRec.fields
+              .filter((f): f is Record<string, unknown> => typeof f === 'object' && f !== null)
+              .map((f) => ({
+                name: typeof f.name === 'string' ? f.name : '',
+                type:
+                  f.type === 'number' || f.type === 'boolean' || f.type === 'string'
+                    ? (f.type as 'number' | 'boolean' | 'string')
+                    : undefined,
+              }))
+              .filter((f) => f.name)
+          : undefined;
+        const itCfg = generateIntegrationTests({ resource: itResource, basePath: itBasePath, fields: itFields });
+        const itWritten: string[] = [];
+        for (const [path, content] of Object.entries(itCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          itWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('integration tests');
+        const itDeps = itCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a real integration-test suite:\n${itWritten.join('\n')}\nAdd the dev dependencies: ${itDeps}\n\n${itCfg.instructions}`;
+      }
+
       case 'generate_e2e': {
         // Cap-2 — Playwright E2E scaffold: a real end-to-end setup that DRIVES the running app in a browser
         // and fails on a blank screen / error overlay / console error (render-not-compile). Pure generator
@@ -2208,10 +3299,10 @@ export class ToolDispatcher {
       }
 
       case 'typecheck': {
-        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) so a
-        // polyglot app's non-TS code is type/compile-checked too. Detection + parsing are pure
-        // (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a missing toolchain
-        // reports "could not run", never a fake pass.
+        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) +
+        // `go build ./...` (Go) so a polyglot app's non-TS code is type/compile-checked too. Detection +
+        // parsing are pure (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a
+        // missing toolchain reports "could not run", never a fake pass.
         const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
         // FRONTEND SYNTAX LOCATOR (deep-test 2026-07-18). A model verifying "does it compile?" runs
         // `tsc` by hand — but `tsc | head` masks the exit code and tsc never crisply pinpoints a JSX PARSE
@@ -2248,8 +3339,47 @@ export class ToolDispatcher {
           if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
           crossLang = typecheckSummary(outcomes);
         }
-        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java sources to check.');
-        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python or Java sources detected — nothing beyond the tsc gate.';
+        // REAL semantic type-check (deep-test autopsy 2026-08-01): esbuild's frontend check above only
+        // catches PARSE errors — it is BLIND to SEMANTIC TypeScript errors (a duplicate identifier, an
+        // `import type` used as a value, a class that doesn't extend Component so `this.state`/`this.props`
+        // "do not exist", a value used as a type). A real SaaS-dashboard build spent 30 min getting
+        // false-green esbuild typechecks, then failed the final `tsc && vite build` on exactly those
+        // (TS2300 duplicate 'Team', TS1361 import-type, TS2339 ErrorBoundary state/props, TS2749). Running
+        // the REAL, incremental `tsc --noEmit` HERE surfaces them per file so the agent fixes them the
+        // moment they appear — not 30 minutes later at the final build. Only for a TS project; a syntax
+        // break is fixed FIRST (tsc on unparseable code just echoes parse noise). Honest: a tsc that can't
+        // run is silently skipped (the esbuild note still stands) — never a fake pass.
+        let tscHeader = '';
+        let tscRanClean = false;
+        const isTsProject = files.includes('tsconfig.json')
+          && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
+        if (isTsProject && !syntaxHeader) {
+          try {
+            const r = await withTimeout(
+              this.actuator.runCommand(
+                this.workspaceId,
+                robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60'),
+              ),
+              30_000,
+              'typecheck-tsc',
+            );
+            const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+            const tscErrs = parseTscErrors(combined);
+            if (tscErrs.length > 0) {
+              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${tscErrs.length} TypeScript error(s).`);
+              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}\n\n`;
+            } else {
+              tscRanClean = true;
+            }
+          } catch { /* real-tsc pass is best-effort — a toolchain miss must never fake a pass */ }
+        }
+        if (syntaxHeader || tscHeader) {
+          return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();
+        }
+        const feHeadline = tscRanClean
+          ? 'frontend parses clean (esbuild) AND type-checks clean (tsc --noEmit)'
+          : 'frontend parses clean (esbuild)';
+        return crossLang || `typecheck: ${feHeadline}; no Python, Java, or Go sources detected.`;
       }
 
       case 'code_graph': {
@@ -2312,6 +3442,24 @@ export class ToolDispatcher {
         const summary = unwiredFilesSummary(files);
         this.state?.appendTerminal(summary);
         return summary;
+      }
+
+      case 'find_code_smells': {
+        // T3 — advisory scan for magic numbers + duplicate blocks. Pure analyzer in CodeSmellAnalyzer.ts.
+        let csFiles: string[];
+        try { csFiles = await this.actuator.listFiles(this.workspaceId); }
+        catch { return 'find_code_smells: failed to list workspace files.'; }
+        const CS_CODE = /\.(t|j)sx?$/;
+        const CS_SKIP = /(node_modules|dist|build|coverage|\.next|\.git|\.test\.|\.spec\.)/;
+        const csCode = csFiles.filter((f) => CS_CODE.test(f) && !CS_SKIP.test(f)).slice(0, 300);
+        const csContents: { path: string; content: string }[] = [];
+        for (const f of csCode) {
+          try { csContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); }
+          catch { /* skip unreadable */ }
+        }
+        const csOut = renderCodeSmells(analyzeCodeSmells(csContents));
+        this.state?.appendTerminal(csOut);
+        return csOut;
       }
 
       case 'api_graph': {
@@ -2577,6 +3725,1326 @@ export class ToolDispatcher {
         return `${summary}\n${written.join('\n')}`;
       }
 
+      case 'generate_crud': {
+        // T1.2 recipe — a COMPLETE CRUD REST resource on Prisma (zod validation + paginated/filtered/
+        // sorted list + validated create/update + SOFT delete). Pure generator in CrudGenerator.ts;
+        // pairs with generate_migration's schema (soft-delete deletedAt + timestamps).
+        const crudRec = (input as Record<string, unknown>) || {};
+        const crudName = typeof crudRec.name === 'string' ? crudRec.name : '';
+        if (!crudName) return 'generate_crud: pass the resource "name" (e.g. "Post") and its "fields".';
+        const crudRawFields = Array.isArray(crudRec.fields) ? crudRec.fields : [];
+        const crudFields = crudRawFields
+          .map((f: unknown) => {
+            if (typeof f !== 'object' || f === null) return null;
+            const fo = f as Record<string, unknown>;
+            const fname = typeof fo.name === 'string' ? fo.name : '';
+            return fname ? { name: fname, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+          })
+          .filter((f): f is { name: string; type: string | undefined } => f !== null);
+        const crud = generateCrudResource({ name: crudName, fields: crudFields }, { protected: crudRec.protected === true });
+        const crudWritten: string[] = [];
+        for (const [path, content] of Object.entries(crud.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          crudWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`crud resource (${crudName})`);
+        const crudDeps = crud.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a CRUD resource for ${crudName}:\n${crudWritten.join('\n')}\nAdd the dependencies: ${crudDeps}\n\n${crud.instructions}`;
+      }
+
+      case 'generate_booking': {
+        // Breadth recipe (domain vertical) — booking/appointments (server/booking/): a real BookingService
+        // with CORRECT double-booking prevention + an Express router. Pure generator in BookingGenerator.ts.
+        const bkcfg = generateBookingIntegration();
+        const bkWritten: string[] = [];
+        for (const [path, content] of Object.entries(bkcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          bkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('booking starter');
+        const bkDeps = bkcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a booking/appointment backend:\n${bkWritten.join('\n')}\nAdd the dependencies: ${bkDeps}\n\n${bkcfg.instructions}`;
+      }
+
+      case 'generate_inventory': {
+        // Breadth recipe (domain vertical) — inventory/stock (server/inventory/): a real InventoryService with
+        // NO-OVERSELL reserve + an Express router. Pure generator in InventoryGenerator.ts.
+        const invcfg = generateInventoryIntegration();
+        const invWritten: string[] = [];
+        for (const [path, content] of Object.entries(invcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          invWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('inventory starter');
+        const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an inventory/stock backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
+      }
+
+      case 'generate_crm': {
+        // Breadth recipe (domain vertical) — CRM/lead-pipeline (server/crm/): a real CrmService with a
+        // sales-stage STATE-MACHINE + open-pipeline value + an Express router. Pure gen in CrmGenerator.ts.
+        const crmcfg = generateCrmIntegration();
+        const crmWritten: string[] = [];
+        for (const [path, content] of Object.entries(crmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          crmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('crm starter');
+        const crmDeps = crmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a CRM / lead-pipeline backend:\n${crmWritten.join('\n')}\nAdd the dependencies: ${crmDeps}\n\n${crmcfg.instructions}`;
+      }
+
+      case 'generate_hospital_erp': {
+        // Breadth recipe (domain vertical) — Hospital-ERP / EMR (server/hospital/): a real HospitalService
+        // with THREE guarantees — no doctor double-booking (409), RBAC on patient-record writes (403), and an
+        // immutable audit log — plus an Express router. Pure gen in HospitalErpGenerator.ts.
+        const hospcfg = generateHospitalErpIntegration();
+        const hospWritten: string[] = [];
+        for (const [path, content] of Object.entries(hospcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          hospWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('hospital-erp starter');
+        const hospDeps = hospcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Hospital-ERP / EMR backend:\n${hospWritten.join('\n')}\nAdd the dependencies: ${hospDeps}\n\n${hospcfg.instructions}`;
+      }
+
+      case 'generate_school_erp': {
+        // Breadth recipe (domain vertical) — School / Education-ERP (server/school/): a real SchoolService
+        // with THREE guarantees — idempotent attendance, valid grades (0..maxMarks), and an exact fee ledger
+        // (balance = invoiced − paid, never negative) — plus an Express router. Pure gen in SchoolErpGenerator.ts.
+        const schoolcfg = generateSchoolErpIntegration();
+        const schoolWritten: string[] = [];
+        for (const [path, content] of Object.entries(schoolcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          schoolWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('school-erp starter');
+        const schoolDeps = schoolcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a School / Education-ERP backend:\n${schoolWritten.join('\n')}\nAdd the dependencies: ${schoolDeps}\n\n${schoolcfg.instructions}`;
+      }
+
+      case 'generate_courier': {
+        // Breadth recipe (domain vertical) — Courier / Logistics (server/courier/): a real CourierService
+        // with a shipment STATE-MACHINE (invalid jumps → 409), append-only tracking history and unique
+        // tracking numbers, plus an Express router. Pure gen in CourierGenerator.ts.
+        const courriercfg = generateCourierIntegration();
+        const courierWritten: string[] = [];
+        for (const [path, content] of Object.entries(courriercfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          courierWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('courier starter');
+        const courierDeps = courriercfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Courier / Logistics backend:\n${courierWritten.join('\n')}\nAdd the dependencies: ${courierDeps}\n\n${courriercfg.instructions}`;
+      }
+
+      case 'generate_restaurant_pos': {
+        // Breadth recipe (domain vertical) — Restaurant / POS (server/restaurant/): a real RestaurantService
+        // with a table STATE-MACHINE + KOT order lifecycle (invalid jumps → 409) + an EXACT GST bill, plus an
+        // Express router. Pure gen in RestaurantPosGenerator.ts.
+        const restcfg = generateRestaurantPosIntegration();
+        const restWritten: string[] = [];
+        for (const [path, content] of Object.entries(restcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          restWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('restaurant-pos starter');
+        const restDeps = restcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Restaurant / POS backend:\n${restWritten.join('\n')}\nAdd the dependencies: ${restDeps}\n\n${restcfg.instructions}`;
+      }
+
+      case 'generate_real_estate': {
+        // Breadth recipe (domain vertical) — Real-estate / property portal (server/realestate/): a real
+        // RealEstateService with a listing STATE-MACHINE (invalid jumps → 409) + append-only price history +
+        // on-market-only inquiries, plus an Express router. Pure gen in RealEstateGenerator.ts.
+        const recfg = generateRealEstateIntegration();
+        const reWritten: string[] = [];
+        for (const [path, content] of Object.entries(recfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          reWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('real-estate starter');
+        const reDeps = recfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Real-estate / property-portal backend:\n${reWritten.join('\n')}\nAdd the dependencies: ${reDeps}\n\n${recfg.instructions}`;
+      }
+
+      case 'generate_fitness': {
+        // Breadth recipe (domain vertical) — Fitness / gym (server/fitness/): a real FitnessService with a
+        // membership validity gate (inactive → 409), deterministic renew/freeze date-math, and idempotent
+        // check-ins, plus an Express router. Pure gen in FitnessGenerator.ts.
+        const fitcfg = generateFitnessIntegration();
+        const fitWritten: string[] = [];
+        for (const [path, content] of Object.entries(fitcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fitWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('fitness starter');
+        const fitDeps = fitcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Fitness / gym backend:\n${fitWritten.join('\n')}\nAdd the dependencies: ${fitDeps}\n\n${fitcfg.instructions}`;
+      }
+
+      case 'generate_pharmacy': {
+        // Breadth recipe (domain vertical) — Pharmacy (server/pharmacy/): a real PharmacyService with an
+        // expiry gate (409), FEFO dispensing that never oversells (409), and a controlled-substance Rx gate
+        // (403), plus an Express router. Pure gen in PharmacyGenerator.ts.
+        const phcfg = generatePharmacyIntegration();
+        const phWritten: string[] = [];
+        for (const [path, content] of Object.entries(phcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          phWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pharmacy starter');
+        const phDeps = phcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Pharmacy backend:\n${phWritten.join('\n')}\nAdd the dependencies: ${phDeps}\n\n${phcfg.instructions}`;
+      }
+
+      case 'generate_recruitment': {
+        // Breadth recipe (domain vertical) — Recruitment / job-board (server/recruitment/): a real
+        // RecruitmentService with a hiring-pipeline STATE-MACHINE (invalid jumps → 409), one-application-per-
+        // candidate-per-job, and a closed-job guard, plus an Express router. Pure gen in RecruitmentGenerator.ts.
+        const rccfg = generateRecruitmentIntegration();
+        const rcWritten: string[] = [];
+        for (const [path, content] of Object.entries(rccfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('recruitment starter');
+        const rcDeps = rccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Recruitment / job-board backend:\n${rcWritten.join('\n')}\nAdd the dependencies: ${rcDeps}\n\n${rccfg.instructions}`;
+      }
+
+      case 'generate_invoicing': {
+        // Breadth recipe (domain vertical) — Invoicing / billing (server/invoicing/): a real InvoicingService
+        // with an invoice STATE-MACHINE (invalid jumps → 409), an exact payment ledger (no overpay → 409,
+        // auto-paid at zero), and a DERIVED overdue status, plus an Express router. Pure gen in InvoicingGenerator.ts.
+        const invcfg = generateInvoicingIntegration();
+        const invWritten: string[] = [];
+        for (const [path, content] of Object.entries(invcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          invWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('invoicing starter');
+        const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an Invoicing / billing backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
+      }
+
+      case 'generate_events': {
+        // Breadth recipe (domain vertical) — events/RSVP (server/events/): a real EventService with CAPACITY
+        // enforcement + a waitlist (auto-promote on cancel) + an Express router. Pure gen in EventsGenerator.ts.
+        const evcfg = generateEventsIntegration();
+        const evWritten: string[] = [];
+        for (const [path, content] of Object.entries(evcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          evWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('events starter');
+        const evDeps = evcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an events/RSVP backend:\n${evWritten.join('\n')}\nAdd the dependencies: ${evDeps}\n\n${evcfg.instructions}`;
+      }
+
+      case 'generate_subscriptions': {
+        // Breadth recipe (domain vertical) — subscriptions/recurring billing (server/subscriptions/): a real
+        // SubscriptionService with a lifecycle STATE-MACHINE + renewal-date math + an Express router. Pure gen
+        // in SubscriptionGenerator.ts.
+        const subcfg = generateSubscriptionIntegration();
+        const subWritten: string[] = [];
+        for (const [path, content] of Object.entries(subcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          subWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('subscriptions starter');
+        const subDeps = subcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a subscriptions / recurring-billing backend:\n${subWritten.join('\n')}\nAdd the dependencies: ${subDeps}\n\n${subcfg.instructions}`;
+      }
+
+      case 'generate_polls': {
+        // Breadth recipe (domain vertical) — polls/surveys (server/polls/): a real PollService with VOTE
+        // INTEGRITY (one vote per voter) + tally + an Express router. Pure gen in PollsGenerator.ts.
+        const plcfg = generatePollsIntegration();
+        const plWritten: string[] = [];
+        for (const [path, content] of Object.entries(plcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          plWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('polls starter');
+        const plDeps = plcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a polls/surveys backend:\n${plWritten.join('\n')}\nAdd the dependencies: ${plDeps}\n\n${plcfg.instructions}`;
+      }
+
+      case 'generate_blog': {
+        // Breadth recipe (domain vertical) — blog/CMS (server/blog/): a real BlogService with a publish
+        // STATE-MACHINE (draft↔published↔archived) + UNIQUE-slug generation + an Express router. Pure gen
+        // in BlogGenerator.ts.
+        const blogcfg = generateBlogIntegration();
+        const blogWritten: string[] = [];
+        for (const [path, content] of Object.entries(blogcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          blogWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('blog starter');
+        const blogDeps = blogcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a blog/CMS backend:\n${blogWritten.join('\n')}\nAdd the dependencies: ${blogDeps}\n\n${blogcfg.instructions}`;
+      }
+
+      case 'generate_reviews': {
+        // Breadth recipe (domain vertical) — reviews/ratings (server/reviews/): a real ReviewService with
+        // RATING INTEGRITY (1..5 bounds, one review per (item,user), exact aggregate) + an Express router.
+        // Pure gen in ReviewsGenerator.ts.
+        const revcfg = generateReviewsIntegration();
+        const revWritten: string[] = [];
+        for (const [path, content] of Object.entries(revcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          revWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('reviews starter');
+        const revDeps = revcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a reviews/ratings backend:\n${revWritten.join('\n')}\nAdd the dependencies: ${revDeps}\n\n${revcfg.instructions}`;
+      }
+
+      case 'generate_loyalty': {
+        // Breadth recipe (domain vertical) — loyalty/points-wallet (server/loyalty/): a real LoyaltyService
+        // with LEDGER INTEGRITY (balance = sum(earned) − sum(redeemed), never negative; no overdraft) + an
+        // Express router. Pure gen in LoyaltyGenerator.ts.
+        const loycfg = generateLoyaltyIntegration();
+        const loyWritten: string[] = [];
+        for (const [path, content] of Object.entries(loycfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          loyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('loyalty starter');
+        const loyDeps = loycfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a loyalty/points-wallet backend:\n${loyWritten.join('\n')}\nAdd the dependencies: ${loyDeps}\n\n${loycfg.instructions}`;
+      }
+
+      case 'generate_referrals': {
+        // Breadth recipe (growth vertical) — referral/invite (server/referrals/): a real ReferralService with
+        // ATTRIBUTION INTEGRITY (unique code, refer-once, no self-referral, credit-once) + an Express router.
+        // Pure gen in ReferralsGenerator.ts.
+        const refcfg = generateReferralsIntegration();
+        const refWritten: string[] = [];
+        for (const [path, content] of Object.entries(refcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          refWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('referrals starter');
+        const refDeps = refcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a referral/invite backend:\n${refWritten.join('\n')}\nAdd the dependencies: ${refDeps}\n\n${refcfg.instructions}`;
+      }
+
+      case 'generate_comments': {
+        // Breadth recipe (domain vertical) — threaded comments (server/comments/): a real CommentService with
+        // THREAD INTEGRITY (reply needs an existing parent, computed depth, soft-delete keeps children) + an
+        // Express router. Pure gen in CommentsGenerator.ts.
+        const cmtcfg = generateCommentsIntegration();
+        const cmtWritten: string[] = [];
+        for (const [path, content] of Object.entries(cmtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cmtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('comments starter');
+        const cmtDeps = cmtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a threaded-comments backend:\n${cmtWritten.join('\n')}\nAdd the dependencies: ${cmtDeps}\n\n${cmtcfg.instructions}`;
+      }
+
+      case 'generate_messaging': {
+        // Breadth recipe (domain vertical) — direct messaging (server/messaging/): a real MessagingService with
+        // CONVERSATION INTEGRITY (canonical participant pairing, exact unread, monotonic read cursor) + an
+        // Express router. Pure gen in MessagingGenerator.ts.
+        const msgcfg = generateMessagingIntegration();
+        const msgWritten: string[] = [];
+        for (const [path, content] of Object.entries(msgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          msgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('messaging starter');
+        const msgDeps = msgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a direct-messaging backend:\n${msgWritten.join('\n')}\nAdd the dependencies: ${msgDeps}\n\n${msgcfg.instructions}`;
+      }
+
+      case 'generate_listings': {
+        // Breadth recipe (domain vertical) — marketplace listings (server/listings/): a real ListingService with
+        // SALE INTEGRITY (lifecycle draft→active→sold/removed, sell-once, no self-purchase) + an Express router.
+        // Pure gen in ListingsGenerator.ts.
+        const lstcfg = generateListingsIntegration();
+        const lstWritten: string[] = [];
+        for (const [path, content] of Object.entries(lstcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lstWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('listings starter');
+        const lstDeps = lstcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a marketplace-listings backend:\n${lstWritten.join('\n')}\nAdd the dependencies: ${lstDeps}\n\n${lstcfg.instructions}`;
+      }
+
+      case 'generate_job_board': {
+        // Breadth recipe (domain vertical) — job board / applicant tracking (server/jobboard/): a real
+        // JobBoardService with APPLICATION INTEGRITY (apply-once per candidate/job + hiring state-machine) + an
+        // Express router. Pure gen in JobBoardGenerator.ts.
+        const jbcfg = generateJobBoardIntegration();
+        const jbWritten: string[] = [];
+        for (const [path, content] of Object.entries(jbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          jbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('job board starter');
+        const jbDeps = jbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a job-board / applicant-tracking backend:\n${jbWritten.join('\n')}\nAdd the dependencies: ${jbDeps}\n\n${jbcfg.instructions}`;
+      }
+
+      case 'generate_wishlist': {
+        // Breadth recipe (domain vertical) — wishlist / favorites / likes (server/favorites/): a real
+        // FavoritesService with IDEMPOTENT MEMBERSHIP (favorite-once + exact count) + an Express router.
+        // Pure gen in WishlistGenerator.ts.
+        const wlcfg = generateWishlistIntegration();
+        const wlWritten: string[] = [];
+        for (const [path, content] of Object.entries(wlcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('wishlist starter');
+        const wlDeps = wlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a wishlist/favorites backend:\n${wlWritten.join('\n')}\nAdd the dependencies: ${wlDeps}\n\n${wlcfg.instructions}`;
+      }
+
+      case 'generate_addresses': {
+        // Breadth recipe (domain vertical) — address book (server/addresses/): a real AddressBook with the
+        // AT-MOST-ONE-DEFAULT invariant (first=default, setDefault unsets previous, delete-default promotes) +
+        // an Express router. Pure gen in AddressesGenerator.ts.
+        const adcfg = generateAddressesIntegration();
+        const adWritten: string[] = [];
+        for (const [path, content] of Object.entries(adcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          adWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('addresses starter');
+        const adDeps = adcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an address-book backend:\n${adWritten.join('\n')}\nAdd the dependencies: ${adDeps}\n\n${adcfg.instructions}`;
+      }
+
+      case 'generate_coupons': {
+        // Breadth recipe (domain vertical) — coupons / discount codes (server/coupons/): a real CouponService
+        // with REDEMPTION INTEGRITY (total + per-user caps, expiry/active/min-order, percent/fixed discount
+        // math) + an Express router. Pure gen in CouponsGenerator.ts.
+        const cpcfg = generateCouponsIntegration();
+        const cpWritten: string[] = [];
+        for (const [path, content] of Object.entries(cpcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('coupons starter');
+        const cpDeps = cpcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a coupons/discount-codes backend:\n${cpWritten.join('\n')}\nAdd the dependencies: ${cpDeps}\n\n${cpcfg.instructions}`;
+      }
+
+      case 'generate_kanban': {
+        // Breadth recipe (domain vertical) — kanban board (server/kanban/): a real KanbanService with BOARD
+        // INTEGRITY (contiguous card ordering + per-column WIP limit) + an Express router. Pure gen in
+        // KanbanGenerator.ts.
+        const kbcfg = generateKanbanIntegration();
+        const kbWritten: string[] = [];
+        for (const [path, content] of Object.entries(kbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          kbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('kanban starter');
+        const kbDeps = kbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a kanban board backend:\n${kbWritten.join('\n')}\nAdd the dependencies: ${kbDeps}\n\n${kbcfg.instructions}`;
+      }
+
+      case 'generate_timesheet': {
+        // Breadth recipe (domain vertical) — time tracking (server/timesheet/): a real Timesheet with SESSION
+        // INTEGRITY (at most one open entry per user + exact duration) + an Express router. Pure gen in
+        // TimesheetGenerator.ts.
+        const tscfg = generateTimesheetIntegration();
+        const tsWritten: string[] = [];
+        for (const [path, content] of Object.entries(tscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('timesheet starter');
+        const tsDeps = tscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a time-tracking backend:\n${tsWritten.join('\n')}\nAdd the dependencies: ${tsDeps}\n\n${tscfg.instructions}`;
+      }
+
+      case 'generate_leaderboard': {
+        // Breadth recipe (domain vertical) — leaderboard / rankings (server/leaderboard/): a real
+        // LeaderboardService with RANK INTEGRITY (best-kept score + deterministic earlier-achiever tie-break) +
+        // an Express router. Pure gen in LeaderboardGenerator.ts.
+        const lbcfg = generateLeaderboardIntegration();
+        const lbWritten: string[] = [];
+        for (const [path, content] of Object.entries(lbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('leaderboard starter');
+        const lbDeps = lbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a leaderboard backend:\n${lbWritten.join('\n')}\nAdd the dependencies: ${lbDeps}\n\n${lbcfg.instructions}`;
+      }
+
+      case 'generate_waitlist': {
+        // Breadth recipe (domain vertical) — launch waitlist (server/waitlist/): a real Waitlist with QUEUE
+        // INTEGRITY (email dedup + FIFO position + invite-front-N-in-order) + an Express router. Pure gen in
+        // WaitlistGenerator.ts.
+        const wtcfg = generateWaitlistIntegration();
+        const wtWritten: string[] = [];
+        for (const [path, content] of Object.entries(wtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('waitlist starter');
+        const wtDeps = wtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a launch-waitlist backend:\n${wtWritten.join('\n')}\nAdd the dependencies: ${wtDeps}\n\n${wtcfg.instructions}`;
+      }
+
+      case 'generate_tags': {
+        // Breadth recipe (domain vertical) — tags / taxonomy (server/tags/): a real TagService with TAG
+        // INTEGRITY (canonical dedup + idempotent attach + rename-cascade/merge + exact counts) + an Express
+        // router. Pure gen in TagsGenerator.ts.
+        const tgcfg = generateTagsIntegration();
+        const tgWritten: string[] = [];
+        for (const [path, content] of Object.entries(tgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('tags starter');
+        const tgDeps = tgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a tags/taxonomy backend:\n${tgWritten.join('\n')}\nAdd the dependencies: ${tgDeps}\n\n${tgcfg.instructions}`;
+      }
+
+      case 'generate_experiments': {
+        // Breadth recipe (domain vertical) — A/B testing (server/experiments/): a real ExperimentService with
+        // DETERMINISTIC STICKY ASSIGNMENT (pure hash bucketing + weighted variants + exposure counts) + an
+        // Express router. Pure gen in ExperimentsGenerator.ts.
+        const excfg = generateExperimentsIntegration();
+        const exWritten: string[] = [];
+        for (const [path, content] of Object.entries(excfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          exWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('experiments starter');
+        const exDeps = excfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an A/B testing backend:\n${exWritten.join('\n')}\nAdd the dependencies: ${exDeps}\n\n${excfg.instructions}`;
+      }
+
+      case 'generate_short_links': {
+        // Breadth recipe (domain vertical) — URL shortener (server/shortlinks/): a real ShortLinkService with
+        // LINK INTEGRITY (unique codes + exact click counts + expiry/disable) + an Express router. Pure gen in
+        // ShortLinksGenerator.ts.
+        const slcfg = generateShortLinksIntegration();
+        const slWritten: string[] = [];
+        for (const [path, content] of Object.entries(slcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          slWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('short links starter');
+        const slDeps = slcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a URL-shortener backend:\n${slWritten.join('\n')}\nAdd the dependencies: ${slDeps}\n\n${slcfg.instructions}`;
+      }
+
+      case 'generate_feedback': {
+        // Breadth recipe (domain vertical) — feedback / feature-request board (server/feedback/): a real
+        // FeedbackService with VOTE + STATUS INTEGRITY (upvote-once + exact counts + status lifecycle) + an
+        // Express router. Pure gen in FeedbackGenerator.ts.
+        const fbcfg = generateFeedbackIntegration();
+        const fbWritten: string[] = [];
+        for (const [path, content] of Object.entries(fbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('feedback starter');
+        const fbDeps = fbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a feedback board backend:\n${fbWritten.join('\n')}\nAdd the dependencies: ${fbDeps}\n\n${fbcfg.instructions}`;
+      }
+
+      case 'generate_consent': {
+        // Breadth recipe (domain vertical) — GDPR consent log (server/consent/): a real ConsentService with an
+        // APPEND-ONLY event log where hasConsent() is the most-recent grant/withdraw (latest wins) + an Express
+        // router. Pure generator in ConsentGenerator.ts.
+        const cscfg = generateConsentIntegration();
+        const csWritten: string[] = [];
+        for (const [path, content] of Object.entries(cscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('consent starter');
+        const csDeps = cscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a GDPR consent-log backend:\n${csWritten.join('\n')}\nAdd the dependencies: ${csDeps}\n\n${cscfg.instructions}`;
+      }
+
+      case 'generate_activity_feed': {
+        // Breadth recipe (domain vertical) — activity feed / timeline (server/activity/): a real
+        // ActivityFeedService whose core guarantee is STABLE CURSOR PAGINATION (monotonic event ids paged by
+        // id < cursor never duplicate or skip as new events append) + an Express router. Pure gen in
+        // ActivityFeedGenerator.ts.
+        const afcfg = generateActivityFeedIntegration();
+        const afWritten: string[] = [];
+        for (const [path, content] of Object.entries(afcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          afWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('activity feed starter');
+        const afDeps = afcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an activity-feed backend:\n${afWritten.join('\n')}\nAdd the dependencies: ${afDeps}\n\n${afcfg.instructions}`;
+      }
+
+      case 'generate_cart': {
+        // Breadth recipe (domain vertical) — shopping cart (server/cart/): a real CartService whose core
+        // guarantee is CART INTEGRITY (adding the same product MERGES quantities into one line, and the total
+        // is the EXACT sum of unitPrice×qty in integer minor units) + an Express router. Pure gen in
+        // CartGenerator.ts.
+        const crtcfg = generateCartIntegration();
+        const crtWritten: string[] = [];
+        for (const [path, content] of Object.entries(crtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          crtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cart starter');
+        const crtDeps = crtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a shopping-cart backend:\n${crtWritten.join('\n')}\nAdd the dependencies: ${crtDeps}\n\n${crtcfg.instructions}`;
+      }
+
+      case 'generate_reactions': {
+        // Breadth recipe (domain vertical) — emoji reactions (server/reactions/): a real ReactionService whose
+        // core guarantee is REACTION INTEGRITY (an idempotent per-user toggle, at most one emoji per target, so
+        // per-emoji counts stay exact) + an Express router. Pure gen in ReactionsGenerator.ts.
+        const rxcfg = generateReactionsIntegration();
+        const rxWritten: string[] = [];
+        for (const [path, content] of Object.entries(rxcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rxWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('reactions starter');
+        const rxDeps = rxcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an emoji-reactions backend:\n${rxWritten.join('\n')}\nAdd the dependencies: ${rxDeps}\n\n${rxcfg.instructions}`;
+      }
+
+      case 'generate_orders': {
+        // Breadth recipe (domain vertical) — ecommerce order lifecycle (server/orders/): a real OrderService
+        // whose core guarantee is ORDER IMMUTABILITY (a placed order snapshots its items + total; later price
+        // changes can't alter it) + a status STATE-MACHINE (placed→paid→shipped→delivered; cancel until ship) +
+        // an Express router. Pure gen in OrdersGenerator.ts.
+        const orcfg = generateOrdersIntegration();
+        const orWritten: string[] = [];
+        for (const [path, content] of Object.entries(orcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          orWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('orders starter');
+        const orDeps = orcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an ecommerce orders backend:\n${orWritten.join('\n')}\nAdd the dependencies: ${orDeps}\n\n${orcfg.instructions}`;
+      }
+
+      case 'generate_faq': {
+        // Breadth recipe (domain vertical) — FAQ / knowledge base (server/faq/): a real FaqService whose core
+        // guarantee is the PUBLISH GATE (a draft entry is never returned by the public list/search) + helpfulness
+        // voting + category/keyword search + an Express router. Pure gen in FaqGenerator.ts.
+        const fqcfg = generateFaqIntegration();
+        const fqWritten: string[] = [];
+        for (const [path, content] of Object.entries(fqcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fqWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('faq starter');
+        const fqDeps = fqcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a FAQ / knowledge-base backend:\n${fqWritten.join('\n')}\nAdd the dependencies: ${fqDeps}\n\n${fqcfg.instructions}`;
+      }
+
+      case 'generate_quiz': {
+        // Breadth recipe (domain vertical) — quiz / assessment (server/quizzes/): a real QuizService whose core
+        // guarantee is GRADING INTEGRITY (a submission is scored against the stored key into an EXACT score +
+        // pass/fail, and the correct-answer key is never exposed to the taker) + an Express router. Pure gen in
+        // QuizGenerator.ts.
+        const qzcfg = generateQuizIntegration();
+        const qzWritten: string[] = [];
+        for (const [path, content] of Object.entries(qzcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          qzWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('quiz starter');
+        const qzDeps = qzcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a quiz / assessment backend:\n${qzWritten.join('\n')}\nAdd the dependencies: ${qzDeps}\n\n${qzcfg.instructions}`;
+      }
+
+      case 'generate_availability': {
+        // Breadth recipe (domain vertical) — availability / opening hours (server/availability/): a real
+        // AvailabilityService whose core guarantee is CORRECT OPEN/CLOSED RESOLUTION (weekly windows + date
+        // exceptions + OVERNIGHT spans that cross midnight) + an Express router. Pure gen in
+        // AvailabilityGenerator.ts.
+        const avcfg = generateAvailabilityIntegration();
+        const avWritten: string[] = [];
+        for (const [path, content] of Object.entries(avcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          avWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('availability starter');
+        const avDeps = avcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an opening-hours backend:\n${avWritten.join('\n')}\nAdd the dependencies: ${avDeps}\n\n${avcfg.instructions}`;
+      }
+
+      case 'generate_announcements': {
+        // Breadth recipe (domain vertical) — site announcements/banners (server/announcements/): a real
+        // AnnouncementService whose core guarantee is SCHEDULED VISIBILITY + DISMISS-ONCE (a banner is active
+        // only inside its [startsAt,endsAt] window, and a user who dismisses it never sees it again) + an
+        // Express router. Pure gen in AnnouncementsGenerator.ts.
+        const ancfg = generateAnnouncementsIntegration();
+        const anWritten: string[] = [];
+        for (const [path, content] of Object.entries(ancfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          anWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('announcements starter');
+        const anDeps = ancfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a site-announcements backend:\n${anWritten.join('\n')}\nAdd the dependencies: ${anDeps}\n\n${ancfg.instructions}`;
+      }
+
+      case 'generate_collections': {
+        // Breadth recipe (domain vertical) — saved collections/boards (server/collections/): a real
+        // CollectionService whose core guarantee is MEMBERSHIP INTEGRITY (an item lives in many collections,
+        // idempotent saves, removing from one never affects the others) + an Express router. Pure gen in
+        // CollectionsGenerator.ts.
+        const clcfg = generateCollectionsIntegration();
+        const clWritten: string[] = [];
+        for (const [path, content] of Object.entries(clcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          clWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('collections starter');
+        const clDeps = clcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a saved-collections backend:\n${clWritten.join('\n')}\nAdd the dependencies: ${clDeps}\n\n${clcfg.instructions}`;
+      }
+
+      case 'generate_contact_form': {
+        // Breadth recipe (domain vertical) — contact form (server/contact/): a real ContactService whose core
+        // guarantee is VALIDATED CAPTURE + SPAM REJECTION (name/email/message validated, a filled honeypot is
+        // dropped as spam, accepted messages have a new→read→archived lifecycle) + an Express router. Pure gen
+        // in ContactFormGenerator.ts.
+        const cfcfg = generateContactFormIntegration();
+        const cfWritten: string[] = [];
+        for (const [path, content] of Object.entries(cfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('contact form starter');
+        const cfDeps = cfcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a contact-form backend:\n${cfWritten.join('\n')}\nAdd the dependencies: ${cfDeps}\n\n${cfcfg.instructions}`;
+      }
+
+      case 'generate_pageviews': {
+        // Breadth recipe (domain vertical) — self-hosted page-view counter (server/pageviews/): a real
+        // PageViewService whose core guarantee is UNIQUE-VISITOR DEDUP (total counts every hit; a salted-hash
+        // visitor counts unique only once per day; raw IP never stored) + an Express router. Pure gen in
+        // PageViewsGenerator.ts.
+        const pvcfg = generatePageViewsIntegration();
+        const pvWritten: string[] = [];
+        for (const [path, content] of Object.entries(pvcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pvWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pageviews starter');
+        const pvDeps = pvcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a self-hosted page-view counter:\n${pvWritten.join('\n')}\nAdd the dependencies: ${pvDeps}\n\n${pvcfg.instructions}`;
+      }
+
+      case 'generate_gift_cards': {
+        // Breadth recipe (domain vertical) — gift cards / store credit (server/giftcards/): a real
+        // GiftCardService whose core guarantee is BALANCE INTEGRITY (a monetary balance in integer minor units;
+        // redeem debits atomically and can never overdraw; exact remainder) + an Express router. Pure gen in
+        // GiftCardsGenerator.ts.
+        const gccfg = generateGiftCardsIntegration();
+        const gcWritten: string[] = [];
+        for (const [path, content] of Object.entries(gccfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('gift cards starter');
+        const gcDeps = gccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a gift-card / store-credit backend:\n${gcWritten.join('\n')}\nAdd the dependencies: ${gcDeps}\n\n${gccfg.instructions}`;
+      }
+
+      case 'generate_teams': {
+        // Breadth recipe (domain vertical) — teams / workspaces (server/teams/): a real TeamService whose core
+        // guarantee is MEMBERSHIP INTEGRITY (multi-workspace membership with per-workspace roles, single-use
+        // invites, a workspace always keeps at least one owner) + an Express router. Pure gen in TeamsGenerator.ts.
+        const tmcfg = generateTeamsIntegration();
+        const tmWritten: string[] = [];
+        for (const [path, content] of Object.entries(tmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('teams starter');
+        const tmDeps = tmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a teams / workspaces backend:\n${tmWritten.join('\n')}\nAdd the dependencies: ${tmDeps}\n\n${tmcfg.instructions}`;
+      }
+
+      case 'generate_status_page': {
+        // Breadth recipe (domain vertical) — public status page (server/status/): a real StatusPageService whose
+        // core guarantee is DERIVED OVERALL STATUS (worst component status) + an APPEND-ONLY INCIDENT TIMELINE
+        // (a resolved incident can't be updated) + an Express router. Pure gen in StatusPageGenerator.ts.
+        const spcfg = generateStatusPageIntegration();
+        const spWritten: string[] = [];
+        for (const [path, content] of Object.entries(spcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          spWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('status page starter');
+        const spDeps = spcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a public status-page backend:\n${spWritten.join('\n')}\nAdd the dependencies: ${spDeps}\n\n${spcfg.instructions}`;
+      }
+
+      case 'generate_survey': {
+        // Breadth recipe (domain vertical) — multi-question survey (server/surveys/): a real SurveyService whose
+        // core guarantee is SCHEMA-VALIDATED RESPONSES + EXACT AGGREGATION (typed questions, invalid responses
+        // rejected, per-question tallies) + an Express router. Pure gen in SurveyGenerator.ts.
+        const svcfg = generateSurveyIntegration();
+        const svWritten: string[] = [];
+        for (const [path, content] of Object.entries(svcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          svWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('survey starter');
+        const svDeps = svcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a survey backend:\n${svWritten.join('\n')}\nAdd the dependencies: ${svDeps}\n\n${svcfg.instructions}`;
+      }
+
+      case 'generate_support_tickets': {
+        // Breadth recipe (domain vertical) — support tickets/helpdesk (server/tickets/): a real TicketService
+        // with a status STATE-MACHINE + an Express router. Pure generator in SupportTicketGenerator.ts.
+        const tkcfg = generateSupportTicketIntegration();
+        const tkWritten: string[] = [];
+        for (const [path, content] of Object.entries(tkcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('support tickets');
+        const tkDeps = tkcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a support-ticket backend:\n${tkWritten.join('\n')}\nAdd the dependencies: ${tkDeps}\n\n${tkcfg.instructions}`;
+      }
+
+      case 'generate_graphql': {
+        // Roadmap BUILD-NOW #8 — a real runnable GraphQL API (graphql + graphql-yoga): schema + mountable
+        // yoga handler with an example Query/Mutation. Pure generator in GraphqlGenerator.ts. No env keys.
+        const gql = generateGraphqlIntegration();
+        const gqlWritten: string[] = [];
+        for (const [path, content] of Object.entries(gql.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gqlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('graphql api');
+        const gqlDeps = gql.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a GraphQL API:\n${gqlWritten.join('\n')}\nAdd the dependencies: ${gqlDeps}\n\n${gql.instructions}`;
+      }
+
+      case 'generate_pagination': {
+        // U-4 recipe — safe list pagination (server/lib/pagination.ts): parsePagination (clamps limit/page,
+        // DoS-safe) + pageMeta. Dependency-free. Pure generator in PaginationGenerator.ts. No env keys.
+        const pgcfg = generatePaginationIntegration();
+        const pgWritten: string[] = [];
+        for (const [path, content] of Object.entries(pgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pagination');
+        return `Wired list pagination:\n${pgWritten.join('\n')}\n(No npm dependency needed — plain query clamping + page math.)\n\n${pgcfg.instructions}`;
+      }
+
+      case 'generate_rbac': {
+        // T1.3 recipe — a dependency-free RBAC layer (Role hierarchy + hasRole + requireRole guard).
+        // Pure generator in RbacGenerator.ts; pairs with generate_auth (sets req.user.role) + generate_crud.
+        const rbacRec = (input as Record<string, unknown>) || {};
+        const rbacRoles = Array.isArray(rbacRec.roles) ? rbacRec.roles.filter((r): r is string => typeof r === 'string') : [];
+        if (rbacRoles.length === 0) return 'generate_rbac: pass roles as a non-empty array, highest → lowest (e.g. ["admin","editor","viewer"]).';
+        const rbac = generateRbac(rbacRoles);
+        const rbacWritten: string[] = [];
+        for (const [path, content] of Object.entries(rbac.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rbacWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('rbac');
+        return `Wired RBAC:\n${rbacWritten.join('\n')}\n\n${rbac.instructions}`;
+      }
+
+      case 'generate_ids': {
+        // U-4 recipe — secure IDs/tokens (server/lib/ids.ts): newId (UUID v4) + shortId + secureToken +
+        // hashToken via node:crypto CSPRNG. Dependency-free. Pure generator in IdGenerator.ts. No env keys.
+        const idcfg = generateIdIntegration();
+        const idWritten: string[] = [];
+        for (const [path, content] of Object.entries(idcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          idWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('secure ids');
+        return `Wired secure IDs/tokens:\n${idWritten.join('\n')}\n(No npm dependency needed — node:crypto CSPRNG.)\n\n${idcfg.instructions}`;
+      }
+
+      case 'generate_admin': {
+        // T1.3 recipe — a React admin page (paginated table + delete) bound to generate_crud's endpoints.
+        // Pure generator in AdminGenerator.ts; guard the route with generate_rbac's requireRole('admin').
+        const adminRec = (input as Record<string, unknown>) || {};
+        const adminName = typeof adminRec.name === 'string' ? adminRec.name : '';
+        if (!adminName) return 'generate_admin: pass the resource "name" (e.g. "Post") and its "fields".';
+        const adminRawFields = Array.isArray(adminRec.fields) ? adminRec.fields : [];
+        const adminFields = adminRawFields
+          .map((f: unknown) => {
+            if (typeof f !== 'object' || f === null) return null;
+            const fo = f as Record<string, unknown>;
+            const fname = typeof fo.name === 'string' ? fo.name : '';
+            return fname ? { name: fname, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+          })
+          .filter((f): f is { name: string; type: string | undefined } => f !== null);
+        const admin = generateAdmin({ name: adminName, fields: adminFields });
+        const adminWritten: string[] = [];
+        for (const [path, content] of Object.entries(admin.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          adminWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`admin (${adminName})`);
+        return `Wired an admin page for ${adminName}:\n${adminWritten.join('\n')}\n\n${admin.instructions}`;
+      }
+
+      case 'generate_settings': {
+        // Roadmap BUILD-NOW #10 (other half) — a settings scaffold (dependency-free React): a persisted
+        // SettingsProvider that APPLIES the theme + a SettingsPage. Pure generator in SettingsScaffoldGenerator.ts.
+        const st = generateSettingsScaffoldIntegration();
+        const stWritten: string[] = [];
+        for (const [path, content] of Object.entries(st.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          stWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('settings scaffold');
+        return `Wired a settings scaffold:\n${stWritten.join('\n')}\n(No npm dependency — React Context + localStorage; applies the theme.)\n\n${st.instructions}`;
+      }
+
+      case 'generate_dashboard': {
+        // T1.3 recipe — a stats dashboard (GET /api/dashboard/stats aggregation + React tiles page).
+        // Pure generator in DashboardGenerator.ts; reuses generate_crud's prisma client + error handler.
+        const dashRec = (input as Record<string, unknown>) || {};
+        const dashModels = Array.isArray(dashRec.models) ? dashRec.models.filter((m): m is string => typeof m === 'string') : [];
+        if (dashModels.length === 0) return 'generate_dashboard: pass models as a non-empty array (e.g. ["Post","User"]).';
+        const dash = generateDashboard(dashModels);
+        const dashWritten: string[] = [];
+        for (const [path, content] of Object.entries(dash.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dashWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('dashboard');
+        return `Wired a dashboard:\n${dashWritten.join('\n')}\n\n${dash.instructions}`;
+      }
+
+      case 'generate_backup': {
+        // T1.3 recipe — a JSON data-export ("backup") endpoint. Pure generator in BackupGenerator.ts;
+        // reuses generate_crud's prisma client + error handler. Guard with generate_rbac's requireRole('admin').
+        const bkRec = (input as Record<string, unknown>) || {};
+        const bkModels = Array.isArray(bkRec.models) ? bkRec.models.filter((m): m is string => typeof m === 'string') : [];
+        if (bkModels.length === 0) return 'generate_backup: pass models as a non-empty array (e.g. ["Post","User"]).';
+        const bk = generateBackup(bkModels);
+        const bkWritten: string[] = [];
+        for (const [path, content] of Object.entries(bk.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          bkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('backup');
+        return `Wired a backup endpoint:\n${bkWritten.join('\n')}\n\n${bk.instructions}`;
+      }
+
+      case 'analyze_requirements': {
+        // T1.4 (safe slice) — surface the likely domain, commonly-missing features, non-functional signals
+        // and clarifying questions for a prompt. Pure analyzer in RequirementGapAnalyzer.ts; no file writes.
+        const arRec = (input as Record<string, unknown>) || {};
+        const arPrompt = typeof arRec.prompt === 'string' ? arRec.prompt : '';
+        if (!arPrompt.trim()) return 'analyze_requirements: pass the "prompt" to analyze.';
+        return renderRequirementGaps(analyzeRequirementGaps(arPrompt));
+      }
+
+      case 'generate_i18n': {
+        // T2.5 recipe — real react-i18next infrastructure (init + per-language locale files + a language
+        // switch hook). Pure generator in I18nGenerator.ts. English is always kept as the fallback.
+        const i18nRec = (input as Record<string, unknown>) || {};
+        const i18nLangs = Array.isArray(i18nRec.languages) ? i18nRec.languages.filter((l): l is string => typeof l === 'string') : [];
+        const i18nCfg = generateI18n(i18nLangs);
+        const i18nWritten: string[] = [];
+        for (const [path, content] of Object.entries(i18nCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          i18nWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('i18n');
+        const i18nDeps = i18nCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired i18n:\n${i18nWritten.join('\n')}\nAdd the dependencies: ${i18nDeps}\n\n${i18nCfg.instructions}`;
+      }
+
+      case 'generate_ui_states': {
+        // T2.5 recipe — a dependency-free React UI-states pack (spinner/skeleton/empty/error-boundary +
+        // useAsync + useOptimisticList). Pure generator in UiStatesGenerator.ts.
+        const uiRec = (input as Record<string, unknown>) || {};
+        const uiInclude = Array.isArray(uiRec.include) ? uiRec.include.filter((s): s is string => typeof s === 'string') : undefined;
+        const ui = generateUiStates(uiInclude);
+        const uiWritten: string[] = [];
+        for (const [path, content] of Object.entries(ui.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          uiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ui-states');
+        return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'generate_state': {
+        // Roadmap BUILD-NOW #9 — GLOBAL state management (Zustand store + selector hooks). Distinct from
+        // generate_ui_states' LOCAL useOptimisticList. Pure generator in FrontendStateGenerator.ts. No env keys.
+        const fs = generateFrontendStateIntegration();
+        const fsWritten: string[] = [];
+        for (const [path, content] of Object.entries(fs.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('global state store');
+        const fsDeps = fs.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired global state management:\n${fsWritten.join('\n')}\nAdd the dependency: ${fsDeps}\n\n${fs.instructions}`;
+      }
+
+      case 'generate_image_optimization': {
+        // T2.6 recipe — a sharp server helper + a CLS-safe lazy <img>. Pure generator in ImageOptGenerator.ts.
+        const io = generateImageOptimization();
+        const ioWritten: string[] = [];
+        for (const [path, content] of Object.entries(io.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ioWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('image-optimization');
+        const ioDeps = io.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired image optimization:\n${ioWritten.join('\n')}\nAdd the dependencies: ${ioDeps}\n\n${io.instructions}`;
+      }
+
+      case 'generate_sso': {
+        // T2.7 recipe — real OIDC SSO (any provider). Pure generator in SsoGenerator.ts. BYO credentials;
+        // never overwrites an existing .env.example.
+        const sso = generateSsoIntegration();
+        const ssoWritten: string[] = [];
+        for (const [path, content] of Object.entries(sso.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); ssoWritten.push(`Kept existing ${path} (add: ${sso.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ssoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('sso');
+        const ssoDeps = sso.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired OIDC SSO:\n${ssoWritten.join('\n')}\nAdd the dependencies: ${ssoDeps}\n\n${sso.instructions}`;
+      }
+
+      case 'generate_abac': {
+        // T2.7 recipe — attribute-based access control (policy registry + authorize guard). Pure generator.
+        const abac = generateAbac();
+        const abacWritten: string[] = [];
+        for (const [path, content] of Object.entries(abac.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          abacWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('abac');
+        return `Wired ABAC:\n${abacWritten.join('\n')}\n\n${abac.instructions}`;
+      }
+
+      case 'generate_metrics': {
+        // T2.8 recipe — Prometheus metrics (registry + request middleware + /metrics route). Pure generator.
+        const met = generateMetrics();
+        const metWritten: string[] = [];
+        for (const [path, content] of Object.entries(met.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          metWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('metrics');
+        const metDeps = met.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired Prometheus metrics:\n${metWritten.join('\n')}\nAdd the dependencies: ${metDeps}\n\n${met.instructions}`;
+      }
+
+      case 'generate_tracing': {
+        // T2.8 recipe — OpenTelemetry distributed tracing (NodeSDK + auto-instrumentation + OTLP). Pure
+        // generator in TracingGenerator.ts. BYO collector endpoint; never overwrites an existing .env.example.
+        const trc = generateTracing();
+        const trcWritten: string[] = [];
+        for (const [path, content] of Object.entries(trc.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); trcWritten.push(`Kept existing ${path} (add: ${trc.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          trcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('tracing');
+        const trcDeps = trc.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired OpenTelemetry tracing:\n${trcWritten.join('\n')}\nAdd the dependencies: ${trcDeps}\n\n${trc.instructions}`;
+      }
+
       case 'generate_deploy_artifacts': {
         const rec = (input as Record<string, unknown>) || {};
         const includeRaw = Array.isArray(rec.include) ? rec.include.filter((x): x is string => typeof x === 'string') : [];
@@ -2623,12 +5091,31 @@ export class ToolDispatcher {
         return `Generated ${written.length} deployment artifact(s):\n${written.join('\n')}`;
       }
 
+      case 'generate_deploy_config': {
+        // Roadmap BUILD-NOW #7 — platform deploy config for a git-push PaaS (Railway/Render/Fly). Pure
+        // generator in DeployConfigGenerator.ts; emits the one config file the target needs. No env keys.
+        const dcTarget = optStr(input, 'target');
+        if (!isDeployTarget(dcTarget)) return 'generate_deploy_config: pass target = "railway" | "render" | "fly".';
+        const dc = generateDeployConfig(dcTarget);
+        const dcWritten: string[] = [];
+        for (const [path, content] of Object.entries(dc.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`deploy config (${dcTarget})`);
+        return `Wired ${dcTarget} deploy config:\n${dcWritten.join('\n')}\n\n${dc.instructions}`;
+      }
+
       case 'generate_iac': {
         // GA-15 — Infrastructure-as-Code: real Kubernetes manifests + a Helm chart + Cloud Run Terraform,
         // generated deterministically from the app's image/port/env. Pure builders in IaCGenerator.ts.
         const rec = (input as Record<string, unknown>) || {};
         const includeRaw = Array.isArray(rec.include) ? rec.include.filter((x): x is string => typeof x === 'string') : [];
-        const include = new Set(includeRaw.length ? includeRaw : ['k8s', 'helm', 'terraform']);
+        const include = new Set(includeRaw.length ? includeRaw : ['k8s', 'helm', 'terraform', 'ansible']);
         const port = typeof rec.port === 'number' && rec.port > 0 ? rec.port : undefined;
         const replicas = typeof rec.replicas === 'number' && rec.replicas > 0 ? rec.replicas : undefined;
         const env = Array.isArray(rec.env) ? rec.env.filter((x): x is string => typeof x === 'string') : undefined;
@@ -2643,8 +5130,9 @@ export class ToolDispatcher {
         if (include.has('k8s')) all['k8s/manifests.yaml'] = generateK8sManifests(iacOpts);
         if (include.has('helm')) Object.assign(all, generateHelmChart(iacOpts));
         if (include.has('terraform')) Object.assign(all, generateTerraformCloudRun(iacOpts));
+        if (include.has('ansible')) Object.assign(all, generateAnsiblePlaybook(iacOpts));
         const iacPaths = Object.keys(all);
-        if (iacPaths.length === 0) return 'generate_iac: nothing to write — pass include: ["k8s","helm","terraform"].';
+        if (iacPaths.length === 0) return 'generate_iac: nothing to write — pass include: ["k8s","helm","terraform","ansible"].';
         const iacWritten: string[] = [];
         for (const p of iacPaths) {
           let kind: 'create' | 'modify' = 'create';
@@ -2893,6 +5381,1029 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('search integration');
         const scDeps = sccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${scProvider} search:\n${scWritten.join('\n')}\nAdd the dependencies: ${scDeps}\n\n${sccfg.instructions}`;
+      }
+
+      case 'generate_otp': {
+        // U-4 recipe — real BYO phone-OTP verification (MSG91 India-first / Twilio Verify): a server route that
+        // sends + verifies the OTP server-side + a client sendOtp/verifyOtp helper. Pure generator in
+        // OtpGenerator.ts. MSG91 uses global fetch (no dependency); Twilio needs the `twilio` package.
+        const oProvider = optStr(input, 'provider');
+        if (!isOtpProvider(oProvider)) return 'generate_otp: pass provider = "msg91" | "twilio".';
+        const ocfg = generateOtpIntegration(oProvider);
+        const otpWritten: string[] = [];
+        for (const [path, content] of Object.entries(ocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); otpWritten.push(`Kept existing ${path} (add: ${ocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          otpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('otp integration');
+        const otpDepLine = ocfg.dependency ? `\nAdd the dependency: ${ocfg.dependency.name}@${ocfg.dependency.version}` : '\n(No npm dependency needed — MSG91 v5 is called with the built-in fetch.)';
+        return `Wired ${oProvider} phone-OTP:\n${otpWritten.join('\n')}${otpDepLine}\n\n${ocfg.instructions}`;
+      }
+
+      case 'generate_totp': {
+        // Breadth recipe — RFC 6238 authenticator-app 2FA (server/lib/totp.ts): dependency-free node:crypto
+        // secret + otpauth:// URI + constant-time verify with drift window. Distinct from generate_otp (SMS).
+        // Pure generator in TotpGenerator.ts. No env keys.
+        const totp = generateTotpIntegration();
+        const totpWritten: string[] = [];
+        for (const [path, content] of Object.entries(totp.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          totpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('totp 2fa');
+        return `Wired authenticator-app 2FA (TOTP):\n${totpWritten.join('\n')}\n(No npm dependency needed — RFC 6238 via node:crypto.)\n\n${totp.instructions}`;
+      }
+
+      case 'generate_indian_validators': {
+        // U-4 recipe — Indian identity/format validators (server/lib/indianValidators.ts): PAN/GSTIN/Aadhaar/
+        // IFSC/PIN/UPI/mobile, with the REAL GSTIN mod-36 + Aadhaar Verhoeff checksums. Dependency-free.
+        const ivcfg = generateIndianValidatorsIntegration();
+        const ivWritten: string[] = [];
+        for (const [path, content] of Object.entries(ivcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ivWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('indian validators');
+        return `Wired Indian validators:\n${ivWritten.join('\n')}\n(No npm dependency needed — real GSTIN/Aadhaar checksums.)\n\n${ivcfg.instructions}`;
+      }
+
+      case 'generate_analytics': {
+        // U-4 recipe — real BYO product analytics (PostHog/Mixpanel): a server capture helper (private key) +
+        // a client init/track/identify helper (public key). Pure generator in AnalyticsGenerator.ts.
+        const anProvider = optStr(input, 'provider');
+        if (!isAnalyticsProvider(anProvider)) return 'generate_analytics: pass provider = "posthog" | "mixpanel".';
+        const ancfg = generateAnalyticsIntegration(anProvider);
+        const anWritten: string[] = [];
+        for (const [path, content] of Object.entries(ancfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); anWritten.push(`Kept existing ${path} (add: ${ancfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          anWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('analytics integration');
+        const anDeps = ancfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${anProvider} analytics:\n${anWritten.join('\n')}\nAdd the dependencies: ${anDeps}\n\n${ancfg.instructions}`;
+      }
+
+      case 'generate_map': {
+        // U-4 recipe — real BYO interactive maps (Google Maps/Mapbox): a client createMap/addMarker helper
+        // using the PUBLIC browser map key. Pure generator in MapGenerator.ts.
+        const mpProvider = optStr(input, 'provider');
+        if (!isMapProvider(mpProvider)) return 'generate_map: pass provider = "googlemaps" | "mapbox".';
+        const mpcfg = generateMapIntegration(mpProvider);
+        const mpWritten: string[] = [];
+        for (const [path, content] of Object.entries(mpcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); mpWritten.push(`Kept existing ${path} (add: ${mpcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('map integration');
+        const mpDeps = mpcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${mpProvider} maps:\n${mpWritten.join('\n')}\nAdd the dependencies: ${mpDeps}\n\n${mpcfg.instructions}`;
+      }
+
+      case 'generate_jobs': {
+        // U-4 recipe — real BYO background jobs / task queue (BullMQ over Redis / pg-boss over Postgres): a
+        // server enqueueJob + processJobs helper. Pure generator in JobsGenerator.ts.
+        const jbProvider = optStr(input, 'provider');
+        if (!isJobsProvider(jbProvider)) return 'generate_jobs: pass provider = "bullmq" | "pgboss".';
+        const jbcfg = generateJobsIntegration(jbProvider);
+        const jbWritten: string[] = [];
+        for (const [path, content] of Object.entries(jbcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); jbWritten.push(`Kept existing ${path} (add: ${jbcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          jbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('jobs integration');
+        const jbDeps = jbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${jbProvider} background jobs:\n${jbWritten.join('\n')}\nAdd the dependencies: ${jbDeps}\n\n${jbcfg.instructions}`;
+      }
+
+      case 'generate_scheduler': {
+        // U-4 recipe — dependency-free in-process job scheduler (server/lib/scheduler.ts): scheduleEvery +
+        // scheduleDailyUtc (drift-free, error-isolated). Distinct from generate_jobs (queue). Pure generator
+        // in SchedulerGenerator.ts. No env keys.
+        const schcfg = generateSchedulerIntegration();
+        const schWritten: string[] = [];
+        for (const [path, content] of Object.entries(schcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          schWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('scheduler');
+        return `Wired job scheduler:\n${schWritten.join('\n')}\n(No npm dependency needed — native timers.)\n\n${schcfg.instructions}`;
+      }
+
+      case 'generate_sms': {
+        // U-4 recipe — real BYO transactional SMS (Twilio/Vonage): a server sendSms(to, body) helper. Distinct
+        // from generate_otp (login/verification). Pure generator in SmsGenerator.ts.
+        const smProvider = optStr(input, 'provider');
+        if (!isSmsProvider(smProvider)) return 'generate_sms: pass provider = "twilio" | "vonage".';
+        const smcfg = generateSmsIntegration(smProvider);
+        const smWritten: string[] = [];
+        for (const [path, content] of Object.entries(smcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); smWritten.push(`Kept existing ${path} (add: ${smcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          smWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('sms integration');
+        return `Wired ${smProvider} transactional SMS:\n${smWritten.join('\n')}\nAdd the dependency: ${smcfg.dependency.name}@${smcfg.dependency.version}\n\n${smcfg.instructions}`;
+      }
+
+      case 'generate_password': {
+        // U-4 recipe — secure password hashing (bcryptjs): hashPassword + verifyPassword + needsRehash
+        // (server/lib/password.ts). Complements generate_auth (session AFTER verify). Pure generator in
+        // PasswordGenerator.ts. No env keys.
+        const pwcfg = generatePasswordIntegration();
+        const pwWritten: string[] = [];
+        for (const [path, content] of Object.entries(pwcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pwWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('password hashing');
+        return `Wired password hashing:\n${pwWritten.join('\n')}\nAdd the dependency: ${pwcfg.dependency.name}@${pwcfg.dependency.version}\n\n${pwcfg.instructions}`;
+      }
+
+      case 'generate_ratelimit': {
+        // U-4 recipe — real API rate limiting (express-rate-limit) with a "memory" (single instance) or
+        // "redis" (distributed) store. Pure generator in RateLimitGenerator.ts.
+        const rlStore = optStr(input, 'store');
+        if (!isRateLimitStore(rlStore)) return 'generate_ratelimit: pass store = "memory" | "redis".';
+        const rlcfg = generateRateLimitIntegration(rlStore);
+        const rlWritten: string[] = [];
+        for (const [path, content] of Object.entries(rlcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); rlWritten.push(`Kept existing ${path} (add: ${rlcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('rate-limit integration');
+        const rlDeps = rlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${rlStore}-store API rate limiting:\n${rlWritten.join('\n')}\nAdd the dependencies: ${rlDeps}\n\n${rlcfg.instructions}`;
+      }
+
+      case 'generate_api_versioning': {
+        // Breadth recipe — API versioning middleware (server/lib/apiVersion.ts): resolves the requested
+        // version from X-API-Version/Accept-Version, validates against the supported list (406 when unknown),
+        // defaults + echoes it. Dependency-free. Pure generator in ApiVersionGenerator.ts. No env keys.
+        const avcfg = generateApiVersionIntegration();
+        const avWritten: string[] = [];
+        for (const [path, content] of Object.entries(avcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          avWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('api versioning');
+        return `Wired API versioning:\n${avWritten.join('\n')}\n(No npm dependency needed — plain Express middleware.)\n\n${avcfg.instructions}`;
+      }
+
+      case 'generate_error_tracking': {
+        // U-4 recipe — real BYO error/exception tracking (Sentry/Rollbar): a server + client init +
+        // captureError helper. Pure generator in ErrorTrackingGenerator.ts.
+        const etProvider = optStr(input, 'provider');
+        if (!isErrorTrackingProvider(etProvider)) return 'generate_error_tracking: pass provider = "sentry" | "rollbar".';
+        const etcfg = generateErrorTrackingIntegration(etProvider);
+        const etWritten: string[] = [];
+        for (const [path, content] of Object.entries(etcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); etWritten.push(`Kept existing ${path} (add: ${etcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          etWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('error-tracking integration');
+        const etDeps = etcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${etProvider} error tracking:\n${etWritten.join('\n')}\nAdd the dependencies: ${etDeps}\n\n${etcfg.instructions}`;
+      }
+
+      case 'generate_feature_flags': {
+        // U-4 recipe — real BYO server-side feature flags (LaunchDarkly/Unleash): a per-user
+        // isFeatureEnabled(flag, userKey) helper for gradual rollouts / A-B / kill switches. Pure generator
+        // in FeatureFlagGenerator.ts.
+        const ffProvider = optStr(input, 'provider');
+        if (!isFeatureFlagProvider(ffProvider)) return 'generate_feature_flags: pass provider = "launchdarkly" | "unleash".';
+        const ffcfg = generateFeatureFlagIntegration(ffProvider);
+        const ffWritten: string[] = [];
+        for (const [path, content] of Object.entries(ffcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); ffWritten.push(`Kept existing ${path} (add: ${ffcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ffWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('feature-flags integration');
+        return `Wired ${ffProvider} feature flags:\n${ffWritten.join('\n')}\nAdd the dependency: ${ffcfg.dependency.name}@${ffcfg.dependency.version}\n\n${ffcfg.instructions}`;
+      }
+
+      case 'generate_ai': {
+        // U-4 recipe — real BYO AI text generation on the USER's own key (OpenAI/Anthropic): a server
+        // generateText + chat helper. Never uses NavBharatAI's own AI account. Pure generator in AiGenerator.ts.
+        const aiProvider = optStr(input, 'provider');
+        if (!isAiProvider(aiProvider)) return 'generate_ai: pass provider = "openai" | "anthropic".';
+        const aicfg = generateAiIntegration(aiProvider);
+        const aiWritten: string[] = [];
+        for (const [path, content] of Object.entries(aicfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); aiWritten.push(`Kept existing ${path} (add: ${aicfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          aiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ai integration');
+        return `Wired ${aiProvider} AI text generation (on the user's own key):\n${aiWritten.join('\n')}\nAdd the dependency: ${aicfg.dependency.name}@${aicfg.dependency.version}\n\n${aicfg.instructions}`;
+      }
+
+      case 'generate_geocoding': {
+        // U-4 recipe — real BYO geocoding address<->coordinates (Google/Mapbox): a server geocode +
+        // reverseGeocode helper (REST via fetch, no dependency). Pure generator in GeocodingGenerator.ts.
+        const gcProvider = optStr(input, 'provider');
+        if (!isGeocodingProvider(gcProvider)) return 'generate_geocoding: pass provider = "google" | "mapbox".';
+        const gccfg = generateGeocodingIntegration(gcProvider);
+        const gcWritten: string[] = [];
+        for (const [path, content] of Object.entries(gccfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); gcWritten.push(`Kept existing ${path} (add: ${gccfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('geocoding integration');
+        const gcDepLine = gccfg.dependency ? `\nAdd the dependency: ${gccfg.dependency.name}@${gccfg.dependency.version}` : '\n(No npm dependency needed — the geocoding REST API is called with the built-in fetch.)';
+        return `Wired ${gcProvider} geocoding:\n${gcWritten.join('\n')}${gcDepLine}\n\n${gccfg.instructions}`;
+      }
+
+      case 'generate_translation': {
+        // U-4 recipe — real BYO text translation (Google Translate/DeepL): a server translate(text, target,
+        // source?) helper (REST via fetch, no dependency). Pure generator in TranslationGenerator.ts.
+        const trProvider = optStr(input, 'provider');
+        if (!isTranslationProvider(trProvider)) return 'generate_translation: pass provider = "google" | "deepl".';
+        const trcfg = generateTranslationIntegration(trProvider);
+        const trWritten: string[] = [];
+        for (const [path, content] of Object.entries(trcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); trWritten.push(`Kept existing ${path} (add: ${trcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          trWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('translation integration');
+        const trDepLine = trcfg.dependency ? `\nAdd the dependency: ${trcfg.dependency.name}@${trcfg.dependency.version}` : '\n(No npm dependency needed — the translation REST API is called with the built-in fetch.)';
+        return `Wired ${trProvider} translation:\n${trWritten.join('\n')}${trDepLine}\n\n${trcfg.instructions}`;
+      }
+
+      case 'generate_moderation': {
+        // U-4 recipe — real BYO content moderation (OpenAI Moderation/Perspective): a server moderate(text)
+        // -> { flagged, score } helper (REST via fetch, no dependency). Pure generator in ModerationGenerator.ts.
+        const mdProvider = optStr(input, 'provider');
+        if (!isModerationProvider(mdProvider)) return 'generate_moderation: pass provider = "openai" | "perspective".';
+        const mdcfg = generateModerationIntegration(mdProvider);
+        const mdWritten: string[] = [];
+        for (const [path, content] of Object.entries(mdcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); mdWritten.push(`Kept existing ${path} (add: ${mdcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('moderation integration');
+        const mdDepLine = mdcfg.dependency ? `\nAdd the dependency: ${mdcfg.dependency.name}@${mdcfg.dependency.version}` : '\n(No npm dependency needed — the moderation REST API is called with the built-in fetch.)';
+        return `Wired ${mdProvider} content moderation:\n${mdWritten.join('\n')}${mdDepLine}\n\n${mdcfg.instructions}`;
+      }
+
+      case 'generate_captcha': {
+        // U-4 recipe — CAPTCHA/bot-protection verify (Turnstile/hCaptcha/reCAPTCHA): a server verifyCaptcha(token)
+        // that checks the token against the provider siteverify endpoint (fetch, no dependency), fails CLOSED.
+        // Pure generator in CaptchaGenerator.ts. Keeps an existing .env.example.
+        const cpcfg = generateCaptchaIntegration();
+        const cpWritten: string[] = [];
+        for (const [path, content] of Object.entries(cpcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); cpWritten.push(`Kept existing ${path} (add: ${cpcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('captcha verification');
+        return `Wired CAPTCHA verification:\n${cpWritten.join('\n')}\n(No npm dependency needed — provider siteverify via fetch.)\n\n${cpcfg.instructions}`;
+      }
+
+      case 'generate_cache': {
+        // U-4 recipe — real BYO key/value caching (Redis over TCP / Upstash over HTTP): a server
+        // cacheGet/cacheSet(TTL)/cacheDel helper. Pure generator in CacheGenerator.ts.
+        const caProvider = optStr(input, 'provider');
+        if (!isCacheProvider(caProvider)) return 'generate_cache: pass provider = "redis" | "upstash".';
+        const cacfg = generateCacheIntegration(caProvider);
+        const caWritten: string[] = [];
+        for (const [path, content] of Object.entries(cacfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); caWritten.push(`Kept existing ${path} (add: ${cacfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          caWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cache integration');
+        return `Wired ${caProvider} caching:\n${caWritten.join('\n')}\nAdd the dependency: ${cacfg.dependency.name}@${cacfg.dependency.version}\n\n${cacfg.instructions}`;
+      }
+
+      case 'generate_retry': {
+        // U-4 recipe — retry with exponential backoff + full jitter (server/lib/retry.ts). Dependency-free;
+        // shouldRetry predicate + AbortSignal; rethrows last error. Pure generator in RetryGenerator.ts.
+        const rtcfg = generateRetryIntegration();
+        const rtWritten: string[] = [];
+        for (const [path, content] of Object.entries(rtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('retry backoff');
+        return `Wired retry with backoff:\n${rtWritten.join('\n')}\n(No npm dependency needed — plain backoff + jitter.)\n\n${rtcfg.instructions}`;
+      }
+
+      case 'generate_http_client': {
+        // U-4 recipe — resilient HTTP client (server/lib/http.ts): fetchJson with a real timeout + HttpError on
+        // non-2xx. Dependency-free (native fetch + AbortController). Pure generator in HttpClientGenerator.ts.
+        const httpcfg = generateHttpClientIntegration();
+        const httpWritten: string[] = [];
+        for (const [path, content] of Object.entries(httpcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          httpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('http client');
+        return `Wired resilient HTTP client:\n${httpWritten.join('\n')}\n(No npm dependency — native fetch + AbortController; pairs with generate_retry.)\n\n${httpcfg.instructions}`;
+      }
+
+      case 'generate_idempotency': {
+        // U-4 recipe — idempotency-key middleware (server/lib/idempotency.ts): createMemoryStore + idempotency
+        // Express middleware that replays the cached response per Idempotency-Key (no double-charge on retry).
+        // Dependency-free. Pure generator in IdempotencyGenerator.ts. No env keys.
+        const idmcfg = generateIdempotencyIntegration();
+        const idmWritten: string[] = [];
+        for (const [path, content] of Object.entries(idmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          idmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('idempotency');
+        return `Wired idempotency middleware:\n${idmWritten.join('\n')}\n(No npm dependency needed — in-process store; swap for Redis to scale.)\n\n${idmcfg.instructions}`;
+      }
+
+      case 'generate_newsletter': {
+        // U-4 recipe — real BYO newsletter/mailing-list signup (Mailchimp/Brevo): a server subscribe(email,
+        // name?) helper (REST via fetch, no dependency). Distinct from generate_email (transactional send).
+        // Pure generator in NewsletterGenerator.ts.
+        const nlProvider = optStr(input, 'provider');
+        if (!isNewsletterProvider(nlProvider)) return 'generate_newsletter: pass provider = "mailchimp" | "brevo".';
+        const nlcfg = generateNewsletterIntegration(nlProvider);
+        const nlWritten: string[] = [];
+        for (const [path, content] of Object.entries(nlcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); nlWritten.push(`Kept existing ${path} (add: ${nlcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          nlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('newsletter integration');
+        const nlDepLine = nlcfg.dependency ? `\nAdd the dependency: ${nlcfg.dependency.name}@${nlcfg.dependency.version}` : '\n(No npm dependency needed — the provider REST API is called with the built-in fetch.)';
+        return `Wired ${nlProvider} newsletter signup:\n${nlWritten.join('\n')}${nlDepLine}\n\n${nlcfg.instructions}`;
+      }
+
+      case 'generate_email_template': {
+        // U-4 recipe — responsive HTML email template builder (server/lib/emailTemplate.ts): renderEmail →
+        // { html, text }, table-based + inline styles + escaped. Dependency-free. Pure generator in
+        // EmailTemplateGenerator.ts. No env keys.
+        const etcfg = generateEmailTemplateIntegration();
+        const etWritten: string[] = [];
+        for (const [path, content] of Object.entries(etcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          etWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('email template');
+        return `Wired HTML email template:\n${etWritten.join('\n')}\n(No npm dependency needed — table-based, escaped, html + text.)\n\n${etcfg.instructions}`;
+      }
+
+      case 'generate_currency': {
+        // U-4 recipe — real BYO currency conversion (ExchangeRate-API/Fixer): a server getRate + convert
+        // helper (REST via fetch, no dependency). Pure generator in CurrencyGenerator.ts.
+        const cuProvider = optStr(input, 'provider');
+        if (!isCurrencyProvider(cuProvider)) return 'generate_currency: pass provider = "exchangerate" | "fixer".';
+        const cucfg = generateCurrencyIntegration(cuProvider);
+        const cuWritten: string[] = [];
+        for (const [path, content] of Object.entries(cucfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); cuWritten.push(`Kept existing ${path} (add: ${cucfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cuWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('currency integration');
+        return `Wired ${cuProvider} currency conversion:\n${cuWritten.join('\n')}\n(No npm dependency needed — the exchange-rate REST API is called with the built-in fetch.)\n\n${cucfg.instructions}`;
+      }
+
+      case 'generate_money_format': {
+        // U-4 recipe — Indian money/number formatting (server/lib/money.ts). Dependency-free (Intl en-IN);
+        // lakh/crore grouping + amount-in-words. Pure generator in MoneyFormatGenerator.ts. No env keys.
+        const mfcfg = generateMoneyFormatIntegration();
+        const mfWritten: string[] = [];
+        for (const [path, content] of Object.entries(mfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('money formatting');
+        return `Wired Indian money/number formatting:\n${mfWritten.join('\n')}\n(No npm dependency needed — native Intl en-IN.)\n\n${mfcfg.instructions}`;
+      }
+
+      case 'generate_weather': {
+        // U-4 recipe — real BYO current-weather lookup (OpenWeatherMap/WeatherAPI): a server getWeather(city)
+        // helper (REST via fetch, no dependency). Pure generator in WeatherGenerator.ts.
+        const weProvider = optStr(input, 'provider');
+        if (!isWeatherProvider(weProvider)) return 'generate_weather: pass provider = "openweathermap" | "weatherapi".';
+        const wecfg = generateWeatherIntegration(weProvider);
+        const weWritten: string[] = [];
+        for (const [path, content] of Object.entries(wecfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); weWritten.push(`Kept existing ${path} (add: ${wecfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          weWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('weather integration');
+        return `Wired ${weProvider} weather:\n${weWritten.join('\n')}\n(No npm dependency needed — the weather REST API is called with the built-in fetch.)\n\n${wecfg.instructions}`;
+      }
+
+      case 'generate_datetime': {
+        // U-4 recipe — IST-pinned date/time formatting (server/lib/datetime.ts). Dependency-free (Intl,
+        // timeZone Asia/Kolkata) + relativeTime. Pure generator in DateTimeGenerator.ts. No env keys.
+        const dtcfg = generateDateTimeIntegration();
+        const dtWritten: string[] = [];
+        for (const [path, content] of Object.entries(dtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('datetime formatting');
+        return `Wired IST date/time formatting:\n${dtWritten.join('\n')}\n(No npm dependency needed — native Intl, Asia/Kolkata.)\n\n${dtcfg.instructions}`;
+      }
+
+      case 'generate_notify': {
+        // U-4 recipe — real BYO team notifications (Slack/Discord incoming webhooks): a server notify(message)
+        // helper (webhook POST via fetch, no dependency). Pure generator in NotifyGenerator.ts.
+        const noProvider = optStr(input, 'provider');
+        if (!isNotifyProvider(noProvider)) return 'generate_notify: pass provider = "slack" | "discord".';
+        const nocfg = generateNotifyIntegration(noProvider);
+        const noWritten: string[] = [];
+        for (const [path, content] of Object.entries(nocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); noWritten.push(`Kept existing ${path} (add: ${nocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          noWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('notify integration');
+        return `Wired ${noProvider} team notifications:\n${noWritten.join('\n')}\n(No npm dependency needed — the incoming webhook is called with the built-in fetch.)\n\n${nocfg.instructions}`;
+      }
+
+      case 'generate_notification_center': {
+        // Roadmap BUILD-NOW #10 — in-app notification CENTER (dependency-free React: provider + bell + badge).
+        // Distinct from generate_notify (OUTBOUND channel). Pure generator in NotificationCenterGenerator.ts.
+        const ncfg = generateNotificationCenterIntegration();
+        const ncWritten: string[] = [];
+        for (const [path, content] of Object.entries(ncfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ncWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('notification center');
+        return `Wired an in-app notification center:\n${ncWritten.join('\n')}\n(No npm dependency — React Context + localStorage.)\n\n${ncfg.instructions}`;
+      }
+
+      case 'generate_env_validation': {
+        // U-4 recipe — real fail-fast env validator (server/lib/env.ts). Adds no env keys, no .env.example.
+        // Pure generator in EnvValidationGenerator.ts.
+        const rawKeys = input.keys;
+        const keys = Array.isArray(rawKeys) ? rawKeys.filter((k): k is string => typeof k === 'string') : [];
+        const evcfg = generateEnvValidation(keys);
+        const evWritten: string[] = [];
+        for (const [path, content] of Object.entries(evcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          evWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('env validation');
+        const evKeyLine = evcfg.validatedKeys.length ? `\nValidated keys: ${evcfg.validatedKeys.join(', ')}` : '';
+        return `Wired fail-fast env validation:\n${evWritten.join('\n')}${evKeyLine}\n(No npm dependency needed — plain process.env.)\n\n${evcfg.instructions}`;
+      }
+
+      case 'generate_cors': {
+        // U-4 recipe — safe allowlist CORS middleware (server/lib/cors.ts). Dependency-free. Pure generator
+        // in CorsGenerator.ts. Never overwrites an existing .env.example.
+        const cocfg = generateCorsIntegration();
+        const coWritten: string[] = [];
+        for (const [path, content] of Object.entries(cocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); coWritten.push(`Kept existing ${path} (add: ${cocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          coWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cors config');
+        return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
+      }
+
+      case 'generate_csrf': {
+        // U-4 recipe — CSRF protection (double-submit cookie) at server/lib/csrf.ts. Dependency-free
+        // (node:crypto), constant-time compare. Pure generator in CsrfGenerator.ts. No env keys.
+        const csrfcfg = generateCsrfIntegration();
+        const csrfWritten: string[] = [];
+        for (const [path, content] of Object.entries(csrfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csrfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('csrf protection');
+        return `Wired CSRF protection (double-submit cookie):\n${csrfWritten.join('\n')}\n(No npm dependency — node:crypto, constant-time compare; guard cookie-session mutating routes.)\n\n${csrfcfg.instructions}`;
+      }
+
+      case 'generate_slug': {
+        // U-4 recipe — Unicode-aware URL slug generator (server/lib/slug.ts). Dependency-free; keeps Indic
+        // combining marks so Hindi slugs are correct. Pure generator in SlugGenerator.ts. No env keys.
+        const slcfg = generateSlugIntegration();
+        const slWritten: string[] = [];
+        for (const [path, content] of Object.entries(slcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          slWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('slug generation');
+        return `Wired URL slug generation:\n${slWritten.join('\n')}\n(No npm dependency needed — native Unicode normalize.)\n\n${slcfg.instructions}`;
+      }
+
+      case 'generate_validation': {
+        // U-4 recipe — real request validation (zod): validateBody + validate() middleware (server/lib/
+        // validate.ts). Pure generator in ValidationGenerator.ts. No env keys, no .env.example.
+        const vacfg = generateValidationIntegration();
+        const vaWritten: string[] = [];
+        for (const [path, content] of Object.entries(vacfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          vaWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('request validation');
+        return `Wired request validation:\n${vaWritten.join('\n')}\nAdd the dependency: ${vacfg.dependency.name}@${vacfg.dependency.version}\n\n${vacfg.instructions}`;
+      }
+
+      case 'generate_sanitize_html': {
+        // U-4 recipe — HTML sanitization / XSS prevention (sanitize-html): sanitizeHtml + sanitizeToText
+        // (server/lib/sanitize.ts). Pure generator in SanitizeHtmlGenerator.ts. No env keys, no .env.example.
+        const szcfg = generateSanitizeHtmlIntegration();
+        const szWritten: string[] = [];
+        for (const [path, content] of Object.entries(szcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          szWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('html sanitization');
+        return `Wired HTML sanitization (XSS prevention):\n${szWritten.join('\n')}\nAdd the dependency: ${szcfg.dependency.name}@${szcfg.dependency.version}\n\n${szcfg.instructions}`;
+      }
+
+      case 'generate_markdown': {
+        // U-4 recipe — Markdown → SAFE HTML (marked + sanitize-html): renderMarkdown renders AND sanitizes in
+        // one call (safe by construction). Pure generator in MarkdownGenerator.ts. No env keys.
+        const mkcfg = generateMarkdownIntegration();
+        const mkWritten: string[] = [];
+        for (const [path, content] of Object.entries(mkcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('markdown rendering');
+        const mkDeps = mkcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired Markdown rendering:\n${mkWritten.join('\n')}\nAdd the dependencies: ${mkDeps}\n\n${mkcfg.instructions}`;
+      }
+
+      case 'generate_qr': {
+        // U-4 recipe — real QR generation (qrcode): a server generateQr(text) → PNG data-URL + generateQrSvg
+        // (server/lib/qr.ts). Pure generator in QrGenerator.ts. No env keys.
+        const qrcfg = generateQrIntegration();
+        const qrWritten: string[] = [];
+        for (const [path, content] of Object.entries(qrcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          qrWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('qr generation');
+        return `Wired QR code generation:\n${qrWritten.join('\n')}\nAdd the dependency: ${qrcfg.dependency.name}@${qrcfg.dependency.version}\n\n${qrcfg.instructions}`;
+      }
+
+      case 'generate_upi': {
+        // U-4 recipe — UPI payment deep-link + VPA validation (src/lib/upi.ts). Dependency-free, keyless,
+        // India-first: a `upi://pay?...` intent link that opens GPay/PhonePe/Paytm/BHIM with no gateway.
+        // Pure generator in UpiGenerator.ts. No env keys.
+        const upicfg = generateUpiIntegration();
+        const upiWritten: string[] = [];
+        for (const [path, content] of Object.entries(upicfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          upiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('upi link');
+        return `Wired UPI payment deep-link:\n${upiWritten.join('\n')}\n(No npm dependency, no API key — pairs with generate_qr for scan-to-pay.)\n\n${upicfg.instructions}`;
+      }
+
+      case 'generate_pdf': {
+        // U-4 recipe — real PDF generation (pdfkit): a server createPdf + createInvoicePdf helper
+        // (server/lib/pdf.ts). Pure generator in PdfGenerator.ts. No env keys.
+        const pdfcfg = generatePdfIntegration();
+        const pdfWritten: string[] = [];
+        for (const [path, content] of Object.entries(pdfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pdfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pdf generation');
+        return `Wired PDF generation:\n${pdfWritten.join('\n')}\nAdd the dependency: ${pdfcfg.dependency.name}@${pdfcfg.dependency.version}\n\n${pdfcfg.instructions}`;
+      }
+
+      case 'generate_csv': {
+        // U-4 recipe — real CSV import/export (papaparse): a server toCsv + parseCsv helper
+        // (server/lib/csv.ts) with RFC-4180-correct quoting. Pure generator in CsvGenerator.ts. No env keys.
+        const csvcfg = generateCsvIntegration();
+        const csvWritten: string[] = [];
+        for (const [path, content] of Object.entries(csvcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csvWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('csv import/export');
+        return `Wired CSV import/export:\n${csvWritten.join('\n')}\nAdd the dependency: ${csvcfg.dependency.name}@${csvcfg.dependency.version}\n\n${csvcfg.instructions}`;
+      }
+
+      case 'generate_audit': {
+        // U-4 recipe — tamper-evident hash-chained audit log (server/lib/audit.ts). Dependency-free
+        // (node:crypto), storage-agnostic. Pure generator in AuditLogGenerator.ts. No env keys.
+        const auditcfg = generateAuditLogIntegration();
+        const auditWritten: string[] = [];
+        for (const [path, content] of Object.entries(auditcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          auditWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('audit log');
+        return `Wired tamper-evident audit log:\n${auditWritten.join('\n')}\n(No npm dependency — node:crypto hash chain; you back it with your own DB store.)\n\n${auditcfg.instructions}`;
+      }
+
+      case 'generate_soft_delete': {
+        // Breadth recipe — soft delete / trash & restore (server/lib/softDelete.ts): dependency-free,
+        // storage-agnostic softDelete/restore/isDeleted + activeOnly/trashedOnly filters + SQL WHERE clauses.
+        // Pure generator in SoftDeleteGenerator.ts. No env keys.
+        const sdcfg = generateSoftDeleteIntegration();
+        const sdWritten: string[] = [];
+        for (const [path, content] of Object.entries(sdcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          sdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('soft delete');
+        return `Wired soft delete (trash & restore):\n${sdWritten.join('\n')}\n(No npm dependency — plain deletedAt stamping + SQL clause helpers.)\n\n${sdcfg.instructions}`;
+      }
+
+      case 'generate_image': {
+        // U-4 recipe — real image processing (sharp): resizeImage + makeThumbnail (server/lib/image.ts).
+        // Pure generator in ImageGenerator.ts. No env keys.
+        const imgcfg = generateImageIntegration();
+        const imgWritten: string[] = [];
+        for (const [path, content] of Object.entries(imgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          imgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('image processing');
+        return `Wired image processing:\n${imgWritten.join('\n')}\nAdd the dependency: ${imgcfg.dependency.name}@${imgcfg.dependency.version}\n\n${imgcfg.instructions}`;
+      }
+
+      case 'generate_logging': {
+        // U-4 recipe — structured logging (pino): a configured logger + a secret-safe request-logger
+        // middleware (server/lib/logger.ts). Pure generator in LoggingGenerator.ts. Never overwrites .env.example.
+        const lgcfg = generateLoggingIntegration();
+        const lgWritten: string[] = [];
+        for (const [path, content] of Object.entries(lgcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); lgWritten.push(`Kept existing ${path} (add: ${lgcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('logging');
+        return `Wired structured logging:\n${lgWritten.join('\n')}\nAdd the dependency: ${lgcfg.dependency.name}@${lgcfg.dependency.version}\n\n${lgcfg.instructions}`;
+      }
+
+      case 'generate_request_id': {
+        // Breadth recipe — correlation-id middleware (server/lib/requestId.ts): reuses a safe inbound
+        // X-Request-Id or mints a UUID, sets req.id + echoes the response header. Dependency-free (node:crypto).
+        // Pairs with generate_logging/generate_tracing. Pure generator in RequestIdGenerator.ts. No env keys.
+        const ricfg = generateRequestIdIntegration();
+        const riWritten: string[] = [];
+        for (const [path, content] of Object.entries(ricfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          riWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('request id');
+        return `Wired correlation IDs:\n${riWritten.join('\n')}\n(No npm dependency needed — node:crypto randomUUID.)\n\n${ricfg.instructions}`;
+      }
+
+      case 'generate_file_upload': {
+        // U-4 recipe — file-upload validation by MAGIC BYTES (server/lib/upload.ts). Dependency-free; detects
+        // the TRUE type from content, not the forgeable client mime/ext. Pure generator in FileUploadGenerator.ts.
+        const upcfg = generateFileUploadIntegration();
+        const upWritten: string[] = [];
+        for (const [path, content] of Object.entries(upcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          upWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('file-upload validation');
+        return `Wired file-upload validation:\n${upWritten.join('\n')}\n(No npm dependency needed — magic-byte content sniffing.)\n\n${upcfg.instructions}`;
+      }
+
+      case 'generate_graceful_shutdown': {
+        // U-4 recipe — graceful shutdown (SIGTERM drain, server/lib/shutdown.ts). Dependency-free. Pure
+        // generator in GracefulShutdownGenerator.ts. Writes no .env.example.
+        const gscfg = generateGracefulShutdownIntegration();
+        const gsWritten: string[] = [];
+        for (const [path, content] of Object.entries(gscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('graceful shutdown');
+        return `Wired graceful shutdown:\n${gsWritten.join('\n')}\n(No npm dependency needed — Node signals + server.close().)\n\n${gscfg.instructions}`;
+      }
+
+      case 'generate_maintenance': {
+        // Breadth recipe — maintenance mode (server/lib/maintenance.ts): dependency-free Express middleware
+        // that returns 503 + Retry-After when on, allow-lists health checks, supports a bypass token, and a
+        // runtime setMaintenance() toggle. Pure generator in MaintenanceModeGenerator.ts. Env: MAINTENANCE_MODE.
+        const mmcfg = generateMaintenanceIntegration();
+        const mmWritten: string[] = [];
+        for (const [path, content] of Object.entries(mmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('maintenance mode');
+        return `Wired maintenance mode:\n${mmWritten.join('\n')}\n(No npm dependency needed — plain Express middleware. Env: MAINTENANCE_MODE.)\n\n${mmcfg.instructions}`;
+      }
+
+      case 'generate_security_headers': {
+        // U-4 recipe — safe security headers middleware (server/lib/securityHeaders.ts). Dependency-free,
+        // CSP left commented (a wrong CSP breaks the app). Pure generator in SecurityHeadersGenerator.ts.
+        const shcfg = generateSecurityHeadersIntegration();
+        const shWritten: string[] = [];
+        for (const [path, content] of Object.entries(shcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          shWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('security headers');
+        return `Wired security headers:\n${shWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${shcfg.instructions}`;
+      }
+
+      case 'generate_seo': {
+        // U-4 recipe — SEO essentials (server/lib/seo.ts): buildMetaTags (OpenGraph/Twitter, escaped) +
+        // buildSitemap + buildRobotsTxt. Dependency-free. Pure generator in SeoGenerator.ts. No env keys.
+        const seocfg = generateSeoIntegration();
+        const seoWritten: string[] = [];
+        for (const [path, content] of Object.entries(seocfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          seoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('seo');
+        return `Wired SEO essentials:\n${seoWritten.join('\n')}\n(No npm dependency needed — escaped meta/sitemap/robots builders.)\n\n${seocfg.instructions}`;
+      }
+
+      case 'generate_webhook': {
+        // U-4 recipe — incoming-webhook HMAC signature verification (server/lib/webhook.ts). Dependency-free
+        // (node:crypto), constant-time compare over the RAW body. Pure generator in WebhookGenerator.ts.
+        const whcfg = generateWebhookIntegration();
+        const whWritten: string[] = [];
+        for (const [path, content] of Object.entries(whcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          whWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('webhook verification');
+        return `Wired webhook signature verification:\n${whWritten.join('\n')}\n(No npm dependency needed — node:crypto.)\n\n${whcfg.instructions}`;
+      }
+
+      case 'generate_webhook_sender': {
+        // U-4 recipe — outgoing signed webhook sender (server/lib/webhookSender.ts): sendWebhook HMAC-signs the
+        // body in the same sha256=<hex> format generate_webhook verifies, with a timeout. Dependency-free.
+        const wscfg = generateWebhookSenderIntegration();
+        const wsWritten: string[] = [];
+        for (const [path, content] of Object.entries(wscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('webhook sender');
+        return `Wired outgoing webhook sender:\n${wsWritten.join('\n')}\n(No npm dependency needed — node:crypto + fetch.)\n\n${wscfg.instructions}`;
       }
 
       case 'generate_mobile_export': {
@@ -3156,6 +6667,10 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
+        // The user's own keys MUST be on disk before a dev server starts. This path can start one via the
+        // actuator without any run_command having gone through the lazy gate, which is how an imported app
+        // booted with none of the keys its owner had saved in Settings (mitrify autopsy 2026-08-04).
+        await this.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
         // LOOP-BREAKER (build-diagnostics root cause): once preview has DEFINITIVELY failed —
         // including a managed dev-server start — stop the retry loop cold. Without this the model
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported
@@ -3359,15 +6874,28 @@ export class ToolDispatcher {
         } catch {
           return 'codemod_rename: failed to list workspace files.';
         }
-        // Read all TS/TSX source files (capped at 50 for performance).
+        // SCOPED read (default, T3): read code files but KEEP only those referencing the symbol as a
+        // whole token, so a repo-wide rename is COMPLETE on 200/1000/5000-file apps — not silently capped
+        // at 50 (which left files 51…N with the OLD name → a broken build reported as success). Kill
+        // switch AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
         const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
-        for (const f of codeFiles) {
-          try {
-            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
-          } catch { /* skip unreadable file */ }
+        let renameSkipped = 0;
+        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+          for (const f of codeFilesAll.slice(0, 50)) {
+            try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
+          }
+        } else {
+          for (const f of codeFilesAll.slice(0, 6000)) { // hard I/O bound; the AST cost stays on the shortlist
+            try {
+              const content = await this.actuator.readFile(this.workspaceId, f);
+              if (!containsSymbol(content, oldName)) continue;
+              if (fileContents.length >= 2000) { renameSkipped++; continue; } // safety cap → honest report, never a silent drop
+              fileContents.push({ path: f, content });
+            } catch { /* skip unreadable file */ }
+          }
         }
         const result = await renameSymbol(fileContents, oldName, newName);
         if (!result.ok) return `codemod_rename failed: ${result.error}`;
@@ -3379,7 +6907,9 @@ export class ToolDispatcher {
           } catch { /* best-effort */ }
         }
         this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
-        return result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+        const renameBase = result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+        const renameNote = codemodTruncationNote('codemod_rename', renameSkipped);
+        return renameNote ? `${renameBase}\n${renameNote}` : renameBase;
       }
 
       case 'codemod_add_prop': {
@@ -3393,14 +6923,27 @@ export class ToolDispatcher {
         } catch {
           return 'codemod_add_prop: failed to list workspace files.';
         }
+        // SCOPED read (default, T3): only files referencing the component as a whole token — so adding a
+        // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch
+        // AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
         const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const tsxFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
-        for (const f of tsxFiles) {
-          try {
-            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
-          } catch { /* skip */ }
+        let addPropSkipped = 0;
+        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+          for (const f of codeFilesAll.slice(0, 50)) {
+            try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
+          }
+        } else {
+          for (const f of codeFilesAll.slice(0, 6000)) {
+            try {
+              const content = await this.actuator.readFile(this.workspaceId, f);
+              if (!containsSymbol(content, componentName)) continue;
+              if (fileContents.length >= 2000) { addPropSkipped++; continue; }
+              fileContents.push({ path: f, content });
+            } catch { /* skip unreadable file */ }
+          }
         }
         const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
         if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
@@ -3411,7 +6954,9 @@ export class ToolDispatcher {
           } catch { /* best-effort */ }
         }
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
-        return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+        const addPropBase = result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+        const addPropNote = codemodTruncationNote('codemod_add_prop', addPropSkipped);
+        return addPropNote ? `${addPropBase}\n${addPropNote}` : addPropBase;
       }
 
       case 'codemod_move_file': {
@@ -3538,9 +7083,12 @@ function testFileHint(filePath: string): string {
 }
 
 function reqStr(input: Record<string, unknown>, key: string): string {
-  const v = input[key];
-  if (typeof v !== 'string') throw new Error(`Missing/invalid string argument: ${key}`);
-  return v;
+  // MALFORMED-CALL REPAIR (CrewHub autopsy 2026-07-20: 9 wasted turns on `{"file": …}` instead of
+  // `{"path": …}`): accept a well-known alias when the canonical key is absent, and when nothing
+  // matches, throw an INSTRUCTIVE error that teaches the model the exact retry shape.
+  const resolved = resolveStringArg(input, key);
+  if (resolved) return resolved.value;
+  throw new Error(missingArgMessage(input, key));
 }
 
 function reqNum(input: Record<string, unknown>, key: string): number {
@@ -3672,6 +7220,8 @@ export interface EditResult {
 /**
  * Apply one edit_file replacement with a whitespace-tolerant fallback.
  *
+ *  0. APPEND: an EMPTY `old_string` is the model's signal to ADD content (not to
+ *     search) — append `new_string` to the END of the file.
  *  1. EXACT: if `oldStr` occurs exactly once, replace it. More than once →
  *     ambiguous, throw (the model must add surrounding context).
  *  2. FLEXIBLE: if `oldStr` is not found exactly (0 matches), retry treating any
@@ -3683,6 +7233,15 @@ export interface EditResult {
  * used to make error messages specific.
  */
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
+  // APPEND MODE (Connectly Edit #1 autopsy 2026-07-21): the model wanted to ADD styles to Navbar.css and
+  // called edit_file with an EMPTY old_string. An empty string "matches" at every character position, so
+  // the old code reported `not unique (1377 matches)` and the model then flailed read→append for several
+  // turns. An empty old_string has one sensible meaning — append the new content to the end of the file.
+  // Deterministic + SAFE: an empty old_string previously only ERRORED, so no working behaviour changes.
+  if (oldStr === '') {
+    const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+    return { updated: existing + sep + newStr, matchedOld: '', note: 'empty old_string → appended new_string to the end of the file' };
+  }
   const exact = existing.split(oldStr).length - 1;
   if (exact === 1) {
     // Slice-concatenate (NOT String.replace) so a `$` in newStr is inserted LITERALLY. JS's

@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, type RunningBuild } from './agentv3';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -97,6 +99,19 @@ describe('needsFallbackConversationPersist (fast-lane "memory gone after reload"
   });
   it('a record updated exactly at buildStartedAt counts as already-persisted (inclusive boundary)', () => {
     expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 1000 }], 'ws-1', 1000)).toBe(false);
+  });
+});
+
+describe('terminalConversationStatus (build-report autopsy 2026-08-02 — "na successful, na fail, na ₹")', () => {
+  it('a definitive SUCCESS stamps status:complete (was left at "running" → reopen showed no verdict)', () => {
+    expect(terminalConversationStatus({ ok: true })).toBe('complete');
+  });
+  it('a definitive FAILURE stamps status:error', () => {
+    expect(terminalConversationStatus({ ok: false })).toBe('error');
+  });
+  it('a NULL/absent verdict leaves status UNTOUCHED — a resumable pause must never be clobbered', () => {
+    expect(terminalConversationStatus(null)).toBeUndefined();
+    expect(terminalConversationStatus(undefined)).toBeUndefined();
   });
 });
 
@@ -234,6 +249,33 @@ describe('chatWorkspaceContextLine — v5.0 always knows its real file count, ev
   });
 });
 
+describe('reviewerShouldRun — a "do not change any files" import/survey turn gets NO post-build reviewer', () => {
+  // ROOT-CAUSE lock (autopsy build 77bd487b): a read-only survey import ran the reviewer ~16 min AND its
+  // heal edited the imported project (added imports + 12 package.json deps) — because the gate keyed off
+  // `wroteFiles`, which INFRA writes (the .env that loads the user's keys) push above zero on a survey turn.
+  it('is FALSE on an import turn even when infra files were written (the exact 77bd487b failure)', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: true, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: true })).toBe(false);
+  });
+  it('is FALSE when nothing was written (nothing to review)', () => {
+    expect(reviewerShouldRun({ wroteFiles: false, isImportTurn: false, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: true })).toBe(false);
+  });
+  it('RUNS on a real agentic build that wrote files (not fast-lane-gated, not an import turn)', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: false, reviewFastlaneForced: false, startTierSonnet: false })).toBe(true);
+  });
+  it('is skipped for a fast-lane build unless forced or a Sonnet-tier prompt', () => {
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: false, startTierSonnet: false })).toBe(false);
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: true, startTierSonnet: false })).toBe(true);
+    expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: false, fastLaneGated: true, reviewFastlaneForced: false, startTierSonnet: true })).toBe(true);
+  });
+  it('an import turn is NEVER reviewed, whatever the other flags say', () => {
+    for (const fastLaneGated of [true, false]) {
+      for (const startTierSonnet of [true, false]) {
+        expect(reviewerShouldRun({ wroteFiles: true, isImportTurn: true, fastLaneGated, reviewFastlaneForced: true, startTierSonnet })).toBe(false);
+      }
+    }
+  });
+});
+
 describe('agentV3KeyDiag (provider diagnosis)', () => {
   const prev = process.env.ANTHROPIC_API_KEY;
   afterEach(() => {
@@ -336,11 +378,41 @@ describe('resolveJudgeKind — mode-aware judge selection', () => {
 // Model Routing Policy (admin 2026-07-12): a FREE build must NEVER touch Claude — the post-build heal
 // gates (integrity/preview/C9/runtime) + the no-files retry go cheap-only on a free build.
 describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/power stays Claude-first', () => {
-  it('FREE build → cheapOnly, never Claude-first (closes the leak)', () => {
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+  const prev = process.env.AGENTV3_WEAK_FLAGSHIP_HEAL;
+  afterEach(() => { if (prev === undefined) delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; else process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = prev; });
+
+  it('FREE build → cheapOnly + FLAGSHIP floor (admin 2026-08-02: weak repair uses the top GLM/Kimi), never Claude-first', () => {
+    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default on
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
   });
-  it('PAID / POWER build → Claude-first, not cheap-only (unchanged)', () => {
+  it('FREE build with the kill switch OFF → reverts to plain cheap-only (no flagship floor)', () => {
+    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+    expect(weakFlagshipHealEnabled()).toBe(false);
+  });
+  it('PAID / POWER build → Claude-first, not cheap-only (UNCHANGED — flagship weak-heal never touches paid)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });
+  });
+});
+
+describe('cheapBuildFloorRunners flagshipOnly — weak-fail repair runs on the TOP GLM/Kimi rung only', () => {
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'KIMI_API_KEY', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE'];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); process.env.AGENTV3_FLOOR_BALANCE = 'off'; });
+  afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('free + flagshipOnly keeps ONLY the last (flagship) rung of each free ladder — no cheap flash/coder rungs', () => {
+    process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
+    // free default ladders: GLM [flash,4.7,5.2] · KIMI [k2.5,k2.6,k2.7-code] → flagshipOnly → 1 GLM + 1 KIMI
+    const runners = cheapBuildFloorRunners({ free: true, flagshipOnly: true });
+    expect(runners.filter((r) => r.name === 'GLM').length).toBe(1);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(1);
+  });
+  it('free WITHOUT flagshipOnly keeps the full cheapest-first ladder (3 GLM + 3 KIMI rungs)', () => {
+    process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
+    const runners = cheapBuildFloorRunners({ free: true });
+    expect(runners.filter((r) => r.name === 'GLM').length).toBe(3);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(3);
   });
 });
 
@@ -414,9 +486,9 @@ describe('parseKeyPool — provider key rotation pool (ROADMAP Tier-4)', () => {
 });
 
 describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admin: 1st call not Claude)', () => {
-  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL'];
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE', 'AGENTV3_FREE_KIMI_LEAD'];
   let saved: Record<string, string | undefined>;
-  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } });
+  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
 
   it('returns [] when flag unset AND no keys — still byte-for-byte the Claude path (safe with no keys)', () => {
@@ -450,11 +522,88 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     // default ladder = ['glm-5.2','glm-4.7'] → two runners, both named GLM (clean deliveredVia split)
     expect(runners.map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
-  it('wires KIMI as a 2-rung ladder by default when flag=kimi AND key present', () => {
+  // 3 rungs since 2026-07-28: kimi-k3 was PREPENDED to the paid ladder (admin-approved), never
+  // swapped in — so an unknown-id error on K3 falls through to k2.7-code exactly as before and no
+  // build can break even if K3 is not a live model. Asserting the COUNT alone would pass for a
+  // replacement too, which is the one shape we must not ship; the free-ladder test below pins the
+  // other half of the decision (the weak module was deliberately left untouched).
+  it('wires KIMI as a 3-rung ladder by default when flag=kimi AND key present, K3 leading', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
     process.env.KIMI_API_KEY = 'kimi-test-key';
-    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'KIMI']);
+    const runners = cheapBuildFloorRunners();
+    expect(runners.map((r) => r.name)).toEqual(['KIMI', 'KIMI', 'KIMI']);
+    // k2.7-code must still be present BELOW k3 — the fall-through that makes adoption safe.
+    expect(parseModelLadder(undefined, ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6']))
+      .toEqual(['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6']);
   });
+
+  it('the FREE/weak Kimi ladder is UNCHANGED — cheapest first, flagship last, no K3', () => {
+    // Admin 2026-07-28: "weak module abhi jaisa hai vaise hi". The free ladder climbs cheapest-first,
+    // so a newer flagship in front would invert the free tier's cost model. If someone later
+    // "harmonises" the two ladders, this fails.
+    const free = parseModelLadder(undefined, ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code']);
+    expect(free[0]).toBe('kimi-k2.5');
+    expect(free).not.toContain('kimi-k3');
+  });
+  // FLOOR BALANCE (admin directive 2026-07-21 — "GLM par pura load na dalo, smartly divide"): the
+  // GLM↔KIMI lead alternates per construction so first-attempt load spreads across both cheap coders.
+  it('FLOOR BALANCE — the lead alternates GLM → KIMI → GLM across constructions (both keys present)', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    const first = cheapBuildFloorRunners();
+    const second = cheapBuildFloorRunners();
+    const third = cheapBuildFloorRunners();
+    expect(first[0].name).toBe('GLM');   // construction 1 — GLM leads (today's order)
+    expect(second[0].name).toBe('KIMI'); // construction 2 — KIMI leads (the load-divide)
+    expect(third[0].name).toBe('GLM');   // construction 3 — back to GLM
+    // The SAME rung set every time — only the order rotates; nothing is dropped or added.
+    const names = (rs: typeof first) => rs.map((r) => r.name).sort();
+    expect(names(second)).toEqual(names(first));
+    expect(names(third)).toEqual(names(first));
+  });
+  it('FREE-TIER KIMI LEAD — a free build leads with KIMI (GLM 429-storm autopsy 2026-08-02); GLM stays as fallback', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    const free = cheapBuildFloorRunners({ free: true });
+    expect(free[0].name).toBe('KIMI');                                     // KIMI leads on a free build
+    expect(cheapBuildFloorRunners({ free: true })[0].name).toBe('KIMI');   // every free construction — no 50/50 flip
+    expect(free.some((r) => r.name === 'GLM')).toBe(true);                 // GLM still present as the error-fallback
+    // Paid build is UNCHANGED — still the GLM↔KIMI 50/50 alternation.
+    _resetFloorLeadCounter();
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('KIMI');
+  });
+  it('FREE-TIER KIMI LEAD — kill switch AGENTV3_FREE_KIMI_LEAD=off restores GLM-first for free too', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    process.env.AGENTV3_FREE_KIMI_LEAD = 'off';
+    expect(cheapBuildFloorRunners({ free: true })[0].name).toBe('GLM'); // off → falls back to the normal balance (GLM first)
+  });
+  it('FLOOR BALANCE — kill switch AGENTV3_FLOOR_BALANCE=off restores the fixed GLM-first order', () => {
+    process.env.AGENTV3_FLOOR_BALANCE = 'off';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM'); // no alternation when off
+  });
+  it('FLOOR BALANCE — a single-provider floor never rotates (nothing to balance)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+  });
+  it('balanceFloorLead (pure) — kimiFirst moves the KIMI block ahead of GLM; identity otherwise', () => {
+    const rs = [
+      { name: 'GLM', runner: {} as never }, { name: 'GLM#2', runner: {} as never, reportAs: 'GLM' },
+      { name: 'KIMI', runner: {} as never },
+    ];
+    expect(balanceFloorLead(rs, false)).toBe(rs); // identity — no reorder, same reference
+    expect(balanceFloorLead(rs, true).map((r) => r.name)).toEqual(['KIMI', 'GLM', 'GLM#2']);
+    // Single-provider input: identity even when kimiFirst (nothing to swap).
+    const glmOnly = [{ name: 'GLM', runner: {} as never }];
+    expect(balanceFloorLead(glmOnly, true)).toBe(glmOnly);
+  });
+
   // KEY POOL / ROTATION (ROADMAP Tier-4 — GLM 429-saturation lever from deep-test App #9/#10).
   it('a comma-separated GLM_API_KEY pool emits a rung PER (model × key), model-major/key-minor', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'glm';
@@ -531,7 +680,7 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     expect(cheapBuildFloorRunners({ free: true }).map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
 
-  it('"both"/"on" makes GLM and KIMI "friends" — both ladders included, GLM first (admin decision, 2026-07-01)', () => {
+  it('"both"/"on" makes GLM and KIMI "friends" — both ladders included, lead ALTERNATING (2026-07-21 load-divide supersedes the fixed GLM-first of 2026-07-01)', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'both';
     process.env.GLM_API_KEY = 'glm-test-key';
     process.env.GLM_MODEL = 'glm-4.7'; // pin to 1 rung each for a clean, exact assertion
@@ -539,8 +688,10 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     process.env.KIMI_MODEL = 'kimi-k2.7-code';
     expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'KIMI']);
 
+    // 2nd construction: the floor-balance rotation now leads KIMI (the admin's "GLM par pura load na
+    // dalo" divide) — both ladders always present, only the lead swaps.
     process.env.AGENTV3_CHEAP_FLOOR = 'on';
-    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'KIMI']);
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'GLM']);
   });
 
   it('with "both" set, GLM alone still works if only GLM has a key (KIMI independently no-ops) — and vice versa', () => {
@@ -1365,6 +1516,18 @@ describe('geminiLastResortEnabled — Vertex/Gemini as the true last resort, DEF
   });
 });
 
+describe('vertexPeerBuildEnabled — Vertex/Gemini as a cheap-floor PEER (admin 2026-07-20 "GLM fail → Kimi AUR Vertex")', () => {
+  it('is ON by default → floor-led build tries GLM → Kimi → Vertex/Gemini → Claude', () => {
+    expect(vertexPeerBuildEnabled(undefined)).toBe(true);
+    expect(vertexPeerBuildEnabled('')).toBe(true);
+    expect(vertexPeerBuildEnabled('1')).toBe(true);
+  });
+  it("reverts to Vertex/Gemini as the absolute last resort with '0'/'off'", () => {
+    expect(vertexPeerBuildEnabled('0')).toBe(false);
+    expect(vertexPeerBuildEnabled('off')).toBe(false);
+  });
+});
+
 describe('shutdownGraceMs (VAJRA V4-1c) — bounded grace for the SIGTERM build drain', () => {
   it('gives no grace when nothing is building (exit immediately)', () => {
     expect(shutdownGraceMs(0)).toBe(0);
@@ -1459,6 +1622,22 @@ describe('zeroBillForUnrenderedPreview (Fix 35) — "preview theek chala to hi p
   });
 });
 
+describe('shouldRunIntegrityHeal (mitrify autopsy 2026-07-24) — never mutate files on a "do not change" import turn', () => {
+  it('runs on a real build turn (expectsArtifacts) when enabled, ok, not aborted', () => {
+    expect(shouldRunIntegrityHeal({ gateEnabled: true, resultOk: true, expectsArtifacts: true, aborted: false })).toBe(true);
+  });
+  it('NEVER runs on an import/survey turn (expectsArtifacts=false) — the reported instruction violation', () => {
+    // The user said "Do not change any files yet"; expectsArtifacts is false on every import turn, so the
+    // file-mutating heal must be skipped even though the gate is on and the build is ok.
+    expect(shouldRunIntegrityHeal({ gateEnabled: true, resultOk: true, expectsArtifacts: false, aborted: false })).toBe(false);
+  });
+  it('does not run when the gate is off, the build failed, or the turn was aborted', () => {
+    expect(shouldRunIntegrityHeal({ gateEnabled: false, resultOk: true, expectsArtifacts: true, aborted: false })).toBe(false);
+    expect(shouldRunIntegrityHeal({ gateEnabled: true, resultOk: false, expectsArtifacts: true, aborted: false })).toBe(false);
+    expect(shouldRunIntegrityHeal({ gateEnabled: true, resultOk: true, expectsArtifacts: true, aborted: true })).toBe(false);
+  });
+});
+
 describe('emptyBuildFailureSummary (deep-test App #7) — an empty build is never "✓ Done"', () => {
   it('fails an artifact build that produced 0 files because the sandbox was unavailable', () => {
     const s = emptyBuildFailureSummary(true, 0, true);
@@ -1489,6 +1668,35 @@ describe('emptyBuildFailureSummary (deep-test App #7) — an empty build is neve
   });
 });
 
+describe('finalSyntaxErrorSummary (sibling of the reviewer-CRITICAL false-success fix, 2026-07-21)', () => {
+  it('never claims success — states the app does not compile / is not runnable', () => {
+    const s = finalSyntaxErrorSummary(2);
+    expect(s).not.toMatch(/✅|successful|console is clean/i);
+    expect(s).toMatch(/don't compile yet/);
+    expect(s).toMatch(/isn't runnable/);
+    expect(s).toMatch(/2 files/);
+  });
+  it('promises the user was NOT charged (working app or free)', () => {
+    expect(finalSyntaxErrorSummary(1)).toMatch(/have NOT been charged/);
+  });
+  it('is actionable + grammatical for the singular case (1 file / doesn\'t)', () => {
+    const s = finalSyntaxErrorSummary(1);
+    expect(s).toMatch(/\b1 file\b/);
+    expect(s).toMatch(/doesn't compile yet/);
+    expect(s).toMatch(/continue/);
+    expect(s).not.toMatch(/\bfiles\b/);
+  });
+  it('WHITE-LABEL: never names a provider/model', () => {
+    const s = finalSyntaxErrorSummary(3).toLowerCase();
+    for (const v of ['glm', 'kimi', 'claude', 'sonnet', 'opus', 'gemini', 'grok', 'moonshot', 'anthropic', 'vertex']) {
+      expect(s).not.toContain(v);
+    }
+  });
+  it('clamps a zero/negative count to at least one', () => {
+    expect(finalSyntaxErrorSummary(0)).toMatch(/\b1 file\b.*doesn't compile yet/);
+  });
+});
+
 describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never make the AI re-ask for the URL', () => {
   it('produces an instruction naming the exact URL + reason for a private-repo clone failure (the report)', () => {
     const note = failedImportPromptNote({ url: 'https://github.com/docasheesh-png/navbharatai', reason: 'the clone failed — most likely a PRIVATE repo the connected GitHub account cannot access, or the URL is wrong' });
@@ -1501,6 +1709,54 @@ describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never 
     expect(failedImportPromptNote(null)).toBe('');
     expect(failedImportPromptNote(undefined)).toBe('');
     expect(failedImportPromptNote({ url: '', reason: 'x' })).toBe('');
+  });
+  it('forbids the model from cloning to a temp dir and reporting a false success (mitrify autopsy)', () => {
+    const note = failedImportPromptNote({ url: 'https://github.com/o/r', reason: 'the clone failed' });
+    expect(note).toContain('Do NOT clone the repository yourself into a temp');
+    expect(note).toContain('would NOT persist');
+  });
+});
+
+describe('importSurveyPromptNote (instant connect 2026-07-24) — the survey uses the API tree + key files', () => {
+  const survey = {
+    url: 'https://github.com/aashishcpmt093-ui/mitrify',
+    fileCount: 165,
+    structure: 'client/, server/, shared/, package.json',
+    keyFiles: { 'package.json': '{"name":"mitrify","scripts":{"dev":"vite"}}' },
+    truncated: false,
+  };
+  it('names the repo, file count, structure, and embeds the key files for an immediate survey', () => {
+    const note = importSurveyPromptNote(survey);
+    expect(note).toContain('https://github.com/aashishcpmt093-ui/mitrify');
+    expect(note).toContain('165 file');
+    expect(note).toContain('client/, server/, shared/, package.json');
+    expect(note).toContain('----- package.json -----');
+    expect(note).toContain('"name":"mitrify"');
+    expect(note).toMatch(/Do not claim you cannot see the repository/i); // never re-ask / deny connection
+  });
+  it('flags a truncated (large) repo listing honestly', () => {
+    expect(importSurveyPromptNote({ ...survey, truncated: true })).toMatch(/partial/i);
+  });
+  it('is empty when there is no instant-connect data (normal turns unchanged)', () => {
+    expect(importSurveyPromptNote(null)).toBe('');
+    expect(importSurveyPromptNote(undefined)).toBe('');
+    expect(importSurveyPromptNote({ ...survey, url: '' })).toBe('');
+  });
+});
+
+describe('importHonestySummaryPrefix (mitrify autopsy, rule 5) — a failed import can never read as success', () => {
+  it('prepends an honest verdict naming the url + reason, ahead of the model prose', () => {
+    const prefix = importHonestySummaryPrefix({ url: 'https://github.com/aashishcpmt093-ui/mitrify', reason: 'the clone failed' });
+    const summary = `${prefix}## Mitrify App Survey\nSuccessfully cloned — ready for further work.`;
+    expect(summary.startsWith(IMPORT_HONESTY_PREFIX_MARK)).toBe(true);            // truth leads
+    expect(prefix).toContain('aashishcpmt093-ui/mitrify');
+    expect(prefix).toContain('does not contain that repository');                 // no fake success
+    expect(prefix.indexOf(IMPORT_HONESTY_PREFIX_MARK)).toBeLessThan(summary.indexOf('Successfully cloned'));
+  });
+  it('is empty when no import failed — a normal build summary is untouched', () => {
+    expect(importHonestySummaryPrefix(null)).toBe('');
+    expect(importHonestySummaryPrefix(undefined)).toBe('');
+    expect(importHonestySummaryPrefix({ url: '', reason: 'x' })).toBe('');
   });
 });
 
@@ -1535,6 +1791,23 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
     const weird = [{ name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' }, { name: 'GLM' }, { name: 'CLAUDE' }];
     const out = enforceNoClaude(weird, true).map((r) => r.name);
     expect(out).toEqual(['GLM', 'CLAUDE_HAIKU']); // Sonnet gone; mid-chain Haiku moved to the end
+  });
+
+  // REGRESSION (admin 2026-07-20, verbatim: "weak module me claude ka only haiku use hona chahiye. sonnet
+  // never!!"): the vertex-peer reorder (AGENTV3_VERTEX_PEER) assembles the chain as
+  // [...floorRunners, ...fallback, claude, ...withBackstop] = GLM → KIMI → VERTEX → GEMINI → CLAUDE → CLAUDE_HAIKU,
+  // with the Sonnet/Opus 'CLAUDE' runner MID-chain (not at the tail as the old baseChain had it). Even so — and
+  // even on the leak path where a heal gate set noClaude WITHOUT cheapOnly, so the build took this !cheapOnly
+  // vertex-peer branch — enforceNoClaude must still strip that mid-chain CLAUDE and keep ONLY the pinned Haiku last.
+  it('the vertex-peer chain shape (CLAUDE mid-chain) still yields NO Sonnet/Opus for a weak build', () => {
+    const vertexPeerChain = [
+      { name: 'GLM' }, { name: 'KIMI' }, { name: 'VERTEX' }, { name: 'GEMINI' },
+      { name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' },
+    ];
+    const out = enforceNoClaude(vertexPeerChain, true).map((r) => r.name);
+    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI', 'CLAUDE_HAIKU']);
+    expect(out).not.toContain('CLAUDE'); // Sonnet/Opus never — the admin's "sonnet never!!"
+    expect(out[out.length - 1]).toBe('CLAUDE_HAIKU'); // only Haiku, and last
   });
 });
 
@@ -1574,6 +1847,30 @@ describe('redactProviderError / sandboxUnavailableNotice — no raw infra error 
     expect(redactProviderError('x'.repeat(500)).length).toBeLessThanOrEqual(200);
     expect(redactProviderError('')).toBe('');
     expect(redactProviderError(undefined as unknown as string)).toBe('');
+  });
+
+  it('White-Label Law: strips every AI vendor + model id so no provider name can reach the user', () => {
+    const forbidden = [
+      'Provider GLM failed: 429 from Z.ai — falling back',
+      'claude-opus-4-8 rate limited; switching to Sonnet',
+      'Kimi (Moonshot) timed out, retrying on gemini-2.5-pro',
+      'xAI Grok returned an error; Anthropic backstop engaged',
+      'OpenAI gpt-4o quota exceeded',
+      'glm-5.2 and kimi-k2.7-code both unavailable, Vertex fallback',
+    ];
+    const banned = /\b(GLM|Z\.?ai|Kimi|Moonshot|Claude|Anthropic|Sonnet|Opus|Haiku|Gemini|Vertex|Grok|xAI|OpenAI|GPT|DeepSeek|glm-|kimi-|claude-|gemini-|grok-|gpt-)\b/i;
+    for (const raw of forbidden) {
+      const out = redactProviderError(raw);
+      expect(out, `leaked a provider name from: ${raw}`).not.toMatch(banned);
+    }
+    // A vendor NAME degrades to our brand; a bare model id degrades to a neutral "the model".
+    expect(redactProviderError('Provider GLM failed')).toContain('NavBharatAI');
+    expect(redactProviderError('claude-opus-4-8 rate limited')).toContain('the model');
+  });
+
+  it('does not mangle ordinary error words that merely resemble nothing forbidden', () => {
+    // A benign message with no provider token passes through (only cap/whitespace applied).
+    expect(redactProviderError('the import errored (repository not found)')).toBe('the import errored (repository not found)');
   });
 });
 
@@ -1624,5 +1921,285 @@ describe('statusEntitlement (T0-9 — /status money facts from the VERIFIED iden
     expect(statusEntitlement({ uid: 'u', email: null }, null).billed).toBe(true);
     process.env.AGENTV3_PAID_PUBLIC = 'false';
     expect(statusEntitlement({ uid: 'u', email: null }, null).billed).toBe(false);
+  });
+});
+
+// T0-9 identity convergence (2026-07-19 re-audit): two CONFIRMED claimed-identity risks were fixed —
+// (A) the /chat abuse ledger + hard-block keyed off the spoofable req.body.userId (victim-framing DoS +
+// self-block evasion), and (B) the /preview-error per-USER "latest report" slot written under the claimed
+// body.userId after an anon-workspace ownership pass (cross-user report poisoning). Both now use the
+// VERIFIED identity. This structural guard reads the route source and fails if either sink regresses back
+// to a client-claimed identity (the route is impure/HTTP; a source assertion is the proportionate lock,
+// same style as the tool-wiring guard).
+describe('T0-9 — abuse ledger + preview-error report slot must use the VERIFIED identity, never req.body.userId', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  it('the abuse ledger attributes to the verified `userId`, not the spoofable req.body.userId', () => {
+    expect(SRC).toContain('const abuserUid = userId ||'); // verified identity resolved earlier in /chat
+    // must not re-introduce a claimed body.userId as the abuse-attribution uid
+    expect(SRC).not.toMatch(/abuserUid\s*=\s*\(?\s*req\.body\??\.userId/);
+  });
+
+  it('the preview-error per-user report slot is keyed off verifiedIdentity(req), not the claim', () => {
+    // Scope to the /preview-error handler ONLY — elsewhere (e.g. /chat) saveLatestForUser(userId, …) is
+    // correct because THAT `userId` is already the verified identity; here it was the claimed body.userId.
+    const start = SRC.indexOf("app.post('/api/agentv3/preview-error'");
+    const end = SRC.indexOf("app.get('/api/agentv3/preview-status'", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const handler = SRC.slice(start, end);
+    expect(handler).toContain('const reportUid = (await verifiedIdentity(req))?.uid ?? null;');
+    expect(handler).toContain('saveLatestForUser(reportUid,');
+    expect(handler).toContain('loadLatestForUser(reportUid)');
+    // within THIS handler the per-user sinks must never key off the spoofable claimed userId
+    expect(handler).not.toContain('saveLatestForUser(userId,');
+    expect(handler).not.toContain('loadLatestForUser(userId)');
+  });
+});
+
+// T0-9 convergence (2026-07-19): the 4 DESTRUCTIVE write routes (exec, delete-files, import-files,
+// visual-edit) must use the STRICT assertVerifiedWorkspaceOwner (verified-owner-or-anon-capability, no
+// claimed-uid fallback), so a token-less caller who merely learned agentv3-victim-{sid} can't run a command
+// or delete files by claiming the victim's uid. The other write routes keep the lenient never-break guard.
+describe('T0-9 — destructive write routes require a VERIFIED workspace owner (no claimed-uid fallback)', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+  const handlerOf = (path: string): string => {
+    const i = SRC.indexOf(`app.post('${path}'`);
+    return i === -1 ? '' : SRC.slice(i, i + 1600);
+  };
+
+  for (const path of ['/api/agentv3/exec', '/api/agentv3/delete-files', '/api/agentv3/import-files', '/api/agentv3/visual-edit']) {
+    it(`${path} uses the strict assertVerifiedWorkspaceOwner, not the lenient assertWorkspaceOwner`, () => {
+      const h = handlerOf(path);
+      expect(h.length).toBeGreaterThan(0);
+      expect(h).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)');
+      expect(h).not.toContain('assertWorkspaceOwner(req, workspaceId)'); // must not use the claimed-fallback guard
+    });
+  }
+
+  it('the strict guard is verified-only (delegates to verifiedWorkspaceReadOk, no claimed-uid input)', () => {
+    const i = SRC.indexOf('async function assertVerifiedWorkspaceOwner(');
+    const fn = SRC.slice(i, i + 260);
+    expect(fn).toContain('verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)');
+    expect(fn).not.toContain('req.body?.userId'); // never reads a claimed identity
+  });
+});
+
+describe('isReportAdmin (Fix 68) — only the admin sees raw provider names in the build report', () => {
+  const save = process.env.AGENTV3_REPORT_ADMINS;
+  afterEach(() => { if (save === undefined) delete process.env.AGENTV3_REPORT_ADMINS; else process.env.AGENTV3_REPORT_ADMINS = save; });
+
+  it('defaults to the known admins (case-insensitive) and fails closed on unknown/empty', () => {
+    delete process.env.AGENTV3_REPORT_ADMINS;
+    expect(isReportAdmin('aashishcpmt09@gmail.com')).toBe(true);
+    expect(isReportAdmin('AASHISHCPMT09@GMAIL.COM')).toBe(true);
+    expect(isReportAdmin('doc.asheesh@icloud.com')).toBe(true);
+    expect(isReportAdmin('random.user@example.com')).toBe(false); // a normal user → anonymized view
+    expect(isReportAdmin('')).toBe(false);
+    expect(isReportAdmin(null)).toBe(false);
+    expect(isReportAdmin(undefined)).toBe(false);
+  });
+
+  it('honours an explicit AGENTV3_REPORT_ADMINS override', () => {
+    process.env.AGENTV3_REPORT_ADMINS = 'ops@navbharatai.in, second@navbharatai.in';
+    expect(isReportAdmin('ops@navbharatai.in')).toBe(true);
+    expect(isReportAdmin('second@navbharatai.in')).toBe(true);
+    expect(isReportAdmin('aashishcpmt09@gmail.com')).toBe(false); // override replaces the default list
+  });
+});
+
+// Large-zip-import GitHub durability backstop (report 2026-07-27 — "1gb zip firbase me nahi to
+// github login karwao"). /api/agentv3/import-files gained a best-effort push-to-GitHub step for
+// the FINAL chunk of a large bulk import when no Firestore-sized transport ceiling would ever be
+// enough. Static-source checks (matching this file's existing style for this huge route file):
+// gating must be narrow (bulk import + finalize + real size threshold + git storage active), and
+// the whole block must never be able to fail the request.
+describe('import-files GitHub backstop — gating + never-blocks (large-zip-import fix)', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+  const handler = (() => {
+    const i = SRC.indexOf("app.post('/api/agentv3/import-files'");
+    const j = SRC.indexOf("app.post('/api/agentv3/delete-files'");
+    expect(i).toBeGreaterThan(-1);
+    expect(j).toBeGreaterThan(i);
+    return SRC.slice(i, j);
+  })();
+
+  it('only attempts the GitHub push for a bulk import, on the final chunk, over a real size threshold, with git storage active', () => {
+    expect(handler).toContain("req.body?.source === 'import'");
+    expect(handler).toContain('req.body?.finalize === true');
+    expect(handler).toContain('totalBytes > LARGE_IMPORT_GITHUB_BACKSTOP_BYTES');
+    expect(handler).toContain('githubStorageActive()');
+  });
+
+  it('the push itself is wrapped so a GitHub failure can never fail the import response', () => {
+    const pushIdx = handler.indexOf('repoSync.pushAll(');
+    expect(pushIdx).toBeGreaterThan(-1);
+    const tryIdx = handler.lastIndexOf('try {', pushIdx);
+    const catchIdx = handler.indexOf('} catch {', pushIdx);
+    expect(tryIdx).toBeGreaterThan(-1);
+    expect(catchIdx).toBeGreaterThan(pushIdx);
+    // the route's own outer catch must still return a 500 only for real (non-GitHub) failures —
+    // confirm the response is built (res.json) AFTER the best-effort GitHub block, not skipped by it.
+    const resJsonIdx = handler.indexOf('res.json({ imported: written.length');
+    expect(resJsonIdx).toBeGreaterThan(catchIdx);
+  });
+
+  it('reports needsGithub only when the import is large and no token is available (never nags on small edits)', () => {
+    const needsIdx = handler.indexOf('needsGithub = true');
+    expect(needsIdx).toBeGreaterThan(-1);
+    // needsGithub is set in the `else` branch of the userToken check, itself inside the size/gating `if`
+    const elseIdx = handler.lastIndexOf('} else {', needsIdx);
+    expect(elseIdx).toBeGreaterThan(-1);
+    const gatingIfIdx = handler.lastIndexOf('if (req.body?.source === \'import\'', elseIdx);
+    expect(gatingIfIdx).toBeGreaterThan(-1);
+    expect(elseIdx).toBeGreaterThan(gatingIfIdx);
+  });
+
+  it('the LARGE_IMPORT_GITHUB_BACKSTOP_BYTES threshold is defined and reasonably sized (not trivially small)', () => {
+    const m = SRC.match(/const LARGE_IMPORT_GITHUB_BACKSTOP_BYTES = ([\d_]+) \* 1024 \* 1024/);
+    expect(m).not.toBeNull();
+    const mb = Number((m as RegExpMatchArray)[1].replace(/_/g, ''));
+    expect(mb).toBeGreaterThanOrEqual(1);
+    expect(mb).toBeLessThanOrEqual(50);
+  });
+});
+
+// ═══ IMPORT/SURVEY TURN MUST NOT MUTATE THE USER'S FILES (mitrify autopsy 2026-07-27) ═══
+// ROOT CAUSE: the prompt was "Import this app … **Do not change any files yet**", yet the build
+// reported "✅ Done — I changed 2 files in your project": the pre-flight dependency reconcile added
+// `nanoid` to package.json, and the credential-log guard rewrote 8 console lines across 2 files.
+// Both are SIBLINGS of the exact class `shouldRunIntegrityHeal` closed on 2026-07-24 — file-MUTATING
+// passes that never checked `isImportTurn`. Every such pass is now gated; these tests lock all of them
+// so a future pass can't silently reintroduce the violation.
+describe('import/survey turn — every file-mutating pass is gated on !isImportTurn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  // Each entry: the env kill-switch that opens the pass, and what the pass writes.
+  const MUTATING_PASSES: Array<{ flag: string; what: string }> = [
+    { flag: 'AGENTV3_DEP_RECONCILE', what: 'adds missing deps to package.json' },
+    { flag: 'AGENTV3_IMPORT_NORMALIZE', what: 'rewrites import specifiers' },
+    { flag: 'AGENTV3_CSS_IMPORT_GUARD', what: 'injects a stylesheet import into the entry' },
+  ];
+
+  for (const { flag, what } of MUTATING_PASSES) {
+    it(`${flag} (${what}) is guarded by !isImportTurn`, () => {
+      const i = SRC.indexOf(`process.env.${flag} !== 'off'`);
+      expect(i).toBeGreaterThan(-1);
+      // the guard must be on the SAME condition, not merely somewhere later in the block
+      const condition = SRC.slice(i, SRC.indexOf('{', i));
+      expect(condition).toContain('!isImportTurn');
+    });
+  }
+
+  it('the credential-log guard DETECTS on an import turn but writes nothing', () => {
+    const i = SRC.indexOf("process.env.AGENTV3_CRED_LOG_GUARD !== 'off'");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 2200);
+    // it branches on isImportTurn...
+    expect(block).toContain('if (isImportTurn)');
+    // ...and the import-turn branch reports honestly instead of redacting
+    const importBranch = block.slice(block.indexOf('if (isImportTurn)'), block.indexOf('} else {'));
+    expect(importBranch).toContain('COMPLIANCE_LOG_LEAK_FOUND');
+    expect(importBranch).toContain('NOT changed');
+    expect(importBranch).not.toContain('actuator.writeFile'); // the whole point: no mutation
+  });
+
+  it('integrity FINDINGS are still recorded on an import turn (advisory, never hidden)', () => {
+    // Honesty half of the fix: we gate the WRITES, never the reporting.
+    expect(SRC).toContain('const obs = (message: string) => importTurnObservation(isImportTurn, message);');
+    expect(SRC).toContain("code: 'INTEGRITY_UNUSED_DEP', ...obs(");
+    expect(SRC).toContain("code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(");
+  });
+
+  it('an imported repo names its own mirror repo (no instruction-shaped repo names)', () => {
+    expect(SRC).toContain('readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl)');
+  });
+});
+
+// CENSUS TRIPWIRE — the invariant, not just today's four instances.
+//
+// The 2026-07-24 autopsy gated ONE mutating pass; three siblings stayed open and two of them fired
+// again on 2026-07-27, because nothing forced a NEW pass to consider the read-only turn. Per-pass
+// tests (above) lock the four we know about; this locks the CLASS: if anyone adds another writer to
+// `writtenFiles`, this fails and makes them prove the import-turn case was considered.
+//
+// `writtenFiles` is the shared invariant three separate guarantees key off — the reviewer skip
+// (`writtenFiles.size > 0`), the summary's honest "I analyzed your project — no files were changed"
+// (`changedFiles === 0`), and the billing/artifact checks. A pass that writes to it on a survey turn
+// silently breaks all three at once, which is exactly what shipped.
+describe('writtenFiles census — a new writer must consider the read-only (import/survey) turn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  it('has exactly the audited set of writtenFiles.set call sites', () => {
+    const count = (SRC.match(/writtenFiles\.set\(/g) ?? []).length;
+    // Audited 2026-07-27 — each site is one of:
+    //   1× the AGENT'S OWN tool write (onFileWrite) — deliberately NOT gated: if the model writes a
+    //      file, the report must honestly say so; gating it would make the summary lie.
+    //   1× one-shot fast lane import-path autofix — enclosing lane is already `&& !isImportTurn`.
+    //   3× integrity passes (import-normalize / css-guard / cred-log) — gated by this change.
+    //   3× post-build artifact passes (tests / index.html / scaffold) — gated on `expectsArtifacts`,
+    //      which is false on every import turn.
+    //   1× the unused-import sweep (first-build-correct, 2026-07-31) — gated on `result.ok &&
+    //      expectsArtifacts && writtenFiles.size > 0`, so it NEVER writes on a read-only import/survey
+    //      turn (same discipline as the artifact passes above). Considered ✓.
+    //   1× the missing vite.config ensure (first-build-correct, 2026-07-31) — gated on `expectsArtifacts`
+    //      (false on every import/survey turn), so it never writes on a read-only turn. It intentionally
+    //      does NOT require result.ok (a missing vite.config is the fix for a FAILED build). Considered ✓.
+    //   1× the entry-file duplicate-import sweep (duplicate-ErrorBoundary autopsy 2026-08-02) — gated on
+    //      `result.ok && expectsArtifacts && writtenFiles.size > 0`, so it NEVER writes on a read-only
+    //      import/survey turn (same discipline as the artifact passes above). Considered ✓.
+    //   1× the PRE-VERDICT duplicate-import dedupe (duplicate-ErrorBoundary autopsy 2026-08-02, buildId
+    //      a2f32f38) — gated on `expectsArtifacts && writtenFiles.size > 0` (false on every import/survey
+    //      turn, so it never writes on a read-only turn). It intentionally does NOT require result.ok — a
+    //      duplicate import is the fix for a FAILED build, and it runs BEFORE the verdict so the duplicate
+    //      never fails the build in the first place (same "fix a failed build" discipline as vite.config). ✓.
+    //   1× the golden-scaffold pre-seed (starter-template apps, 2026-08-02) — gated on
+    //      `intent === 'new_build' && !isImportTurn` plus an exact chip-prompt match and an EMPTY src/
+    //      tree, so it never writes on a read-only import/survey turn (or any edit/rebuild turn). ✓.
+    expect(count).toBe(13);
+  });
+
+  it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {
+    // The size-only guard was DEFEATED in practice (build 77bd487b): infra writes on a read-only survey
+    // turn — the `.env` that loads the user's saved keys, foundational scaffolding — pushed
+    // writtenFiles.size above zero, so the reviewer RAN and its heal edited a "do not change any files"
+    // import (Added 4 imports + 12 package.json deps). The gate now ALSO requires !isImportTurn via the
+    // exported `reviewerShouldRun` predicate, so an analysis-only turn is NEVER reviewed regardless of
+    // infra writes (this stacks on top of the writtenFiles.set write-site audit above — defense in depth).
+    // If this stops being the gate, the "no reviewer on an analysis-only turn" guarantee needs re-deriving.
+    expect(SRC).toContain('const reviewerAllowed = reviewerShouldRun(');
+    expect(SRC).toContain('!opts.isImportTurn'); // reviewerShouldRun itself gates on the import turn
+  });
+
+  it('the build summary still reports honestly from writtenFiles.size', () => {
+    // ProjectSummary picks "I analyzed your project — no files were changed" on changedFiles === 0.
+    expect(SRC).toContain('changedFiles: writtenFiles.size');
+  });
+});
+
+// "WORKING APP OR FREE" must not have a hole (autopsy 2026-07-27, buildId d1623410).
+// The old guard read `expectsArtifacts && !result.ok`. expectsArtifacts is FALSE on every
+// import/survey turn, so an import turn that failed with OUTCOME_SYNTAX_ERROR *and* BUILD_TIMEOUT
+// after 29 minutes was still billed (₹19.08 recorded) — while the user-facing summary said
+// verbatim "You have NOT been charged for this build".
+describe('zeroBillForFailedBuild — a failed build is never charged, import turns included', () => {
+  it('zeroes the bill whenever the build did not succeed', () => {
+    expect(zeroBillForFailedBuild(false)).toBe(true);
+  });
+
+  it('leaves a SUCCESSFUL build billable (a real survey is delivered work)', () => {
+    expect(zeroBillForFailedBuild(true)).toBe(false);
+  });
+
+  it('does not depend on expectsArtifacts — that dependence WAS the bug', () => {
+    // The rule takes only `ok`. If a future refactor reintroduces an artifacts condition,
+    // an import/survey turn silently becomes billable-on-failure again.
+    expect(zeroBillForFailedBuild.length).toBe(1);
+  });
+
+  it('is wired into the billing path (not merely defined)', () => {
+    const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+    expect(SRC).toContain('zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0');
+    expect(SRC).not.toContain('expectsArtifacts && !result.ok && effectiveBilledUsd > 0');
   });
 });

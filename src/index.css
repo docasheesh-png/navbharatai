@@ -10,7 +10,16 @@
    sidebar) is handled in JS. */
 html, body {
   overscroll-behavior-x: none;
-  overscroll-behavior-y: auto;
+  /* NATIVE-FEEL FIX (admin audit 2026-07-26). This was `auto`, which leaves the BROWSER's
+     pull-to-refresh armed: dragging down at the top of a chat reloads the whole app. That is wrong
+     twice over — no native app reloads itself from a downward swipe, and doing it mid-build throws
+     away the screen the user was watching. It also leaves the iOS rubber-band bounce on the app
+     shell, which native screens do not have.
+
+     `none` removes both. Nothing depends on it: the app has no pull-to-refresh of its own (grepped),
+     and inner scrollable regions are unaffected — this only governs what happens when the DOCUMENT
+     is dragged past its own boundary. */
+  overscroll-behavior-y: none;
 }
 
 /* The html/body rule alone only stops the back/forward gesture when the page
@@ -23,6 +32,30 @@ html, body {
    horizontal scrolling — only the boundary overscroll that triggered nav. */
 * {
   overscroll-behavior-x: none;
+}
+
+/* NATIVE-FEEL FIX (admin audit 2026-07-26). The default mobile tap-highlight paints a translucent
+   grey/blue rectangle over whatever you touch — the single most recognisable "this is a web page in
+   an app" tell, because no native Android or iOS control behaves that way. Removing it costs nothing:
+   the app already renders its own pressed/active states, so touch feedback stays intact while the
+   browser's rectangle disappears. Scoped to the whole document because the giveaway appears on every
+   tappable element, not just buttons.
+
+   `text-size-adjust` is here for the same reason — a WebView silently inflating font sizes on rotate
+   breaks the typographic rhythm in a way that reads as "web page", never as a native screen. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Long-pressing UI chrome in a native app must not raise the browser's text-selection handles or the
+   iOS callout menu. Selection stays ENABLED for the places users genuinely need it — chat replies,
+   generated code, inputs — so nothing becomes uncopyable. */
+button, [role='button'], nav, header, footer {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @layer base {
@@ -278,6 +311,20 @@ html, body {
 .animate-bounce,
 [class*="transition-"] {
   will-change: transform;
+}
+/* `.animate-spin` gets the GPU hint (will-change) but MUST NOT get a static
+   `transform: translateZ(0)`. Tailwind's `@keyframes spin` defines only the `to`
+   (100%) frame, so the `from` (0%) is synthesized from the element's underlying
+   transform. A static `translateZ(0)` makes that synthesized `from` an identity
+   matrix, and `to` is `rotate(360deg)` — also the identity matrix — so the
+   interpolation is identity→identity and the spinner never visibly rotates
+   (root cause of the app-wide "spinner doesn't spin" bug; verified in Chromium).
+   Excluding `.animate-spin` here lets its `from` synthesise from `none`
+   (= rotate(0deg)) so it spins. pulse/bounce/transition define transforms at
+   both keyframe ends, so the static promotion is safe for them. */
+.animate-pulse,
+.animate-bounce,
+[class*="transition-"] {
   transform: translateZ(0);
 }
 /* After animation completes, reset will-change to avoid persistent memory cost */

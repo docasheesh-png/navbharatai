@@ -3,10 +3,12 @@ import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Stethoscope,
   Scale, GraduationCap, Activity, Zap, Code2, Rocket,
-  CheckCircle2, ArrowRight, ChevronRight
+  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
+import { isNativeApp } from '../../lib/mobileNative';
+import { medicalFeaturesHidden, professionalsCardCopy } from '../../lib/playCompliance';
 
 interface HomeData {
   heroTitle: string;
@@ -27,6 +29,8 @@ interface HomeViewProps {
   onStartChat: () => void;
   onStartProChat?: () => void;
   onStartProfessionals?: () => void;
+  /** Open the "Other AI" page — the builder-tools hub (admin 2026-07-23: a full view, like the other 3). */
+  onOpenOtherAI?: () => void;
   isAdmin?: boolean;
   data?: HomeData;
   onUpdate?: (newData: HomeData) => void;
@@ -48,8 +52,8 @@ const PRODUCT_CARDS = [
     Icon: MessageSquare,
     title: 'NavBharatAI',
     subtitle: 'Free AI Chat',
-    description: 'Ask anything in Hindi, English, or Hinglish. Powered by advanced AI — instant answers, creative writing, coding help, and more.',
-    features: ['Chat in Hindi, English & Hinglish', 'Code, write, research & learn', 'App builder for simple projects'],
+    description: 'Ask anything in Hindi, English, or Hinglish — instant answers, explanations, ideas, creative writing, and everyday help. Your free AI companion to learn and get things done. (For building apps, use NavBharatAI Pro.)',
+    features: ['Chat in Hindi, English & Hinglish', 'Instant answers, research & learning', 'Creative writing, summaries & translation'],
     featureIcon: CheckCircle2,
     featureColor: 'text-orange-400',
     btnClass: 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-white',
@@ -68,8 +72,8 @@ const PRODUCT_CARDS = [
     Icon: Bot,
     title: 'NavBharatAI Pro',
     subtitle: 'Agentic App Builder',
-    description: 'Describe any app in plain language. Pro v5.0 plans, codes, previews and deploys it — automatically, end-to-end.',
-    features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', 'Powered by Claude Opus (best AI)'],
+    description: 'Describe any app in plain language and NavBharatAI Pro v5.0 plans, codes, previews and deploys it — automatically, end-to-end. This is the coding & app-building engine.',
+    features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', "NavBharatAI's most powerful AI engine"],
     featureIcon: Zap,
     featureColor: 'text-indigo-400',
     btnClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white',
@@ -96,14 +100,38 @@ const PRODUCT_CARDS = [
     btnLabel: 'Explore Professionals',
     btnIcon: ChevronRight,
   },
+  {
+    id: 'tools',
+    badge: '20+ Tools',
+    badgeColor: 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30',
+    gradient: 'from-fuchsia-600/20 via-pink-500/10 to-transparent',
+    border: 'border-fuchsia-500/20 hover:border-fuchsia-400/50',
+    glow: 'shadow-fuchsia-500/10',
+    iconBg: 'bg-fuchsia-500/15',
+    iconColor: 'text-fuchsia-400',
+    Icon: LayoutGrid,
+    title: 'Other AI',
+    subtitle: 'Builder Tools & Utilities',
+    description: 'Every extra AI utility to design, develop, ship and monetize your app — bot builder, image gen, debugger, deploy, SEO, monetization and more.',
+    features: ['Design, develop, test & minify', 'Publish, deploy & custom domain', 'Monetize, analytics & team'],
+    featureIcon: CheckCircle2,
+    featureColor: 'text-fuchsia-400',
+    btnClass: 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-white',
+    btnLabel: 'Open Tools',
+    btnIcon: LayoutGrid,
+  },
 ];
 
 const PROF_ICONS = [Stethoscope, Scale, GraduationCap, Activity, Code2];
+// Play compliance (admin 2026-08-04): inside the native shell the Professionals card must not
+// advertise medical features — no "Doctor AI" copy, no stethoscope icon (playCompliance.ts).
+const PROF_ICONS_NATIVE = [Scale, GraduationCap, Activity, Code2];
 
 export const HomeView = ({
   onStartChat,
   onStartProChat,
   onStartProfessionals,
+  onOpenOtherAI,
   isAdmin,
   data,
   onUpdate,
@@ -117,6 +145,8 @@ export const HomeView = ({
     free: onStartChat,
     pro: onStartProChat,
     professionals: onStartProfessionals,
+    // "Other AI" navigates to its OWN full page (like the other 3 cards) — the tools live INSIDE it.
+    tools: onOpenOtherAI,
   };
 
   return (
@@ -185,13 +215,20 @@ export const HomeView = ({
           </p>
         </motion.div>
 
-        {/* ── Product Cards ── */}
-        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-          {PRODUCT_CARDS.map((card, i) => {
+        {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
+        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+          {PRODUCT_CARDS.map((rawCard, i) => {
+            // Play compliance: the Professionals card's copy must not name medical assistants in the
+            // native shell (the shipped app declares no medical features — copy and app must match).
+            const hideMedical = medicalFeaturesHidden(isNativeApp());
+            const card = rawCard.id === 'professionals' && hideMedical
+              ? { ...rawCard, ...professionalsCardCopy(true), features: [...professionalsCardCopy(true).features] }
+              : rawCard;
             const CardIcon = card.Icon;
             const BtnIcon = card.btnIcon;
             const FeatIcon = card.featureIcon;
             const handler = handlers[card.id];
+            const comingSoon = (card as { comingSoon?: boolean }).comingSoon === true;
 
             return (
               <motion.div
@@ -242,7 +279,7 @@ export const HomeView = ({
                   {/* Professionals mini-icon row */}
                   {card.id === 'professionals' && (
                     <div className="flex items-center gap-2">
-                      {PROF_ICONS.map((PIcon, idx) => (
+                      {(hideMedical ? PROF_ICONS_NATIVE : PROF_ICONS).map((PIcon, idx) => (
                         <div key={idx} className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
                           <PIcon className="w-3.5 h-3.5 text-teal-400" />
                         </div>
@@ -253,23 +290,28 @@ export const HomeView = ({
 
                   {/* CTA Button */}
                   <button
-                    onClick={handler || onShowLogin}
+                    onClick={comingSoon ? undefined : (handler || onShowLogin)}
+                    disabled={comingSoon}
                     className={cn(
                       'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl sm:rounded-2xl',
                       'font-black text-xs uppercase tracking-widest transition-all duration-200',
-                      'active:scale-95 select-none',
+                      'select-none',
+                      comingSoon ? 'opacity-70 cursor-not-allowed' : 'active:scale-95',
                       card.btnClass
                     )}
                   >
                     <BtnIcon className="w-4 h-4 shrink-0" />
                     <span className="truncate">{card.btnLabel}</span>
-                    <ArrowRight className="w-3.5 h-3.5 shrink-0 ml-auto" />
+                    {!comingSoon && <ArrowRight className="w-3.5 h-3.5 shrink-0 ml-auto" />}
                   </button>
                 </div>
               </motion.div>
             );
           })}
         </div>
+
+        {/* The "Other AI" builder tools now live on their OWN page (OtherAIView), opened by the 4th
+            card above — not revealed below the cards (admin 2026-07-23). */}
 
         {/* ── Footer tagline ── */}
         <motion.p

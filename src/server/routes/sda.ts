@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
-import { CREATOR_IDENTITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
 import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
@@ -11,6 +11,11 @@ import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
+import { chargeForAiTurn } from '../lib/aiTurnCharge';
+import type { ChatTurnUsage } from '../lib/chatSpend';
+import { usdInrRate } from '../lib/UsdInrRate';
+import { getServerDb } from '../lib/serverDb';
+import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -111,6 +116,16 @@ export function registerSdaRoutes(app: Express): void {
       const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, sdaIdentity?.email || null);
       if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
       const sdaTier: ProfessionalTier = sdaGate.tier;
+      // What the answering model reported, filled in by whichever branch below actually answers.
+      let sdaSpend: ChatTurnUsage | null = null;
+
+      // IMAGE-GENERATION INTENT (admin 2026-08-02): Doctor AI does not generate images — if the doctor asks
+      // it to CREATE a picture (e.g. "draw a diagram of the heart"), point them to the dedicated AI Image
+      // Gen tool instead of an unhelpful answer. Skipped when a file is attached (that is a document/image
+      // ANALYSIS request, which SDA does handle). No free message is burned.
+      if (!fileData && typeof message === 'string' && detectImageIntent(message).wants) {
+        return res.json({ reply: imageGenGuidance(), sessionId: sessionId || userId || null });
+      }
 
       // ── Session / clinical-store resolution ──────────────────────────────────
       // sessionId is preferred; fall back to userId for backwards compat.
@@ -292,7 +307,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // doctor focused; the model is told to use and cite these.
       const kbQuery = `${message} ${clinicalEntry.patientData?.chiefComplaint || ''} ${clinicalEntry.redFlags.join(' ')}`;
       const kbBlock = formatKnowledgeForPrompt(retrieveClinicalKnowledge(kbQuery));
-      const SDA_SYSTEM_FINAL = [SDA_SYSTEM, sdaAppCtx, kbBlock, CREATOR_IDENTITY].filter(Boolean).join('\n\n');
+      const SDA_SYSTEM_FINAL = [SDA_SYSTEM, sdaAppCtx, kbBlock, INDIA_TERRITORIAL_INTEGRITY, CREATOR_IDENTITY].filter(Boolean).join('\n\n');
 
       // Extract structured data from response (simple heuristic)
       const extractPatientUpdate = (text: string, msg: string): Record<string, any> => {
@@ -453,6 +468,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
+            // ONE WALLET: keep what this answer cost so the turn can be charged like any other AI.
+            // SDA's other branches (the Grok/Gemini race above, the Vertex/Claude multimodal fallback
+            // below) do not report usage, so a turn answered by one of those stays UNMEASURED and is
+            // therefore not charged — we never invent a number to bill (see chatSpend.ts).
+            sdaSpend = {
+              provider: response.provider,
+              model: response.model,
+              inputTokens: response.usage?.inputTokens,
+              outputTokens: response.usage?.outputTokens,
+            };
             console.log(`[SDA] Isolated 'professional' universe router succeeded via ${telemetry.provider}`);
           }
         } catch (e: any) { console.warn('[SDA] professional-universe router err:', e.message); }
@@ -475,6 +500,26 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             } catch (ve: any) { console.warn(`[SDA] Vertex ${modelName}:`, ve.message); }
           }
         } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
+      }
+
+      // FREE-tier reliability (admin 2026-07-30, "Doctor AI respond nahi kar raha"): a free TEXT turn
+      // only had GLM-flash → inline Vertex; when BOTH are down (e.g. a GLM-429 storm with no Vertex
+      // project configured) it 503'd and looked "dead". Gemini is explicitly in the free ladder
+      // (GLM/Kimi → Vertex/Gemini → …), so add DIRECT Gemini as a sequential free fallback. It fires
+      // ONLY when the cheap chain produced nothing, so a normal free turn that GLM answers costs nothing
+      // extra. Never Grok/Claude on free. (Image/PDF already reach Gemini via the racer above.)
+      if (!reply && sdaTier === 'free' && sdaGeminiKey && !isImage && !isPDF) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const contents = buildGeminiContents();
+          for (const m of geminiVisionModels()) {
+            try {
+              const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+              const t = r.text || '';
+              if (t.trim()) { reply = t; console.log(`[SDA] Free-tier Gemini fallback ${m} succeeded`); break; }
+            } catch (e: any) { console.warn(`[SDA] free Gemini ${m}:`, e.message); }
+          }
+        } catch (e: any) { console.warn('[SDA] free Gemini fallback err:', e.message); }
       }
 
       // TIER: Claude is the premium last resort — PAID tier only. A free-tier turn that got no reply
@@ -501,8 +546,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       }
 
       if (!reply) {
+        // Admin-facing detail stays in the log; the doctor gets an honest, on-brand busy message
+        // (never internal provider/key detail — the client now shows this text directly).
         console.error('[SDA] All AI providers failed — returning 503');
-        return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
+        return res.status(503).json({ error: 'Doctor AI is busy right now — please try again in a moment.' });
       }
 
       // ── Extract CLINICAL_JSON from reply and persist to session store ──────────
@@ -567,11 +614,22 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // A genuinely-answered FREE-tier turn burns one of today's free messages (shared across all
       // professionals + Doctor AI). Never on a paywall block or an error. Best-effort.
       if (sdaGate.countsAgainstFree) burnFreeMessage(sdaGate.uid);
+      // ONE WALLET: Doctor AI draws on the same balance as every other assistant and every build.
+      // After the answer, never awaited into the response, inert while AI_WALLET_SPEND is off.
+      void chargeForAiTurn(
+        getServerDb() as any,
+        { userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass },
+        sdaSpend,
+        usdInrRate(),
+        Date.now(),
+      );
       return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {
+      // Full detail to the server log (admin diagnostics); a safe, on-brand message to the doctor —
+      // the client now shows this `error` text directly, so it must never leak internals.
       console.error('[SDA] Error:', err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Doctor AI hit an unexpected error. Please try again in a moment.' });
     }
   });
 }

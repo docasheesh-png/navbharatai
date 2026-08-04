@@ -1,24 +1,58 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target } from 'lucide-react';
+import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
+import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
+import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../lib/firstPassQuality';
 
 interface AdminDashboardProps {
   adminToken: string;
   onLogout: () => void;
 }
 
-type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'security' | 'settings';
+type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'overview',  label: 'Overview',    icon: Activity },
   { id: 'users',     label: 'Users',        icon: Users },
   { id: 'engines',   label: 'AI Engines',   icon: Cpu },
   { id: 'revenue',   label: 'Revenue',      icon: IndianRupee },
+  { id: 'reports',   label: 'Build Reports', icon: FileText },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
+
+type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
+
+interface AdminBuildReportRow {
+  id: string;
+  reportedAt: number;
+  userId: string | null;
+  email: string | null;
+  name: string | null;
+  workspaceId: string | null;
+  buildId: string | null;
+  ok: boolean | null;
+  appLabel: string;
+  userTier: string | null;
+  tier: ReportTier;
+  billedInr: number | null;
+  billedUsd: number | null;
+  buildMs: number | null;
+  rootCause: string | null;
+  summary: string | null;
+  /** How many defects the engine repaired in its OWN output, and how many it left unresolved.
+   *  Absent on reports written before this measurement existed — those rows are EXCLUDED from the
+   *  first-pass rate rather than counted as clean (see firstPassStatsFromMeta). */
+  healCount?: number;
+  unresolvedCount?: number;
+}
+
+type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
+type ReportTierFilter = 'all' | 'paid' | 'free' | 'admin';
+type ReportStatusFilter = 'all' | 'ok' | 'failed';
 
 const statCard = (label: string, value: string | number, sub: string, color: string, Icon: React.ComponentType<any>) => (
   <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 relative overflow-hidden">
@@ -61,9 +95,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [promoDiscount, setPromoDiscount] = useState('');
   const [promoMaxUses, setPromoMaxUses] = useState('1');
 
-  // Announcement
+  // Announcement / user notification
   const [annMsg, setAnnMsg] = useState('');
   const [annTarget, setAnnTarget] = useState('all');
+  const [annEmail, setAnnEmail] = useState('');
 
   // Token adjust
   const [tokenDelta, setTokenDelta] = useState('');
@@ -103,9 +138,112 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [mfaCode, setMfaCode] = useState('');
   const [mfaBusy, setMfaBusy] = useState(false);
 
+  // Build Reports inbox (admin 2026-07-29) — the reports users submit via the single "Report" button.
+  const [buildReports, setBuildReports] = useState<AdminBuildReportRow[]>([]);
+  const [buildReportsLoading, setBuildReportsLoading] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<{ meta: AdminBuildReportRow; report: any } | null>(null);
+  const [selectedReportLoading, setSelectedReportLoading] = useState(false);
+  // Build Reports — filters & sorting (admin 2026-08-01): who sent which report, when, free/paid.
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportTierFilter, setReportTierFilter] = useState<ReportTierFilter>('all');
+  const [reportStatusFilter, setReportStatusFilter] = useState<ReportStatusFilter>('all');
+  const [reportSortKey, setReportSortKey] = useState<ReportSortKey>('time');
+  const [reportSortAsc, setReportSortAsc] = useState(false); // default: newest first
+
+  // Apply the search + tier + status filters, then sort. Pure derivation of the fetched rows.
+  const visibleBuildReports = useMemo(() => {
+    const q = reportSearch.trim().toLowerCase();
+    const filtered = buildReports.filter((r) => {
+      if (reportTierFilter !== 'all' && r.tier !== reportTierFilter) return false;
+      if (reportStatusFilter === 'ok' && r.ok !== true) return false;
+      if (reportStatusFilter === 'failed' && r.ok !== false) return false;
+      if (q) {
+        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = reportSortAsc ? 1 : -1;
+    const sorted = [...filtered].sort((a, b) => {
+      switch (reportSortKey) {
+        case 'name': return dir * (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? '');
+        case 'app': return dir * (a.appLabel ?? '').localeCompare(b.appLabel ?? '');
+        case 'tier': return dir * (a.tier ?? '').localeCompare(b.tier ?? '');
+        case 'charged': return dir * ((a.billedInr ?? 0) - (b.billedInr ?? 0));
+        case 'time':
+        default: return dir * (a.reportedAt - b.reportedAt);
+      }
+    });
+    return sorted;
+  }, [buildReports, reportSearch, reportTierFilter, reportStatusFilter, reportSortKey, reportSortAsc]);
+
+  const fmtCharge = (inr: number | null): { text: string; cls: string } => {
+    if (inr == null) return { text: '—', cls: 'text-zinc-500' };
+    if (inr <= 0) return { text: '₹0', cls: 'text-[#8b949e]' };
+    return { text: `₹${inr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, cls: 'text-emerald-300 font-bold' };
+  };
+
+  // M8-S8.1 — data-driven failure signal: which failure class recurs most across all reports.
+  const failureSummary = useMemo(() => summarizeFailurePatterns(buildReports), [buildReports]);
+  // ROADMAP #1 Phase 0.2 — FIRST-PASS QUALITY: the one number that says whether the ENGINE improved.
+  // Per the 50/50 law a self-heal is a RED FLAG, so the headline is the CLEAN rate (zero repairs
+  // needed), never the delivered rate. Computed from the SAME rows already fetched — one shared
+  // implementation with the server route (src/lib/firstPassQuality.ts), so the two can never drift.
+  const firstPass = useMemo(() => firstPassStatsFromMeta(buildReports), [buildReports]);
+  // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
+  const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
+  const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
+
+  const tierBadge = (tier: ReportTier): { label: string; cls: string } => {
+    switch (tier) {
+      case 'paid': return { label: 'Paid', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' };
+      case 'free': return { label: 'Free', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
+      case 'admin': return { label: 'Admin/Tester', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+      default: return { label: 'Unknown', cls: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/30' };
+    }
+  };
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
+
+  const fetchBuildReports = useCallback(async () => {
+    setBuildReportsLoading(true);
+    try {
+      const r = await fetch('/api/admin/build-reports', { headers });
+      const d = await r.json();
+      setBuildReports(Array.isArray(d?.reports) ? d.reports : []);
+    } catch (e) { console.error(e); setBuildReports([]); }
+    finally { setBuildReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const openBuildReport = useCallback(async (id: string) => {
+    setSelectedReportLoading(true);
+    try {
+      const r = await fetch(`/api/admin/build-reports/${encodeURIComponent(id)}`, { headers });
+      if (!r.ok) throw new Error('not found');
+      const d = await r.json();
+      setSelectedReport(d);
+    } catch (e) { console.error(e); toast('Could not open that report.'); }
+    finally { setSelectedReportLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const downloadSelectedReport = () => {
+    if (!selectedReport) return;
+    try {
+      const blob = new Blob([JSON.stringify(selectedReport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `build-report-${selectedReport.meta.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { console.error(e); toast('Download failed.'); }
+  };
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
@@ -250,6 +388,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
+  useEffect(() => { if (activeTab === 'reports') fetchBuildReports(); }, [activeTab, fetchBuildReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -365,9 +504,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   };
 
   const handleAnnouncement = async () => {
-    if (!annMsg) return;
-    const r = await adminPost('/api/admin/announcement', { message: annMsg, target: annTarget });
-    if (r.ok) { toast('Announcement sent!'); setAnnMsg(''); }
+    if (!annMsg.trim()) return;
+    if (annTarget === 'user' && !annEmail.trim()) { toast('Enter the user’s email to message one user.'); return; }
+    const r = await adminPost('/api/admin/announcement', { message: annMsg, target: annTarget, email: annTarget === 'user' ? annEmail.trim() : undefined });
+    if (r.ok) { toast(annTarget === 'user' ? `Message sent to ${annEmail.trim()}` : 'Message sent to all users!'); setAnnMsg(''); setAnnEmail(''); }
     else toast('Error: ' + r.error);
   };
 
@@ -408,7 +548,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </div>
         {/* Logout — always top-right, never wraps off screen */}
         <button
-          onClick={() => { sessionStorage.removeItem('admin_token'); onLogout(); }}
+          onClick={() => { localStorage.removeItem('admin_token'); onLogout(); }}
           className="absolute top-0 right-0 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 active:bg-red-600 border border-red-500/30 text-red-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap"
         >
           Logout
@@ -431,7 +571,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
       {loading && !analytics ? (
         <div className="py-24 text-center">
-          <RefreshCw className="w-10 h-10 text-indigo-500 animate-spin mx-auto mb-4" />
+          <TirangaLoader className="w-10 h-10 mx-auto mb-4" />
           <p className="text-xs text-[#8b949e] font-black uppercase tracking-widest">Loading dashboard data...</p>
         </div>
       ) : (
@@ -675,7 +815,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {usersLoading && (
-                        <tr><td colSpan={7} className="py-10 text-center"><RefreshCw className="w-5 h-5 animate-spin text-indigo-400 mx-auto" /></td></tr>
+                        <tr><td colSpan={7} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && usersError && (
                         <tr><td colSpan={7} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
@@ -1076,6 +1216,295 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             </div>
           )}
 
+          {/* ── BUILD REPORTS TAB (admin 2026-07-29) — the reports users submit via "Report" ── */}
+          {activeTab === 'reports' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-white tracking-tight">Build Reports</h3>
+                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only.</p>
+                </div>
+                <button
+                  onClick={fetchBuildReports}
+                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
+                </button>
+              </div>
+
+              {/* FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the headline engine number. A build that
+                  healed itself is NOT counted as a success (50/50 law: a heal is a red flag), so this
+                  deliberately reads lower than the delivered rate shown beside it. Honest by
+                  construction: shows nothing rather than a fake 0% when no row carries the signal. */}
+              {!buildReportsLoading && firstPass.cleanRate !== null && (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4">
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <Target className="w-4 h-4 text-indigo-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">First-pass quality</h4>
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                      firstPass.cleanRate >= FIRST_PASS_TARGET
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    }`}>
+                      target {Math.round(FIRST_PASS_TARGET * 100)}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                    <div>
+                      <p className="text-2xl font-black text-white tabular-nums">{(firstPass.cleanRate * 100).toFixed(1)}%</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Right first time</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-emerald-300 tabular-nums">{firstPass.clean}</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Clean</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-amber-300 tabular-nums">{firstPass.healed}</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Needed repair</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-rose-300 tabular-nums">{firstPass.failed}</p>
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Failed</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)}</p>
+                  {firstPass.skippedLegacy > 0 && (
+                    <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
+                      {firstPass.skippedLegacy} older report(s) excluded — they predate this measurement and
+                      carry no repair count. Counting them as clean would inflate the number.
+                    </p>
+                  )}
+                  {firstPass.topHealCodes.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider mb-2">
+                        Repairs that fire most — prevent these upstream
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {firstPass.topHealCodes.map((h) => (
+                          <span key={h.code} className="text-[10px] font-mono px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9]">
+                            {h.code} <span className="text-amber-300 font-bold">×{h.count}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Top failure patterns (M8-S8.1) — data-driven: which failure class recurs most, so the
+                  most-impactful fix is chosen from real evidence. Only shown when there are failures. */}
+              {!buildReportsLoading && failureSummary.totalFailed > 0 && (
+                <div className="bg-[#161b22] border border-amber-500/20 rounded-[1.25rem] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Top failure patterns</h4>
+                    <span className="text-[11px] text-[#8b949e] font-bold">
+                      {failureSummary.totalFailed} failed of {failureSummary.totalReports} report(s)
+                    </span>
+                  </div>
+                  <div className="grid gap-1.5">
+                    {failureSummary.patterns.map((p) => {
+                      const pct = failureSummary.totalFailed > 0 ? Math.round((p.count / failureSummary.totalFailed) * 100) : 0;
+                      return (
+                        <div key={p.label} className="flex items-center gap-3">
+                          <span className="w-40 shrink-0 text-[12px] font-bold text-white truncate" title={p.sample}>{p.label}</span>
+                          <span className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                            <span className="block h-full bg-amber-500/70 rounded-full" style={{ width: `${pct}%` }} />
+                          </span>
+                          <span className="w-16 shrink-0 text-right text-[11px] text-[#8b949e] tabular-nums">{p.count} · {pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Build-time signal (M6-S6.1) — average / median / slowest builds, so speed is measurable. */}
+              {!buildReportsLoading && buildTimeSummary.counted > 0 && (
+                <div className="bg-[#161b22] border border-sky-500/20 rounded-[1.25rem] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Activity className="w-4 h-4 text-sky-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Build speed</h4>
+                    <span className="text-[11px] text-[#8b949e] font-bold">across {buildTimeSummary.counted} build(s)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-6">
+                    <div>
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Average</p>
+                      <p className="text-xl font-black text-white font-mono">{fmtDuration(buildTimeSummary.avgMs)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Median</p>
+                      <p className="text-xl font-black text-white font-mono">{fmtDuration(buildTimeSummary.medianMs)}</p>
+                    </div>
+                    <div className="min-w-[180px]">
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest mb-1">Slowest</p>
+                      {buildTimeSummary.slowest.slice(0, 3).map((s, i) => (
+                        <p key={i} className="text-[11px] text-[#8b949e] truncate"><span className="text-amber-400 font-bold font-mono">{fmtDuration(s.ms)}</span> · {s.app}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Filters + sorting (admin 2026-08-01): who sent which report, when, free/paid */}
+              {!buildReportsLoading && buildReports.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8b949e]" />
+                    <input
+                      value={reportSearch}
+                      onChange={(e) => setReportSearch(e.target.value)}
+                      placeholder="Search name, email, or app…"
+                      className="w-full bg-[#161b22] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-[12px] text-white placeholder:text-[#8b949e] focus:border-indigo-500/50 outline-none"
+                    />
+                  </div>
+                  <select
+                    value={reportTierFilter}
+                    onChange={(e) => setReportTierFilter(e.target.value as ReportTierFilter)}
+                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
+                    title="Filter by user type"
+                  >
+                    <option value="all">All users</option>
+                    <option value="paid">Paid</option>
+                    <option value="free">Free</option>
+                    <option value="admin">Admin/Tester</option>
+                  </select>
+                  <select
+                    value={reportStatusFilter}
+                    onChange={(e) => setReportStatusFilter(e.target.value as ReportStatusFilter)}
+                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
+                    title="Filter by build outcome"
+                  >
+                    <option value="all">All status</option>
+                    <option value="ok">Success</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                  <select
+                    value={reportSortKey}
+                    onChange={(e) => setReportSortKey(e.target.value as ReportSortKey)}
+                    className="bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white outline-none focus:border-indigo-500/50"
+                    title="Sort by"
+                  >
+                    <option value="time">Sort: Time</option>
+                    <option value="name">Sort: Name</option>
+                    <option value="app">Sort: App</option>
+                    <option value="tier">Sort: User type</option>
+                    <option value="charged">Sort: ₹ Charged</option>
+                  </select>
+                  <button
+                    onClick={() => setReportSortAsc((v) => !v)}
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                    title={reportSortAsc ? 'Ascending' : 'Descending'}
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5" /> {reportSortAsc ? 'Asc' : 'Desc'}
+                  </button>
+                </div>
+              )}
+
+              {buildReportsLoading ? (
+                <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading reports…</div>
+              ) : buildReports.length === 0 ? (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No build reports submitted yet.</div>
+              ) : (
+                <>
+                  <p className="text-[11px] text-[#8b949e] font-bold">
+                    Showing {visibleBuildReports.length} of {buildReports.length} report(s)
+                  </p>
+                  {visibleBuildReports.length === 0 ? (
+                    <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No reports match these filters.</div>
+                  ) : (
+                    <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="text-[10px] uppercase tracking-wider text-[#8b949e] border-b border-white/10">
+                              <th className="px-3 py-2.5 font-black w-10">SN</th>
+                              <th className="px-3 py-2.5 font-black">Application</th>
+                              <th className="px-3 py-2.5 font-black">Sender</th>
+                              <th className="px-3 py-2.5 font-black">Email</th>
+                              <th className="px-3 py-2.5 font-black whitespace-nowrap">Time</th>
+                              <th className="px-3 py-2.5 font-black">User</th>
+                              <th className="px-3 py-2.5 font-black whitespace-nowrap">Charged</th>
+                              <th className="px-3 py-2.5 font-black">Status</th>
+                              <th className="px-3 py-2.5 font-black w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleBuildReports.map((r, idx) => {
+                              const badge = tierBadge(r.tier);
+                              return (
+                                <tr
+                                  key={r.id}
+                                  onClick={() => openBuildReport(r.id)}
+                                  className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] cursor-pointer transition-colors"
+                                >
+                                  <td className="px-3 py-2.5 text-[12px] text-[#8b949e] tabular-nums">{idx + 1}</td>
+                                  <td className="px-3 py-2.5 max-w-[240px]">
+                                    <span className="flex items-center gap-2">
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                                      <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
+                                    </span>
+                                    {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-[12px] text-white/90 truncate max-w-[140px]">{r.name || <span className="text-[#8b949e]">—</span>}</td>
+                                  <td className="px-3 py-2.5 text-[12px] text-[#8b949e] truncate max-w-[180px]">{r.email || r.userId || 'unknown'}</td>
+                                  <td className="px-3 py-2.5 text-[11px] text-[#8b949e] whitespace-nowrap">{new Date(r.reportedAt).toLocaleString()}</td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`inline-block text-[10px] font-black px-2 py-0.5 rounded-full border ${badge.cls}`} title={r.userTier || undefined}>{badge.label}</span>
+                                  </td>
+                                  <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                                    {(() => { const c = fmtCharge(r.billedInr); return <span className={`text-[12px] ${c.cls}`} title={r.billedUsd != null ? `$${r.billedUsd}` : undefined}>{c.text}</span>; })()}
+                                  </td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`text-[11px] font-black ${r.ok === true ? 'text-emerald-400' : r.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>
+                                      {r.ok === true ? 'Success' : r.ok === false ? 'Failed' : '—'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2.5"><Eye className="w-4 h-4 text-[#8b949e]" /></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Detail viewer for the selected report */}
+              {(selectedReport || selectedReportLoading) && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setSelectedReport(null)}>
+                  <div className="bg-[#0d1117] border border-white/15 rounded-[1.5rem] w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
+                        {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={downloadSelectedReport}
+                          disabled={!selectedReport}
+                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Download JSON
+                        </button>
+                        <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4">
+                      {selectedReportLoading ? (
+                        <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>
+                      ) : (
+                        <pre className="text-[11px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words font-mono">{JSON.stringify(selectedReport?.report ?? {}, null, 2)}</pre>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
@@ -1245,23 +1674,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </button>
               </div>
 
-              {/* Announcement */}
+              {/* Send a message to users (admin 2026-07-30): delivers a real notification to ALL users
+                  or to ONE specific user (by email). Users see it via the notification bell in the app. */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Megaphone className="w-4 h-4 text-amber-400" /> Send Announcement
+                  <Megaphone className="w-4 h-4 text-amber-400" /> Message Users
                 </h3>
-                <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your announcement message..." rows={3}
+                <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your message to users..." rows={3}
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-[#8b949e] outline-none focus:border-indigo-500 resize-none" />
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <select value={annTarget} onChange={e => setAnnTarget(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-indigo-500">
                     <option value="all">All Users</option>
-                    <option value="pro">Pro Users</option>
-                    <option value="free">Free Users</option>
+                    <option value="user">A Specific User</option>
                   </select>
+                  {annTarget === 'user' && (
+                    <input
+                      type="email"
+                      value={annEmail}
+                      onChange={e => setAnnEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="flex-1 min-w-[200px] bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-[#8b949e] outline-none focus:border-indigo-500"
+                    />
+                  )}
                   <button onClick={handleAnnouncement} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-black transition-all active:scale-95">
-                    Send Announcement
+                    Send Message
                   </button>
                 </div>
+                <p className="text-[10px] text-[#8b949e] leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>
               </div>
 
               {/* Promo Codes */}

@@ -408,6 +408,47 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     expect(cooldowns.until('GLM')).toBe(0); // success cleared the shared state for everyone
   });
 
+  // === ESCALATING RE-PROBE BENCH (restaurant-build autopsy 2026-07-21) ============================
+  // 32 GLM 429s in one 27-min build DESPITE the shared cooldown: the bench was FIXED 60s, so an
+  // all-build-long saturated provider was re-probed (and 429'd) roughly once a minute — a steady drip
+  // the 8-in-120s breaker never sees. Each failed re-probe must DOUBLE the bench (capped), and a
+  // success must reset it to the base window.
+
+  it('ESCALATING BENCH — each failed re-probe doubles the window (60s → 120s → 240s), capped', () => {
+    const c = createRateLimitCooldowns(60_000, 1, {}, 600_000);
+    let t = 1_000_000;
+    c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 60_000);        // episode 1 — base window
+    t += 61_000; c.strike('GLM', t);                 // re-probe after expiry fails again
+    expect(c.until('GLM')).toBe(t + 120_000);       // episode 2 — doubled
+    t += 121_000; c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 240_000);       // episode 3 — doubled again
+    t += 241_000; c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 480_000);       // episode 4
+    t += 481_000; c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 600_000);       // episode 5 — capped at cooldownMaxMs, never beyond
+  });
+
+  it('ESCALATING BENCH — concurrent stragglers inside an active bench do NOT escalate (one burst = one episode)', () => {
+    const c = createRateLimitCooldowns(60_000, 1, {}, 600_000);
+    const t = 1_000_000;
+    c.strike('GLM', t);                              // the fast lane's 8 concurrent turns all 429 together
+    for (let i = 1; i <= 7; i++) c.strike('GLM', t + i);
+    expect(c.until('GLM')).toBe(t + 60_000);        // still the base window — the burst is ONE episode
+    c.strike('GLM', t + 61_000);                     // the first genuine re-probe failure after expiry
+    expect(c.until('GLM')).toBe(t + 61_000 + 120_000); // only now does it double
+  });
+
+  it('ESCALATING BENCH — a success resets the escalation to the base window', () => {
+    const c = createRateLimitCooldowns(60_000, 1, {}, 600_000);
+    let t = 1_000_000;
+    c.strike('GLM', t); t += 61_000;
+    c.strike('GLM', t); t += 121_000;                // two episodes → next would be 240s
+    c.clear('GLM');                                  // the provider answered — recovered
+    c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 60_000);        // fresh start at the base window
+  });
+
   it('SHARED COOLDOWN — per bench NAME: one throttled key does not cool the rest of the pool', async () => {
     const cooldowns = createRateLimitCooldowns(60_000, 2);
     const now = () => 1_000_000;
@@ -460,6 +501,85 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     await runner.runTurn(big); // skip
     await runner.runTurn(big); // skip
     expect((await runner.runTurn(PARAMS)).text).toBe('from glm'); // small turn still reaches GLM — not benched
+  });
+});
+
+// === CIRCUIT BREAKER (CollabDesk/PaisaTrack GLM-storm autopsy 2026-07-19) =============================
+// The short 60s cooldown RE-PROBES a saturated provider every minute → 79 GLM 429s in one build. The
+// breaker tracks the rolling 429 rate and, once tripped, benches the provider for a LONG window (no
+// per-minute re-probe) so the whole build leads with the next provider.
+describe('circuit breaker — a sustained 429 rate benches the provider for a LONG window (not re-probed)', () => {
+  it('trips after breakerTripAfter strikes in the window and stays benched past the short cooldown', () => {
+    let t = 1_000_000;
+    // trip after 3 strikes in 120s; short cooldown 60s; breaker 300s.
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000 });
+    cd.strike('GLM', t); // #1 → short cooldown t+60s
+    cd.strike('GLM', t); // #2
+    cd.strike('GLM', t); // #3 → breaker trips → t+300s
+    // At t+61s the SHORT cooldown has expired, but the breaker keeps GLM benched.
+    expect(cd.until('GLM')).toBe(t + 300_000);
+    // A single success clears the short cooldown but NOT the breaker (proven-saturated stays benched).
+    cd.clear('GLM');
+    expect(cd.until('GLM')).toBe(t + 300_000);
+  });
+
+  it('does NOT trip when strikes are spread OUTSIDE the rolling window (a healthy provider with rare 429s)', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000 });
+    cd.strike('GLM', 1_000_000);          // 1 strike
+    cd.strike('GLM', 1_000_000 + 200_000); // +200s (window is 120s → the first aged out)
+    cd.strike('GLM', 1_000_000 + 400_000); // +400s
+    // Only ever 1 strike inside any 120s window → breaker never trips (only the short cooldown, which
+    // a later success would clear). The last strike's short cooldown is the only bench.
+    expect(cd.until('GLM')).toBe(1_000_000 + 400_000 + 60_000);
+  });
+
+  it('is disabled when breakerTripAfter is 0 (existing 2-arg behaviour is byte-for-byte unchanged)', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 0 });
+    for (let i = 0; i < 20; i++) cd.strike('GLM', 1_000_000);
+    expect(cd.until('GLM')).toBe(1_000_000 + 60_000); // only the short cooldown, never a long breaker
+  });
+
+  // ESCALATING BENCH (MediConnect autopsy): each repeat trip benches GLM 2× longer, capped — so a
+  // persistently-throttled provider stops being re-probed instead of re-storming 67 times over 31 min.
+  it('escalates the bench on repeat trips (300s → 600s → 1200s), capped at breakerMaxMs', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, {
+      breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000,
+      breakerMaxMs: 1_000_000, breakerEscalationWindowMs: 1_800_000,
+    });
+    // Trip #1 at t0 → base bench 300s.
+    let t = 1_000_000;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);
+    expect(cd.until('GLM')).toBe(t + 300_000);
+    // After the bench expires the provider is probed again and re-storms → Trip #2 → 600s.
+    t = t + 300_000 + 1;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);
+    expect(cd.until('GLM')).toBe(t + 600_000);
+    // Trip #3 → 1200s, but the cap (1_000_000ms) applies.
+    t = t + 600_000 + 1;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);
+    expect(cd.until('GLM')).toBe(t + 1_000_000); // 1200s wanted, capped at 1000s
+  });
+
+  it('a lone trip does NOT escalate (no breakerMaxMs → fixed bench, existing behaviour preserved)', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000 });
+    let t = 1_000_000;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);      // trip #1 → 300s
+    t = t + 300_001;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);      // trip #2 → still 300s (no escalation)
+    expect(cd.until('GLM')).toBe(t + 300_000);
+  });
+
+  it('circuitBreakerConfig — escalation defaults ON (cap 30min); tunable via env', async () => {
+    const { circuitBreakerConfig } = await import('./MultiProviderTurnRunner');
+    expect(circuitBreakerConfig({} as NodeJS.ProcessEnv).breakerMaxMs).toBe(1_800_000);
+    expect(circuitBreakerConfig({ AGENTV3_CIRCUIT_BREAKER_MAX_MS: '600000' } as unknown as NodeJS.ProcessEnv).breakerMaxMs).toBe(600_000);
+  });
+
+  it('circuitBreakerConfig — default ON (trip 8); AGENTV3_CIRCUIT_BREAKER=off disables', async () => {
+    const { circuitBreakerConfig } = await import('./MultiProviderTurnRunner');
+    expect(circuitBreakerConfig({} as NodeJS.ProcessEnv).breakerTripAfter).toBe(8);
+    expect(circuitBreakerConfig({ AGENTV3_CIRCUIT_BREAKER: 'off' } as unknown as NodeJS.ProcessEnv).breakerTripAfter).toBe(0);
+    expect(circuitBreakerConfig({ AGENTV3_CIRCUIT_BREAKER_TRIP: '5' } as unknown as NodeJS.ProcessEnv).breakerTripAfter).toBe(5);
   });
 });
 

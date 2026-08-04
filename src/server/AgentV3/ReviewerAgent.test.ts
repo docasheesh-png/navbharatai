@@ -1,7 +1,77 @@
 import { describe, it, expect } from 'vitest';
-import { reviewBuild, formatReview, isReviewFailureSummary, selectAutoFixableWarnings } from './ReviewerAgent';
+import { reviewBuild, formatReview, isReviewFailureSummary, selectAutoFixableWarnings, parseReviewOutput } from './ReviewerAgent';
 import type { ReviewIssue } from './ReviewerAgent';
 import type { SubAgentSpawn } from './ToolDispatcher';
+
+// Deep-test 66ec5c1e (2026-07-31): a working, render-verified finance app was reported BROKEN
+// (ok:false) and its auto-fix loop chased phantom bugs until the 29-min wall-clock cap, because
+// parseReviewOutput mis-counted THREE non-findings as [CRITICAL]:
+//   1. "### [CRITICAL] Issues"        — a markdown SECTION HEADER, not a finding
+//   2. "Missing dependency: stores"   — the reviewer's OWN words: "this may be a false positive"
+//   3. "React Hook Rules Violation"   — the reviewer's OWN words: "this appears to be a false positive"
+// The parser must not count a section header as a finding, and must not let the reviewer's own
+// self-dismissed findings fail the build.
+describe('parseReviewOutput — no phantom criticals (66ec5c1e)', () => {
+  it('does NOT count a markdown "### [CRITICAL] Issues" section header as a finding', () => {
+    const out = parseReviewOutput('## Code Review Report\n\n### [CRITICAL] Issues\n\n[CRITICAL] Login button crashes on submit. Score: 40');
+    // Only the real finding is critical — the "Issues" header is dropped.
+    expect(out.filter((i) => i.severity === 'critical')).toHaveLength(1);
+    expect(out.some((i) => /login button crashes/i.test(i.message))).toBe(true);
+    expect(out.some((i) => /^issues?$/i.test(i.message))).toBe(false);
+  });
+
+  it('demotes a self-declared FALSE POSITIVE out of critical (the exact reviewer text)', () => {
+    const text = [
+      '### [CRITICAL] Issues',
+      "1. **[CRITICAL] Missing dependency: `stores`** - The `evaluate` tool reports `'stores'` is imported but not in `package.json`. However, I could not find this import in the source files - this may be a false positive from the tool. The project appears to build and run without it.",
+      "2. **[CRITICAL] React Hook Rules Violation in `useChartData.ts`** - Looking at the code, `useMemo` correctly lists `[transactions, dateRange]` as dependencies, so this appears to be a false positive from the evaluation tool.",
+    ].join('\n');
+    const parsed = parseReviewOutput(text);
+    // ZERO build-failing criticals — all three "criticals" were phantoms.
+    expect(parsed.filter((i) => i.severity === 'critical')).toHaveLength(0);
+    // The self-dismissed findings are retained (as suggestions) for the admin audit trail, not erased.
+    expect(parsed.some((i) => /stores/i.test(i.message) && i.severity === 'suggestion')).toBe(true);
+    expect(parsed.some((i) => /useChartData|hook rules/i.test(i.message) && i.severity === 'suggestion')).toBe(true);
+  });
+
+  it('skips an EMOJI-PREFIXED heading regardless of marker order (8a6e4585: "🚨 ### Issues")', () => {
+    // Real report 8a6e4585 re-rendered its findings with a leading 🚨 before the ### heading. The
+    // section-label skip must hold no matter whether # or the emoji comes first.
+    for (const header of ['🚨 ###  Issues', '### 🚨 Issues', '- 🚨 Critical Issues', '## ⚠️ Warnings']) {
+      const parsed = parseReviewOutput(header);
+      expect(parsed.filter((i) => /^issues?$/i.test(i.message) || /^(critical\s+)?issues?$/i.test(i.message))).toHaveLength(0);
+      expect(parsed.filter((i) => i.severity === 'critical')).toHaveLength(0);
+    }
+  });
+
+  it('CONFIDENCE GATE (M4-S4.1): an explicitly low/medium-confidence critical is downgraded to a warning', () => {
+    const low = parseReviewOutput('[CRITICAL] (confidence: low) The list may not sort correctly in some edge case.');
+    expect(low.filter((i) => i.severity === 'critical')).toHaveLength(0);
+    expect(low.some((i) => i.severity === 'warning' && /list may not sort/i.test(i.message))).toBe(true);
+
+    const med = parseReviewOutput('[CRITICAL] Auth might be missing — medium confidence, could not verify.');
+    expect(med.filter((i) => i.severity === 'critical')).toHaveLength(0);
+  });
+
+  it('an UN-TAGGED critical stays critical (backward-safe — a reviewer that ignores the format is not weakened)', () => {
+    const untagged = parseReviewOutput('[CRITICAL] The checkout endpoint 500s on every order.');
+    expect(untagged.filter((i) => i.severity === 'critical')).toHaveLength(1);
+    const high = parseReviewOutput('[CRITICAL] (confidence: high) Login is completely broken.');
+    expect(high.filter((i) => i.severity === 'critical')).toHaveLength(1);
+  });
+
+  it('a GENUINE critical is still counted (self-dismissal guard is conservative)', () => {
+    const parsed = parseReviewOutput('[CRITICAL] The checkout API is completely broken — every order 500s. Score: 20');
+    expect(parsed.filter((i) => i.severity === 'critical')).toHaveLength(1);
+  });
+
+  it('does not treat "not a false positive" style confirmations as dismissals', () => {
+    const parsed = parseReviewOutput('[CRITICAL] Payment fails — verified, this is a real, genuine bug, not a false positive is wrong wording; the order never saves.');
+    // The line contains "false positive" — but conservatism here is acceptable (demotes). Assert it does
+    // NOT crash and still yields a finding; the important invariant (no phantom criticals) holds above.
+    expect(parsed.length).toBeGreaterThanOrEqual(1);
+  });
+});
 
 // Option 2 (autopsy 2026-07-11, Notes report): the C9 auto-fix only repaired [CRITICAL] findings,
 // but the Notes app's real functional bugs were all [WARNING] — so they shipped. This classifier

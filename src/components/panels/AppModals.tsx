@@ -4,6 +4,7 @@ import {
   Github, ExternalLink, ShieldCheck, Sparkles, X, CreditCard, Loader2,
   Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { AuthComponent } from '../AuthComponent';
 import { PROVIDER_CONFIG } from '../../types';
@@ -351,7 +352,7 @@ export function AppModals({
                   <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                   {isRecharging ? (
                     <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <TirangaLoader className="w-3.5 h-3.5" />
                       Connecting Gateway...
                     </>
                   ) : wallet?.hasVishwakarmaPass ? (
@@ -446,7 +447,7 @@ export function AppModals({
                     disabled={isRestoringUci || !resumeUciInputState.trim()}
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 flex items-center gap-1"
                   >
-                    {isRestoringUci ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LinkIcon className="w-3.5 h-3.5" />}
+                    {isRestoringUci ? <TirangaLoader className="w-3.5 h-3.5" /> : <LinkIcon className="w-3.5 h-3.5" />}
                     Restore Workspace
                   </button>
                 </div>

@@ -424,6 +424,24 @@ safely edit, or truly verify it).
   existing `.env.example`. (Smoke-testing the generated recipe end-to-end remains a future enhancement.)
 - **Cap-4** 🟢🟡 — Auto-inject observability (error handler + request logger + `/health`) into
   generated apps + cost-alerting thresholds.
+  **Advisory half SHIPPED (#1548, 2026-07-19):** `ObservabilityAnalysis.scanObservability` is an `evaluate`
+  dimension that flags a backend missing a `/health` route (high), an Express/Koa error handler (medium), or
+  a request logger (low) — project-level, conservative (SPA/Fastify/Nest not false-flagged).
+  **Injection half — `/health` + error handler SHIPPED (#1554 + #1555, 2026-07-19):**
+  `ObservabilityInjector` deterministically adds a `/health` route (#1554) AND a 4-arg error-handling
+  middleware (#1555) to an Express entry that lacks them — both dependency-free and purely additive, placed
+  immediately before `.listen(` (so the route registers first and the error handler is last, as Express
+  requires). `injectObservabilityFixes` applies both in one pass; persisted through the durable write path;
+  wired as a default-OFF build-end gate (`AGENTV3_OBSERVABILITY_INJECT=on`), never blocks. High precision —
+  only the unambiguous single-entry case.
+  **Request-logger injection SHIPPED (#1634, 2026-07-19):** `injectRequestLogger` completes the injection trio
+  — a DEPENDENCY-FREE inline middleware (logs method/url/status/duration on the response `finish` event via
+  console; never headers/body, so secrets never leak) placed immediately AFTER the app declaration and BEFORE
+  any route (Express middleware only runs for later routes). Chosen dependency-free over morgan/pino on purpose:
+  adding an npm dep to a generated app can break the install (the roadmap's morgan/pino assumption was corrected
+  per the external-suggestion rule). `injectObservabilityFixes` now applies logger → /health → error-handler in
+  one pass; `ObservabilityAnalysis`'s logger detector recognizes the finish-event idiom too, so an injected app
+  is never re-flagged (round-trip test-locked). **Remaining ❌:** cost-alerting thresholds.
 
 ### 2E · Pipeline verification stages (P-PIPE)
 - 🟢❌ Runtime smoke tests (hit routes/API, auth, DB reads) · hydration validation · post-deploy liveness check.
@@ -431,8 +449,11 @@ safely edit, or truly verify it).
 - 🟢🟡 Wire eslint + prettier + `npm audit`/CVE + license-validation gates into the AgentV3 pipeline.
   **License slice SHIPPED (#1444, 2026-07-16):** `SBOMGenerator.licenseAdvisorySummary` + the `check_licenses`
   tool flag strong-copyleft (GPL/AGPL) deps (on-demand parity with the CVE `scan_vulnerabilities` tool).
-  ESLint gate + OSV CVE already exist. **Remaining ❌:** auto-running prettier + CVE + license at BUILD-END
-  (vs on-demand) — a small AgentRunner-gate wiring slice.
+  ESLint gate + OSV CVE already exist. **CVE + license build-end auto-run SHIPPED (#1551, 2026-07-19):**
+  `DependencyHealthGate` + `ToolDispatcher.assessDependencyHealthGate` run the OSV/CVE scan + strong-copyleft
+  check at BUILD-END and append one advisory block to a successful build's summary — advisory-only (never
+  blocks), default-OFF behind `AGENTV3_DEPHEALTH_GATE=on`. **Remaining ❌:** auto-running **prettier** at
+  build-end (the CVE + license halves are now wired).
 - 🟢❌ Perf/bundle-size + Lighthouse gate (blocker for complex apps) · a11y as a blocker for complex apps.
 - 🟢❌ Task-dependency graph (`TodoItem.dependsOn`) for correct big-app build order.
 - 🟢❌ Real interactive clarification round (bounded `ask_user` tool for complex apps).

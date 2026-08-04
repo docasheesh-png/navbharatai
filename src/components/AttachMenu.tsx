@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { Camera, Image as ImageIcon, FileText, Paperclip } from 'lucide-react';
+import { Camera, Image as ImageIcon, FileText, Paperclip, Folder } from 'lucide-react';
 
 // Shared attach menu (admin 2026-07-12): tapping the 📎 attach button opens a 3-option sheet —
 // Take Photo (camera) / Choose photo or video (gallery) / Choose file — the SAME everywhere
@@ -25,6 +25,16 @@ export interface AttachMenuProps {
   title?: string;
   /** Optional count bubble on the button (e.g. number of files already attached). */
   badge?: number;
+  /**
+   * When provided, the menu shows a DEDICATED "Import project (.zip)" option (admin 2026-07-28).
+   *
+   * A zip is not an attachment — it is a PROJECT IMPORT, and treating the two the same is what broke
+   * large uploads: a zip picked through "Choose file" was base64-encoded into the build request and
+   * died against Cloud Run's ~32 MB per-request cap. This option hands the File straight to the caller,
+   * which uploads it in chunks and lands it in the workspace/IDE — no build request, no base64, no cap.
+   * Given its own picker so a project can never accidentally take the attachment path again.
+   */
+  onZipProject?: (file: File) => void;
 }
 
 export function AttachMenu({
@@ -35,11 +45,13 @@ export function AttachMenu({
   buttonClassName = '',
   title = 'Attach',
   badge,
+  onZipProject,
 }: AttachMenuProps) {
   const [open, setOpen] = useState(false);
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const galleryRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const zipRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Close on outside tap / Escape (matches the rest of the app's popovers).
@@ -110,6 +122,17 @@ export function AttachMenu({
               <span>{o.label}</span>
             </button>
           ))}
+          {onZipProject && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => pick(zipRef)}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
+            >
+              <span className="text-emerald-400"><Folder className="w-4 h-4" /></span>
+              <span>Import project (.zip)<span className="block text-[11px] text-zinc-500">Opens your app in Files — any size</span></span>
+            </button>
+          )}
         </div>
       )}
 
@@ -117,6 +140,19 @@ export function AttachMenu({
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleChange} />
       <input ref={galleryRef} type="file" accept="image/*,video/*" multiple={multiple} className="hidden" onChange={handleChange} />
       <input ref={fileRef} type="file" accept={fileAccept} multiple={multiple} className="hidden" onChange={handleChange} />
+      {/* Project import — its OWN single-file picker, routed to onZipProject (never onFiles), so a
+          project can never re-enter the attachment/base64 path that capped it at 18 MB. */}
+      <input
+        ref={zipRef}
+        type="file"
+        accept=".zip,application/zip,application/x-zip-compressed"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) onZipProject?.(f);
+        }}
+      />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import { analyzeImportExports } from './ImportExportAnalysis';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
+import { isReactFamilyFramework } from './frameworkFamily';
 
 export interface HealthCheckResult {
   id: 'code-confidence' | 'react-hooks' | 'import-export' | 'jsx-resolution' | 'hook-resolution' | 'dependency-constraints';
@@ -33,8 +34,12 @@ export interface WorkspaceHealthReport {
   checks: HealthCheckResult[];
 }
 
-/** Run every workspace build-health check and combine the results. Pure (delegates to pure analyzers). */
-export async function analyzeWorkspaceHealth(files: Record<string, string>): Promise<WorkspaceHealthReport> {
+/** Run every workspace build-health check and combine the results. Pure (delegates to pure analyzers).
+ *  The React-specific checks (Rules-of-Hooks / JSX-resolution / hook-resolution) are reported as passing
+ *  for non-React frameworks — a Vue/Nuxt/Svelte app's `useX` composables are NOT React hooks (ShopSphere
+ *  autopsy). Framework defaults to the React family when omitted (historical behaviour). */
+export async function analyzeWorkspaceHealth(files: Record<string, string>, framework?: string): Promise<WorkspaceHealthReport> {
+  const reactLint = isReactFamilyFramework(framework);
   // Code confidence + dependency constraints are synchronous; the AST analyzers are async.
   const conf = detectHallucinations(files);
   const constraints = analyzeDependencyConstraints(files);
@@ -59,9 +64,9 @@ export async function analyzeWorkspaceHealth(files: Record<string, string>): Pro
     {
       id: 'react-hooks',
       name: 'React Rules of Hooks',
-      ok: hooks.ok,
-      issues: hooks.violations.length,
-      summary: hooks.ok ? 'No Rules-of-Hooks violations.' : `${hooks.violations.length} violation(s) that crash React at runtime.`,
+      ok: !reactLint || hooks.ok,
+      issues: reactLint ? hooks.violations.length : 0,
+      summary: !reactLint ? 'Not a React app — Rules-of-Hooks check skipped.' : hooks.ok ? 'No Rules-of-Hooks violations.' : `${hooks.violations.length} violation(s) that crash React at runtime.`,
     },
     {
       id: 'import-export',
@@ -73,16 +78,16 @@ export async function analyzeWorkspaceHealth(files: Record<string, string>): Pro
     {
       id: 'jsx-resolution',
       name: 'JSX Component Resolution',
-      ok: jsx.ok,
-      issues: jsx.undefinedComponents.length,
-      summary: jsx.ok ? 'Every JSX component resolves.' : `${jsx.undefinedComponents.length} component(s) used but never imported/defined.`,
+      ok: !reactLint || jsx.ok,
+      issues: reactLint ? jsx.undefinedComponents.length : 0,
+      summary: !reactLint ? 'Not a JSX app — component-resolution check skipped.' : jsx.ok ? 'Every JSX component resolves.' : `${jsx.undefinedComponents.length} component(s) used but never imported/defined.`,
     },
     {
       id: 'hook-resolution',
       name: 'Hook Resolution',
-      ok: undefHooks.ok,
-      issues: undefHooks.undefinedHooks.length,
-      summary: undefHooks.ok ? 'Every hook call resolves.' : `${undefHooks.undefinedHooks.length} hook(s) called but never imported/defined.`,
+      ok: !reactLint || undefHooks.ok,
+      issues: reactLint ? undefHooks.undefinedHooks.length : 0,
+      summary: !reactLint ? 'Not a React app — hook-resolution check skipped (Vue/Nuxt auto-imports composables).' : undefHooks.ok ? 'Every hook call resolves.' : `${undefHooks.undefinedHooks.length} hook(s) called but never imported/defined.`,
     },
     {
       id: 'dependency-constraints',

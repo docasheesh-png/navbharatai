@@ -5,9 +5,6 @@ import {
   Code,
   Zap,
   RefreshCw,
-  TrendingUp,
-  TrendingDown,
-  Lightbulb,
   Activity,
   BarChart2,
   Clock,
@@ -47,20 +44,6 @@ interface StatCard {
   icon: React.ReactNode;
   accent: string;
   bgAccent: string;
-  trend: string;
-  trendUp: boolean;
-}
-
-interface ModelUsage {
-  name: string;
-  percentage: number;
-  color: string;
-}
-
-interface FeatureUsage {
-  name: string;
-  percentage: number;
-  color: string;
 }
 
 type TimeRange = '7days' | '30days' | 'alltime';
@@ -249,68 +232,6 @@ const BarChartSVG: React.FC<{ data: ActivityDay[]; days: number }> = ({ data, da
   );
 };
 
-const HorizontalBar: React.FC<{ label: string; pct: number; color: string; delay?: number }> = ({
-  label,
-  pct,
-  color,
-  delay = 0,
-}) => {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const t = setTimeout(() => setWidth(pct), 80 + delay);
-    return () => clearTimeout(t);
-  }, [pct, delay]);
-
-  return (
-    <div className="flex items-center gap-3 group">
-      <span className="w-20 text-xs text-gray-400 shrink-0 text-right">{label}</span>
-      <div className="flex-1 h-2.5 rounded-full bg-[#21262d] overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-700 ease-out"
-          style={{ width: `${width}%`, background: color }}
-        />
-      </div>
-      <span className="w-9 text-xs font-semibold text-gray-300 shrink-0">{pct}%</span>
-    </div>
-  );
-};
-
-const StackedModelBar: React.FC<{ models: ModelUsage[] }> = ({ models }) => {
-  const [animate, setAnimate] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setAnimate(true), 100);
-    return () => clearTimeout(t);
-  }, []);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex h-6 rounded-full overflow-hidden gap-0.5">
-        {models.map((m, i) => (
-          <div
-            key={i}
-            className="h-full transition-all duration-700 ease-out rounded-sm first:rounded-l-full last:rounded-r-full"
-            style={{
-              width: animate ? `${m.percentage}%` : '0%',
-              background: m.color,
-              transitionDelay: `${i * 120}ms`,
-            }}
-            title={`${m.name}: ${m.percentage}%`}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-4">
-        {models.map((m, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: m.color }} />
-            <span className="text-xs text-gray-400">{m.name}</span>
-            <span className="text-xs font-semibold text-gray-200">{m.percentage}%</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) => {
@@ -416,51 +337,9 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
   // ── Derived Stats ──
   const totalMessages = sessions.reduce((acc, s) => acc + (s.messages?.length ?? 0), 0);
   const totalApps = historyCount || Math.max(sessions.length, 1);
-  const aiConversations = sessions.length || 12;
+  const aiConversations = sessions.length;
   const codeGenKB = Math.round((totalMessages * 0.3 + 12) * 10) / 10; // rough estimate
   const tokensUsed = Math.round(aiConversations * 1500);
-
-  // ── Model usage from messages ──
-  const modelCounts: Record<string, number> = { Gemini: 0, Claude: 0, Groq: 0 };
-  sessions.forEach((s) => {
-    s.messages?.forEach((m) => {
-      const mu = (m.modelUsed || '').toLowerCase();
-      if (mu.includes('gemini') || mu.includes('navbharatai') || mu.includes('general')) {
-        modelCounts['Gemini']++;
-      } else if (mu.includes('claude') || mu.includes('anthropic')) {
-        modelCounts['Claude']++;
-      } else if (mu.includes('groq') || mu.includes('llama') || mu.includes('llama')) {
-        modelCounts['Groq']++;
-      } else {
-        modelCounts['Gemini']++; // default
-      }
-    });
-  });
-
-  const totalModelMsgs = Object.values(modelCounts).reduce((a, b) => a + b, 0) || 100;
-  const modelUsage: ModelUsage[] = [
-    {
-      name: 'Gemini Pro',
-      percentage: Math.round((modelCounts['Gemini'] / totalModelMsgs) * 100) || 60,
-      color: '#4ade80',
-    },
-    {
-      name: 'Claude',
-      percentage: Math.round((modelCounts['Claude'] / totalModelMsgs) * 100) || 25,
-      color: '#f59e0b',
-    },
-    {
-      name: 'Groq (Llama)',
-      percentage: Math.round((modelCounts['Groq'] / totalModelMsgs) * 100) || 15,
-      color: '#a78bfa',
-    },
-  ];
-
-  // Normalize percentages to 100
-  const totalPct = modelUsage.reduce((a, m) => a + m.percentage, 0);
-  if (totalPct !== 100) {
-    modelUsage[0].percentage += 100 - totalPct;
-  }
 
   // ── Activity Chart Data ──
   const chartDays = timeRange === '7days' ? 7 : timeRange === '30days' ? 30 : 60;
@@ -482,8 +361,6 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       icon: <Rocket size={20} />,
       accent: 'text-indigo-400',
       bgAccent: 'bg-indigo-500/10 border-indigo-500/20',
-      trend: '+12% this week',
-      trendUp: true,
     },
     {
       label: 'AI Conversations',
@@ -491,8 +368,6 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       icon: <MessageSquare size={20} />,
       accent: 'text-emerald-400',
       bgAccent: 'bg-emerald-500/10 border-emerald-500/20',
-      trend: '+8% this week',
-      trendUp: true,
     },
     {
       label: 'Code Generated',
@@ -500,8 +375,6 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       icon: <Code size={20} />,
       accent: 'text-violet-400',
       bgAccent: 'bg-violet-500/10 border-violet-500/20',
-      trend: '+24% this week',
-      trendUp: true,
     },
     {
       label: 'Tokens Used (est.)',
@@ -509,24 +382,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       icon: <Zap size={20} />,
       accent: 'text-amber-400',
       bgAccent: 'bg-amber-500/10 border-amber-500/20',
-      trend: '-3% this week',
-      trendUp: false,
     },
-  ];
-
-  // ── Features ──
-  const features: FeatureUsage[] = [
-    { name: 'Chat', percentage: 45, color: '#6366f1' },
-    { name: 'App Build', percentage: 30, color: '#10b981' },
-    { name: 'Preview', percentage: 15, color: '#f59e0b' },
-    { name: 'Other', percentage: 10, color: '#6b7280' },
-  ];
-
-  // ── Insights ──
-  const insights = [
-    { text: 'Tumhara peak usage time: Evening (6–9 PM)', sub: 'Based on session timestamps' },
-    { text: 'Most built app type: E-commerce', sub: 'Seen in 40% of sessions' },
-    { text: 'Pro tip: Voice mode se 3x faster prompts', sub: 'Try karo Mic button se' },
   ];
 
   const handleRefresh = () => {
@@ -540,7 +396,9 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
   // ── Render ──
   return (
     <div
-      className="min-h-full w-full overflow-y-auto p-4 md:p-6 space-y-6 text-sm"
+      // h-full (not min-h-full) gives the scroll container a BOUNDED height so overflow-y-auto
+      // actually scrolls on mobile; the extra bottom padding clears the fixed bottom nav + safe area.
+      className="h-full w-full overflow-y-auto p-4 md:p-6 pb-28 space-y-6 text-sm overscroll-contain"
       style={{ background: '#0d1117', color: '#c9d1d9' }}
     >
       {/* ── Header ── */}
@@ -604,10 +462,6 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           >
             <div className="flex items-center justify-between">
               <span className={`${card.accent}`}>{card.icon}</span>
-              <span className={`flex items-center gap-1 text-xs ${card.trendUp ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {card.trendUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                {card.trend}
-              </span>
             </div>
             <div>
               <div className={`text-2xl font-bold ${card.accent}`}>{card.value}</div>
@@ -734,46 +588,23 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
         </div>
       )}
 
-      {/* ── Two-column Row ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left – Most Used Features */}
-        <div
-          className="rounded-xl border p-4"
-          style={{ background: '#161b22', borderColor: '#30363d' }}
-        >
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart2 size={16} className="text-amber-400" />
-            <h2 className="font-semibold text-white text-sm">Most Used Features</h2>
-          </div>
-          <div className="space-y-3">
-            {features.map((f, i) => (
-              <HorizontalBar
-                key={f.name}
-                label={f.name}
-                pct={f.percentage}
-                color={f.color}
-                delay={i * 80}
-              />
-            ))}
-          </div>
+      {/* ── Recent Sessions (real, from local chat history) ── */}
+      <div
+        className="rounded-xl border p-4"
+        style={{ background: '#161b22', borderColor: '#30363d' }}
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Clock size={16} className="text-emerald-400" />
+          <h2 className="font-semibold text-white text-sm">Recent Sessions</h2>
         </div>
-
-        {/* Right – Recent Sessions */}
-        <div
-          className="rounded-xl border p-4"
-          style={{ background: '#161b22', borderColor: '#30363d' }}
-        >
-          <div className="flex items-center gap-2 mb-4">
-            <Clock size={16} className="text-emerald-400" />
-            <h2 className="font-semibold text-white text-sm">Recent Sessions</h2>
+        {recentSessions.length === 0 ? (
+          <div className="text-xs text-gray-500 py-6 text-center">
+            No sessions yet — start a chat or build an app and it will appear here.
           </div>
+        ) : (
           <div className="space-y-2">
             {recentSessions.slice(0, 5).map((session) => {
               const msgCount = session.messages?.length ?? 0;
-              const model =
-                session.messages?.find((m) => m.modelUsed)?.modelUsed ||
-                session.agent ||
-                'navBharatAI';
               return (
                 <div
                   key={session.id}
@@ -784,7 +615,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
                     <div className="text-xs font-medium text-gray-200 truncate">{session.title}</div>
                     <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
                       <span>{formatTimestamp(session.lastUpdated)}</span>
-                      <span className="text-indigo-400/70">{model}</span>
+                      <span className="text-indigo-400/70">NavBharatAI</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -796,42 +627,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
               );
             })}
           </div>
-        </div>
-      </div>
-
-      {/* ── AI Model Usage ── */}
-      <div
-        className="rounded-xl border p-4"
-        style={{ background: '#161b22', borderColor: '#30363d' }}
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <Zap size={16} className="text-violet-400" />
-          <h2 className="font-semibold text-white text-sm">AI Model Usage Breakdown</h2>
-        </div>
-        <StackedModelBar models={modelUsage} />
-      </div>
-
-      {/* ── Tips & Insights ── */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Lightbulb size={16} className="text-amber-400" />
-          <h2 className="font-semibold text-white text-sm">Tips &amp; Insights</h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {insights.map((ins, i) => (
-            <div
-              key={i}
-              className="rounded-xl border p-4 flex gap-3"
-              style={{ background: '#161b22', borderColor: '#30363d' }}
-            >
-              <Lightbulb size={16} className="text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <div className="text-xs font-medium text-gray-200 leading-relaxed">{ins.text}</div>
-                <div className="text-[11px] text-gray-500 mt-1">{ins.sub}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+        )}
       </div>
     </div>
   );

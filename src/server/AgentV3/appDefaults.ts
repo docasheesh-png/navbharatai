@@ -99,6 +99,22 @@ function ensureLang(html: string): [string, boolean] {
 }
 
 /**
+ * Where a standalone default asset (manifest / icon / sw / robots) must live so the app's BUILD actually
+ * ships it. A Vite app copies ONLY the `public/` directory verbatim into `dist/` — a file left in the
+ * project ROOT is silently dropped from the build, so the deployed site 404s its manifest/icon/sw and the
+ * builder burns a rebuild-grind (`mkdir public && cp …`, `npm run build` ×7) copying it into place
+ * (deploy-report autopsy 2026-08-03, buildId 588885e8). Vite-family framework → `public/<file>` (the
+ * absolute `/manifest.webmanifest` hrefs in index.html still resolve, since Vite serves public/ at root);
+ * every other framework (plain static HTML, unknown) → root, unchanged. Never double-prefixes an
+ * already-pathed file. Pure.
+ */
+export function defaultAssetPath(rel: string, framework: string | null | undefined): string {
+  const viteFamily = (framework ?? '').toLowerCase().includes('vite');
+  if (!viteFamily || rel.includes('/')) return rel;
+  return `public/${rel}`;
+}
+
+/**
  * Plan the app-scaffold defaults. Pure + idempotent. `indexHtml` may be null (no index.html found):
  * then only the standalone files (manifest, robots) are returned and `indexHtml` stays null.
  */

@@ -1,9 +1,14 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
-import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
+import { runProfessionalChatWithUsage, type ProfessionalTurn } from '../professionals/engine';
+import { chargeForAiTurn } from '../lib/aiTurnCharge';
+import { usdInrRate } from '../lib/UsdInrRate';
+import { getServerDb } from '../lib/serverDb';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
+import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import { sendSafeError } from '../lib/httpError';
 import {
   professionalPaidEnabled, professionalFreeDailyLimit, professionalPassPriceInr,
   professionalPassDays, isProfessionalFreeUser,
@@ -116,15 +121,35 @@ export function registerProfessionalsRoutes(app: Express): void {
       return;
     }
 
+    // IMAGE-GENERATION INTENT (admin 2026-08-02): a Professional (Teacher, Lawyer, …) does not generate
+    // images — when the user asks it to CREATE one, point them to the dedicated AI Image Gen tool instead of
+    // an unhelpful refusal. Uses the RAW user message (not the doc-augmented one), and skips when a real
+    // image is attached (that is a vision/analysis request, not generation). No free message is burned.
+    if (typeof message === 'string' && !rawAttachments.some((a) => isVisionAttachment(a.type, a.name)) && detectImageIntent(message).wants) {
+      res.json({ reply: imageGenGuidance(), professionalId: config.id });
+      return;
+    }
+
     try {
-      const reply = await runProfessionalChat(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier);
+      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier);
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);
       }
+      // ONE WALLET: charge the same balance a build spends, for what this answer really cost. Deliberately
+      // AFTER the answer exists and never awaited into the response — a money-path problem must not cost
+      // the user their reply, and charging before answering would risk billing a turn that then failed.
+      // Entirely inert while AI_WALLET_SPEND is off (the default), and never charges an unmeasured turn.
+      void chargeForAiTurn(
+        getServerDb() as any,
+        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass },
+        spend,
+        usdInrRate(),
+        Date.now(),
+      );
       res.json({ reply, professionalId: config.id });
     } catch (err: any) {
-      res.status(503).json({ error: err?.message || 'The assistant is busy. Please try again.' });
+      sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional chat');
     }
   });
 }

@@ -27,6 +27,100 @@ export function isDeadSandboxError(errMessage: string | null | undefined): boole
   return DEAD_PATTERNS.some((re) => re.test(errMessage));
 }
 
+/**
+ * Recover the REAL exit code from a thrown command error. E2B's `commands.run` REJECTS on a non-zero
+ * exit (a CommandExitError carrying `.exitCode` and a message like "exit status 2"), so a genuine
+ * command failure (e.g. `tsc --noEmit` finding type errors → exit 2) would otherwise be flattened to
+ * the sentinel -1 and read like the sandbox never ran it (PaisaTrack autopsy 2026-07-19: a real tsc
+ * exit-2 was reported as `exit -1`, a dead-sandbox look-alike). Prefer the error's own `exitCode`; else
+ * parse "exit status N" from the message. Returns -1 ONLY when the program truly never ran (SDK/network
+ * throw with no exit info) — exactly the case the dead-sandbox detector then handles. PURE.
+ */
+export function resolveThrownCommandExit(err: unknown): number {
+  const e = err as { exitCode?: unknown; message?: unknown } | null | undefined;
+  if (e && typeof e.exitCode === 'number' && Number.isInteger(e.exitCode) && e.exitCode >= 0) {
+    return e.exitCode;
+  }
+  const msg = e && typeof e.message === 'string' ? e.message : '';
+  const m = /exit\s+status\s+(\d+)/i.exec(msg) || /exit\s+code[:\s]+(\d+)/i.exec(msg);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return -1; // truly could not run (no exit info) — the dead-sandbox path owns this
+}
+
+// ── Silent DB-unreachable failure (MediConnect autopsy 2026-07-19) ────────────────────────────────
+//
+// ROOT CAUSE (App #14, Remix + Prisma + Postgres): `npx prisma migrate dev` returned **exit 0** while
+// its own output said `P1001: Can't reach database server at localhost:5432` and
+// `dev server did not come up on port 5432`. The migration NEVER applied — no Postgres was running in
+// the sandbox — yet the exit-0 made recordCommand log it as a benign `SANDBOX_CMD` (info, autoResolved).
+// The builder, seeing "migrate succeeded", proceeded on a FALSE premise, then improvised a broken
+// Postgres→SQLite downgrade that cascaded into enum/DateTime errors. A DB-connectivity failure hidden
+// behind a 0 exit code is a lie the report must not repeat: exit 0 ≠ "the database was reachable".
+//
+// These patterns are Prisma/Postgres connectivity failures that are unambiguous even on a 0 exit — a
+// health-check wrapper can swallow the real exit while still printing the failure into stdout.
+const DB_UNREACHABLE_PATTERNS: RegExp[] = [
+  /\bP1001\b/i,                                   // Prisma: "Can't reach database server"
+  /can'?t\s+reach\s+database\s+server/i,
+  /database\s+server\s+.*(is\s+not\s+running|not\s+reachable|unreachable)/i,
+  /connection\s+refused.*:\s*5432|:\s*5432.*connection\s+refused/i,
+];
+
+// A Prisma SCHEMA-validation failure (broken relations, missing @id/enum) is NOT a DB-connectivity
+// problem — the DB is fine, the schema is wrong (LedgerLoop autopsy 2026-07-20). Our health-check
+// wrapper unhelpfully prints "did not come up on port 5432" for ANY dev-server boot failure, including
+// a schema error, so that string alone must never be treated as DB-unreachable. When these markers are
+// present the failure is the schema, and DB_UNREACHABLE would be a false, misleading verdict.
+const SCHEMA_VALIDATION_MARKERS: RegExp[] = [
+  /Validation Error Count:/i,
+  /\[Context:\s*validate\]/i,
+  /Prisma schema validation/i,
+  /Error validating (?:model|field|datasource)/i,
+  /is missing an opposite relation field/i,
+];
+
+/** True when a command is DB-provisioning/ORM-related (prisma / migrate / seed / psql / drizzle / pg). */
+function isDbRelatedCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  return /\b(prisma|migrate|drizzle|psql|pg_|createdb|sequelize)\b/i.test(command)
+    || /\bseed(\.[tj]s)?\b/i.test(command);
+}
+
+/**
+ * Detect a "silent" database-unreachable failure: a command that reported SUCCESS (exit 0, so the
+ * normal `failed` path never fires) but whose output proves the database was never reachable, so the
+ * migration/query did NOT actually happen. Requires BOTH a hard DB-unreachable output signal AND a
+ * DB-related command, so an app that merely PRINTS "P1001" in a log line it's echoing is never
+ * mis-flagged. Only meaningful when the command claims success (exitCode 0) — a real nonzero exit is
+ * already handled by the normal failure path. Pure + unit-testable.
+ */
+/**
+ * True when command output shows the database is genuinely UNREACHABLE (a live-connectivity failure),
+ * regardless of exit code — used to trigger a mid-build Postgres RE-PROVISION when the provisioned DB
+ * died (FleetOps autopsy 2026-07-20: the sandbox Postgres was reaped ~2.5 min after provisioning). Keyed
+ * on the unambiguous connectivity signals only (P1001 / can't reach server / connection refused :5432);
+ * a schema-validation failure is deliberately NOT included. Pure.
+ */
+export function looksLikeDbUnreachable(text: string | null | undefined): boolean {
+  if (typeof text !== 'string' || !text) return false;
+  return /\bP1001\b/i.test(text)
+    || /can'?t\s+reach\s+database\s+server/i.test(text)
+    || /connection\s+refused.*:\s*5432|:\s*5432.*connection\s+refused/i.test(text);
+}
+
+export function detectSilentDbFailure(sig: { command?: string; exitCode: number | null; stdout?: string; stderr?: string }): boolean {
+  if (sig.exitCode !== 0) return false;              // a real nonzero exit is handled elsewhere
+  if (!isDbRelatedCommand(sig.command)) return false;
+  const out = `${sig.stdout || ''}\n${sig.stderr || ''}`;
+  // A schema-validation failure is NOT a connectivity failure — the DB is reachable, the schema is wrong.
+  // Never mislabel it DB_UNREACHABLE (the schema-repair self-heal + honest SANDBOX_CMD path own that case).
+  if (SCHEMA_VALIDATION_MARKERS.some((re) => re.test(out)) && !/\bP1001\b/i.test(out)) return false;
+  return DB_UNREACHABLE_PATTERNS.some((re) => re.test(out));
+}
+
 export interface CommandFailureSignal {
   /** Exit code. <0 means the SDK threw (the program never ran) rather than the program exiting nonzero. */
   exitCode: number;

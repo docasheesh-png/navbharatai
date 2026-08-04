@@ -25,9 +25,9 @@ export interface ComplianceIssue {
 }
 
 /** Generated / vendored / test code is never the user's product surface. */
-const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)/i;
+export const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)/i;
 /** Source files whose content we scan. */
-const CODE_EXT = /\.(tsx?|jsx?|vue|svelte|astro|html?|mjs|cjs)$/i;
+export const CODE_EXT = /\.(tsx?|jsx?|vue|svelte|astro|html?|mjs|cjs)$/i;
 
 const SNIPPET_MAX = 120;
 
@@ -35,6 +35,19 @@ const SNIPPET_MAX = 120;
 // Deliberately high-precision (no bare "email"/"phone" — too noisy) so a hit is a
 // real data-protection problem, not a guess.
 const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[_-]?card|card[_-]?number|otp|secret|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\b/i;
+
+// A client-side console.* sink — the sink that must never receive a credential/token.
+export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;
+
+/**
+ * True when this single line logs a sensitive credential/token to the console — the EXACT
+ * condition behind the high-severity `pii-in-logs` compliance finding. Exported so the
+ * deterministic credential-log redaction heal (`credentialLogRedaction.ts`) heals precisely
+ * what this detector flags — one shared definition, so the two can never drift (rule 2).
+ */
+export function lineLogsCredential(line: string): boolean {
+  return CONSOLE_CALL.test(line) && SENSITIVE.test(line);
+}
 
 // PII form-field signals — used to decide whether the app collects personal data
 // (and therefore needs a privacy policy). Names/types a real form would use.
@@ -114,7 +127,7 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       issues.push({ file, line: i + 1, kind, severity, snippet: trimSnippet(line) });
 
     // ── high: personal data / secrets written to logs (DPDP minimisation, GDPR) ──
-    if (/\bconsole\.(log|info|warn|error|debug)\s*\(/.test(line) && SENSITIVE.test(line)) {
+    if (lineLogsCredential(line)) {
       push('pii-in-logs', 'high');
     }
 

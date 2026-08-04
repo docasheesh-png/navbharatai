@@ -7,6 +7,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
+import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
@@ -16,10 +17,14 @@ import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
+import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
+import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
+import { verifyFirebaseToken as verifyFirebaseTokenForIntegrations } from './src/server/lib/authMiddleware';
 import { registerNavigateRoutes } from './src/server/routes/navigate';
 import { registerWebhookRoutes } from './src/server/routes/webhooks';
+import { registerBotRoutes } from './src/server/routes/bots';
 import { registerChangelogRoutes } from './src/server/routes/changelog';
 import { registerTechDebtRoutes } from './src/server/routes/techDebt';
 import { registerVersionRoutes } from './src/server/routes/version';
@@ -34,11 +39,22 @@ import { registerReleaseGateRoutes } from './src/server/routes/releaseGate';
 import { registerTeamLibraryRoutes } from './src/server/routes/teamLibrary';
 import { registerTraceabilityRoutes } from './src/server/routes/traceability';
 import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
+import { registerDebugRoutes } from './src/server/routes/debug';
+import { registerAppDebugRoutes } from './src/server/routes/appDebug';
+import { registerImageGenRoutes } from './src/server/routes/imageGen';
+import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
+import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
+import { registerFigmaProxyRoutes } from './src/server/routes/figmaProxy';
 import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
+import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
+import { registerMinifyRoutes } from './src/server/routes/minify';
+import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
+import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
+import { registerNavStoreRoutes } from './src/server/routes/navStore';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
 // import { registerAppmakerRoutes } from './src/server/routes/appmaker';
@@ -56,6 +72,8 @@ import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
 import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
+import { registerAppReviewRoutes } from './src/server/routes/appReview';
+import { registerNotificationRoutes } from './src/server/routes/notifications';
 // DELETED — Engineer AI routes (/api/engineer-*) were unregistered in the v3.0 cutover and the
 // dead files (routes/engineer.ts, EngineerAIChat.tsx, EngineerRouterFactory, WebAgentLoop, legacy
 // LocalActuator) were removed on 2026-07-09. Replaced by Pro v3.0. NOTE: the rest of
@@ -63,7 +81,9 @@ import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
 // legacy /api/build pipeline (routes/build.ts) and must not be deleted with it.
 import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
+import { registerNbaiDomainsRoutes } from './src/server/routes/nbaiDomains';
 import { registerZipRoutes } from './src/server/routes/zip';
+import { registerZipUploadRoutes } from './src/server/routes/zipUpload';
 import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerBuildRoutes } from './src/server/routes/build';
 import { getPreviewService } from './src/server/runtime/PreviewService';
@@ -146,7 +166,6 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import https from 'https';
 import * as cheerio from 'cheerio';
 import fs from 'fs';
@@ -417,8 +436,15 @@ setInterval(() => {
 
   async function initializeServer() {
 
-    // Vite integration
+    // Vite integration.
+    //
+    // Imported LAZILY, inside the dev-only branch. Vite is a DEV bundler — production serves the
+    // pre-built dist/ below and never calls this. A top-level `import ... from 'vite'` nevertheless
+    // loaded the whole bundler into every production boot, which is why vite had to be a runtime
+    // dependency, which is why its nested esbuild Go binary shipped to Cloud Run and answered for 14
+    // HIGH CVEs in a container that never bundles anything (Trivy, 2026-08-04).
     if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',
@@ -449,13 +475,12 @@ setInterval(() => {
         // GET APIs) and return index.html with a 200 — which is exactly why the
         // preview silently "worked" in audits but showed the main app. Let those
         // paths fall through to their real handlers.
-        if (
-          req.path.startsWith('/api/') ||
-          req.path.startsWith('/preview-app/') ||
-          req.path.startsWith('/preview/') ||
-          req.path === '/guide' || req.path === '/guide/' || // U-9 — auto-generated docs site
-          req.path === '/status' || req.path === '/status/' // U-15 — public status page
-        ) {
+        // ONE source of truth for this decision (src/server/lib/spaFallback.ts). The list used to live
+        // inline here and drifted twice: the live preview once, and then DEPLOYED USER APPS (/pwa/<id>)
+        // — a user's deployed app link opened NavBharatAI instead of their own app, because /pwa/ was
+        // never added. A test now reads the real route modules and fails if any server route is missing
+        // from the list, so the next added route cannot silently return index.html.
+        if (spaFallbackShouldDefer(req.path)) {
           return next();
         }
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -514,6 +539,28 @@ setInterval(() => {
   // GitHub data-API routes — extracted to src/server/routes/github.ts (Phase 1).
   registerGithubRoutes(app);
 
+  // Ship-to-stores: generate a real GitHub Actions build pipeline for a user's app (signed .aab +
+  // .ipa → TestFlight) and dispatch it. See src/server/lib/mobileShipKit.ts for why the binary is
+  // built on GitHub's runners rather than here.
+  registerMobileShipRoutes(app);
+
+  // Code Minifier — real AST minification (esbuild) of the user's OWN app files, with a verified
+  // restore point before anything is overwritten. See src/server/routes/minify.ts for why the
+  // checkpoint and the write are both read back rather than trusted.
+  registerMinifyRoutes(app);
+
+  // The shared "read and change one of my apps" API behind every Design & Build tool. Its writes go
+  // through the same verified-restore-point sequence the Minifier uses — see lib/workspaceEdit.ts.
+  registerWorkspaceFileRoutes(app);
+
+  // "Set up my app for the stores" — assembles a user's v5 app into a GitHub repo whose workflows
+  // build a genuine signed .aab/.ipa on GitHub's runners. See routes/mobileSetup.ts for who does what.
+  registerMobileSetupRoutes(app);
+
+  // Nav App Store — user-published Android apps. Every upload is inspected and malware-scanned, and
+  // NOTHING becomes public without an explicit admin approval. See routes/navStore.ts.
+  registerNavStoreRoutes(app);
+
   // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
   registerAuditRoutes(app);
 
@@ -527,6 +574,10 @@ setInterval(() => {
   registerSdaRoutes(app);
   registerProfessionalsRoutes(app);
   registerRepoAnalystRoutes(app);
+  // Connect-App code review (/api/app-review/review) — real AI review of a connected
+  // NavBharatAI app or GitHub repo, from the AI Code Review tool's "Connect App" flow.
+  registerAppReviewRoutes(app);
+  registerNotificationRoutes(app);
   // DELETED — Engineer AI (/api/engineer-*) was unregistered in the v3.0 cutover and its dead
   // files were removed on 2026-07-09 (see the import-block note above). Replaced by Pro v3.0.
 
@@ -537,6 +588,8 @@ setInterval(() => {
 
   // Custom-domain connect (Cloudflare for SaaS).
   registerDomainsRoutes(app);
+  // Firebase-native custom-domain connect (Slice 2; gated by AGENTV3_FIREBASE_CUSTOM_DOMAINS).
+  registerNbaiDomainsRoutes(app);
 
   // Wallet / sync / payment / admin / secrets / anthropic / zip routes (Phase 1 extractions).
   registerWalletRoutes(app);
@@ -564,10 +617,14 @@ setInterval(() => {
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).
   registerDeployArtifactsRoutes(app);
   registerSecretsRoutes(app);
+  registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);
   registerBuildAnalyticsRoutes(app);
+  // ROADMAP #1 Phase 1 — one-click database (connect the user's OWN Supabase account).
+  registerSupabaseIntegrationRoutes(app, verifyFirebaseTokenForIntegrations);
   registerNavigateRoutes(app);
   registerWebhookRoutes(app);
+  registerBotRoutes(app); // Hosted chat bots — real Telegram/WhatsApp connectors for the Bot Builder
   registerChangelogRoutes(app);
   registerTechDebtRoutes(app);
   registerVersionRoutes(app);
@@ -583,8 +640,16 @@ setInterval(() => {
   registerTeamLibraryRoutes(app); // P-COLLAB.4 — team-scoped shared library (prompts/templates/components)
   registerTraceabilityRoutes(app); // P-PME.12 — requirement→file→test traceability matrix (POST/GET /api/workspace/traceability)
   registerExplainCodeRoutes(app); // P-DEV.10 — deterministic code explanation (POST /api/workspace/explain)
+  registerDebugRoutes(app); // AI Debugger — real free-tier AI error analysis (POST /api/debug)
+  registerAppDebugRoutes(app); // Full-App Debugger — whole-codebase scan (GET /api/app-debug/sources, POST /api/app-debug/run)
+  registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
+  registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
+  registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
+  registerFigmaProxyRoutes(app); // Figma Import — server-side Figma fetch (POST /api/figma/proxy)
   registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);
+  // Chunked zip import — the only path a project larger than one HTTP request can take (see zipUpload.ts).
+  registerZipUploadRoutes(app);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);
   // Engine-backed build route (Phase 4 — VFS + EditEngine + Verifier + RepairLoop + preview).

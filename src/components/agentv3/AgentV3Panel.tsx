@@ -4,21 +4,34 @@ import { AttachMenu } from '../AttachMenu';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
+  Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search,
+  Star, Search, Mic, Camera,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
+import { HostingChooser } from './HostingChooser';
+import { uploadZipProject } from '../../lib/zipProjectUpload';
+import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
+import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
+import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
+import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { checkAttachmentSizes } from '../../lib/attachmentLimits';
+import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
+import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
+import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { deployBlockedReason } from '../../lib/deployGuard';
+import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -30,6 +43,7 @@ import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
+import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
@@ -77,14 +91,29 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  // UNSEND (Slice 2) — true while a take-back purge is in flight (disables the button, prevents double-fire).
+  const [unsending, setUnsending] = useState(false);
+  // AP-3 (cross-restart resume) — a reopened build whose durable status is still 'running' with no live
+  // build was cut off before it could finish (a server restart/crash mid-build). We honestly offer a
+  // one-click Continue instead of silently resetting. Set on reopen; cleared once a build starts or the
+  // user dismisses/continues.
+  const [interruptedResume, setInterruptedResume] = useState(false);
+  // ASK-USER (opt-in): dismiss state for the non-blocking clarify card. Reset whenever a NEW clarify
+  // arrives so a fresh build's questions always show; the build itself never waits on this.
+  const [clarifyDismissed, setClarifyDismissed] = useState(false);
+  useEffect(() => { if (state.pendingClarify) setClarifyDismissed(false); }, [state.pendingClarify]);
+  // Save-as-template: the user's own reusable starters (on-device), shown beside the built-in ones.
+  const [savedTpls, setSavedTpls] = useState<SavedTemplate[]>(() => loadSavedTemplates());
+  const handleSaveTemplate = (text: string) => setSavedTpls(saveTemplate('', text));
+  const handleRemoveTemplate = (id: string) => setSavedTpls(removeSavedTemplate(id));
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
   // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
@@ -106,6 +135,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [roleBusy, setRoleBusy] = useState(false);
   const roleAbortRef = useRef<AbortController | null>(null);
   const [roleProposedSteps, setRoleProposedSteps] = useState<{ role: 'planner' | 'advisor'; steps: string[] } | null>(null);
+  // Roadmap chip (admin 2026-07-21): the proposed plan/fixes render as a tiny pill above the composer
+  // (never a block over the chat). Open = the expandable sheet; dismissedKey hides a specific proposal
+  // (keyed by its steps) until a NEW one arrives.
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [roadmapDismissedKey, setRoadmapDismissedKey] = useState<string | null>(null);
   // 3 SEPARATE PAGES (admin 2026-07-06): Build / Plan / Advise are 3 tabs, ONE shared session + project
   // memory but their OWN visible thread. The Build tab is the existing thread (userMsgs + agentHistory +
   // live state.narration); Plan/Advise each keep their own messages here so switching tabs shows a
@@ -225,13 +259,41 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
-  // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build starts; ticks every
-  // second while the premium card is visible. Reset when the build ends so the next starts at 0s.
+  // INLINE voice dictation (admin 2026-07-22): the mic types speech straight into the composer on this
+  // page — no separate Voice-to-App page. Same Web Speech engine the standalone tool uses.
+  const [listening, setListening] = useState(false);
+  // Web Speech API types aren't in this project's TS lib — use `any`, as the standalone Voice tool does.
+  const voiceRef = useRef<any>(null);
+  const voiceBaseRef = useRef(''); // composer text captured when dictation started (interim appends after it)
+  const voiceFinalRef = useRef(''); // finalized transcript accumulated this dictation session
+  const speechSupported = speechRecognitionSupported();
+  // INLINE "Screenshot → App": pick a screenshot from the gallery → build from it, right here (admin
+  // 2026-07-22). A hidden gallery input drives BOTH entry points (the glowing template button AND the
+  // Attach-menu option) — 2 entries, one system.
+  const screenshotInputRef = useRef<HTMLInputElement | null>(null);
+  const [screenshotBusy, setScreenshotBusy] = useState(false);
+  // Project-import (.zip) progress — a large archive takes real time, so the user always sees where it is.
+  const [zipImporting, setZipImporting] = useState(false);
+  const [zipProgress, setZipProgress] = useState('');
+  // Stop any live dictation when the panel unmounts (never leave the mic hot).
+  useEffect(() => () => { try { voiceRef.current?.stop(); } catch { /* already stopped */ } }, []);
+  // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
+  // second while the premium card is visible. FREEZE-ON-STOP (admin 2026-07-21 — "time reset ho
+  // jata hai, error ane par nahi hona chahiye"): the old effect zeroed the clock the moment
+  // `running` flipped false, so an error event wiped the elapsed time on screen. Now the clock
+  // only re-anchors on the false→true transition (a genuinely new build); an error/completion
+  // freezes the last real value instead of erasing it.
   const buildStartRef = useRef<number>(0);
+  const prevRunningRef = useRef(false);
   const [teamElapsedMs, setTeamElapsedMs] = useState(0);
   useEffect(() => {
-    if (!running) { buildStartRef.current = 0; setTeamElapsedMs(0); return; }
-    if (buildStartRef.current === 0) buildStartRef.current = Date.now();
+    const wasRunning = prevRunningRef.current;
+    prevRunningRef.current = running;
+    if (!running) return; // freeze — never zero a real elapsed time on stop/error
+    if (!wasRunning || buildStartRef.current === 0) {
+      buildStartRef.current = Date.now();
+      setTeamElapsedMs(0);
+    }
     if (powerLevel !== 'max') return;
     const t = setInterval(() => setTeamElapsedMs(Date.now() - buildStartRef.current), 1000);
     return () => clearInterval(t);
@@ -254,14 +316,37 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!el) return;
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
-    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter):
-    // a single tight line — the box still auto-grows as the user types (up to maxHeight).
-    const minHeight = 30;
-    const maxHeight = 20 * 5 + 8; // ~5 lines (text-sm line-height 20) + vertical padding (py-1)
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
+    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter)
+    // + 2026-07-21 ("resting 1x, not 4x"): rest at EXACTLY one line. + 2026-07-21 ("type/enter karne par
+    // vertical size increase hona chahiye"): but then GROW with the content — the old ~2-line cap made it
+    // barely move, so multi-line typing felt like it wasn't growing at all. It now grows up to ~6 lines and
+    // only then scrolls internally (very long prompts still use the Expand button → h-[50vh]). Measured from
+    // the element's REAL computed line-height + padding, so it's a true single line on mobile too (the CSS
+    // forces font-size:16px there, which the old hardcoded 20px line-height math didn't account for).
+    const cs = getComputedStyle(el);
+    const lineH = parseFloat(cs.lineHeight) || 20;
+    const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    // clampComposerHeight (pure, unit-tested): rest at 1 line, grow up to ~6 lines, then scroll.
+    el.style.height = `${clampComposerHeight(el.scrollHeight, lineH, padY)}px`;
   }, [prompt, composerExpanded]);
+  // Composer action buttons (expand / send / stop) vertical placement. RESTING/GROWN composer: vertically
+  // CENTERED — equidistant from the top and bottom border (admin 2026-07-21: "buttons ka center of mass
+  // upper aur lower border se equal distance par ho"), instead of pinned to the lower edge. EXPANDED
+  // editor (h-[50vh]): pinned near the bottom, since centering a button in a half-screen box reads wrong.
+  const composerBtnY = composerExpanded ? 'bottom-2' : 'top-1/2 -translate-y-1/2';
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
+  // True once the user DELIBERATELY chose a framework (picker) or a reopened session carries one — that
+  // choice then always wins over chat-text detection on the server (admin bidirectional-selection law
+  // 2026-07-20). Stays false for a brand-new default session, so chat can still auto-select the framework.
+  const [frameworkExplicit, setFrameworkExplicit] = useState(false);
+  // The user picked a framework in the picker → mark it explicit so the server honours it over chat text.
+  const pickFramework = useCallback((id: string) => { setFramework(id); setFrameworkExplicit(true); }, []);
+  // A pending framework conflict (admin 2026-07-20): the user PICKED framework A but their message NAMES a
+  // different framework B — confirm which one BEFORE building, never silently build the wrong stack.
+  // `launch(fw)` re-runs the held build with the chosen framework (resolved, so it won't re-prompt).
+  const [fwConflict, setFwConflict] = useState<{ picked: string; detected: string; launch: (fw: string) => void } | null>(null);
+  const fwName = useCallback((id: string) => FRAMEWORKS.find((f) => f.id === id)?.name ?? id, []);
   const [importUrl, setImportUrl] = useState('');
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -271,8 +356,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [ghReposLoading, setGhReposLoading] = useState(false);
   // 'auth' = not connected / token expired (show Connect); anything else = a real fetch error.
   const [ghReposError, setGhReposError] = useState<string>('');
+  // Immediate feedback for the "Connect GitHub" tap: the async connect (fetch → redirect) gave NO
+  // visual response on mobile (no active/hover on touch), so users tapped it 5-6× (admin 2026-07-22).
+  const [ghConnecting, setGhConnecting] = useState(false);
+  // Paste-a-token fallback (admin 2026-07-22): the OAuth redirect can't return the token to the bundled
+  // native app, so a user who "connected" still had no token → their PRIVATE repo failed to clone. A
+  // pasted GitHub token (repo scope) is stored the same way and works on EVERY platform.
+  const [showTokenPaste, setShowTokenPaste] = useState(false);
+  const [pastedToken, setPastedToken] = useState('');
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenError, setTokenError] = useState('');
   const [repoSearch, setRepoSearch] = useState('');
   const [importSending, setImportSending] = useState(false);
+  // ── Push mode (admin 2026-07-20): the SAME repo picker can PUSH the current app to a repo, so
+  // connect + import + push all live in one place. 'import' clones a repo in; 'push' publishes out.
+  const [modalMode, setModalMode] = useState<'import' | 'push'>('import');
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushResult, setPushResult] = useState<{ ok: boolean; text: string; url?: string } | null>(null);
+  const [pushCommitMsg, setPushCommitMsg] = useState('');
 
   const loadGhRepos = useCallback(async () => {
     const token = (() => { try { return localStorage.getItem('gh_token'); } catch { return null; } })();
@@ -305,13 +406,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, []);
   // Load the list the moment the modal opens (state 3: already connected → zero extra clicks).
   useEffect(() => {
-    if (showImportModal) { setRepoSearch(''); void loadGhRepos(); }
+    if (showImportModal) { setRepoSearch(''); setPushResult(null); setPushCommitMsg(''); void loadGhRepos(); }
   }, [showImportModal, loadGhRepos]);
 
   // Full-page OAuth redirect — the SAME proven flow the app-level GitHub connect uses (the
   // callback returns to this exact URL with #gh_token, which App.tsx stores in localStorage).
   // A redirect can't be killed by mobile popup blockers, unlike window.open.
   const connectGitHub = useCallback(async () => {
+    if (ghConnecting) return; // guard against the 5-6 rapid taps — one connect at a time
+    setGhConnecting(true);
+    setGhReposError('');
     try {
       const state = window.location.href.split('#')[0];
       const redirectUri = 'https://navbharatai.com/api/github/callback';
@@ -327,10 +431,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       if (data.scope) githubUrl.searchParams.set('scope', String(data.scope));
       if (data.state) githubUrl.searchParams.set('state', String(data.state));
       window.location.href = githubUrl.toString();
+      // NOTE: on success the line above navigates away, so `ghConnecting` intentionally stays true
+      // (the button keeps showing "Connecting…") until the page leaves — never flickers back to idle.
     } catch (e) {
       setGhReposError(e instanceof Error ? e.message : 'Could not start GitHub sign-in.');
+      setGhConnecting(false); // real failure → let the user tap again
     }
-  }, []);
+  }, [ghConnecting]);
 
   // "Wrong account?" — drop the current GitHub connection so the user can connect a DIFFERENT one
   // (without logging out of NavBharatAI). Clears the same keys App.tsx binds to the user, then
@@ -345,6 +452,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setGhReposError('auth');
   }, []);
 
+  // Verify a pasted GitHub token against the real GitHub API, then store it exactly like the OAuth
+  // token so the build request (which reads localStorage.gh_token) and the repo list both use it. This
+  // is the reliable path when the OAuth redirect can't complete (e.g. inside the native app).
+  const submitPastedToken = useCallback(async () => {
+    const tok = pastedToken.trim();
+    if (!tok || tokenBusy) return;
+    setTokenBusy(true);
+    setTokenError('');
+    try {
+      const res = await fetch('/api/github/user', { headers: { Authorization: `Bearer ${tok}` } });
+      if (!res.ok) {
+        throw new Error(res.status === 401
+          ? 'GitHub rejected that token. Make sure it has the "repo" scope and hasn\'t expired.'
+          : `GitHub returned ${res.status} — please try again.`);
+      }
+      try {
+        localStorage.setItem('gh_token', tok);
+        localStorage.setItem('gh_token_signal', tok); // notify other tabs, same as the OAuth flow
+      } catch { /* storage unavailable */ }
+      setPastedToken('');
+      setShowTokenPaste(false);
+      setGhReposError('');
+      void loadGhRepos();
+    } catch (e) {
+      setTokenError(e instanceof Error ? e.message : 'Could not verify that token.');
+    } finally {
+      setTokenBusy(false);
+    }
+  }, [pastedToken, tokenBusy, loadGhRepos]);
+
   // 1-CLICK IMPORT: picking a repo sends the import message itself — the user just watches the
   // clone → Files/IDE → preview → AI survey happen (the #886/#890 Landing Pipeline server-side).
   // Deliberately a PLAIN function (not useCallback): it must close over the CURRENT render's
@@ -357,6 +494,50 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       text: 'Import this app from my GitHub repository and give me a short survey of what it is and how it is structured. Do not change any files yet.',
       importUrl: repoUrl,
     }).finally(() => setImportSending(false));
+  };
+
+  // REAL push: publish the CURRENT app's files to the chosen GitHub repo via the safe (non-force)
+  // push route. Reuses the repo picker — the user just clicks the repo to push to. Deliberately a
+  // plain function (closes over the current render's workspaceFiles/loader/token), like importRepo.
+  const pushToRepo = async (fullName: string) => {
+    if (pushBusy || running || importSending) return;
+    const token = ghToken();
+    if (!token) { setPushResult({ ok: false, text: 'Connect GitHub first, then push.' }); setGhReposError('auth'); return; }
+    const slash = fullName.indexOf('/');
+    if (slash <= 0) { setPushResult({ ok: false, text: 'Pick a repository in the form owner/name.' }); return; }
+    const owner = fullName.slice(0, slash).trim();
+    const repo = fullName.slice(slash + 1).trim();
+
+    setPushBusy(true);
+    setPushResult({ ok: true, text: `Pushing to ${fullName}…` });
+    try {
+      // Use the loaded workspace file CONTENTS; fetch them if the panel hasn't cached them yet.
+      let files = workspaceFiles;
+      if (!files || Object.keys(files).length === 0) files = await loadWorkspaceFiles();
+      if (!files || Object.keys(files).length === 0) {
+        setPushResult({ ok: false, text: 'No app files to push yet — build or open an app first.' });
+        return;
+      }
+      const res = await fetch('/api/github/push-enhanced', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          owner, repo, files,
+          visibility: 'private',
+          branch: 'main',
+          message: pushCommitMsg.trim() || 'Update from NavBharatAI Pro v5.0',
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (res.status === 401 || res.status === 403) { setPushResult({ ok: false, text: 'GitHub authorization expired — reconnect and try again.' }); setGhReposError('auth'); return; }
+      if (res.status === 409 || data?.nonFastForward) { setPushResult({ ok: false, text: 'This repo has newer commits than your app. Import it first, then push — this protects your work.' }); return; }
+      if (!res.ok || !data?.success) { setPushResult({ ok: false, text: typeof data?.error === 'string' ? data.error : 'Push failed — please try again.' }); return; }
+      setPushResult({ ok: true, text: `Pushed to ${fullName} ✓`, url: typeof data.repoUrl === 'string' ? data.repoUrl : `https://github.com/${owner}/${repo}` });
+    } catch {
+      setPushResult({ ok: false, text: 'Push failed — check your connection and try again.' });
+    } finally {
+      setPushBusy(false);
+    }
   };
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
@@ -470,8 +651,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // install`", real +N/-M from the actual patches) in one glanceable, expandable row, instead of
   // the old flat spam of per-file ticks and ⏱ heartbeats. Pure grouping in activityTimeline.ts.
   // Build actions (activity/diffs) decorate ONLY the Build tab; the read-only Plan/Advise pages render a
-  // clean conversation.
-  const chatBlocks = buildChatBlocks(convo, chatMode === 'build' ? state.activity : [], chatMode === 'build' ? state.diffs : {});
+  // clean conversation. Prior turns' archived activity (activityLog) is included so a finished build's
+  // action rows + diff stats stay in the chat forever within the session (admin 2026-07-21 — no vanish).
+  const chatBlocks = buildChatBlocks(
+    convo,
+    chatMode === 'build' ? [...state.activityLog, ...state.activity] : [],
+    chatMode === 'build' ? state.diffs : {},
+  );
 
   // All checkpoints across the session (prior turns + the live build), deduped by
   // sha so the History tab keeps showing earlier checkpoints across messages.
@@ -486,6 +672,52 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
     return out;
   })();
+
+  // UNSEND (Slice 2) — the LAST user message can be taken back: stop any in-flight build AND purge it
+  // from the server transcript + workspace memory, then drop it (and its reply) from the visible thread.
+  // Only the newest user message is unsendable (its reply is always the live `narration`, never yet
+  // flushed to agentHistory — so removing it can't strand an orphaned reply). Build lane only.
+  const lastUserTs = chatMode === 'build'
+    ? (() => { for (let i = convo.length - 1; i >= 0; i--) if (convo[i].role === 'user') return convo[i].ts; return null; })()
+    : null;
+  const handleUnsend = async (ts: number) => {
+    if (unsending) return;
+    setUnsending(true);
+    try {
+      // A message that reached the server (has a workspace) is purged server-side; a purely-local one
+      // (no workspaceId yet — it never persisted) is just halted locally. Either way the reply lives in
+      // `narration`, which unsend()/stop() clears.
+      let purged = true;
+      if (state.workspaceId) purged = await unsend();
+      else stop();
+      // On failure the message is NOT removed (it stays visible — honest, no fake "unsent"); the user
+      // can simply try again. Never claim a purge that didn't happen.
+      if (!purged) return;
+      setUserMsgs((prev) => prev.filter((m) => m.ts < ts));
+      setAgentHistory((prev) => prev.filter((m) => m.ts < ts));
+    } finally {
+      setUnsending(false);
+    }
+  };
+  // EDIT (Slice 2) — take the message back (same full purge as Unsend) AND drop its text into the
+  // composer so the user can re-write and send again. Only prefill on a genuine purge, so a failed
+  // take-back can't leave the message both in the thread AND in the composer.
+  const handleEdit = async (ts: number, text: string) => {
+    if (unsending) return;
+    setUnsending(true);
+    try {
+      let purged = true;
+      if (state.workspaceId) purged = await unsend();
+      else stop();
+      if (!purged) return; // keep the message; never a fake "edited"
+      setUserMsgs((prev) => prev.filter((m) => m.ts < ts));
+      setAgentHistory((prev) => prev.filter((m) => m.ts < ts));
+      setPrompt(text); // load the taken-back text back into the composer to re-write
+      setTimeout(() => composerRef.current?.focus(), 0);
+    } finally {
+      setUnsending(false);
+    }
+  };
 
   // Auto-scroll the chat to the newest message.
   useEffect(() => {
@@ -522,6 +754,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const autoContinueRef = useRef(0);
   const planContinuesRef = useRef(0);
   const lastPlanRemainingRef = useRef<number | null>(null);
+  // FleetOps 2026-07-20 — progress-driven wall-clock auto-continue: a big full-stack app needs several
+  // 30-min windows. noProgressRef = consecutive pauses that added NO new files (a stuck build → stop
+  // after PAUSE_CONTINUE_MAX); lastFilesWrittenRef = files at the previous pause, to detect real progress.
+  const noProgressRef = useRef(0);
+  const lastFilesWrittenRef = useRef<number | null>(null);
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
@@ -547,21 +784,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverBuildRunning, running, userId, email, resumeBuild]);
 
-  // TAB SWITCH resilience: a backgrounded tab (esp. mobile Safari) suspends timers and
-  // can silently drop the event stream. When the tab becomes visible again, immediately
-  // reconcile with the server — re-attach a still-running build (via the auto-resume
-  // effect above) so the build never looks "stopped" after a tab switch.
+  // CONNECTION-DROP resilience: the build runs (and is buffered) server-side, so a lost CLIENT
+  // connection must NEVER look like the app "stopped". Three real drop signals must each trigger an
+  // immediate reconcile → re-attach of the still-running build (via the auto-resume effect above):
+  //   • visibilitychange — a backgrounded tab / minimized app (mobile Safari/webview suspends timers
+  //     and drops the stream); recover the instant it returns to the foreground.
+  //   • ONLINE — a brief network cut (even 0.01s) while the tab stays VISIBLE never fires
+  //     visibilitychange, so before this the ONLY recovery was start()'s bounded retry loop; once that
+  //     gave up the user was stuck on a "network error" even though the network came back and the
+  //     server build is alive. The `online` event fires exactly when connectivity is restored → reconcile.
+  //   • FOCUS — window refocus (alt-tab / app switch on desktop) that doesn't flip document visibility.
+  // Reconcile whenever we are NOT actively streaming OR an error is showing (a surfaced drop error must
+  // be cleared by a successful re-attach — resume() calls setError(null)). checkRunning is a cheap,
+  // idempotent GET; the auto-resume effect's own guards prevent any double-attach.
   const [liveNonce, setLiveNonce] = useState(0);
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!running) checkRunning({ userId, email, workspaceId: expectedWorkspaceId() });
-      setLiveNonce((n) => n + 1); // re-arm the cross-device live poll when the tab is shown again
+    const reconcile = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // still backgrounded
+      if (!running || error) checkRunning({ userId, email, workspaceId: expectedWorkspaceId() });
+      setLiveNonce((n) => n + 1); // re-arm the cross-device live poll
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', reconcile);
+    window.addEventListener('online', reconcile);
+    window.addEventListener('focus', reconcile);
+    return () => {
+      document.removeEventListener('visibilitychange', reconcile);
+      window.removeEventListener('online', reconcile);
+      window.removeEventListener('focus', reconcile);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, userId, email, checkRunning]);
+  }, [running, error, userId, email, checkRunning]);
 
   // CROSS-DEVICE LIVE MIRROR (Slice B): while this panel is OPEN + VISIBLE and NOT running a build
   // locally, watch the shared LiveChannel so a build started on ANOTHER device shows its activity
@@ -655,10 +907,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // Apply only if the user hasn't already switched away meanwhile.
       if (!restored || restored.messages.length === 0 || sessionIdRef.current !== sid) return;
       // Adopt the durable framework so a reopened non-Vite session's follow-up build stays correct.
-      if (restored.framework) setFramework(restored.framework);
+      if (restored.framework) { setFramework(restored.framework); setFrameworkExplicit(true); }
       // REATTACH-ON-REOPEN: same as the ☰-menu open path — a build still running for this
       // session (closed mid-build) re-attaches its live stream instead of 409-ing on send.
       if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
+      setInterruptedResume(restored.unfinished === true); // AP-3 — offer Continue if a restart cut it off
       // Cross-cutover continuity: if the seeded legacy thread is provably disjoint from the server
       // transcript (a pre-cutover chat continued later), keep it IN FRONT of the server messages;
       // if it overlaps (old build sessions — both stores hold copies), drop it: server wins.
@@ -792,10 +1045,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       img.src = url;
     });
 
+  // ROOT-CAUSE FIX (admin 2026-07-26: "zip upload complete ho jaata hai lekin files v5 me nahi
+  // aati") — this used to filter out any file over a hardcoded 15 MB with NO feedback at all, so a
+  // large zip silently vanished from the attachment list right here, before it ever reached the
+  // send-time size guard (Fix 36a / checkAttachmentSizes) whose entire job is to explain WHY an
+  // oversized upload can't go through. Two size limits had drifted apart — a silent one (15 MB, here)
+  // and an honest one (MAX_ATTACHMENT_BYTES, attachmentLimits.ts) — and the silent one always won.
+  // Now there is ONE limit, and a rejected file gets the same honest, actionable message as a
+  // rejected send, immediately, so the user knows their upload never happened and why.
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const MAX = 15 * 1024 * 1024; // 15MB/file
-    const picked = Array.from(list).filter((f) => f.size <= MAX);
+    const incoming = Array.from(list);
+    const tooBig = incoming.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    const picked = incoming.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+    if (tooBig.length > 0) {
+      const verdict = checkAttachmentSizes(tooBig);
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${verdict.reason || 'One or more files are too large to attach.'}`, ts: Date.now() }]);
+    }
     if (picked.length > 0) setFiles((prev) => [...prev, ...picked].slice(0, 8));
   };
 
@@ -805,12 +1071,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
+    // Stop live voice dictation the moment the message is sent (never leave the mic recording).
+    if (listening) { try { voiceRef.current?.stop(); } catch { /* already stopped */ } setListening(false); }
+    setInterruptedResume(false); // AP-3 — a new build/turn resolves any "unfinished build" offer
     // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
     // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
     // "continue" after a stall starts a fresh progress-monotone chain.
     autoContinueRef.current = 0;
     planContinuesRef.current = 0;
     lastPlanRemainingRef.current = null;
+    noProgressRef.current = 0;
+    lastFilesWrittenRef.current = null;
     // Preserve the previous turn's agent replies BEFORE start() resets the live
     // build state — otherwise the prior reply (which lives only in state.narration)
     // disappears from the thread the moment the next message begins.
@@ -855,13 +1126,171 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-    start(msgText, {
-      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, appSignature: appSignaturePref(),
+    // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
+    // nor the server re-prompts on the same conflict.
+    const launch = (fw: string, resolved: boolean) => start(msgText, {
+      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments,
+      framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
       importUrl: pendingImportUrl || undefined,
       // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
       chatRole: chatMode === 'build' ? undefined : chatMode,
     });
+    // FRAMEWORK CONFLICT CONFIRM (admin 2026-07-20): only for a BUILD turn, and only when the user PICKED
+    // one framework but the message NAMES a different one — pause and ask which to use instead of building
+    // the wrong stack. A plan/advise turn or a no-conflict build proceeds immediately.
+    const sel = chatMode === 'build'
+      ? resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt: msgText })
+      : { status: 'ok' as const, framework };
+    if (sel.status === 'conflict') {
+      setFwConflict({ picked: sel.picked, detected: sel.detected, launch: (fw: string) => launch(fw, true) });
+      return;
+    }
+    launch(sel.framework, false);
+  };
+
+  // ── INLINE VOICE DICTATION (admin 2026-07-22) ────────────────────────────────────────────────
+  // Tap the mic → speech types straight into the composer on THIS page (interim + final), tap again to
+  // stop. Same Web Speech engine as the standalone tool. On a platform without Web Speech, fall back to
+  // the dedicated Voice-to-App page so the feature still works.
+  const stopVoice = () => {
+    try { voiceRef.current?.stop(); } catch { /* already stopped */ }
+    setListening(false);
+  };
+  const toggleVoice = () => {
+    if (!speechSupported) {
+      window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }));
+      return;
+    }
+    if (listening) { stopVoice(); return; }
+    const w = window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any };
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) return;
+    const sr = new SR();
+    sr.continuous = true;
+    sr.interimResults = true;
+    sr.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-IN';
+    voiceBaseRef.current = prompt ? prompt.replace(/\s+$/, '') + ' ' : '';
+    voiceFinalRef.current = '';
+    sr.onresult = (event: any) => {
+      let interim = '';
+      let newFinal = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) newFinal += t; else interim += t;
+      }
+      if (newFinal) voiceFinalRef.current += (voiceFinalRef.current ? ' ' : '') + newFinal.trim();
+      setPrompt((voiceBaseRef.current + voiceFinalRef.current + (interim ? ' ' + interim : '')).replace(/^\s+/, ''));
+    };
+    sr.onerror = () => setListening(false);
+    sr.onend = () => setListening(false);
+    voiceRef.current = sr;
+    try { sr.start(); setListening(true); setTimeout(() => composerRef.current?.focus(), 0); } catch { setListening(false); }
+  };
+
+  // ── INLINE "SCREENSHOT → APP" (admin 2026-07-22) ─────────────────────────────────────────────
+  // Open the gallery, read the chosen screenshot, turn it into a build spec (/api/screenshot/to-prompt,
+  // which appends the intent-aware clone/anti-phishing policy), and start the build right here. Drives
+  // both the glowing template button and the Attach-menu option.
+  const openScreenshotGallery = () => { if (!running && !screenshotBusy) screenshotInputRef.current?.click(); };
+  const handleScreenshotPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file || running || screenshotBusy) return;
+    setScreenshotBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(String(r.result || ''));
+        r.onerror = () => reject(new Error('read failed'));
+        r.readAsDataURL(file);
+      });
+      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      const res = await fetch('/api/screenshot/to-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, imageType: file.type || 'image/png' }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || typeof data.prompt !== 'string') {
+        throw new Error((data && typeof data.error === 'string' && data.error) || 'Could not read the screenshot — try a clearer image.');
+      }
+      // KEEP WHAT THE USER TYPED (admin 2026-07-28). This flow used to send ONLY the prompt derived
+      // from the image, silently discarding the composer text — so "make this page but in Hindi" lost
+      // "but in Hindi", the single most likely thing a user adds to a screenshot. Their words come
+      // LAST so they read as the overriding instruction, and the composer is cleared like a normal send.
+      const typed = prompt.trim();
+      const combined = combineScreenshotPrompt(data.prompt, typed);
+      if (typed) setPrompt('');
+      await send({ text: combined, importUrl: '' });
+    } catch (err) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${err instanceof Error ? err.message : 'Screenshot could not be read. Try again.'}`, ts: Date.now() }]);
+    } finally {
+      setScreenshotBusy(false);
+    }
+  };
+
+  // PROJECT IMPORT (.zip) — admin 2026-07-28. A zip is a PROJECT, not a chat attachment: it is
+  // uploaded in chunks (so archive size is not a limit — see zipProjectUpload.ts), extracted and
+  // landed SERVER-SIDE into this workspace, and then shown in Files. It never becomes base64 in a
+  // build request, which is exactly what capped it at 18 MB and made a 161 MB import impossible.
+  const handleZipProject = async (file: File) => {
+    if (running || zipImporting) return;
+    // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used by the COMMIT call,
+    // which runs AFTER the entire archive has been transferred — so a missing one used to cost a 161 MB,
+    // multi-minute upload before the server could correctly refuse it. Resolve and validate the target
+    // here, in the first millisecond, exactly like the server's own size/disk preflight. This also fixes
+    // the id itself: this was the one call site passing `state.workspaceId` (empty until a build
+    // attaches) instead of the session's real id, so a FRESH tab could never import at all.
+    const targetWorkspaceId = resolveImportWorkspaceId({
+      stateWorkspaceId: state.workspaceId,
+      fallbackWorkspaceId: clientWorkspaceId(userId, sessionIdRef.current),
+    });
+    if (!targetWorkspaceId) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${importTargetUnavailableMessage()}`, ts: Date.now() }]);
+      return;
+    }
+    setZipImporting(true);
+    const started = Date.now();
+    setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
+    try {
+      const result = await uploadZipProject(file, targetWorkspaceId, (p) => {
+        setZipProgress(zipImportProgressLabel(p.phase, p.fraction));
+      });
+      // The success line now STATES what did not come in. A green tick over a silently-gutted project
+      // is the product lying about its own result — the exact thing the second and third absolute rules
+      // forbid. `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
+      setUserMsgs((c) => [...c, {
+        role: 'agent',
+        text: result.dropSummary
+          ? `✅ Imported “${result.fileName}”.\n\n${result.dropSummary}\n\nYour project is in Files — tell me what to change.`
+          : `✅ Imported ${result.fileCount} file${result.fileCount === 1 ? '' : 's'} from “${result.fileName}”. Your project is in Files — tell me what to change.`,
+        ts: Date.now(),
+      }]);
+      // Pull the landed project into the IDE/Files view through the SAME bridge a build's own file
+      // writes use, so an imported app behaves exactly like a built one from here on.
+      try {
+        const res = await fetch('/api/agentv3/workspace-files', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          // The SAME resolved id the import landed in — reading back `state.workspaceId` here would
+          // ask an empty workspace for the files on exactly the fresh session this fix is about.
+          body: JSON.stringify({ workspaceId: targetWorkspaceId, userId, email }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.files && typeof data.files === 'object') onFilesSync?.(data.files);
+      } catch { /* the files are already durable server-side; the Files view refreshes on next load */ }
+      setTab('files');
+    } catch (err) {
+      setUserMsgs((c) => [...c, {
+        role: 'agent',
+        text: `⚠️ ${err instanceof Error ? err.message : 'The project could not be imported.'}`,
+        ts: Date.now(),
+      }]);
+    } finally {
+      setZipImporting(false);
+      setZipProgress('');
+    }
   };
 
   // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
@@ -963,11 +1392,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // SPM-3: one pure decision for both loops — the classic bounded deadline-pause continue AND
     // the project-mode module chain (continues only while planRemaining strictly decreases, with
     // a fresh pause budget per completed module and an absolute backstop).
+    const filesWritten = typeof state.filesWritten === 'number' ? state.filesWritten : undefined;
+    const madeProgress = typeof filesWritten === 'number'
+      && (lastFilesWrittenRef.current == null || filesWritten > lastFilesWrittenRef.current);
     const decision = decideAutoContinue({
       planRemaining: state.planRemaining,
       lastPlanRemaining: lastPlanRemainingRef.current,
       pauseContinues: autoContinueRef.current,
       planContinues: planContinuesRef.current,
+      filesWritten,
+      lastFilesWritten: lastFilesWrittenRef.current,
+      noProgressPauses: noProgressRef.current,
     });
     if (typeof state.planRemaining === 'number') lastPlanRemainingRef.current = state.planRemaining;
     if (!decision.proceed) {
@@ -979,9 +1414,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       }
       return;
     }
-    if (decision.isPlanContinue) planContinuesRef.current += 1;
-    if (decision.resetPauseBudget) autoContinueRef.current = 0;
-    else autoContinueRef.current += 1;
+    if (decision.isPlanContinue) {
+      planContinuesRef.current += 1;
+      if (decision.resetPauseBudget) autoContinueRef.current = 0;
+      else autoContinueRef.current += 1;
+    } else {
+      // Classic wall-clock pause: keep the ABSOLUTE counter climbing (backstop), and reset/advance the
+      // no-progress streak by whether this window actually added files. lastFilesWrittenRef tracks the
+      // high-water mark so a later smaller scan can't look like "no progress".
+      autoContinueRef.current += 1;
+      noProgressRef.current = madeProgress ? 0 : noProgressRef.current + 1;
+      if (typeof filesWritten === 'number') lastFilesWrittenRef.current = Math.max(lastFilesWrittenRef.current ?? 0, filesWritten);
+    }
     // Preserve the paused turn's replies into history before start() resets the live state.
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
@@ -990,7 +1434,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
+    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
 
@@ -1024,7 +1468,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
+      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
       void refreshQueue();
     } finally {
       queueClaimInFlightRef.current = false;
@@ -1110,6 +1554,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setRestoreNote('');
     setShipNote(null);
     setBilled(false);
+    setInterruptedResume(false); // AP-3 — a fresh/other session never inherits an unfinished-build offer
     // Composer extras + workspace view: back to the defaults a truly new chat starts with. The
     // preview surface unmounts (previewEverOpened=false), so no stale iframe can survive; its own
     // workspaceId-keyed clear (PreviewSurface) covers the mounted case too.
@@ -1319,12 +1764,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
         // Adopt the session's durable framework so a follow-up build/edit/deploy on a reopened
         // non-Vite session doesn't silently reset to vite-react (the framework-reset defect).
-        if (restored.framework) setFramework(restored.framework);
+        if (restored.framework) { setFramework(restored.framework); setFrameworkExplicit(true); }
         // REATTACH-ON-REOPEN (test #5): if THIS session's build is still running server-side (the
         // user closed the tab/browser mid-build — the build keeps going by design), detect it now
         // so the auto-resume effect re-attaches its live stream immediately — instead of the user
         // discovering it via a "build already running" error when they try to type.
         if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
+        // AP-3: honestly flag a build that a restart cut off mid-flight (durable status still 'running').
+        // The banner itself only renders when there's ALSO no live build (serverBuildRunning === false).
+        setInterruptedResume(restored.unfinished === true);
         // Cross-cutover continuity: a pre-cutover session continued after the server became the
         // only transcript writer has its old turns ONLY in the frozen legacy chat_sessions copy.
         // When that legacy copy is provably disjoint from the server transcript, show it in front;
@@ -1693,9 +2141,50 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
-  // Admin 2026-07-06: the Text-report download and Copy-report buttons were removed from the header.
-  // The JSON "Build report" download (downloadDiagnostics) remains the single report export; the
-  // server still keeps the full "0 → last" session history behind it and the History dropdown.
+  // REPORT TO ADMIN (admin 2026-07-29): the build report is ADMIN-ONLY now. The user can no longer
+  // see, download or copy it — a single "Report" button submits the current build's report to the
+  // admin inbox (POST /api/agentv3/report-to-admin), which resolves + snapshots it server-side. The
+  // user gets only an acknowledgement; the report content never reaches the client. (The older
+  // download/copy/history helpers above are no longer wired to any UI and are retained dormant to
+  // avoid a risky large deletion in this file — they can be removed in a dedicated cleanup.)
+  const [reportSending, setReportSending] = useState(false);
+  const [reportSent, setReportSent] = useState(false);
+  // SEND COUNT (admin 2026-08-04, "report (1), report (2) aise — jisse duplicate report na ho"): the
+  // old button flashed "Report sent" for 4s and then looked untouched again, so a user who missed the
+  // flash re-sent the same build's report. The count is per BUILD and persisted, so the button tells
+  // the truth after a reload too. See reportSendCount.ts.
+  const reportIdKey = reportKey(state.workspaceId, state.buildId);
+  const [reportCount, setReportCount] = useState(0);
+  useEffect(() => { setReportCount(reportSendCount(reportIdKey)); }, [reportIdKey]);
+  const sendReportToAdmin = useCallback(async () => {
+    if (reportSending) return;
+    setReportSending(true);
+    try {
+      const body: Record<string, string> = {};
+      if (state.workspaceId) body.workspaceId = state.workspaceId;
+      if (state.buildId) body.activeBuildId = state.buildId;
+      if (state.promptHash) body.promptHash = state.promptHash;
+      const res = await fetch('/api/agentv3/report-to-admin', {
+        method: 'POST',
+        headers: { ...(await authJsonHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok) {
+        // Count ONLY a genuinely accepted submission — a failed send must never inflate the tally
+        // (the whole point of the number is that the user can trust it).
+        setReportCount(bumpReportSendCount(reportKey(state.workspaceId, state.buildId)));
+        setReportSent(true);
+        setTimeout(() => setReportSent(false), 4000);
+      } else {
+        alert(data?.error || 'Could not send the report right now — please try again in a moment.');
+      }
+    } catch (e) {
+      alert(`Could not send the report: ${e instanceof Error ? e.message : String(e)}.`);
+    } finally {
+      setReportSending(false);
+    }
+  }, [reportSending, state.workspaceId, state.buildId, state.promptHash]);
 
   // ── Mobile footer API (admin 2026-07-07): registration moved BELOW the workspaceFiles state
   // declaration (it feeds the Files count + green-dot signal) — see the effect after it.
@@ -1704,6 +2193,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
+  const [showHostingChooser, setShowHostingChooser] = useState(false);
 
   // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
   useEffect(() => {
@@ -1727,6 +2218,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // only CONFIGURED providers are offered so a deploy can never target an unconfigured host.
   const [providers, setProviders] = useState<Array<{ id: string; name: string; configured: boolean; requirement: string }>>([]);
   const [deployProvider, setDeployProvider] = useState<string>('firebase');
+  // Slice 3: whether the Firebase-native "connect your own domain" surface is live (server flag).
+  const [customDomainsEnabled, setCustomDomainsEnabled] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -1740,6 +2233,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (!cancelled && Array.isArray(data?.providers)) {
           setProviders(data.providers);
           if (typeof data.default === 'string') setDeployProvider(data.default);
+          if (typeof data.customDomains === 'boolean') setCustomDomainsEnabled(data.customDomains);
         }
       } catch { /* best-effort — default to Firebase */ }
     })();
@@ -1750,18 +2244,40 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
   // deploy tool, publishing to the CHOSEN provider's permanent public URL). Routed through the normal
   // stream so the user watches real progress; the live URL is then refreshed from the server.
-  const deployLive = () => {
-    if (running || !state.workspaceId) return;
+  /**
+   * Start a real publish. Returns an HONEST reason when it could NOT start, null when it did.
+   *
+   * ROOT CAUSE (admin 2026-08-02): this used to be `if (running || !state.workspaceId) return;` — a
+   * SILENT no-op. The Publish modal closed itself first, so the user tapped a button, the sheet
+   * vanished, and nothing happened: "sabhi button farzi hai". The precondition is now a reported
+   * value (src/lib/deployGuard.ts) that every caller must surface — never a hidden branch.
+   */
+  const deployLive = (providerOverride?: string): string | null => {
+    const prov0 = providerOverride || deployProvider;
+    const blocked = deployBlockedReason({
+      running,
+      workspaceId: state.workspaceId,
+      providerConfigured: configuredProviders.some((p) => p.id === prov0),
+      providerName: providers.find((p) => p.id === prov0)?.name,
+    });
+    if (blocked) return blocked;
+    // When triggered from the Git panel a specific provider is passed; otherwise use the picker.
+    const prov = providerOverride || deployProvider;
+    if (providerOverride) setDeployProvider(providerOverride);
     if (state.narration.length > 0) {
       setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    const providerName = configuredProviders.find((p) => p.id === deployProvider)?.name || 'a live URL';
+    const providerName = configuredProviders.find((p) => p.id === prov)?.name || 'a live URL';
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider, appSignature: appSignaturePref() },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, deployProvider: prov, appSignature: appSignaturePref() },
     );
+    // Show the live progress the publish is now producing — on mobile the user was left staring at
+    // whatever surface they came from, which is half of why the button felt like it did nothing.
+    setShowWorkspace(false); // the chat surface, where the deploy narration streams
+    return null;
   };
 
   // "Restore all files" — genuinely bring the whole project back into the workspace (the server
@@ -1808,8 +2324,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
-      buildReport: () => { setMobileSheet(null); void downloadDiagnostics(); },
-      reportBusy: downloadingDiag,
       openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
       // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
@@ -1818,7 +2332,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       fileCount: realFileCount,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onFooterApi, showWorkspace, tab, downloadingDiag, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
+  }, [onFooterApi, showWorkspace, tab, reportSending, sendReportToAdmin, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
   // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
   // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
@@ -1938,6 +2452,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFix?.nonce]);
 
+  // Deploy requested from the Git panel (sidebar) for a specific real provider — run v5's REAL
+  // build+deploy pipeline for that provider (the actual, tested deploy engine). Fires on each new
+  // pendingDeploy (nonce change). If it CAN'T start, say why in the chat — this path used to drop
+  // deployLive's silent no-op on the floor too (same dead-button class, admin 2026-08-02).
+  useEffect(() => {
+    if (!pendingDeploy?.provider) return;
+    setShowWorkspace(false);
+    const reason = deployLive(pendingDeploy.provider);
+    if (reason) {
+      setAgentHistory((h) => [...h, { role: 'agent' as const, agent: 'architect', text: `⚠️ ${reason}`, ts: Date.now() }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeploy?.nonce]);
+
   // Load the file contents when the Files tab is opened (and not already loaded), so each file
   // row can show its line count — without the user having to click into a file first.
   useEffect(() => {
@@ -1983,6 +2511,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const planDone = state.todos.filter((t) => t.status === 'done').length;
   const currentTodo = state.todos.find((t) => t.status === 'in_progress')
     ?? state.todos.find((t) => t.status !== 'done');
+  // "Plan complete" = every step is done. Once a build finishes, the whole 9/9 checklist kept sitting
+  // expanded above the composer forever (admin: "jab plan pura ho gaya … bas 'done' likh kar aaye,
+  // hamesha plan show ho aisa zaroori nahi"). So on the transition to complete we collapse it to a compact
+  // "✓ Done" line; on the transition back to incomplete (a new/continued build) we reopen it. The user can
+  // still expand/collapse manually in between — this only drives the two transitions, never every render.
+  const planComplete = state.todos.length > 0 && state.todos.every((t) => t.status === 'done');
+  const prevPlanCompleteRef = useRef(false);
+  useEffect(() => {
+    if (planComplete && !prevPlanCompleteRef.current) setPlanCollapsed(true);
+    else if (!planComplete && prevPlanCompleteRef.current) setPlanCollapsed(false);
+    prevPlanCompleteRef.current = planComplete;
+  }, [planComplete]);
 
   // Shared session-history list — rendered by BOTH the desktop ☰ dropdown and the mobile footer's
   // History sheet, so there is exactly ONE history UI (same data, same live dots, same actions).
@@ -2037,7 +2577,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             aria-label={c.pinned ? 'Unpin this session' : 'Pin this session'}
             className={`p-1 rounded touch-manipulation disabled:opacity-40 focus:opacity-100 ${c.pinned ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 opacity-100' : 'text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 opacity-60 sm:opacity-0 sm:group-hover:opacity-100'}`}
           >
-            {isPinning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
+            {isPinning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
           </button>
           <button
             type="button"
@@ -2047,7 +2587,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             aria-label="Delete this session"
             className="p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
           >
-            {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+            {isDeleting ? <TirangaLoader className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
@@ -2057,7 +2597,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     <>
       {tapDebug && (
         <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-amber-300 break-all select-text">
-          {lastTap || 'tap tracer ON — ab kisi chat par tap kijiye'}
+          {lastTap || 'tap tracer ON — now tap any chat'}
         </div>
       )}
       <button
@@ -2093,7 +2633,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         </div>
       )}
       {historyLoading ? (
-        <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
+        <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading sessions…</div>
       ) : historyError ? (
         <div className="px-3 py-4 text-xs text-center">
           <div className="flex items-center justify-center gap-1.5 text-amber-400">
@@ -2142,6 +2682,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
+      {showHostingChooser && (
+        <HostingChooser
+          providers={configuredProviders}
+          busy={running}
+          workspaceId={state.workspaceId}
+          customDomainsEnabled={customDomainsEnabled}
+          ownRepo={state.ownRepo}
+          githubConnected={!!ghToken()}
+          onConnectGitHub={() => void connectGitHub()}
+          onClose={() => setShowHostingChooser(false)}
+          // Close ONLY when the publish genuinely started; otherwise hand the reason back so the
+          // chooser shows it inline (never a modal that vanishes with nothing happening).
+          onDeploy={(id) => {
+            const reason = deployLive(id);
+            if (!reason) setShowHostingChooser(false);
+            return reason;
+          }}
+        />
+      )}
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
       <div className="shrink-0 border-b border-zinc-800">
         {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve
@@ -2241,75 +2800,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
-          {/* Admin 2026-07-06: the moving header carried Export .zip / Text report / Copy report too —
-              removed to declutter. The single JSON "Build report" download stays (the canonical report
-              to send to support), alongside the per-build History dropdown below. */}
+          {/* Report to admin (admin 2026-07-29): ONE button, no download/copy, no history browser —
+              the report is admin-only. Clicking it submits this build's report to NavBharatAI; the
+              user only sees a "sent" acknowledgement, never the report content. */}
           <button
-            onClick={() => downloadDiagnostics('download')}
-            disabled={downloadingDiag}
-            title="Download the diagnostics report from your last build (JSON) — every issue v5.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            onClick={() => void sendReportToAdmin()}
+            disabled={reportSending || !state.workspaceId}
+            title={`Send this build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)${reportCount > 0 ? ` ${reportAlreadySentHint(reportCount)}` : ''}`}
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent || reportCount > 0 ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
           >
-            {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-            {downloadingDiag ? 'Preparing…' : 'Build report'}
+            {reportSending ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent || reportCount > 0 ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+            {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
           </button>
-          {/* Copy build report (admin 2026-07-12 — re-added, right next to Download): copies the SAME
-              report JSON to the clipboard so it can be pasted straight into a chat/support without a file. */}
-          <button
-            onClick={() => downloadDiagnostics('copy')}
-            disabled={downloadingDiag}
-            title="Copy the last build's diagnostics report (JSON) to the clipboard — paste it straight into a chat or support message."
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5" /> Copy
-          </button>
-          <div className="relative">
-            <button
-              onClick={toggleHistoryReport}
-              disabled={!state.workspaceId}
-              title="Browse past builds' reports — a small recent build never hides a previous, more useful report."
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${selectedHistoryBuildId ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              {selectedHistoryBuildId ? 'Viewing past build' : 'Report history'}
-            </button>
-            {historyReportOpen && (
-              <>
-                <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryReportOpen(false)} aria-hidden="true" />
-                <div className="absolute left-0 top-8 z-50 w-80 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
-                  {selectedHistoryBuildId && (
-                    <button
-                      onClick={() => { setSelectedHistoryBuildId(null); setHistoryReportOpen(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-300 hover:bg-zinc-800"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" /> Back to latest report
-                    </button>
-                  )}
-                  <div className="my-1 border-t border-zinc-800" />
-                  {historyReportLoading ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
-                  ) : historyReportItems.length === 0 ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
-                  ) : (
-                    historyReportItems.map((h) => (
-                      <button
-                        key={h.id}
-                        onClick={() => { setSelectedHistoryBuildId(h.id); setHistoryReportOpen(false); }}
-                        title={h.rootCause || ''}
-                        className={`w-full flex items-start gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 ${selectedHistoryBuildId === h.id ? 'bg-indigo-500/10 text-white' : 'text-zinc-300'}`}
-                      >
-                        <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${h.ok === true ? 'bg-emerald-500' : h.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
-                        <span className="flex-1 min-w-0">
-                          <span className="block text-[10px] text-zinc-500">{new Date(h.startedAt).toLocaleString()}</span>
-                          <span className="block truncate">{h.rootCause || '(no root cause recorded)'}</span>
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
           {state.repoUrl && (
             <a
               href={state.repoUrl}
@@ -2323,31 +2825,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           )}
-          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL.
-              When more than one hosting provider is configured, a chooser lets the user pick
-              WHERE to deploy (no lock-in); with only one, the button alone keeps it simple. */}
-          {configuredProviders.length > 1 && (
-            <select
-              value={deployProvider}
-              onChange={(e) => setDeployProvider(e.target.value)}
-              disabled={running}
-              title="Choose where to deploy (no lock-in)"
-              className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
-            >
-              {configuredProviders.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          )}
+          {/* R5 §5.1 + Hosting Phase 1 — one "Publish" button opens the Hosting chooser: host on
+              NavBharatAI (our free one-click hosting) OR bring your own provider (no lock-in). */}
           <button
-            onClick={deployLive}
+            onClick={() => setShowHostingChooser(true)}
             data-tour="deploy"
             disabled={running || !state.workspaceId}
             title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Rocket className="w-3.5 h-3.5" />
-            Deploy
+            Publish
           </button>
           {liveUrl && (
             <a
@@ -2377,6 +2865,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           {/* Conversation */}
           {/* Admin 2026-07-06: tighter padding (p-3 → px-2 py-2) + smaller gaps so more chat is visible. */}
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
+            {(() => {
+              const lastUser = [...convo].reverse().find((m) => m.role === 'user');
+              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+            })()}
             {convo.length === 0 && (
               <div className="text-sm text-zinc-500 mt-6 text-center">
                 <Bot className="w-8 h-8 mx-auto mb-2 text-indigo-400/60" />
@@ -2385,48 +2877,182 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   : chatMode === 'advisor'
                   ? <>🔍 <b className="text-zinc-300">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
-              </div>
-            )}
-            {chatBlocks.map((b) => b.kind === 'msg'
-              ? <Bubble key={b.key} msg={b.msg} />
-              : <ActionGroupRow key={b.key} block={b} />)}
-            {(running || state.activity.length > 0) && (
-              <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
-            )}
-            {/* FIX #6 — a role chat (Plan/Advise) proposed steps: the USER approves them into this
-                app's queue (never auto-enqueued). The Build chat then runs them in order, hands-free. */}
-            {activeProposedSteps && activeProposedSteps.steps.length > 0 && (
-              <div className="px-3 py-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
-                    {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => addStepsToQueue(activeProposedSteps.steps.filter((s) => !addedSteps.has(s)), activeProposedSteps.role)}
-                    disabled={activeProposedSteps.steps.every((s) => addedSteps.has(s))}
-                    className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
-                  >
-                    {activeProposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
-                  </button>
-                </div>
-                {activeProposedSteps.steps.map((s, i) => (
-                  <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
-                    <button
-                      type="button"
-                      onClick={() => addStepsToQueue([s], activeProposedSteps.role)}
-                      disabled={addedSteps.has(s)}
-                      title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
-                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
-                    >
-                      {addedSteps.has(s) ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-                    </button>
-                    <span className="whitespace-pre-wrap break-words">{i + 1}. {s}</span>
+                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
+                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {/* The user's OWN saved templates (on-device) — shown first when present. Each is a one-tap
+                    prompt with a remove (×). Saved via the 🔖 action on any message you sent. */}
+                {chatMode === 'build' && savedTpls.length > 0 && (
+                  <div className="mt-5">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Your templates</div>
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                      {savedTpls.map((t) => (
+                        <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-amber-200 overflow-hidden">
+                          <button
+                            type="button"
+                            title={t.prompt}
+                            onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                            className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 hover:bg-amber-500/15 transition-colors"
+                          >
+                            <span aria-hidden>🔖</span>{t.label}
+                          </button>
+                          <button
+                            type="button"
+                            title="Remove this template"
+                            aria-label="Remove template"
+                            onClick={() => handleRemoveTemplate(t.id)}
+                            className="px-1.5 py-1 text-amber-400/70 hover:text-red-400 hover:bg-white/5 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                ))}
-                <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
+                )}
+                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
+                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {chatMode === 'build' && (() => {
+                  // TIER-AWARE starters (admin 2026-08-02): a FREE user (powerUnlocked=false) is only offered
+                  // `simple` apps their weak tier actually ships, so their FIRST build works — plus a curated
+                  // few LOCKED `pro` showcases that open the upgrade surface (the free→paid carrot). An
+                  // unlocked user gets the whole library, tappable, no locks.
+                  const { tappable: starterTappable, locked: starterLocked } = partitionStarters(powerUnlocked);
+                  return (
+                  <div className="mt-5">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                      {starterTappable.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          title={t.prompt}
+                          onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300 hover:border-indigo-500/60 hover:text-indigo-200 hover:bg-indigo-500/10 transition-colors"
+                        >
+                          <span aria-hidden>{t.icon}</span>{t.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
+                        recharge surface) instead of dropping a prompt the weak tier would flail on. */}
+                    {starterLocked.length > 0 && (
+                      <div className="mt-4">
+                        <div className="text-[11px] uppercase tracking-wide text-indigo-400/70 mb-2 flex items-center justify-center gap-1">
+                          <span aria-hidden>⚡</span> Unlock with Pro
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                          {starterLocked.map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              title={`${t.label} needs a Pro tier — the free tier is tuned for simple apps. Tap to unlock.`}
+                              onClick={() => setSettingsOpen(true)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-indigo-300/80 hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-indigo-200 transition-colors"
+                            >
+                              <span aria-hidden>{t.icon}</span>{t.label}<span aria-hidden className="ml-0.5 opacity-70">🔒</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* GLOWING "Screenshot → App" button (admin 2026-07-22) — sits with the templates as a
+                        highlighted starter: tap → open the gallery → build an app from that screenshot,
+                        inline. Second entry to the SAME flow as the Attach-menu option. */}
+                    <div className="flex justify-center mt-3">
+                      <button
+                        type="button"
+                        onClick={openScreenshotGallery}
+                        disabled={screenshotBusy || running}
+                        title="Pick a website/app screenshot from your gallery — v5.0 builds it"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+                        {screenshotBusy ? 'Reading screenshot…' : 'Screenshot → App'}
+                      </button>
+                    </div>
+                  </div>
+                  );
+                })()}
               </div>
             )}
+            {chatBlocks.map((b) => {
+              if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} />;
+              const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
+              return <Bubble key={b.key} msg={b.msg}
+                onUnsend={isLastUser ? () => { void handleUnsend(b.msg.ts); } : undefined}
+                onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined}
+                onSaveTemplate={b.msg.role === 'user' ? () => handleSaveTemplate(b.msg.text) : undefined} />;
+            })}
+            {/* AP-3 (cross-restart resume) — an honest offer to finish a build a server restart cut off
+                mid-flight. Shows only when the reopened build's durable status was 'running' AND there is
+                no live build anywhere (serverBuildRunning false) and nothing is streaming here. Files, plan
+                and memory were all saved durably, so Continue picks up from where it stopped. */}
+            {interruptedResume && !serverBuildRunning && !running && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">This build didn’t finish</div>
+                    <div className="text-amber-200/80 text-xs mt-0.5">
+                      It was interrupted before it could complete (usually a server restart). Your files, plan and progress are all saved — continue to finish the remaining steps.
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void send({ text: 'Continue the build from where it left off and finish the remaining steps.', importUrl: '' }); }}
+                        className="px-2.5 py-1 rounded-md bg-amber-500 text-zinc-950 text-xs font-medium hover:bg-amber-400 transition-colors"
+                      >
+                        Continue building
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInterruptedResume(false)}
+                        className="px-2.5 py-1 rounded-md text-amber-200/80 text-xs hover:text-amber-100 hover:bg-white/5 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {(running || state.activity.length > 0) && (
+              <WorkingIndicator activity={state.activity} running={running} />
+            )}
+            {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
+                sensible defaults for these; the user MAY refine any of them with a follow-up message, or
+                dismiss. It never pauses the build (honours "text reply > build app"). */}
+            {state.pendingClarify && !clarifyDismissed && state.pendingClarify.questions.length > 0 && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-sm text-indigo-100">
+                <div className="flex items-start gap-2">
+                  <Bot className="w-4 h-4 mt-0.5 shrink-0 text-indigo-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">Building your {state.pendingClarify.domain} app — a few things I assumed</div>
+                    <div className="text-indigo-200/80 text-xs mt-0.5">
+                      I’m already building with sensible defaults. Want to adjust any of these? Just reply below — no need to wait.
+                    </div>
+                    <ul className="mt-1.5 space-y-1">
+                      {state.pendingClarify.questions.map((q, i) => (
+                        <li key={i} className="text-xs text-indigo-100/90 flex gap-1.5"><span className="text-indigo-400">•</span><span>{q}</span></li>
+                      ))}
+                    </ul>
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setClarifyDismissed(true)}
+                        className="px-2.5 py-1 rounded-md text-indigo-200/80 text-xs hover:text-indigo-100 hover:bg-white/5 transition-colors"
+                      >
+                        Looks good — dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* FIX #6 → COMPACT (admin 2026-07-21 — "roadmap screen se hatao, chhota button bana do"):
+                the proposed plan/fixes no longer render as a block here (it used to pin itself after
+                the last AI message and hide the responses). It now lives as a small chip just above
+                the composer — see the sticky footer below. */}
             {billingBlock && (
               // Paid-public (billing PR 5): credits ran out → the build was refused BEFORE it started, so
               // "Fix with AI" (the code-error treatment) would be wrong. This is its own actionable card:
@@ -2555,6 +3181,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 </div>
               </div>
             )}
+            {fwConflict && (
+              <div className="px-3 py-2.5 bg-indigo-950/50 border border-indigo-800 rounded">
+                <div className="flex items-center gap-2 text-xs text-indigo-200 mb-1">
+                  <AlertCircle className="w-4 h-4" /> Which framework should I use?
+                </div>
+                <div className="text-[11px] text-zinc-400 mb-2">
+                  You selected <b className="text-zinc-200">{fwName(fwConflict.picked)}</b>, but your message mentions <b className="text-zinc-200">{fwName(fwConflict.detected)}</b>. Pick one — I&apos;ll build with it.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => { setFramework(fwConflict.detected); setFrameworkExplicit(true); fwConflict.launch(fwConflict.detected); setFwConflict(null); }}
+                    className="px-3 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white"
+                  >Use {fwName(fwConflict.detected)} (from your message)</button>
+                  <button
+                    onClick={() => { setFramework(fwConflict.picked); setFrameworkExplicit(true); fwConflict.launch(fwConflict.picked); setFwConflict(null); }}
+                    className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+                  >Keep {fwName(fwConflict.picked)} (your selection)</button>
+                  <button
+                    onClick={() => setFwConflict(null)}
+                    className="px-3 py-1 text-xs rounded bg-transparent hover:bg-white/5 text-zinc-500"
+                  >Cancel</button>
+                </div>
+              </div>
+            )}
             {state.done && (typeof state.billedInr === 'number' || typeof state.billedUsd === 'number') && (
               <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Customer bill (INR)">
                 <Rocket className="w-3 h-3" />{' '}
@@ -2610,27 +3260,89 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {(() => {
               const pending = queueItems.filter((i) => i.status === 'pending').length;
               const runningQ = queueItems.some((i) => i.status === 'running');
-              if (pending === 0 && !runningQ) return null;
+              // Roadmap chip (admin 2026-07-21): the Plan/Advise proposed steps live HERE as a tiny
+              // pill instead of a block glued under the last AI message — zero extra space when absent,
+              // one 6px-tall row when present, chat never hidden.
+              const roadmap = activeProposedSteps && activeProposedSteps.steps.length > 0
+                && roadmapDismissedKey !== activeProposedSteps.steps.join('\n') ? activeProposedSteps : null;
+              if (pending === 0 && !runningQ && !roadmap) return null;
               return (
-                <div className="px-3 pt-1.5 flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
-                    title="This app's command queue — steps run one at a time"
-                    className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white"
-                  >
-                    <Clock className="w-3 h-3" />
-                    Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
-                  </button>
+                <div className="px-3 pt-1.5 flex items-center gap-1.5">
+                  {roadmap && (
+                    <button
+                      type="button"
+                      onClick={() => setRoadmapOpen((v) => !v)}
+                      title={`${roadmap.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} — tap to review & queue`}
+                      className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold border ${roadmapOpen ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-950/60 border-indigo-800 text-indigo-300 hover:text-white'}`}
+                    >
+                      🗺 {roadmap.role === 'planner' ? 'Plan' : 'Fixes'} · {roadmap.steps.length}
+                    </button>
+                  )}
+                  {(pending > 0 || runningQ) && (
+                    <button
+                      type="button"
+                      onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
+                      title="This app's command queue — steps run one at a time"
+                      className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white"
+                    >
+                      <Clock className="w-3 h-3" />
+                      Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
+                    </button>
+                  )}
                 </div>
               );
             })()}
+            {/* Roadmap sheet — the proposed steps, expanded ONLY on tap (scrolls internally; the chat
+                behind stays fully visible the rest of the time). Queue-all / per-step add / dismiss. */}
+            {roadmapOpen && activeProposedSteps && activeProposedSteps.steps.length > 0
+              && roadmapDismissedKey !== activeProposedSteps.steps.join('\n') && (
+              <div className="mx-3 mt-1.5 p-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5 max-h-44 overflow-y-auto">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+                    {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => addStepsToQueue(activeProposedSteps.steps.filter((s) => !addedSteps.has(s)), activeProposedSteps.role)}
+                      disabled={activeProposedSteps.steps.every((s) => addedSteps.has(s))}
+                      className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
+                    >
+                      {activeProposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRoadmapDismissedKey(activeProposedSteps.steps.join('\n')); setRoadmapOpen(false); setRoleProposedSteps(null); }}
+                      title="Dismiss this roadmap"
+                      className="text-zinc-500 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {activeProposedSteps.steps.map((s, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
+                    <button
+                      type="button"
+                      onClick={() => addStepsToQueue([s], activeProposedSteps.role)}
+                      disabled={addedSteps.has(s)}
+                      title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
+                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      {addedSteps.has(s) ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                    </button>
+                    <span className="whitespace-pre-wrap break-words">{i + 1}. {s}</span>
+                  </div>
+                ))}
+                <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
+              </div>
+            )}
             {queueOpen && queueItems.length > 0 && (
               <div className="mx-3 mt-1.5 p-2 bg-zinc-900/80 border border-zinc-800 rounded space-y-1 max-h-40 overflow-y-auto">
                 {queueItems.map((item) => (
                   <div key={item.id} className="flex items-start gap-2 text-[11px]">
                     <span className={`shrink-0 mt-0.5 ${item.status === 'running' ? 'text-indigo-400' : item.status === 'done' ? 'text-green-500' : item.status === 'failed' ? 'text-red-400' : item.status === 'cancelled' ? 'text-zinc-600' : 'text-zinc-400'}`}>
-                      {item.status === 'running' ? <Loader2 className="w-3 h-3 animate-spin" /> : item.status === 'done' ? <Check className="w-3 h-3" /> : item.status === 'failed' ? <X className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+                      {item.status === 'running' ? <TirangaLoader className="w-3 h-3" /> : item.status === 'done' ? <Check className="w-3 h-3" /> : item.status === 'failed' ? <X className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
                     </span>
                     <span className={`flex-1 break-words ${item.status === 'cancelled' ? 'text-zinc-600 line-through' : item.status === 'done' ? 'text-zinc-500' : 'text-zinc-300'}`}>
                       {item.prompt}
@@ -2691,10 +3403,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   title={planCollapsed ? 'Expand plan' : 'Minimize plan'}
                 >
                   {planCollapsed ? <ChevronRight className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
-                  <span>Plan</span>
-                  <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
-                  {planCollapsed && currentTodo && (
-                    <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                  {planComplete ? (
+                    <span className="text-emerald-500 font-semibold flex items-center gap-1">✓ Done</span>
+                  ) : (
+                    <>
+                      <span>Plan</span>
+                      <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
+                      {planCollapsed && currentTodo && (
+                        <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                      )}
+                    </>
                   )}
                 </button>
                 {!planCollapsed && (
@@ -2728,12 +3446,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
-            <div className="flex items-end gap-1.5 px-2 py-0.5">
-              {/* LEFT CONTROLS (admin 2026-07-18 — "Android me chat box ~50% chota karo"): the
-                  Build/Plan/Advise MODE SELECTOR + settings + attach now sit in ONE ROW beside the input
-                  (was stacked in two rows, which forced the whole composer ~60px tall). Same function as
-                  before: same setChatMode, same dropups (still open upward), running dot, thread counts. */}
-              <div className="flex items-end gap-1 shrink-0">
+            <div className="flex flex-col gap-1.5 px-2 py-0.5">
+              {/* OPTION A (admin 2026-07-19 — "input box gadbad, reposition + attractive"): the input now
+                  sits on its OWN full-width row (order-1) and the Build/Plan/Advise MODE SELECTOR + settings
+                  + attach sit in a slim toolbar row BELOW it (order-2, flex-wrap so more controls can be
+                  added later without squeezing the input). CSS `order` reorders VISUALLY without touching
+                  DOM order or any handler — same setChatMode, same dropups (still open upward, now over the
+                  input), running dot, thread counts. Input is full-width again (the phone squish is gone). */}
+              <div className="flex items-center gap-1 order-2 flex-wrap">
               <div className="relative">
                 {modeMenuOpen && (
                   <>
@@ -2858,21 +3578,52 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   title="Build options"
                   className={`relative h-7 w-9 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
                 >
-                  <SlidersHorizontal className="w-4 h-4" />
+                  <Settings className="w-4 h-4" />
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
+              {/* Attach — also carries the "Screenshot → App" option (admin 2026-07-22): people send photos
+                  through Attach anyway, so it opens the gallery and builds from the screenshot right here
+                  (the SAME flow as the glowing template button — 2 entries, one system). */}
               <AttachMenu
                 onFiles={(fl) => addFiles(fl)}
-                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
+                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.js,.ts,.tsx,.jsx,.py,.css"
                 disabled={running}
                 badge={files.length}
-                title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
+                title="Attach (photo, gallery, file, or a website screenshot → app)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+                onZipProject={(f) => void handleZipProject(f)}
               />
+              {/* Voice to App — INLINE dictation (admin 2026-07-22): tap to speak → text types into THIS
+                  input box live; tap again to stop. No separate page. Turns red/pulsing while listening. */}
+              <button
+                type="button"
+                onClick={toggleVoice}
+                disabled={running}
+                title={listening ? 'Listening… tap to stop' : 'Voice to App — speak to type'}
+                aria-pressed={listening}
+                className={`h-7 w-9 flex items-center justify-center rounded border disabled:opacity-40 ${listening ? 'border-red-500 text-red-400 bg-red-500/10 animate-pulse' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+              >
+                <Mic className="w-4 h-4" />
+              </button>
+              {/* Hidden gallery picker — drives the inline "Screenshot → App" flow for BOTH entry points
+                  (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
+                  it opens the photo gallery/library. */}
+              <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
               </div>{/* /settings + attach row */}
-              </div>{/* /left column (mode selector + settings/attach) */}
-              <div className="relative flex-1" data-tour="chat">
+              </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
+              {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
+                  transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
+                  screen showed one static "Importing…" line for minutes, which is indistinguishable from
+                  a crash ("sab ruk gaya"). A real percentage is the difference between working and frozen. */}
+              {zipImporting && (
+                <div className="order-1 w-full mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-800/60 bg-indigo-950/40 text-[11px] text-indigo-200">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span className="flex-1 truncate">{zipProgress || 'Preparing your project…'}</span>
+                  <span className="shrink-0 text-indigo-400">Large projects take a few minutes</span>
+                </div>
+              )}
+              <div className="relative w-full order-1" data-tour="chat">
                 <textarea
                   ref={composerRef}
                   className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-16 py-1 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
@@ -2884,7 +3635,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
                       : canSteerMidBuild(running, powerLevel, chatMode)
                       ? '⚡ Message the team while they build — they will act on it at the next step…'
-                      : 'Message v5.0… (e.g. “hello”, “build a notes app”, or attach a file)'
+                      : 'Type…'
                   }
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -2920,7 +3671,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className="absolute right-9 bottom-0.5 h-7 w-7 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -2929,26 +3680,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
-                    {roleBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white`}>
+                    {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
                   // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
                   // team (server /steer); Stop moves to the smaller slot so it stays one tap away.
                   <>
-                    <button onClick={stop} title="Stop the build" className="absolute right-9 bottom-0.5 h-7 w-7 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
+                    <button onClick={stop} title="Stop the build" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
                       <Send className="w-4 h-4" />
                     </button>
                   </>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
+                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white`}>
                     <Square className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white`}>
                     <Send className="w-4 h-4" />
                   </button>
                 )}
@@ -2977,7 +3728,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               Same real WorkingIndicator (current action + elapsed + expandable real activity log). */}
           {(running || state.activity.length > 0) && (
             <div className="sm:hidden shrink-0 px-3 py-1.5 border-b border-zinc-800 bg-zinc-950">
-              <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+              <WorkingIndicator activity={state.activity} running={running} />
             </div>
           )}
 
@@ -3066,7 +3817,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         disabled={restoring}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
                       >
-                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
                     )}
@@ -3097,7 +3848,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         title="Bring your whole project back into the workspace"
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
                       >
-                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
                       {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
@@ -3188,48 +3939,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <span className="flex-1 text-left">Checkpoints</span>
                   <span className="text-xs text-zinc-500">{allCheckpoints.length}</span>
                 </button>
-                {/* Report history — the same real per-build report list as the desktop dropdown */}
+                {/* Report to admin (admin 2026-07-29): one action, admin-only report — no download,
+                    no copy, no history browser. Submits this build's report to NavBharatAI. */}
                 <button
-                  onClick={() => void toggleHistoryReport()}
-                  disabled={!state.workspaceId}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                  onClick={() => { setMobileSheet(null); void sendReportToAdmin(); }}
+                  disabled={reportSending || !state.workspaceId}
+                  className="w-full flex items-start gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
-                  <Clock className="w-4 h-4 shrink-0 text-zinc-400" />
-                  <span className="flex-1 text-left">Report history</span>
-                  {selectedHistoryBuildId && <span className="text-xs text-indigo-400">viewing past build</span>}
+                  {reportSent || reportCount > 0
+                    ? <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                    : <FileText className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />}
+                  <span className="flex-1 text-left">
+                    {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
+                    {/* The count alone answers "did mine go through?"; this line says outright that a
+                        second send adds nothing — the actual ask behind "duplicate report na ho". */}
+                    {reportCount > 0 && !reportSending && (
+                      <span className="block text-[11px] text-zinc-500 leading-snug">{reportAlreadySentHint(reportCount)}</span>
+                    )}
+                  </span>
                 </button>
-                {historyReportOpen && (
-                  <div className="mx-4 mb-1 rounded-lg border border-zinc-800 overflow-hidden">
-                    {selectedHistoryBuildId && (
-                      <button
-                        onClick={() => { setSelectedHistoryBuildId(null); setHistoryReportOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-300 hover:bg-zinc-800 touch-manipulation"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" /> Back to latest report
-                      </button>
-                    )}
-                    {historyReportLoading ? (
-                      <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
-                    ) : historyReportItems.length === 0 ? (
-                      <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
-                    ) : (
-                      historyReportItems.map((h) => (
-                        <button
-                          key={h.id}
-                          onClick={() => { setSelectedHistoryBuildId(h.id); setHistoryReportOpen(false); }}
-                          title={h.rootCause || ''}
-                          className={`w-full flex items-start gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 touch-manipulation ${selectedHistoryBuildId === h.id ? 'bg-indigo-500/10 text-white' : 'text-zinc-300'}`}
-                        >
-                          <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${h.ok === true ? 'bg-emerald-500' : h.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
-                          <span className="flex-1 min-w-0">
-                            <span className="block text-[10px] text-zinc-500">{new Date(h.startedAt).toLocaleString()}</span>
-                            <span className="block truncate">{h.rootCause || '(no root cause recorded)'}</span>
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
                 {state.repoUrl && (
                   <a
                     href={state.repoUrl}
@@ -3242,29 +3970,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <ExternalLink className="w-3 h-3 opacity-60" />
                   </a>
                 )}
-                {configuredProviders.length > 1 && (
-                  <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200">
-                    <Rocket className="w-4 h-4 shrink-0 text-emerald-400/70" />
-                    <span className="flex-1 text-left">Deploy to</span>
-                    <select
-                      value={deployProvider}
-                      onChange={(e) => setDeployProvider(e.target.value)}
-                      disabled={running}
-                      className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
-                    >
-                      {configuredProviders.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
                 <button
-                  onClick={() => { setMobileSheet(null); deployLive(); }}
+                  onClick={() => { setMobileSheet(null); setShowHostingChooser(true); }}
                   disabled={running || !state.workspaceId}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
-                  <span className="flex-1 text-left">Deploy — publish to a permanent live URL</span>
+                  <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
                 </button>
                 {liveUrl && (
                   <a
@@ -3311,7 +4023,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showFrameworkPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
-          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          {/* Capped + scrollable — an uncapped modal grows past a phone screen and everything below the
+              fold becomes unreachable (see the Import/Push modal below for the reported instance). */}
+          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
@@ -3321,7 +4035,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <FrameworkPicker value={framework} onChange={setFramework} />
+            <FrameworkPicker value={framework} onChange={pickFramework} />
             <button
               onClick={() => setShowFrameworkPicker(false)}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
@@ -3336,15 +4050,34 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
-          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          {/* ROOT CAUSE of "PUSH button kaam ka nahi hai" (admin 2026-08-03): this card had NO height cap
+              and NO scroll, so on a phone it grew past the screen. In PUSH mode the commit-message field
+              and — critically — the push RESULT banner render near the BOTTOM, i.e. below the fold with
+              no way to reach them. The push itself ran fine (real blobs → tree → commit → ref); its only
+              feedback was simply off-screen, so the button felt dead. Same class as the Publish sheet
+              (#2037) — this was its surviving sibling. Cap at the viewport and scroll. */}
+          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-widest">Import Project</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">Clone a GitHub repo into your v5.0 workspace</p>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">{modalMode === 'push' ? 'Publish your current app to one of your GitHub repos' : 'Clone a GitHub repo into your v5.0 workspace'}</p>
               </div>
               <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
                 <X className="w-4 h-4" />
               </button>
+            </div>
+            {/* Import / Push toggle — one connection, both directions. */}
+            <div className="grid grid-cols-2 gap-1 p-1 bg-black/40 rounded-xl border border-white/10">
+              {(['import', 'push'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setModalMode(m); setPushResult(null); }}
+                  className={`py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all ${modalMode === m ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}
+                >
+                  {m === 'import' ? 'Import' : 'Push'}
+                </button>
+              ))}
             </div>
             {/* PRIMARY: the 1-click repo picker (states: connect → loading → list/empty → error) */}
             {ghReposError === 'auth' ? (
@@ -3353,15 +4086,53 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button
                   type="button"
                   onClick={() => void connectGitHub()}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all touch-manipulation"
+                  disabled={ghConnecting}
+                  aria-busy={ghConnecting}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait text-white text-sm font-bold rounded-xl transition-all touch-manipulation"
                 >
-                  <Github className="w-4 h-4" /> Connect GitHub
+                  {ghConnecting
+                    ? <><TirangaLoader className="w-4 h-4" /> Connecting…</>
+                    : <><Github className="w-4 h-4" /> Connect GitHub</>}
                 </button>
                 <p className="text-[10px] text-[#484f58]">You'll be taken to GitHub to sign in and approve access (private repos included), then brought right back here.</p>
+                {/* Reliable fallback (works even inside the app, where the OAuth redirect can't return): */}
+                <button
+                  type="button"
+                  onClick={() => setShowTokenPaste((v) => !v)}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300 underline touch-manipulation"
+                >
+                  {showTokenPaste ? 'Hide token option' : 'Not working? Paste a GitHub token instead'}
+                </button>
+                {showTokenPaste && (
+                  <div className="space-y-2 text-left bg-white/5 border border-white/10 rounded-xl p-3">
+                    <p className="text-[10px] text-[#8b949e] leading-relaxed">
+                      Create a token at{' '}
+                      <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=NavBharatAI" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">github.com/settings/tokens</a>{' '}
+                      with the <span className="font-mono text-indigo-300">repo</span> scope, then paste it here — this works for your private repos on any device.
+                    </p>
+                    <input
+                      type="password"
+                      value={pastedToken}
+                      onChange={(e) => setPastedToken(e.target.value)}
+                      placeholder="ghp_… or github_pat_…"
+                      autoComplete="off"
+                      className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#484f58] font-mono focus:outline-none focus:border-indigo-500/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void submitPastedToken()}
+                      disabled={!pastedToken.trim() || tokenBusy}
+                      className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait text-white text-xs font-bold rounded-lg transition-all touch-manipulation"
+                    >
+                      {tokenBusy ? <><TirangaLoader className="w-3.5 h-3.5" /> Verifying…</> : 'Use this token'}
+                    </button>
+                    {tokenError && <p className="text-[10px] text-amber-300">{tokenError}</p>}
+                  </div>
+                )}
               </div>
             ) : ghReposLoading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-[#8b949e] text-xs">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading your repositories…
+                <TirangaLoader className="w-4 h-4" /> Loading your repositories…
               </div>
             ) : ghReposError ? (
               <div className="space-y-2 text-center py-2">
@@ -3387,9 +4158,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       <button
                         key={r.fullName}
                         type="button"
-                        onClick={() => importRepo(r.url)}
-                        disabled={running || importSending}
-                        title={running ? 'A build is running — wait for it to finish before importing' : `Import ${r.fullName} into this workspace`}
+                        onClick={() => (modalMode === 'push' ? void pushToRepo(r.fullName) : importRepo(r.url))}
+                        disabled={running || importSending || pushBusy}
+                        title={running ? 'A build is running — wait for it to finish' : modalMode === 'push' ? `Push your current app to ${r.fullName}` : `Import ${r.fullName} into this workspace`}
                         className="w-full text-left px-3 py-2.5 hover:bg-white/5 active:bg-white/10 disabled:opacity-40 touch-manipulation"
                       >
                         <span className="flex items-center gap-2">
@@ -3403,33 +4174,66 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     ))}
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] text-[#484f58]">Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.</p>
+                  <p className="text-[10px] text-[#484f58]">{modalMode === 'push' ? 'Click a repo to push your current app to it. New repos are created automatically.' : 'Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.'}</p>
                   <button type="button" onClick={disconnectGh} className="shrink-0 text-[10px] text-[#8b949e] hover:text-white underline underline-offset-2 touch-manipulation">Wrong account?</button>
                 </div>
               </div>
             ) : null}
 
-            {/* SECONDARY: paste any repo URL (e.g. someone else's public repo) */}
-            <div className="pt-1 border-t border-white/10 space-y-2">
-              <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Or paste a repository URL</label>
-              <div className="flex gap-2">
+            {/* PUSH mode: an optional commit message; the click on a repo above does the real push. */}
+            {modalMode === 'push' && ghReposError !== 'auth' && (
+              <div className="pt-1 border-t border-white/10 space-y-2">
+                <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Commit message (optional)</label>
                 <input
-                  type="url"
-                  value={importUrl}
-                  onChange={e => setImportUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo"
-                  className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  type="text"
+                  value={pushCommitMsg}
+                  onChange={e => setPushCommitMsg(e.target.value)}
+                  placeholder="Update from NavBharatAI Pro v5.0"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
                 />
-                <button
-                  type="button"
-                  onClick={() => { const u = importUrl.trim(); if (u) { setImportUrl(''); importRepo(u); } }}
-                  disabled={running || importSending || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/.test(importUrl.trim())}
-                  className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl touch-manipulation"
-                >
-                  Import
-                </button>
+                <p className="text-[10px] text-[#484f58]">Secrets (.env, keys, service-account files) are never pushed. If a repo already has newer commits, we ask you to import first instead of overwriting.</p>
               </div>
-            </div>
+            )}
+
+            {/* SECONDARY (import only): paste any repo URL (e.g. someone else's public repo) */}
+            {modalMode === 'import' && (
+              <div className="pt-1 border-t border-white/10 space-y-2">
+                <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Or paste a repository URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={importUrl}
+                    onChange={e => setImportUrl(e.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                    className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { const u = importUrl.trim(); if (u) { setImportUrl(''); importRepo(u); } }}
+                    disabled={running || importSending || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/.test(importUrl.trim())}
+                    className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl touch-manipulation"
+                  >
+                    Import
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason).
+                STICKY: this is the ONLY feedback a push gives, and it lives below the repo list — on a
+                phone that put it off-screen, which is exactly why the button felt dead. Pinned to the
+                bottom of the scroll area so the answer is visible the moment a repo is tapped. */}
+            {(pushBusy || pushResult) && (
+              <div className={`sticky bottom-0 z-10 flex items-start gap-2 p-3 rounded-xl border text-[11px] backdrop-blur-sm ${pushResult && !pushResult.ok ? 'bg-amber-950/80 border-amber-500/30 text-amber-200' : 'bg-indigo-950/80 border-indigo-500/30 text-indigo-100'}`}>
+                {pushBusy ? <TirangaLoader className="w-4 h-4 shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
+                <div className="min-w-0">
+                  <p>{pushResult?.text || 'Pushing…'}</p>
+                  {pushResult?.ok && pushResult.url && (
+                    <a href={pushResult.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 break-all hover:text-white">{pushResult.url}</a>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3503,13 +4307,6 @@ function activityIcon(e: ActivityEntry): string {
   return '⚙️';
 }
 
-function fmtClock(ts: number): string {
-  try {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
-}
 
 function fmtElapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -3524,23 +4321,17 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, todos, running }: { activity: ActivityEntry[]; todos: TodoItem[]; running: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+function WorkingIndicator({ activity, running }: { activity: ActivityEntry[]; running: boolean }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const mountTsRef = useRef(Date.now());
-  const logRef = useRef<HTMLDivElement | null>(null);
 
-  // Tick the elapsed clock only while running (a finished build's time is frozen).
+  // Tick the elapsed clock only while running. On stop (done OR error) the time FREEZES at the
+  // last real value — it is derived from the activity timestamps, so it can never reset to 0.
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, [running]);
-
-  // Auto-scroll the expanded log to the newest entry (like a terminal/chat).
-  useEffect(() => {
-    if (expanded && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [expanded, activity.length]);
 
   const startTs = activity.length ? activity[0].ts : mountTsRef.current;
   const endTs = running ? nowTick : (activity.length ? activity[activity.length - 1].ts : startTs);
@@ -3548,50 +4339,19 @@ function WorkingIndicator({ activity, todos, running }: { activity: ActivityEntr
 
   // Current action: the newest still-in-flight tool, else the newest entry.
   const current = [...activity].reverse().find((a) => a.active) ?? activity[activity.length - 1];
-  const headText = running
-    ? (current ? current.text : 'working…')
-    : `Done · ${activity.length} step${activity.length === 1 ? '' : 's'}`;
 
-  const doneTodos = todos.filter((t) => t.status === 'done').length;
-
+  // Admin 2026-07-21 ("sari file last me time ke sath dikhane se behatar — chat me hi dikhe; last me
+  // bas time"): the per-step log that used to expand here duplicated the chat's action rows, where
+  // every file already streams live. The indicator is now a single honest line — the live current
+  // action + clock while running, just "Done · <time>" once finished.
   return (
     <div className="text-xs text-zinc-500 w-full max-w-[90%]">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-2 w-full text-left hover:text-zinc-300 transition-colors"
-        aria-expanded={expanded}
-        title={expanded ? 'Hide activity' : 'Show what the build is doing'}
-      >
+      <div className="flex items-center gap-2 w-full text-left">
         {running ? <WavingTiranga size={16} /> : <span className="text-emerald-400">✓</span>}
-        <span className="truncate flex-1">{running && current ? activityIcon(current) + ' ' : ''}{headText}</span>
+        <span className="truncate flex-1">{running ? `${current ? `${activityIcon(current)} ${current.text}` : 'working…'}` : 'Done'}</span>
         {running && current?.active && <span className="inline-block w-1 h-3 bg-current animate-pulse shrink-0" />}
         <span className="shrink-0 tabular-nums text-zinc-600">{elapsed}</span>
-        {activity.length > 0 && (expanded ? <ChevronDown className="w-3.5 h-3.5 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0" />)}
-      </button>
-
-      {expanded && activity.length > 0 && (
-        <div className="mt-1.5 ml-1 border-l border-zinc-800 pl-2.5">
-          <div ref={logRef} className="max-h-52 overflow-auto space-y-1 pr-1">
-            {activity.map((a) => (
-              <div key={a.id} className="flex items-start gap-2 leading-relaxed">
-                <span className="text-zinc-600 tabular-nums shrink-0">{fmtClock(a.ts)}</span>
-                <span className="shrink-0">{activityIcon(a)}</span>
-                <span className={`flex-1 break-words ${a.active ? 'text-zinc-300' : a.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>
-                  {a.text}
-                  {a.active && <span className="inline-block w-1 h-3 ml-1 bg-current animate-pulse align-middle" />}
-                  {!a.active && a.ok === false && ' ✗'}
-                </span>
-              </div>
-            ))}
-          </div>
-          {todos.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-zinc-800 text-zinc-600">
-              Tasks: {doneTodos}/{todos.length} done
-            </div>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -3621,16 +4381,16 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
   return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
 }
 
-function Bubble({ msg }: { msg: ChatMsg }) {
+function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void; onSaveTemplate?: () => void }) {
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
         <div className="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />
         </div>
-        {/* Copy / fold on every user message (Edit + Unsend attach only to the LAST user message — slice 2). */}
+        {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
         <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
-          <MessageActions text={msg.text} />
+          <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} onSaveTemplate={onSaveTemplate} />
         </div>
       </div>
     );
@@ -3669,7 +4429,7 @@ function Bubble({ msg }: { msg: ChatMsg }) {
 function todoStatusIcon(status: TodoStatus) {
   switch (status) {
     case 'done': return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
-    case 'in_progress': return <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />;
+    case 'in_progress': return <TirangaLoader className="w-3.5 h-3.5 text-indigo-400 shrink-0" />;
     case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
     default: return <Circle className="w-3.5 h-3.5 text-zinc-600 shrink-0" />; // pending
   }
@@ -3711,8 +4471,18 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/**
+ * The user-facing build-health card. The readiness engine's lines are deliberately FORENSIC
+ * ("hardcoded-secret @ server/index.js:24 — …") because the repair loop and the admin Report need
+ * file:line precision. But the CARD is a user surface, so it renders SHORT plain-language lines via
+ * simplifyHealthLines — de-duplicated and capped (admin 2026-08-02: "itna bada aur complex likhne ki
+ * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
+ */
 function BuildHealthCard({ health }: { health: BuildHealth }) {
   const ready = health.ready;
+  const blockers = simplifyHealthLines(health.blockers, 3);
+  const warnings = simplifyHealthLines(health.warnings, 2);
+  const more = blockers.more + warnings.more;
   return (
     <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
       <div className="flex items-center gap-1.5 font-semibold">
@@ -3722,19 +4492,22 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
         <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>Build health: {ready ? 'READY' : 'NOT READY'}</span>
         <span className="text-zinc-500">· {health.score}/100</span>
       </div>
-      {health.blockers.length > 0 && (
+      {blockers.lines.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-amber-200/90">
-          {health.blockers.slice(0, 6).map((b, i) => (
+          {blockers.lines.map((b, i) => (
             <li key={`b${i}`} className="flex gap-1"><span className="text-amber-500">✗</span><span>{b}</span></li>
           ))}
         </ul>
       )}
-      {health.warnings.length > 0 && (
+      {warnings.lines.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-zinc-400">
-          {health.warnings.slice(0, 4).map((w, i) => (
+          {warnings.lines.map((w, i) => (
             <li key={`w${i}`} className="flex gap-1"><span className="text-zinc-500">•</span><span>{w}</span></li>
           ))}
         </ul>
+      )}
+      {more > 0 && (
+        <div className="mt-1 text-[10px] text-zinc-500">+{more} more · see Report for details</div>
       )}
     </div>
   );

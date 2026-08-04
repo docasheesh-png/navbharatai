@@ -127,6 +127,7 @@ export function defaultClearAuthStorage(): void {
   } catch { /* storage may be unavailable — reload still signs out */ }
   try {
     localStorage.removeItem('navbharat_admin_v1');
-    sessionStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_token');
+    sessionStorage.removeItem('admin_token'); // stale key from before the localStorage migration
   } catch { /* storage may be unavailable */ }
 }

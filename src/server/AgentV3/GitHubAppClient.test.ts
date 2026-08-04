@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as crypto from 'crypto';
-import { GitHubAppClient, githubConfigFromEnv, repoNameForProject, readableTimeStamp, type GitHubConfig } from './GitHubAppClient';
+import { GitHubAppClient, githubConfigFromEnv, repoNameForProject, readableTimeStamp, readableAppNameForRepo, type GitHubConfig } from './GitHubAppClient';
 
 // A real RSA keypair so the JWT signature can be genuinely verified.
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -209,5 +209,55 @@ describe('repoNameForProject + config', () => {
     if (prev.id === undefined) delete process.env.GITHUB_APP_ID; else process.env.GITHUB_APP_ID = prev.id;
     if (prev.key === undefined) delete process.env.GITHUB_APP_PRIVATE_KEY; else process.env.GITHUB_APP_PRIVATE_KEY = prev.key;
     if (prev.org === undefined) delete process.env.GITHUB_ORG; else process.env.GITHUB_ORG = prev.org;
+  });
+});
+
+// ── readableAppNameForRepo — an imported repo names its own mirror ─────────────────────────────
+// ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): the readable name came only from
+// deriveTitle(prompt). On an IMPORT turn the prompt is an instruction, so the user's real GitHub
+// account got a repo literally named `import-this-app-from-my-github-repositor-10pm-270726-609c45`
+// for an app called `mitrify` — a permanent, confusing artifact in someone else's account.
+describe('readableAppNameForRepo (mitrify autopsy 2026-07-27)', () => {
+  const INSTRUCTION_TITLE = 'Import this app from my GitHub repository and give me a short survey';
+
+  it('uses the IMPORTED repo name instead of an instruction-shaped title', () => {
+    expect(readableAppNameForRepo({
+      importedRepo: { owner: 'aashishcpmt093-ui', repo: 'mitrify' },
+      fallbackTitle: INSTRUCTION_TITLE,
+    })).toBe('mitrify');
+  });
+
+  it('produces a sane mirror repo name end-to-end (the exact bug that shipped)', () => {
+    const createdAtMs = Date.UTC(2026, 6, 27, 16, 30); // 10pm IST
+    const appName = readableAppNameForRepo({
+      importedRepo: { owner: 'aashishcpmt093-ui', repo: 'mitrify' },
+      fallbackTitle: INSTRUCTION_TITLE,
+    });
+    const name = repoNameForProject('uid-9', 'sess-abc', { appName, createdAtMs });
+    expect(name).toContain('mitrify');
+    expect(name).not.toContain('import-this-app');
+  });
+
+  it('falls back to the stored title when this turn imports nothing', () => {
+    expect(readableAppNameForRepo({ importedRepo: null, fallbackTitle: 'Watch store landing page' }))
+      .toBe('Watch store landing page');
+    expect(readableAppNameForRepo({ fallbackTitle: 'Watch store landing page' }))
+      .toBe('Watch store landing page');
+  });
+
+  it('falls back when the repo name would slug to nothing (never yields an empty name)', () => {
+    expect(readableAppNameForRepo({ importedRepo: { owner: 'o', repo: '---' }, fallbackTitle: 'My App' }))
+      .toBe('My App');
+  });
+
+  it('is STABLE across turns — the same import always yields the same repo name', () => {
+    const createdAtMs = Date.UTC(2026, 6, 27, 16, 30);
+    const mk = (title: string) => repoNameForProject('uid-9', 'sess-abc', {
+      appName: readableAppNameForRepo({ importedRepo: { owner: 'o', repo: 'mitrify' }, fallbackTitle: title }),
+      createdAtMs,
+    });
+    // Turn 1's prompt-derived title and turn 2's differ — the repo name must NOT (else ensureRepo
+    // spawns a new repo every turn, the exact sprawl repoNameForProject was built to prevent).
+    expect(mk('Import this app and survey it')).toBe(mk('now add a dark mode toggle'));
   });
 });

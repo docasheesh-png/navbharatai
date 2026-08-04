@@ -48,6 +48,14 @@ export function buildInitialWallet(i: NewWalletInput): Record<string, unknown> {
     totalTokensPurchased: i.welcomeTokens,
     totalTokensUsed: 0,
     lastRechargeAt: null,
+    // Anchors for the weekly free credit (weeklyTopUp.ts): a brand-new wallet starts its week HERE, so
+    // the ₹250 signup grant is followed by the first weekly top-up exactly seven days later — never
+    // immediately on the next page load.
+    createdAt: i.nowIso,
+    lastWeeklyTopUpAt: i.nowIso,
+    // Running total of everything EVER gifted to this account. The weekly ladder stops permanently once
+    // this reaches the lifetime cap (₹650), so it must start at whatever the signup grant actually was.
+    freeGiftedTokens: i.welcomeTokens,
     walletLedger:
       i.welcomeTokens > 0
         ? [

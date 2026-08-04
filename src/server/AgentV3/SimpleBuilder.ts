@@ -18,12 +18,15 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
+import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
   path: string;
@@ -139,6 +142,11 @@ export function manifestSystemPrompt(framework: string): string {
     '- List EVERY source file the app needs (entry, components, styles, hooks, utils, config it must edit).',
     '- Edit/replace the scaffolded entry files (e.g. src/App.tsx, index.html) — do not nest a subfolder.',
     '- Keep it minimal but COMPLETE — no file the app references should be missing.',
+    // SIZE DISCIPLINE (admin 2026-08-02): "minimal" alone is an adjective a weak model reads as optional —
+    // a real build planned 50 files for an app needing ~12. The per-app NUMBER lives in the user prompt
+    // (fileBudgetInstruction); this is the app-agnostic anti-pattern that produces most of the bloat.
+    '- One file per REAL unit of the app. Never a separate file for a single tiny helper, type or constant —',
+    '  co-locate it with its only user. Fewer, cohesive files beat many thin ones.',
     '- Do NOT list node_modules, lockfiles, or build output.',
   ].join('\n');
 }
@@ -147,7 +155,10 @@ export function manifestUserPrompt(prompt: string, scaffoldPaths: string[]): str
   const scaffold = scaffoldPaths.length
     ? `Already scaffolded (edit/extend; root is the project root):\n${scaffoldPaths.slice(0, 60).map((p) => `  - ${p}`).join('\n')}`
     : 'The project starts empty — plan all files at the project root.';
-  return `Plan the file list for this app:\n\n${prompt}\n\n${scaffold}\n\nOutput the file list now (one "path :: purpose" per line).`;
+  // The size ceiling is derived HERE, from the prompt this function already receives, so every caller of
+  // the manifest lane inherits it automatically — there is no second path that can plan unbudgeted.
+  const budget = fileBudgetInstruction(fileBudgetForPrompt(prompt));
+  return `Plan the file list for this app:\n\n${prompt}\n\n${scaffold}\n\n${budget}\n\nOutput the file list now (one "path :: purpose" per line).`;
 }
 
 /** System prompt for a single-file generation call. */
@@ -164,7 +175,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Output ONLY that one file block — no prose, no explanation, no markdown fences.',
     '- Write the COMPLETE, real file — no TODOs, no placeholders, no "..." stubs.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
-    ...EXPORT_IMPORT_CONVENTION,
+    ...exportImportConvention(framework),
     ...DESIGN_CONTRACT,
   ].join('\n');
 }
@@ -192,7 +203,7 @@ export const DESIGN_CONTRACT: string[] = [
  * against a NAMED `export function useNotes` (TS2613/TS2614), which the build then has to repair every
  * time. A single deterministic convention makes producers and consumers agree by construction.
  */
-const EXPORT_IMPORT_CONVENTION: string[] = [
+const REACT_CONVENTION: string[] = [
   'EXPORT/IMPORT CONVENTION — follow EXACTLY so every import matches the matching export across files:',
   '  • A React COMPONENT file (App, Button, NoteCard, Sidebar, pages, …) → `export default` the component,',
   '    and import it as DEFAULT: `import NoteCard from "./NoteCard"`.',
@@ -211,6 +222,64 @@ const EXPORT_IMPORT_CONVENTION: string[] = [
   '    `import React from "react"`. Hooks files are usually .ts (no JSX) so React is NOT auto-in-scope.',
   '  • `key` is React\'s special prop for list items only — NEVER add it to a component\'s props interface.',
 ];
+
+// Vue 3 / Nuxt 3 — SFCs + auto-imports + Pinia. CargoPilot-sibling autopsy (ShopSphere, App #12):
+// the React convention above was fed to a NUXT build, so the model wrote `export default` components,
+// invented Nuxt modules (`useSupabaseClient`, `#auth`, `<Icon>`) and duplicate-imported the same type.
+const VUE_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION (Vue 3 / Nuxt) — follow EXACTLY so files agree by construction:',
+  '  • Components are Single-File Components (`.vue`) with `<script setup lang="ts">`. NEVER `export default`',
+  '    a component, NEVER `import React`, NEVER JSX — use the SFC `<template>`.',
+  '  • In NUXT, components in `components/`, composables in `composables/`, and Pinia stores are',
+  '    AUTO-IMPORTED — do NOT write manual imports for them; use them directly (`<ProductCard />`,',
+  '    `useCart()`, `useCartStore()`). In a plain Vite+Vue app import components by DEFAULT',
+  '    (`import ProductCard from "@/components/ProductCard.vue"`) and use the `@/` alias.',
+  '  • Utilities / types / interfaces → NAMED exports (`export function formatPrice`, `export interface',
+  '    Product`); import them NAMED (Nuxt `~/`, Vite `@/`). Pinia store:',
+  '    `export const useCartStore = defineStore("cart", () => { … })`; call it `useCartStore()`.',
+  '  • DO NOT invent modules/composables that were not requested — no `useSupabaseClient`, `useI18n`,',
+  '    `#auth`, `useSession`, `<Icon>` unless the app explicitly uses that module. For auth/session use the',
+  '    app\'s OWN Nitro server routes (`server/api/**`) + a Pinia store, not a third-party auth module.',
+  'PROP & TYPE CONTRACTS (get them right the FIRST time):',
+  '  • `defineProps<{ … }>()` types must EXACTLY match what the parent passes (same names + types).',
+  '  • Import each symbol/type EXACTLY ONCE — never import the same name (e.g. `OrderStatus`) on two',
+  '    import lines, and never import a value AND its type name twice.',
+];
+
+// Svelte / SvelteKit — .svelte SFCs, `export let` props, $lib alias, writable stores.
+const SVELTE_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION (Svelte / SvelteKit) — follow EXACTLY:',
+  '  • Components are `.svelte` files; declare props with `export let name` (typed). NEVER `export default`',
+  '    a component, NEVER `import React`, NEVER JSX.',
+  '  • Import a component by DEFAULT WITH its extension: `import Card from "$lib/Card.svelte"`.',
+  '  • Utilities / types / stores → NAMED exports; import from the `$lib` alias',
+  '    (`import { formatDate } from "$lib/utils"`). Store: `export const cart = writable([])`; read it in',
+  '    markup with the `$cart` auto-subscription.',
+  'PROP & TYPE CONTRACTS: the props a parent passes MUST match the child\'s `export let` names + types.',
+  '  Import each symbol/type EXACTLY ONCE.',
+];
+
+// Framework-neutral fallback (Angular, Solid, unknown) — the invariant without React/Vue specifics.
+const GENERIC_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION — follow EXACTLY so every import matches its export across files:',
+  '  • Use this framework\'s IDIOMATIC component + module style (do NOT assume React/JSX). Match the',
+  '    producer\'s export style at every consumer: never default-import a named export or vice-versa.',
+  '  • Utilities / types / stores → NAMED exports, imported named via the app\'s configured path alias.',
+  '  • Do NOT invent packages/modules/helpers that were not requested. Import each symbol/type ONCE.',
+];
+
+/**
+ * The export/import convention to inject, chosen by FRAMEWORK. The convention used to be React-only and
+ * was fed verbatim to Vue/Nuxt and Svelte builds (ShopSphere autopsy 2026-07-19: a Nuxt app got told to
+ * `export default` its components and `import React`), so producers and consumers drifted. Pure.
+ */
+export function exportImportConvention(framework: string): string[] {
+  const fw = (framework || '').toLowerCase();
+  if (/vue|nuxt/.test(fw)) return VUE_CONVENTION;
+  if (/svelte/.test(fw)) return SVELTE_CONVENTION;
+  if (/angular|solid|qwik|astro/.test(fw)) return GENERIC_CONVENTION;
+  return REACT_CONVENTION; // react, vite-react, next, remix, gatsby, … (the default family)
+}
 
 /**
  * LENS A — SHARED CONTRACTS FIRST. The deepest cause of cross-file drift is that each file is
@@ -392,7 +461,7 @@ export function repairSystemPrompt(framework: string, strategy: RepairStrategy =
       '  if the change is large. Never bend the contract to a file; bend the file to the contract.',
     );
   }
-  base.push(...EXPORT_IMPORT_CONVENTION);
+  base.push(...exportImportConvention(framework));
   return base.join('\n');
 }
 
@@ -486,8 +555,21 @@ export interface SimpleBuildDeps {
   concurrency?: number;
   /** Hard cap (ms) on the manifest + all per-file generation + writes (default 240 s). */
   overallTimeoutMs?: number;
+  /** Hard cap (ms) on the PLAN step alone — the manifest + shared-contract calls (default 90 s). A single
+   *  slow/storming provider call (KIMI timeout + GLM 429 retries) once ran the plan 247 s and blew the whole
+   *  240 s budget → the fast lane always timed out and fell to the full builder. Bounding the plan lets the
+   *  fast lane bail FAST (to the full builder, which recovered in ~26 s) instead of wasting the budget. */
+  planTimeoutMs?: number;
   /** Hard cap (ms) on the best-effort preview (default 90 s). */
   previewTimeoutMs?: number;
+  /**
+   * STREAMING FIRST-PAINT (gated by the caller). Called ONCE with the fully-healed generated files
+   * the instant they are final — after deterministic self-heal + write, but BEFORE the verify+repair
+   * loop and the caller's install/dev-server boot (tens of seconds). The caller uses it to publish an
+   * early in-browser preview so the user sees the real app much sooner. Fire-and-forget + best-effort:
+   * a hook failure or slowness never affects or delays the build. Omit it (default) = today's behavior.
+   */
+  onFilesReady?: (files: OneShotFile[]) => void | Promise<void>;
 }
 
 export interface SimpleBuildResult {
@@ -552,16 +634,39 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
-      const manifestText = await deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths));
+      // Bound the PLAN call: if it exceeds planTimeoutMs the fast lane bails NOW (→ full builder) instead
+      // of one slow call running to the 240 s overall cap. `withTimeout` only races, so the underlying call
+      // keeps running in the background, but the lane stops waiting on it.
+      //
+      // BUDGET ALLOCATION (admin report 858f6d7b): the plan and contract caps used to be INDEPENDENT, so
+      // two 90s caps could consume 180s of a 240s lane and leave 60s to generate the whole app — which is
+      // exactly what happened (plan 89s + contract 70s = 159s before file one). `preambleCapMs` derives
+      // each cap from what the budget can still afford, so a slow plan shrinks the contract's cap instead
+      // of compounding with it, and the file-generation phase keeps its reserved majority.
+      const configuredPlanCap = deps.planTimeoutMs ?? 90_000;
+      const overallMs = deps.overallTimeoutMs ?? 240_000;
+      const laneStartedAt = Date.now();
+      const manifestText = await withTimeout(
+        deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
+        preambleCapMs(overallMs, 0, configuredPlanCap), 'simple-plan');
       const manifest = parseFileManifest(manifestText);
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
-      // names/shapes by construction (best-effort: a failure here just leaves `contract` empty).
-      if (shareContract) {
+      // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`
+      // empty, so a storming contract call can't eat the budget either).
+      // The contract's cap is whatever the preamble share can still afford after the plan. A cap of 0
+      // means the plan already spent the share — skip the contract rather than starve file generation.
+      // Safe by design: the contract is best-effort (an empty one weakens per-file agreement, which the
+      // deterministic import/export reconcilers below then repair; a starved build phase produces no app
+      // at all).
+      const contractCap = shareContract ? preambleCapMs(overallMs, Date.now() - laneStartedAt, configuredPlanCap) : 0;
+      if (shareContract && contractCap > 0) {
         deps.log?.('Designing the shared types & component contract…');
         try {
-          contract = (await deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)) || '').trim();
+          contract = (await withTimeout(deps.generate(contractSystemPrompt(deps.framework), contractUserPrompt(deps.prompt, manifest)), contractCap, 'simple-contract') || '').trim();
         } catch { contract = ''; }
+      } else if (shareContract) {
+        deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);
       // REAL per-file progress: the chat used to go silent between "Building N file(s)…" and "Built
@@ -604,12 +709,25 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const depOrder = deps.depOrder !== false;
       const tiers = depOrder ? [0, 1, 2] : [0];
       const written: OneShotFile[] = [];
-      for (const tier of tiers) {
+      for (let ti = 0; ti < tiers.length; ti++) {
+        const tier = tiers[ti];
         const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
         if (specs.length === 0) continue;
         const producedSoFar = [...written]; // real source of all earlier tiers (snapshot for this tier)
+        const tierStartedAt = Date.now();
         const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));
         for (const f of gen) if (f && f.content) written.push(f);
+        // EARLY BAIL (admin report 858f6d7b). A tier costs as much as its slowest file, so once ONE tier's
+        // real duration is known the rest is predictable. The reported build ground on to the full 240s to
+        // produce 4 of 14 files — work the full builder then had to continue anyway. Bailing the moment the
+        // arithmetic says we cannot finish hands off sooner and without a tier being killed mid-flight;
+        // the catch below salvages exactly the same finished files. Never fires without a real measurement.
+        const tiersRemaining = tiers.length - 1 - ti;
+        const progress = { tiersRemaining, lastTierMs: Date.now() - tierStartedAt, elapsedMs: Date.now() - laneStartedAt, overallMs };
+        if (!canFinishRemainingTiers(progress)) {
+          if (written.length >= minFiles) break; // enough files to be a real app — finish this build honestly
+          throw new Error(`simple-build ${earlyBailReason(progress)}`);
+        }
       }
       if (written.length < minFiles) throw new Error('too_few_files_generated');
       // DETERMINISTIC IMPORT SELF-HEAL before the files are written/previewed (jungle-game report
@@ -703,11 +821,35 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
+      // DETERMINISTIC ORPHAN-PAGE WIRING before write/preview (deep-test SaaS dashboard 6f87751d): the
+      // builder wrote page components (AnalyticsPage/ApiKeysPage/AuditLogPage/…) but never imported or
+      // routed them → the app cannot reach them and readiness flags "N created but never used" +
+      // "Requested feature not found". Wire each orphaned page into the react-router <Routes> (an import
+      // + a <Route>). Additive-only, idempotent, and a no-op the moment the router is ambiguous, so it can
+      // never break a working router. Best-effort. Kill: AGENTV3_ORPHAN_PAGE_GUARD=off.
+      if (process.env.AGENTV3_ORPHAN_PAGE_GUARD !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const wired = wireOrphanPages(before);
+          if (wired.wired.length > 0) {
+            for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.(`🧭 Wired ${wired.wired.length} orphaned page(s) into the router so they are actually reachable.`);
+          }
+        } catch { /* best-effort — a failure just leaves the files as generated */ }
+      }
       // ZOMBIE GUARD: if the race was already lost, this closure is an orphan — writing now would dump
       // a second module tree into a workspace the full builder is ALREADY building in (the StudySync
       // catastrophe). Refuse; the catch below has salvaged what was finished.
       if (lapsed) throw new Error('simple-build-cancelled');
       await deps.writeFiles(written);
+      // STREAMING FIRST-PAINT (gated by the caller via onFilesReady). The files are final and in the
+      // workspace, but the verify+repair loop and the caller's install/dev-server boot (tens of
+      // seconds) still lie ahead. Hand the ready files to the caller NOW so it can publish an early
+      // in-browser preview — the user sees their real app while the slow infra tax runs. Fire-and-
+      // forget + best-effort: a hook throw or slowness can never affect or delay the build.
+      if (deps.onFilesReady) {
+        try { void Promise.resolve(deps.onFilesReady(written)).catch(() => {}); } catch { /* a hook failure never touches the build */ }
+      }
       return written;
     })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');
   } catch (e) {
@@ -719,7 +861,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // exactly the workspace it keeps. Best-effort with its own small timeout; salvage failure only
     // means the old empty-tree behavior.
     let salvagedPaths: string[] | undefined;
-    if (reason.includes('timed out') && generatedSoFar.length > 0) {
+    // An EARLY BAIL is a budget exhaustion the lane saw coming, so it salvages exactly like a timeout —
+    // otherwise predicting the timeout instead of waiting for it would silently DISCARD the finished
+    // files the old path preserved, making the improvement a regression.
+    if ((reason.includes('timed out') || reason.includes('stopped early')) && generatedSoFar.length > 0) {
       const salvage = [...generatedSoFar]; // snapshot — in-flight genOne pushes can't mutate mid-write
       try {
         await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');

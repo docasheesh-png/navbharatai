@@ -7,8 +7,26 @@
 //
 // Budgets reflect CURRENT reality + ~15% headroom (an honest "no further bloat" guard, not
 // an aspirational target that would fail today). NOTE: the main entry chunk is large
-// (~567 KB gz) — splitting it via manualChunks is a known, separate optimisation; this
+// (~590 KB gz) — splitting it via manualChunks is a known, separate optimisation; this
 // budget stops it from growing unchecked in the meantime.
+//
+// KNOWN TOTAL-JS GROWTH DRIVER (root cause of the 2026-07-20 total-JS bump 1050→1200):
+// the offline assistant (`src/lib/offlineAssistant.ts`) imports the ENTIRE server feature
+// catalog `APP_KNOWLEDGE_BASE` (`src/server/AppContext/AppKnowledgeBase.ts`) into the CLIENT
+// bundle, so every new user-facing feature/recipe entry legitimately grows total JS. This
+// is intentional feature growth, not accidental bloat — hence the budget is raised, per the
+// "if intentional, raise the budget" guidance below. The deeper optimisation (ship only the
+// client-navigation KB entries to the browser and keep the server-only build-recipe entries
+// out of the client bundle, or lazy-load them) is a separate, carefully-tested change — see
+// PROGRESS.md open root cause. Until then this budget tracks the honest current size.
+//
+// SECOND TOTAL-JS DRIVER (2026-08-04, bump 1200→1300): Code Studio's real persistent shell needs a
+// real terminal emulator — xterm.js, ~70 KB gzipped — because a genuine TTY speaks ANSI (colours,
+// cursor movement, in-place progress bars, `top`, `vim`) that no list-of-lines renderer can display.
+// It is imported DYNAMICALLY (`ShellTerminal.tsx`), so it is its own chunk and only downloads for
+// someone who actually opens a terminal; nobody pays for it on first paint. That is why the LARGEST
+// CHUNK budget is untouched — this is not main-bundle growth. Total JS counts every chunk including
+// lazy ones, so the total budget absorbs the honest new capability instead of the gate being skipped.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,10 +34,11 @@ import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 
 export const BUDGETS = {
-  /** Largest single JS chunk, gzipped. Current main ≈ 567 KB. */
+  /** Largest single JS chunk, gzipped. Current main ≈ 590 KB. */
   largestChunkGzipKB: 650,
-  /** Sum of all JS chunks, gzipped. Current ≈ 918 KB. */
-  totalJsGzipKB: 1050,
+  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Current ≈ 1231 KB (feature KB + the lazily
+   *  loaded xterm terminal emulator — see header). */
+  totalJsGzipKB: 1300,
   /** Sum of all CSS, gzipped. Current ≈ 33 KB. */
   totalCssGzipKB: 50,
 };

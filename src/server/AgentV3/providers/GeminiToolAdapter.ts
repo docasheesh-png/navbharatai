@@ -201,5 +201,8 @@ export function parseGeminiResponse(response: GeminiResponseLike): TurnResult {
   };
 
   const stopReason = mapGeminiFinish(response?.candidates?.[0]?.finishReason, toolUses.length > 0);
-  return { text, toolUses, stopReason, usage, rawContent, ...(typeof response?.modelVersion === 'string' && response.modelVersion ? { model: response.modelVersion } : {}) };
+  // Surface the REAL finish reason even when masked to 'tool_use' — a MAX_TOKENS stop that cut off a
+  // functionCall mid-arguments must reach the truncation guard (CargoPilot vertex case).
+  const truncated = response?.candidates?.[0]?.finishReason === 'MAX_TOKENS';
+  return { text, toolUses, stopReason, ...(truncated ? { truncated } : {}), usage, rawContent, ...(typeof response?.modelVersion === 'string' && response.modelVersion ? { model: response.modelVersion } : {}) };
 }

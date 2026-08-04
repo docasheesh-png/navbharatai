@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildBuildManifest,
   canonicalizeManifest,
+  deliveredModelId,
   signManifest,
   verifyManifestSignature,
   manifestSummaryLine,
@@ -82,6 +83,47 @@ describe('canonicalize + sign + verify', () => {
     expect(signManifest(m, '').signature).toBeUndefined();
     expect(verifyManifestSignature(m, SECRET)).toBe(false); // unsigned → not verifiable
     expect(verifyManifestSignature(signManifest(m, undefined), undefined)).toBe(false);
+  });
+});
+
+describe('deliveredModelId — the model that ACTUALLY built (ShopSphere autopsy: no nominal-Claude lie)', () => {
+  it('returns the highest-output model of the dominant provider', () => {
+    // A weak GLM build: flash did most of the output → THAT is the delivered model, never the nominal Claude.
+    const entries = [
+      { provider: 'GLM', model: 'glm-4.7-flash', usage: { inputTokens: 100, outputTokens: 5000 } },
+      { provider: 'GLM', model: 'glm-4.7', usage: { inputTokens: 50, outputTokens: 900 } },
+    ];
+    expect(deliveredModelId(entries, 'GLM')).toBe('glm-4.7-flash');
+  });
+
+  it('prefers the dominant provider even if another provider had more output', () => {
+    const entries = [
+      { provider: 'CLAUDE', model: 'claude-sonnet-4-6', usage: { inputTokens: 10, outputTokens: 9000 } },
+      { provider: 'GLM', model: 'glm-4.7', usage: { inputTokens: 10, outputTokens: 800 } },
+    ];
+    expect(deliveredModelId(entries, 'GLM')).toBe('glm-4.7');
+  });
+
+  it('falls back to the global max when the dominant provider has no model-tagged slice', () => {
+    const entries = [
+      { provider: 'GLM', usage: { inputTokens: 10, outputTokens: 5000 } }, // no model id
+      { provider: 'KIMI', model: 'kimi-k2.6', usage: { inputTokens: 10, outputTokens: 800 } },
+    ];
+    expect(deliveredModelId(entries, 'GLM')).toBe('kimi-k2.6');
+  });
+
+  it('returns undefined when no slice carries a model id (keep the nominal model)', () => {
+    expect(deliveredModelId([{ provider: 'GLM', usage: { outputTokens: 100 } }], 'GLM')).toBeUndefined();
+    expect(deliveredModelId([], 'GLM')).toBeUndefined();
+  });
+
+  it('the manifest records the delivered model + provider, NOT the nominal Claude fallback', () => {
+    const entries = [{ provider: 'GLM', model: 'glm-4.7-flash', usage: { inputTokens: 1, outputTokens: 9 } }];
+    const delivered = deliveredModelId(entries, 'GLM');
+    const m = buildBuildManifest(base({ model: delivered || 'claude-sonnet-4-6', deliveredVia: 'GLM' }));
+    expect(m.model).toBe('glm-4.7-flash');
+    expect(m.deliveredVia).toBe('GLM');
+    expect(manifestSummaryLine(m)).toContain('model=glm-4.7-flash');
   });
 });
 

@@ -1,5 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
-import { performSignOut, deleteFirebaseAuthDb, type SignOutFlowDeps } from './signOutFlow';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { performSignOut, deleteFirebaseAuthDb, defaultClearAuthStorage, type SignOutFlowDeps } from './signOutFlow';
+
+// Minimal in-memory Storage stub for the node test env (no DOM). A Proxy over a plain object so
+// Object.keys(localStorage) — which defaultClearAuthStorage relies on to sweep stale firebase:*
+// keys — reflects the real stored keys, not just get/setItem.
+function makeStorageStub(): Storage {
+  const store: Record<string, string> = {};
+  return new Proxy(store, {
+    get(target, prop: string) {
+      if (prop === 'getItem') return (k: string) => (k in target ? target[k] : null);
+      if (prop === 'setItem') return (k: string, v: string) => { target[k] = String(v); };
+      if (prop === 'removeItem') return (k: string) => { delete target[k]; };
+      if (prop === 'clear') return () => { for (const k of Object.keys(target)) delete target[k]; };
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as Storage;
+}
 
 // THE bug (admin, 2026-07-11): after a recent logout, the next Google login on desktop "hota hi
 // nahi" — the logout deleted Firebase's IndexedDB unawaited and reloaded mid-delete, corrupting the
@@ -132,5 +150,50 @@ describe('deleteFirebaseAuthDb — await-able and never hangs the logout', () =>
 
   it('resolves immediately when there is no indexedDB at all', async () => {
     await expect(deleteFirebaseAuthDb('db', { idb: undefined })).resolves.toBeUndefined();
+  });
+});
+
+// THE bug (admin, 2026-07-25: "mobile app open karo to login karna pad raha hai" — every cold
+// app restart on BOTH iOS and Android forced the admin dashboard to show "Admin session expired —
+// please log out and log in again"). Root cause: admin_token was written to sessionStorage, which
+// is tied to the WebView's current top-level navigation and is GUARANTEED empty after a fresh
+// launch — a full app kill + reopen is a brand-new navigation on every platform, every time.
+// localStorage is disk-backed and survives a cold restart; the `isAdmin` flag was already there,
+// but the token the dashboard actually authenticates with was not. Fixed at every call site.
+describe('defaultClearAuthStorage — admin_token lives in localStorage (survives a cold app restart)', () => {
+  it('clears admin_token from localStorage on sign-out', () => {
+    vi.stubGlobal('localStorage', makeStorageStub());
+    vi.stubGlobal('sessionStorage', makeStorageStub());
+    localStorage.setItem('admin_token', 'tok-123');
+    localStorage.setItem('navbharat_admin_v1', 'true');
+    defaultClearAuthStorage();
+    expect(localStorage.getItem('admin_token')).toBeNull();
+    expect(localStorage.getItem('navbharat_admin_v1')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('also clears the stale sessionStorage key from before the migration (best-effort cleanup)', () => {
+    vi.stubGlobal('localStorage', makeStorageStub());
+    vi.stubGlobal('sessionStorage', makeStorageStub());
+    sessionStorage.setItem('admin_token', 'stale-tok');
+    defaultClearAuthStorage();
+    expect(sessionStorage.getItem('admin_token')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('regression guard — admin_token is NEVER written to sessionStorage again', () => {
+  // A grep-style source assertion (same pattern as tests/appKnowledgeBase.test.ts): every call site
+  // that sets/reads the admin token must use localStorage. sessionStorage.setItem/getItem for
+  // 'admin_token' is exactly the bug above — this fails loudly if the regression is reintroduced.
+  const FILES = [
+    '../App.tsx',
+    '../components/AdminDashboard.tsx',
+    '../components/panels/SettingsPanel.tsx',
+  ];
+
+  it.each(FILES)('%s never sets or reads admin_token via sessionStorage', (rel) => {
+    const src = readFileSync(join(__dirname, rel), 'utf8');
+    expect(src).not.toMatch(/sessionStorage\.(setItem|getItem)\(['"]admin_token['"]/);
   });
 });

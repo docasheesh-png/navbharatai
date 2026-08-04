@@ -4,8 +4,10 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { requireUserMatch } from '../lib/authMiddleware';
-import { TOKENS_PER_RUPEE } from '../lib/payments';
+import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
+import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
+import { sendSafeError } from '../lib/httpError';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
  *  WALLET_MERGE_RESOLVE=on, so a merged/retired account transparently reads its unified wallet. */
@@ -55,12 +57,86 @@ export function registerWalletRoutes(app: Express): void {
         if (updated) {
           await setDoc(walletRef, data, { merge: true });
         }
+
+        // THE FREE GIFT LADDER (admin 2026-07-28): ₹250 at signup → +₹200 → +₹200 → cut off for good.
+        // Applied LAZILY right here on the wallet read, against the SERVER clock — no cron, no fan-out
+        // over every account, and a dormant account accrues nothing until it comes back.
+        //
+        // `freeGiftedTokens` is what bounds it: the TOTAL ever gifted, never the balance. A balance cap
+        // would quietly become an unlimited weekly stipend the moment the user spent anything.
+        // Wallets created before this field existed are seeded from the signup bonus they received.
+        try {
+          const giftedSoFar = Number.isFinite(Number(data.freeGiftedTokens))
+            ? Number(data.freeGiftedTokens)
+            : welcomeBonusTokens();
+          const decision = decideWeeklyTopUp({
+            giftedSoFar,
+            lastTopUpAt: data.lastWeeklyTopUpAt ?? null,
+            createdAt: data.createdAt ?? null,
+            now: Date.now(),
+          });
+          if (decision.newLastTopUpAt) {
+            const nowIso = decision.newLastTopUpAt;
+            const applied = await runTransaction(db, async (tx) => {
+              const fresh = await tx.get(walletRef);
+              if (!fresh.exists()) return null;
+              const w = fresh.data();
+              // Re-decide on the IN-TRANSACTION balance: a concurrent debit may have changed how much
+              // room is left under the cap since the read above.
+              const given2 = Number.isFinite(Number(w.freeGiftedTokens))
+                ? Number(w.freeGiftedTokens)
+                : welcomeBonusTokens();
+              const d2 = decideWeeklyTopUp({
+                giftedSoFar: given2,
+                lastTopUpAt: w.lastWeeklyTopUpAt ?? null,
+                createdAt: w.createdAt ?? null,
+                now: Date.now(),
+              });
+              if (!d2.newLastTopUpAt) return null; // already applied, or the ladder is finished
+              const patch: Record<string, unknown> = { lastWeeklyTopUpAt: d2.newLastTopUpAt, updatedAt: nowIso };
+              if (d2.grantTokens > 0) {
+                const held = Number(w.tokenBalance) > 0 ? Number(w.tokenBalance) : 0;
+                patch.tokenBalance = held + d2.grantTokens;
+                patch.totalTokensPurchased = (Number(w.totalTokensPurchased) || 0) + d2.grantTokens;
+                // The running total that ENDS the ladder. Written in the same transaction as the credit,
+                // so a grant can never land without being counted against the lifetime cap.
+                patch.freeGiftedTokens = given2 + d2.grantTokens;
+                const creditInr = d2.grantTokens / TOKENS_PER_RUPEE;
+                patch.remaining_balance = (Number(w.remaining_balance) || 0) + creditInr;
+                patch.total_balance = (Number(w.total_balance) || 0) + creditInr;
+                patch.walletLedger = [...(w.walletLedger || []), topUpLedgerEntry(d2.grantTokens, d2.newLastTopUpAt)];
+              }
+              tx.update(walletRef, patch);
+              return patch;
+            });
+            if (applied) Object.assign(data, applied);
+          }
+        } catch (topUpErr) {
+          // A top-up failure must never cost the user their wallet screen — log it and serve the
+          // balance we already have. The next read tries again.
+          console.error('[WALLET] Weekly top-up failed (balance served unchanged):', topUpErr);
+        }
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
         // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
-        return res.json({ ...data, tokensPerRupee: TOKENS_PER_RUPEE });
+        //
+        // `freeGift` travels with it too (2026-07-28): the grant used to be invisible — credit simply
+        // appeared and nothing said where it came from, how much was left, or when the next one lands.
+        // It is derived from the SAME inputs the grant uses, so the screen can never disagree with the
+        // ledger. It is also the moment that matters commercially: "this was your last free credit" is
+        // when someone decides to recharge.
+        return res.json({
+          ...data,
+          tokensPerRupee: TOKENS_PER_RUPEE,
+          freeGift: summarizeGiftLadder({
+            giftedSoFar: Number.isFinite(Number(data.freeGiftedTokens)) ? Number(data.freeGiftedTokens) : welcomeBonusTokens(),
+            lastTopUpAt: data.lastWeeklyTopUpAt ?? null,
+            createdAt: data.createdAt ?? null,
+            now: Date.now(),
+          }),
+        });
       } else {
-        // The wallet doc is missing → (re)create it. MONEY-BLEED FIX (admin 2026-07-12): grant the 50,000
-        // welcome bonus ONLY if this user has NEVER received it, guarded by the DURABLE welcome-bonus marker
+        // The wallet doc is missing → (re)create it. MONEY-BLEED FIX (admin 2026-07-12): grant the
+        // welcome bonus (₹250 since 2026-07-28) ONLY if this user has NEVER received it, guarded by the DURABLE welcome-bonus marker
         // (`payment_transactions/welcome_${userId}`) which lives in a SEPARATE collection and so SURVIVES any
         // wallet-doc recreation. The old code granted the bonus purely because the wallet doc was absent, so a
         // re-created wallet re-minted 50k every logout→login — an infinite free-token farm. Done in a
@@ -93,12 +169,21 @@ export function registerWalletRoutes(app: Express): void {
           return initialWallet;
         });
 
-        // The rate travels WITH the wallet on the new-wallet path too (same as the existing-doc path).
-        return res.json({ ...createdWallet, tokensPerRupee: TOKENS_PER_RUPEE });
+        // The rate + the gift-ladder state travel WITH the wallet on the new-wallet path too.
+        return res.json({
+          ...createdWallet,
+          tokensPerRupee: TOKENS_PER_RUPEE,
+          freeGift: summarizeGiftLadder({
+            giftedSoFar: Number((createdWallet as Record<string, unknown>).freeGiftedTokens) || 0,
+            lastTopUpAt: (createdWallet as Record<string, unknown>).lastWeeklyTopUpAt as string ?? null,
+            createdAt: (createdWallet as Record<string, unknown>).createdAt as string ?? null,
+            now: Date.now(),
+          }),
+        });
       }
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);
-      return res.status(500).json({ error: err.message || 'Unknown internal wallet error' });
+      return sendSafeError(res, 500, 'Unable to load your wallet right now. Please try again.', err, 'wallet get');
     }
   });
 
@@ -120,7 +205,7 @@ export function registerWalletRoutes(app: Express): void {
         logs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return res.json(logs);
       } catch (fallbackErr: any) {
-        return res.status(500).json({ error: fallbackErr.message });
+        return sendSafeError(res, 500, 'Unable to load your usage logs right now. Please try again.', fallbackErr, 'wallet logs');
       }
     }
   });
@@ -143,7 +228,7 @@ export function registerWalletRoutes(app: Express): void {
         txs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return res.json(txs);
       } catch (fallbackErr: any) {
-        return res.status(500).json({ error: fallbackErr.message });
+        return sendSafeError(res, 500, 'Unable to load your transactions right now. Please try again.', fallbackErr, 'wallet transactions');
       }
     }
   });

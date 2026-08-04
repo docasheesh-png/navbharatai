@@ -24,6 +24,11 @@ const COLLECTION = 'workspace_files_v3';
 const MAX_FILE_BYTES = 900 * 1024;
 /** Firestore batches allow up to 500 writes; stay under it. */
 const BATCH = 400;
+/** How many Firestore batch commits may be in flight at once during a merge (see mergeWorkspaceFiles). */
+const MERGE_COMMIT_CONCURRENCY = Math.max(
+  1,
+  Math.min(16, Number(process.env.AGENTV3_MERGE_COMMIT_CONCURRENCY) || 6),
+);
 
 let _db: admin.firestore.Firestore | null = null;
 
@@ -198,13 +203,24 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
     const root = db.collection(COLLECTION).doc(workspaceId);
     const filesCol = root.collection('files');
     // 1) Upsert ONLY the changed/added content docs.
+    //
+    // The commits run CONCURRENTLY (bounded). They used to be awaited one after another, so a large
+    // import paid every batch's round trip end-to-end — the same "serial awaits over a network" class
+    // that once made the sandbox landing take 648 seconds (see WorkspaceFiles.ts). Batches are
+    // independent upserts of DISTINCT docs, so ordering between them carries no meaning and running
+    // them together is safe by construction. Bounded so a huge import can't open unlimited sockets.
+    const commits: Array<Promise<unknown>> = [];
     for (let i = 0; i < entries.length; i += BATCH) {
       const batch = db.batch();
       for (const [path, content] of entries.slice(i, i + BATCH)) {
         batch.set(filesCol.doc(fileDocId(path)), { path, content });
       }
-      await batch.commit();
+      commits.push(batch.commit());
+      if (commits.length >= MERGE_COMMIT_CONCURRENCY) {
+        await Promise.all(commits.splice(0, commits.length));
+      }
     }
+    if (commits.length) await Promise.all(commits);
     // 2) UNION the authoritative path list (never drop unchanged files).
     const meta = await root.get();
     const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
@@ -311,6 +327,51 @@ export async function listWorkspaceFilePaths(workspaceId: string): Promise<strin
     return Array.isArray(data?.paths)
       ? data!.paths.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
       : [];
+  } catch {
+    return [];
+  }
+}
+
+/** One durably-stored Pro v5 app owned by a user (metadata only — no file content read). */
+export interface UserWorkspaceApp {
+  workspaceId: string;
+  fileCount: number;
+  savedAt: number;
+}
+
+/**
+ * List a user's Pro v5-built apps that have durable files — the source list for the Full-App Debugger
+ * (admin request 2026-07-24). Every v5 workspace id is `agentv3-{uid}-{sessionId}`, so a documentId
+ * PREFIX range query over the metadata docs returns exactly this user's apps (each metadata doc is a
+ * root doc; the per-file `files` subcollection docs live one level down and are NOT returned). Reads
+ * only the small metadata docs (count + savedAt), never file content. Newest-first. Returns [] when
+ * absent / no Firestore. Never throws — a listing failure must never break the tool.
+ */
+export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<UserWorkspaceApp[]> {
+  const db = getDb();
+  if (!db || !uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return [];
+  try {
+    const prefix = `agentv3-${uid}-`;
+    // U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range.
+    const prefixEnd = `${prefix}${String.fromCharCode(0xf8ff)}`;
+    const byId = admin.firestore.FieldPath.documentId();
+    const snap = await db.collection(COLLECTION)
+      .orderBy(byId)
+      .startAt(prefix)
+      .endAt(prefixEnd)
+      .limit(Math.max(1, Math.min(limit, 200)))
+      .get();
+    const apps: UserWorkspaceApp[] = [];
+    for (const d of snap.docs) {
+      const data = d.data() || {};
+      const fileCount = typeof data.count === 'number'
+        ? data.count
+        : (Array.isArray(data.paths) ? data.paths.length : 0);
+      if (fileCount <= 0) continue; // an empty workspace is not a debuggable app
+      apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
+    }
+    apps.sort((a, b) => b.savedAt - a.savedAt);
+    return apps;
   } catch {
     return [];
   }

@@ -1,7 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, isEngineInjectedUserText, filterSessionsByQuery, partitionPinnedSessions, type PersistedConversation } from './agentV3History';
+import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, isEngineInjectedUserText, filterSessionsByQuery, partitionPinnedSessions, isUnfinishedBuild, type PersistedConversation } from './agentV3History';
 import { agentV3Reducer } from './agentV3Reducer';
 import { initialAgentV3State } from './agentV3Types';
+
+describe('isUnfinishedBuild (AP-3 cross-restart resume detection)', () => {
+  const conv = (status: PersistedConversation['status'], msgs: unknown[]): Pick<PersistedConversation, 'status' | 'messages'> => ({ status, messages: msgs });
+  it('flags a build still marked running WITH content (cut off before it could settle)', () => {
+    expect(isUnfinishedBuild(conv('running', [{ role: 'user', content: 'build a todo app' }]))).toBe(true);
+  });
+  it('does NOT flag a cleanly-finished build (terminal status)', () => {
+    expect(isUnfinishedBuild(conv('complete', [{ role: 'user', content: 'x' }]))).toBe(false);
+    expect(isUnfinishedBuild(conv('error', [{ role: 'user', content: 'x' }]))).toBe(false);
+    expect(isUnfinishedBuild(conv('stopped', [{ role: 'user', content: 'x' }]))).toBe(false);
+  });
+  it('does NOT flag an empty running record (nothing to continue)', () => {
+    expect(isUnfinishedBuild(conv('running', []))).toBe(false);
+  });
+});
 
 describe('messageText', () => {
   it('returns a plain string content as-is', () => {

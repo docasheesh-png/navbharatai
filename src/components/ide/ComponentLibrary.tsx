@@ -3,8 +3,10 @@ import {
   Search, Copy, Check, Star, X, Layout, Type, Square,
   LayoutGrid, FileText, Bell, Table, MousePointer,
   Navigation, Image, CreditCard, AlignLeft, Anchor,
-  ChevronRight, Eye,
+  ChevronRight, Eye, Loader2, History, AlertTriangle, Save,
 } from 'lucide-react';
+import { insertSnippet, pageLoadsTailwind, snippetNeedsTailwind } from '../../lib/htmlInsert';
+import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,7 +20,10 @@ interface Component {
 }
 
 interface ComponentLibraryProps {
+  /** Preview handoff — kept so an inserted component also shows up on screen straight away. */
   onInsert?: (html: string, componentName: string) => void;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
 }
 
 interface CustomizerState {
@@ -285,7 +290,7 @@ const CDN_LIBRARIES: CdnLib[] = [
 
 // ─── ComponentLibrary ─────────────────────────────────────────────────────────
 
-export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) => {
+export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, sessionId }) => {
   const [activeTab, setActiveTab] = useState<'components' | 'libraries'>('components');
   const [libSearch, setLibSearch] = useState('');
   const [libCopied, setLibCopied] = useState<string | null>(null);
@@ -300,6 +305,81 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
     fontSize: 'medium',
     rounded: 'large',
   });
+
+  // Adding a component to the user's REAL app (admin 2026-07-27). "Insert" used to merge the snippet
+  // into the in-memory preview only, so it was gone the moment the tab closed.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [targetPath, setTargetPath] = useState('');
+  const [inserting, setInserting] = useState('');
+  const [insertNote, setInsertNote] = useState('');
+  const [insertFailed, setInsertFailed] = useState(false);
+  const [mobilePicker, setMobilePicker] = useState(false);
+
+  // Default to the app's main page — where a component almost always belongs.
+  useEffect(() => {
+    if (targetPath && appFiles.some((f) => f.path === targetPath)) return;
+    const pages = appFiles.filter((f) => f.writable && /\.html?$/i.test(f.path)).map((f) => f.path);
+    setTargetPath(pages.find((p) => /(^|\/)index\.html?$/i.test(p)) || pages[0] || '');
+  }, [appFiles, targetPath]);
+
+  /**
+   * Add a snippet to the chosen page of the chosen app, for real.
+   *
+   * The page is re-read first so the snippet lands in its CURRENT content. A library tag that is
+   * already loaded is reported as such rather than added a second time, and a Tailwind-based
+   * component going into a page without Tailwind says so instead of quietly rendering unstyled.
+   */
+  const addToApp = useCallback(async (snippet: string, name: string, key: string) => {
+    if (!targetSession || !targetPath || inserting) return;
+    setInserting(key);
+    setInsertNote('');
+    setInsertFailed(false);
+    try {
+      const current = await readAppFile(targetSession, targetPath);
+      if (current === null) {
+        setInsertFailed(true);
+        setInsertNote('Could not open that page, so nothing was changed.');
+        return;
+      }
+      const result = insertSnippet(targetPath, current, snippet);
+      if (!result.ok) {
+        setInsertFailed(true);
+        setInsertNote(result.error || 'That file cannot take a component.');
+        return;
+      }
+      if (result.skipped) {
+        setInsertNote(`${name} is already loaded on that page — nothing was added.`);
+        return;
+      }
+
+      const outcome = await saveFilesToApp(
+        targetSession,
+        { [targetPath]: result.code },
+        `Before adding ${name} to ${targetPath}`,
+      );
+      if (!outcome.ok) {
+        setInsertFailed(true);
+        setInsertNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      const needsTailwind = snippetNeedsTailwind(snippet) && !pageLoadsTailwind(result.code);
+      setInsertNote(
+        `${name} added to ${targetPath}.${needsTailwind
+          ? ' Note: this component is styled with Tailwind classes and that page does not load Tailwind, so it will look unstyled until you add it.'
+          : ''} ${outcome.undoHint || ''}`.trim(),
+      );
+      void reloadFiles(targetSession);
+      onInsert?.(snippet, name);
+    } catch {
+      setInsertFailed(true);
+      setInsertNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setInserting('');
+    }
+  }, [targetSession, targetPath, inserting, onInsert, reloadFiles]);
+
+  const canInsert = !!targetSession && !!targetPath;
 
   // Sync favs to localStorage
   useEffect(() => { saveFavs(favs); }, [favs]);
@@ -393,14 +473,14 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
                     {libCopied === lib.id ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
                     {libCopied === lib.id ? 'Copied!' : 'Copy Tag'}
                   </button>
-                  {onInsert && (
-                    <button
-                      onClick={() => onInsert(lib.scriptTag, lib.name)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 border border-emerald-500/25 text-emerald-400 text-[10px] font-bold rounded-lg transition-all"
-                    >
-                      + Inject
-                    </button>
-                  )}
+                  <button
+                    onClick={() => void addToApp(lib.scriptTag, lib.name, 'lib_' + lib.id)}
+                    disabled={!canInsert || !!inserting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 border border-emerald-500/25 text-emerald-400 text-[10px] font-bold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {inserting === 'lib_' + lib.id ? <Loader2 size={11} className="animate-spin" /> : null}
+                    Add to my app
+                  </button>
                 </div>
               </div>
             ))}
@@ -408,10 +488,58 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
         </div>
       )}
 
-      {activeTab === 'components' && <div className="flex flex-1 overflow-hidden">
-      {/* ── Left Sidebar ── */}
-      <div className="flex-shrink-0 w-[220px] border-r border-gray-800 overflow-y-auto py-3">
-        <div className="px-4 py-2 mb-1">
+      {/* ── Where does "Add to my app" put things? Answering this once, at the top, is what turns
+             every button below from a preview trick into a real change. ── */}
+      <div className="flex-shrink-0 border-b border-gray-800" style={{ background: '#0d1117' }}>
+        <button
+          onClick={() => setMobilePicker(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2.5 text-left md:hidden"
+        >
+          <Save size={13} className="text-indigo-400 flex-shrink-0" />
+          <span className="flex-1 min-w-0 text-xs text-gray-300 truncate">
+            {canInsert ? <>Adding to <span className="text-indigo-300">{targetPath}</span></> : 'Choose where to add components'}
+          </span>
+          <ChevronRight size={13} className={`text-gray-500 transition-transform ${mobilePicker ? 'rotate-90' : ''}`} />
+        </button>
+        <div className={`${mobilePicker ? 'block' : 'hidden'} md:block`}>
+          <AppTargetPicker
+            apps={apps}
+            appsLoading={appsLoading}
+            files={appFiles}
+            filesLoading={filesLoading}
+            sessionId={targetSession}
+            onSessionChange={(sid) => { setTargetSession(sid); setTargetPath(''); setInsertNote(''); }}
+            selectedPath={targetPath}
+            onPathChange={(pth) => { setTargetPath(pth); setInsertNote(''); }}
+            fileFilter={(f) => /\.html?$/i.test(f.path)}
+            fileLabel="Add components to"
+          />
+        </div>
+        {insertNote && (
+          <p
+            className="mx-3 mb-3 px-3 py-2 rounded-lg text-xs leading-relaxed flex gap-2"
+            style={{
+              color: insertFailed ? '#fcd34d' : '#86efac',
+              background: insertFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)',
+            }}
+          >
+            {insertFailed && <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />}
+            <span>{insertNote}</span>
+          </p>
+        )}
+        {apps.length > 0 && (
+          <p className="hidden md:flex mx-3 mb-3 text-[11px] text-gray-500 gap-1.5 leading-snug">
+            <History size={11} className="mt-0.5 flex-shrink-0" />
+            A restore point is saved before each change, so you can undo it from Versioning.
+          </p>
+        )}
+      </div>
+
+      {activeTab === 'components' && <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
+      {/* ── Categories. A fixed 220px rail leaves nothing beside it on a phone, so on small screens
+             this becomes a horizontal scroller instead. ── */}
+      <div className="flex-shrink-0 flex md:block md:w-[220px] overflow-x-auto md:overflow-x-visible md:overflow-y-auto border-b md:border-b-0 md:border-r border-gray-800 py-2 md:py-3">
+        <div className="hidden md:block px-4 py-2 mb-1">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Categories</p>
         </div>
         {CATEGORIES.map(cat => {
@@ -421,14 +549,14 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
             <button
               key={cat.id}
               onClick={() => { setActiveCategory(cat.id); setSearch(''); }}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+              className={`flex-shrink-0 md:w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-2.5 text-left whitespace-nowrap transition-colors ${
                 active
-                  ? 'bg-indigo-600/20 text-indigo-400 border-r-2 border-indigo-500'
+                  ? 'bg-indigo-600/20 text-indigo-400 md:border-r-2 md:border-indigo-500'
                   : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
               }`}
             >
               <Icon size={14} className="flex-shrink-0" />
-              <span className="text-xs font-medium flex-1">{cat.label}</span>
+              <span className="text-xs font-medium md:flex-1">{cat.label}</span>
               <span className={`text-xs px-1.5 py-0.5 rounded-full ${
                 active ? 'bg-indigo-600/30 text-indigo-300' : 'bg-gray-800 text-gray-500'
               }`}>
@@ -448,7 +576,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Component search karo..."
+              placeholder="Search components..."
               className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
               style={{ background: '#161b22', border: '1px solid #30363d', color: '#e6edf3' }}
             />
@@ -460,7 +588,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
           {filteredComponents.length === 0 ? (
             <div className="text-center text-gray-600 py-16 text-sm">No components found</div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
               {filteredComponents.map(comp => {
                 const isFav = favs.includes(comp.id);
                 const isSelected = selected?.id === comp.id;
@@ -527,15 +655,14 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
                           {copied === comp.id + '_copy' ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
                           {copied === comp.id + '_copy' ? 'Copied!' : 'Copy'}
                         </button>
-                        {onInsert && (
-                          <button
-                            className="flex-1 text-[11px] py-1.5 rounded-md transition-colors font-medium"
-                            style={{ background: '#3730a3', color: '#c7d2fe' }}
-                            onClick={e => { e.stopPropagation(); onInsert(comp.html, comp.name); }}
-                          >
-                            Insert
-                          </button>
-                        )}
+                        <button
+                          className="flex-1 text-[11px] py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{ background: '#3730a3', color: '#c7d2fe' }}
+                          disabled={!canInsert || !!inserting}
+                          onClick={e => { e.stopPropagation(); void addToApp(comp.html, comp.name, comp.id); }}
+                        >
+                          {inserting === comp.id ? 'Adding…' : 'Add to app'}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -547,7 +674,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
       </div>
 
       {/* ── Right Panel ── */}
-      <div className="flex-shrink-0 w-[300px] border-l border-gray-800 flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 w-full md:w-[300px] border-t md:border-t-0 md:border-l border-gray-800 flex flex-col overflow-hidden">
         {selected ? (
           <>
             {/* Large Preview */}
@@ -586,15 +713,15 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
                   {copied === 'full' ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
                   {copied === 'full' ? 'Copied!' : 'Copy with Tailwind CDN'}
                 </button>
-                {onInsert && (
-                  <button
-                    className="w-full py-2 rounded-lg text-xs font-medium transition-colors"
-                    style={{ background: '#4f46e5', color: '#fff' }}
-                    onClick={() => onInsert(selected.html, selected.name)}
-                  >
-                    Insert into Editor
-                  </button>
-                )}
+                <button
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ background: '#4f46e5', color: '#fff' }}
+                  disabled={!canInsert || !!inserting}
+                  onClick={() => void addToApp(selected.html, selected.name, 'sel_' + selected.id)}
+                >
+                  {inserting === 'sel_' + selected.id ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {inserting === 'sel_' + selected.id ? 'Adding to your app…' : 'Add to my app'}
+                </button>
               </div>
 
               {/* Customizer */}

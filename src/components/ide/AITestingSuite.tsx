@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TestTube, Play, Check, X, AlertCircle, CheckCircle2, Code, RefreshCw, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { sampleInputValue } from '../../server/QualityEvaluationEngine/TestDataManager';
 
 type TestStatus = 'pending' | 'pass' | 'fail' | 'skip';
@@ -72,7 +73,7 @@ function generateTestsFromCode(code: string): TestCase[] {
       id: String(id++), category: 'unit', status: 'pending',
       name: 'State initialization check',
       description: 'Component initial state is set with the correct values',
-      code: `import { render } from '@testing-library/react';\nimport Component from './component';\n\ntest('initial state is correct', () => {\n  const { getByTestId } = render(<Component />);\n  // Initial state values verify karo\n  expect(getByTestId('counter')).toHaveTextContent('0');\n});`,
+      code: `import { render } from '@testing-library/react';\nimport Component from './component';\n\ntest('initial state is correct', () => {\n  const { getByTestId } = render(<Component />);\n  // Verify the initial state values\n  expect(getByTestId('counter')).toHaveTextContent('0');\n});`,
     });
   }
 
@@ -236,7 +237,7 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">AI Testing Suite</h2>
-          <p className="text-xs text-white/40">Code se automatically test cases generate karo</p>
+          <p className="text-xs text-white/40">Automatically generate test cases from your code</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {generated && (
@@ -303,7 +304,7 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
             className="w-full py-2.5 bg-[#161b22] hover:bg-white/5 border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-sm flex items-center justify-center gap-2 transition-all"
           >
             {running ? (
-              <><RefreshCw className="w-4 h-4 animate-spin" /> Running...</>
+              <><TirangaLoader className="w-4 h-4" /> Running...</>
             ) : (
               <><Play className="w-4 h-4 text-emerald-400" /> Run All Tests</>
             )}

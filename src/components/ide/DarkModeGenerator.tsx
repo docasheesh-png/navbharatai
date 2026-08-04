@@ -1,8 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Moon, Sun, Copy, Download, Check, ChevronDown, ChevronUp,
-  Zap, Sliders, RefreshCw, Code2, Layers, PaintBucket
+  Zap, Sliders, RefreshCw, Code2, Layers, PaintBucket, Loader2, Save, History, AlertTriangle
 } from 'lucide-react';
+import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
+import { injectStyleBlock, injectScriptBlock, canCarryStylesheet } from '../../lib/cssInjection';
+import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
+
+/** Ids that fence this tool's own blocks, so a re-run replaces them instead of stacking copies. */
+const DARK_CSS_MARKER = 'nb-darkmode';
+const DARK_TOGGLE_MARKER = 'nb-darkmode-toggle';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +35,11 @@ interface PresetTheme {
 
 export interface DarkModeGeneratorProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
   onCodeUpdate?: (code: string) => void;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -201,27 +212,37 @@ ${mappings.map(m => `  /* ${m.usage} */\n  [style*="${m.original}"] { color: ${m
 }`;
 }
 
-function injectDarkCSS(html: string, css: string, strategy: Strategy, theme: PresetTheme): string {
-  const styleTag = `<style>\n${css}\n</style>`;
+/**
+ * Put the generated dark stylesheet (and, for the toggle strategy, its button) into a page.
+ *
+ * ROOT-CAUSE REWRITE (admin 2026-07-27), because this result is now SAVED into the user's real file
+ * rather than thrown at a preview. The previous version had three defects that only a preview could
+ * hide:
+ *   • it merged the generated CSS into the FIRST `</style>` it found — which is normally the user's
+ *     OWN stylesheet, mixing generated rules into hand-written ones with no way to separate them again;
+ *   • it appended the toggle `<script>` AFTER `</html>`, outside the document entirely;
+ *   • it did all of that again on every press, so re-generating stacked duplicate CSS and a new
+ *     floating button each time.
+ * Both blocks are now fenced with their own ids, so a re-run REPLACES them and switching the strategy
+ * away from the toggle actually removes the button instead of orphaning it.
+ */
+function injectDarkCSS(html: string, css: string, strategy: Strategy, theme: PresetTheme, filePath = 'index.html'): string {
   const toggleScript = strategy === 'class-toggle'
-    ? `<script>
-(function(){
+    ? `(function(){
   var btn = document.createElement('button');
   btn.textContent = '🌙 Toggle Dark';
   btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;padding:8px 14px;background:${theme.bgSecondary};color:${theme.text};border:1px solid ${theme.border};border-radius:8px;cursor:pointer;font-size:14px;';
   btn.onclick = function(){ document.documentElement.classList.toggle('dark'); };
   document.body.appendChild(btn);
-})();
-</script>`
+})();`
     : '';
 
-  if (html.includes('</style>')) {
-    return html.replace(/<\/style>/, `\n${css}\n</style>`) + toggleScript;
-  }
-  if (html.includes('</head>')) {
-    return html.replace(/<\/head>/, `${styleTag}\n</head>`) + toggleScript;
-  }
-  return styleTag + '\n' + html + toggleScript;
+  const styled = injectStyleBlock(filePath, html, css, DARK_CSS_MARKER);
+  const withCss = styled.ok ? styled.code : html;
+  // A CSS target cannot carry the button; the stylesheet alone is the whole change there.
+  if (!/\.html?$/i.test(filePath)) return withCss;
+  const scripted = injectScriptBlock(filePath, withCss, toggleScript, DARK_TOGGLE_MARKER);
+  return scripted.ok ? scripted.code : withCss;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -234,8 +255,13 @@ const ColorSwatch: React.FC<{ color: string; size?: number }> = ({ color, size =
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedCode, onCodeUpdate }) => {
-  const [htmlInput, setHtmlInput] = useState(generatedCode ?? '');
+export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedCode, files, onCodeUpdate, sessionId }) => {
+  // Resolve the REAL app HTML (admin autopsy 2026-07-21): the transform is genuine but used to run on
+  // the "Waiting for magic…" placeholder. Prefer the bundled preview / workspace index.html; treat the
+  // placeholder as "no app" so the paste box + guidance appear instead.
+  const resolved = resolveAppSource(generatedCode, files);
+  const realApp = hasAnalysableApp(resolved);
+  const [htmlInput, setHtmlInput] = useState(realApp ? resolved.html : '');
   const [darkHtml, setDarkHtml] = useState('');
   const [colorMappings, setColorMappings] = useState<ColorMapping[]>([]);
   const [strategy, setStrategy] = useState<Strategy>('css-vars');
@@ -249,12 +275,34 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
   const [generated, setGenerated] = useState(false);
   const [syncScroll, setSyncScroll] = useState(false);
 
-  const sourceHtml = generatedCode ?? htmlInput;
+  // Saving into the user's REAL app (admin 2026-07-27). "Apply to app" used to call onCodeUpdate,
+  // which only changed the on-screen preview — the dark mode was gone as soon as the tab closed.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [targetPath, setTargetPath] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
 
-  // Keep htmlInput in sync if prop changes
+  // Default to the app's main page, which is what a user means by "my app" almost every time.
   useEffect(() => {
-    if (generatedCode) setHtmlInput(generatedCode);
-  }, [generatedCode]);
+    if (targetPath && appFiles.some((f) => f.path === targetPath)) return;
+    const carriers = appFiles.filter((f) => f.writable && canCarryStylesheet(f.path)).map((f) => f.path);
+    setTargetPath(
+      carriers.find((p) => /(^|\/)index\.html?$/i.test(p))
+      || carriers.find((p) => /\.html?$/i.test(p))
+      || carriers[0]
+      || '',
+    );
+  }, [appFiles, targetPath]);
+
+  const sourceHtml = realApp ? resolved.html : htmlInput;
+
+  // Keep the manual-paste input in sync with the REAL app source (not the placeholder).
+  useEffect(() => {
+    if (realApp) setHtmlInput(resolved.html);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realApp, resolved.html]);
 
   const runGenerate = useCallback((html: string, theme: PresetTheme, strat: Strategy) => {
     if (!html.trim()) return;
@@ -302,10 +350,50 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
     URL.revokeObjectURL(url);
   };
 
-  const handleInject = () => {
-    if (!darkHtml || !onCodeUpdate) return;
-    onCodeUpdate(darkHtml);
-  };
+  /**
+   * Save the dark mode into the user's real app file.
+   *
+   * The file is re-read first and the blocks are merged into its CURRENT content, so this works on a
+   * file that has changed since the tool loaded — and it never writes the preview's copy blindly.
+   */
+  const saveDarkModeToApp = useCallback(async () => {
+    if (!targetSession || !targetPath || saving || !generated) return;
+    setSaving(true);
+    setSaveNote('');
+    setSaveFailed(false);
+    try {
+      const current = await readAppFile(targetSession, targetPath);
+      if (current === null) {
+        setSaveFailed(true);
+        setSaveNote('Could not open that file, so nothing was changed.');
+        return;
+      }
+      const css = buildDarkCSS(colorMappings, strategy, activeTheme);
+      const updated = injectDarkCSS(current, css, strategy, activeTheme, targetPath);
+      const outcome = await saveFilesToApp(
+        targetSession,
+        { [targetPath]: updated },
+        `Before adding dark mode to ${targetPath}`,
+      );
+      if (!outcome.ok) {
+        setSaveFailed(true);
+        setSaveNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      if (outcome.unchanged) {
+        setSaveNote('Your app already has exactly this dark mode — nothing needed changing.');
+        return;
+      }
+      setSaveNote(`Dark mode saved into ${targetPath}. ${outcome.undoHint || ''}`.trim());
+      void reloadFiles(targetSession);
+      if (onCodeUpdate && /\.html?$/i.test(targetPath)) onCodeUpdate(updated);
+    } catch {
+      setSaveFailed(true);
+      setSaveNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setSaving(false);
+    }
+  }, [targetSession, targetPath, saving, generated, colorMappings, strategy, activeTheme, onCodeUpdate, reloadFiles]);
 
   const iframeStyle: React.CSSProperties = {
     width: '100%',
@@ -342,8 +430,9 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
         </div>
       </div>
 
-      {/* HTML Input (if no generatedCode prop) */}
-      {!generatedCode && (
+      {/* HTML Input — shown when there's no real app to read (so the placeholder never masquerades
+          as input; the user can paste real HTML instead). */}
+      {!realApp && (
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontSize: 12, color: '#8b949e', display: 'block', marginBottom: 6 }}>Paste HTML to convert</label>
           <textarea
@@ -419,7 +508,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
         {/* Iframes */}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {(viewMode === 'light' || viewMode === 'both') && (
-            <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ flex: '1 1 260px', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <Sun size={13} color="#f59e0b" />
                 <span style={{ fontSize: 12, color: '#8b949e', fontWeight: 600 }}>Light Mode</span>
@@ -436,7 +525,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
             </div>
           )}
           {(viewMode === 'dark' || viewMode === 'both') && (
-            <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ flex: '1 1 260px', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <Moon size={13} color="#6366f1" />
                 <span style={{ fontSize: 12, color: '#8b949e', fontWeight: 600 }}>Dark Mode</span>
@@ -541,14 +630,63 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
         </div>
       )}
 
-      {/* Inject & Apply */}
-      {generated && onCodeUpdate && (
-        <button
-          onClick={handleInject}
-          style={{ width: '100%', padding: '12px 0', background: 'linear-gradient(135deg, #6366f1, #818cf8)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          <Zap size={16} /> Inject &amp; Apply Dark Mode
-        </button>
+      {/* Save into the user's real app. This used to update only the on-screen preview, so the dark
+          mode disappeared the moment the tab closed and the v5 builder never knew about it. */}
+      {generated && (
+        <div style={{ background: '#161b22', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 12px 0', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Save size={14} color="#818cf8" /> Save this dark mode into your app
+          </div>
+
+          <AppTargetPicker
+            apps={apps}
+            appsLoading={appsLoading}
+            files={appFiles}
+            filesLoading={filesLoading}
+            sessionId={targetSession}
+            onSessionChange={(s) => { setTargetSession(s); setTargetPath(''); setSaveNote(''); }}
+            selectedPath={targetPath}
+            onPathChange={(p) => { setTargetPath(p); setSaveNote(''); }}
+            fileFilter={(f) => canCarryStylesheet(f.path)}
+            fileLabel="Add dark mode to"
+          />
+
+          {apps.length > 0 && (
+            <div style={{ padding: '0 12px 12px' }}>
+              <button
+                onClick={() => void saveDarkModeToApp()}
+                disabled={!targetSession || !targetPath || saving}
+                style={{
+                  width: '100%', padding: '13px 0',
+                  background: 'linear-gradient(135deg, #6366f1, #818cf8)', color: '#fff', border: 'none',
+                  borderRadius: 10, fontSize: 15, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  cursor: !targetSession || !targetPath || saving ? 'not-allowed' : 'pointer',
+                  opacity: !targetSession || !targetPath || saving ? 0.4 : 1,
+                }}
+              >
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                {saving ? 'Saving into your app…' : 'Save dark mode into my app'}
+              </button>
+              <p style={{ marginTop: 8, fontSize: 11, color: '#8b949e', lineHeight: 1.5, display: 'flex', gap: 5 }}>
+                <History size={11} style={{ marginTop: 2, flexShrink: 0 }} />
+                A restore point is saved first, so you can undo this any time from Versioning.
+                Running it again updates the same block rather than adding a second copy.
+              </p>
+              {saveNote && (
+                <p style={{
+                  marginTop: 8, fontSize: 12, lineHeight: 1.5, padding: '8px 10px', borderRadius: 8,
+                  color: saveFailed ? '#fcd34d' : '#86efac',
+                  background: saveFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)',
+                  display: 'flex', gap: 6,
+                }}>
+                  {saveFailed && <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />}
+                  <span>{saveNote}</span>
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {!generated && !sourceHtml && (

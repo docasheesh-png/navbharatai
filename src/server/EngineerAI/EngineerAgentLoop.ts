@@ -6,7 +6,7 @@ import { PlannerAgent } from './PlannerAgent';
 import { CoderAgent, STEPS_PER_PLAN_STEP } from './CoderAgent';
 import { deploymentService } from './DeploymentService';
 import { backendScaffolder } from './BackendScaffolder';
-import { CREATOR_IDENTITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
 import { workspaceMemoryStore } from './WorkspaceMemoryStore';
@@ -127,7 +127,7 @@ Coding rules (when in MODE 2):
   • NEVER write a 300+ line file in a single edit_file. If a component is large, write a skeleton first (the structure + props), then patch_file to add logic.
   • The workspace ALREADY has a starter template (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx). Your job is to MODIFY and ADD files on top of it — do NOT re-create boilerplate from scratch.
   • Build order for a new feature: read the existing src/App.tsx first → create the new component → patch App.tsx to add the component → bash to verify → repeat.
-  • After every 2-3 files written, run bash with "npm run build" or "npx --no-install tsc --noEmit" to verify (always the --no-install form: bare "npx tsc" downloads an unrelated squatter package when typescript isn't installed yet — if it errors "tsc not found", run "npm install" first). Fix ALL errors before writing more files.
+  • After every 2-3 files written, run bash with "npm run build" or the LOCAL binary "./node_modules/.bin/tsc --noEmit" to verify. NEVER "npx tsc" (not even --no-install): when typescript isn't installed, npx resolves "tsc" to an ancient unrelated squatter package (tsc@2.0.4) that only prints a help page and never typechecks. If "./node_modules/.bin/tsc" is missing, run "npm install typescript --save-dev" ONCE, then use the local binary. Fix ALL errors before writing more files.
   • This incremental approach shows real progress to the user AND catches errors early.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
@@ -524,6 +524,7 @@ export class EngineerAgentLoop {
         const appCtx = AppContextInjector.getRelevantContext(effectiveInstruction, 'engineer_ai');
         let effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
         if (appCtx) effectiveSystemPrompt += `\n\n${appCtx}`;
+        effectiveSystemPrompt += `\n\n${INDIA_TERRITORIAL_INTEGRITY}`; // India-first: territorial/map answers per India's official position
         effectiveSystemPrompt += `\n\n${CREATOR_IDENTITY}`; // every agent credits its creators (single source of truth)
         // Phase 1.6 — CoderAgent uses grok-3 (most capable) for accurate code generation;
         // PlannerAgent keeps grok-3-fast (default) since it only needs structured JSON.

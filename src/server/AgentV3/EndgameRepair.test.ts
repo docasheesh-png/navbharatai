@@ -173,6 +173,49 @@ describe('runEndgameRepair — the two-layer orchestration', () => {
     expect(writes).toHaveLength(0); // no deterministic change either — nothing written at all
   });
 
+  it('CONVERGENCE GUARD — a repair that INCREASES the error count is rolled back (CrewHub 59→67)', async () => {
+    // Entry tsc: 1 error. The LLM "repair" rewrites the file but the re-run shows 2 errors (worse).
+    // The guard must restore the pre-repair content, keep errorsAfter at the pre-repair count, report
+    // llmFilesWritten 0 (net-zero delivery) and set llmReverted.
+    const original = 'export const broken = 30; // original content, one error';
+    const outputs = [
+      `src/App.tsx(1,1): error TS2345: original single error.`,
+      `src/App.tsx(1,1): error TS2345: still broken.\nsrc/App.tsx(2,1): error TS2739: NEW error the repair introduced.`,
+    ];
+    const llm = vi.fn(async () => [{ path: 'src/App.tsx', content: 'export const worse = true; // repair that makes it worse' }]);
+    const writes: Array<{ p: string; c: string }> = [];
+    const v = await runEndgameRepair({
+      runTsc: async () => outputs.shift() ?? '',
+      readFiles: async () => ({ 'src/App.tsx': original }),
+      writeFile: async (p, c) => { writes.push({ p, c }); },
+      llmRepair: llm,
+    });
+    // The LAST write to the file must be the ROLLBACK to the original content.
+    const appWrites = writes.filter((w) => w.p === 'src/App.tsx');
+    expect(appWrites[appWrites.length - 1].c).toBe(original);
+    expect(v.llmReverted).toBe(true);
+    expect(v.llmFilesWritten).toBe(0);
+    expect(v.errorsAfter).toBe(1); // the better, pre-repair state — never the worse one
+    expect(v.clean).toBe(false);
+  });
+
+  it('a repair that HELPS is kept — no rollback, no llmReverted flag', async () => {
+    const outputs = [
+      `src/a.ts(1,1): error TS2345: e1.\nsrc/a.ts(2,1): error TS2345: e2.`,
+      `src/a.ts(1,1): error TS2345: only one left.`, // improved 2 → 1 (still not clean)
+    ];
+    const llm = vi.fn(async () => [{ path: 'src/a.ts', content: 'export const better = 1; // improved' }]);
+    const v = await runEndgameRepair({
+      runTsc: async () => outputs.shift() ?? '',
+      readFiles: async () => ({ 'src/a.ts': 'export const x = 1;' }),
+      writeFile: async () => {},
+      llmRepair: llm,
+    });
+    expect(v.llmReverted).toBeUndefined();
+    expect(v.llmFilesWritten).toBe(1);
+    expect(v.errorsAfter).toBe(1);
+  });
+
   it('an I/O throw returns the honest no-attempt verdict (endgame never worsens a build)', async () => {
     const v = await runEndgameRepair({
       runTsc: async () => { throw new Error('sandbox gone'); },

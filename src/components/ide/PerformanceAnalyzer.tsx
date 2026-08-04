@@ -4,6 +4,8 @@ import {
   CheckCircle2, AlertTriangle, X, Lightbulb, Clock,
   BarChart2
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
+import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +44,27 @@ interface HistoryEntry {
 
 interface PerformanceAnalyzerProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
+  /** The app's LIVE, publicly-reachable URL (the E2B preview or a deployed site). Enables REAL
+   *  Lighthouse measurement — the static checks below are offline heuristics only. */
+  liveUrl?: string;
 }
+
+// The real Lighthouse result from GET /api/analyze/pagespeed (the existing, tested PageSpeed proxy).
+interface LiveResult {
+  performance: number; accessibility: number; seo: number; bestPractices: number;
+  lcp?: string; cls?: string; tbt?: string; fcp?: string; si?: string; tti?: string;
+  strategy?: string; finalUrl?: string;
+}
+const VITAL_ORDER: Array<{ key: keyof LiveResult; label: string }> = [
+  { key: 'lcp', label: 'Largest Contentful Paint (LCP)' },
+  { key: 'cls', label: 'Cumulative Layout Shift (CLS)' },
+  { key: 'tbt', label: 'Total Blocking Time (TBT)' },
+  { key: 'fcp', label: 'First Contentful Paint (FCP)' },
+  { key: 'si', label: 'Speed Index' },
+  { key: 'tti', label: 'Time to Interactive (TTI)' },
+];
 
 // ─── Analysis Logic ───────────────────────────────────────────────────────────
 
@@ -451,19 +473,54 @@ function MiniBarChart({ history }: { history: HistoryEntry[] }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ generatedCode }) => {
+export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ generatedCode, files, liveUrl }) => {
+  // REAL performance measurement (admin 2026-07-25): run the LIVE app through Google's Lighthouse engine
+  // (PageSpeed Insights) via /api/analyze/pagespeed → genuine scores + Core Web Vitals. Only works on a
+  // publicly-reachable URL (the live preview / a deployed site); the static checks below stay as an
+  // offline heuristic fallback. The measured URL defaults to the live preview URL when we have one.
+  const [measureUrl, setMeasureUrl] = useState(liveUrl || '');
+  const [strategy, setStrategy] = useState<'mobile' | 'desktop'>('mobile');
+  const [live, setLive] = useState<LiveResult | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState('');
+
+  useEffect(() => { if (liveUrl && !measureUrl) setMeasureUrl(liveUrl); }, [liveUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runLiveMeasure = useCallback(async () => {
+    const url = measureUrl.trim();
+    if (!url || liveLoading) return;
+    setLiveLoading(true); setLiveError(''); setLive(null);
+    try {
+      const res = await fetch(`/api/analyze/pagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        throw new Error((data && typeof data.error === 'string' && data.error) || 'Could not measure this URL.');
+      }
+      setLive(data as LiveResult);
+    } catch (e) {
+      setLiveError(e instanceof Error ? e.message : 'Could not measure this URL — please try again.');
+    } finally {
+      setLiveLoading(false);
+    }
+  }, [measureUrl, strategy, liveLoading]);
+
+  // Resolve the REAL app HTML (admin autopsy 2026-07-21): prefer the bundled preview, else the
+  // workspace index.html; the "Waiting for magic…" placeholder counts as no app yet, so the manual
+  // Paste fallback and empty state show correctly instead of scoring the placeholder.
+  const appSource = resolveAppSource(generatedCode, files);
+  const realApp = hasAnalysableApp(appSource);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pasteModal, setPasteModal] = useState(false);
   const [pasteValue, setPasteValue] = useState('');
-  const [codeToAnalyze, setCodeToAnalyze] = useState<string | undefined>(generatedCode);
+  const [codeToAnalyze, setCodeToAnalyze] = useState<string | undefined>(realApp ? appSource.html : undefined);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Sync prop changes
+  // Sync prop changes — analyse the real app source, or nothing when there is no built app yet.
   useEffect(() => {
-    setCodeToAnalyze(generatedCode);
-  }, [generatedCode]);
+    setCodeToAnalyze(realApp ? appSource.html : undefined);
+  }, [realApp, appSource.html]);
 
   // Load history from localStorage
   useEffect(() => {
@@ -541,16 +598,21 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
               {new Date(result.analyzedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
+          {/* Open the full pagespeed.web.dev report for the SAME live URL (was previously an empty ?url=
+              that opened a blank PageSpeed — the exact broken button, fixed 2026-07-25). Disabled until
+              there is a URL to test. */}
           <a
-            href="https://pagespeed.web.dev/analysis?url="
+            href={measureUrl.trim() ? `https://pagespeed.web.dev/analysis?url=${encodeURIComponent(measureUrl.trim())}` : undefined}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] text-[#58a6ff] hover:bg-[#21262d] transition-colors"
+            aria-disabled={!measureUrl.trim()}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] transition-colors ${measureUrl.trim() ? 'text-[#58a6ff] hover:bg-[#21262d]' : 'text-[#484f58] cursor-not-allowed pointer-events-none'}`}
+            title={measureUrl.trim() ? 'Open the full report on pagespeed.web.dev' : 'Enter a live URL below first'}
           >
             <BarChart2 size={13} />
-            Run PageSpeed Test
+            Full report ↗
           </a>
-          {!generatedCode && (
+          {!realApp && (
             <button
               onClick={() => setPasteModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] text-[#e6edf3] hover:bg-[#21262d] transition-colors"
@@ -566,15 +628,13 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           >
             {isAnalyzing ? (
               <>
-                <span
-                  className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"
-                />
+                <TirangaLoader className="w-3 h-3" />
                 Analyzing...
               </>
             ) : (
               <>
                 <Play size={12} />
-                Analyze Karo
+                Analyze
               </>
             )}
           </button>
@@ -585,20 +645,86 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
       <div className="flex flex-1 overflow-hidden">
         {/* Main Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
+          {/* ─── LIVE performance — REAL Lighthouse metrics (the genuine measurement) ─── */}
+          <div className="rounded-xl border border-indigo-500/30 p-4" style={{ background: '#12141c' }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Gauge size={15} className="text-indigo-400" />
+              <span className="text-sm font-semibold text-[#e6edf3]">Live performance — real Lighthouse metrics</span>
+            </div>
+            <p className="text-[11px] text-[#8b949e] mb-3">Measures your actually-running app (Core Web Vitals: LCP, CLS, TBT…) via Google Lighthouse. Needs a public URL — your live preview or a deployed site.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={measureUrl}
+                onChange={(e) => setMeasureUrl(e.target.value)}
+                placeholder="https://your-app.example.com  (live preview or deployed URL)"
+                className="flex-1 min-w-[220px] rounded-md border border-[#30363d] bg-[#0d1117] text-xs text-[#e6edf3] px-3 py-2 focus:outline-none focus:border-indigo-500"
+              />
+              <div className="flex rounded-md border border-[#30363d] overflow-hidden text-xs">
+                {(['mobile', 'desktop'] as const).map((s) => (
+                  <button key={s} onClick={() => setStrategy(s)} className={`px-3 py-2 ${strategy === s ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-[#21262d]'}`}>{s === 'mobile' ? 'Mobile' : 'Desktop'}</button>
+                ))}
+              </div>
+              <button
+                onClick={runLiveMeasure}
+                disabled={!measureUrl.trim() || liveLoading}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {liveLoading ? <><TirangaLoader className="w-3 h-3" /> Measuring…</> : <><Play size={12} /> Measure live</>}
+              </button>
+            </div>
+            {!liveUrl && !measureUrl.trim() && (
+              <p className="mt-2 text-[11px] text-amber-300/80">Open your app's live preview once (or deploy it) to get a public URL, then measure real performance here.</p>
+            )}
+            {liveError && <p className="mt-2 text-[11px] text-red-400">{liveError}</p>}
+            {liveLoading && <p className="mt-3 text-[11px] text-[#8b949e]">Running Lighthouse on the live page — this takes ~10–30s…</p>}
+            {live && !liveLoading && (
+              <div className="mt-4 space-y-4">
+                <div className="flex flex-wrap gap-5 justify-center">
+                  {([['performance', 'Performance'], ['accessibility', 'Accessibility'], ['seo', 'SEO'], ['bestPractices', 'Best Practices']] as const).map(([k, label]) => {
+                    const v = live[k];
+                    return v == null
+                      ? <div key={k} className="flex flex-col items-center justify-center gap-2" style={{ width: 120, height: 146 }}><span className="text-2xl text-[#484f58]">—</span><span className="text-xs text-[#8b949e]">{label}</span></div>
+                      : <ScoreRing key={k} score={v} label={label} />;
+                  })}
+                </div>
+                {VITAL_ORDER.some(({ key }) => live[key]) && (
+                  <div className="rounded-lg border border-[#30363d] p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e] mb-2">Core Web Vitals (measured)</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {VITAL_ORDER.filter(({ key }) => live[key]).map(({ key, label }) => (
+                        <div key={key} className="rounded-md bg-[#0d1117] border border-[#30363d] px-2.5 py-2">
+                          <div className="text-sm font-semibold text-[#e6edf3]">{live[key]}</div>
+                          <div className="text-[10px] text-[#8b949e] leading-tight">{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <p className="text-[10px] text-[#8b949e]">Measured on {live.finalUrl || measureUrl} ({live.strategy}) via Google Lighthouse.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Static code checks (offline heuristics) — a quick, no-URL lint of the HTML source. Honest:
+              this is NOT the performance measurement above; for a React SPA it sees only the static shell. */}
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#8b949e]">Static code checks (offline)</span>
+            <span className="text-[10px] text-[#6e7681]">— quick HTML/SEO/a11y lint, no URL needed</span>
+          </div>
           {/* Empty State */}
           {!result && !isAnalyzing && (
             <div className="flex flex-col items-center justify-center h-full gap-4 py-16">
               <Gauge size={56} className="text-[#30363d]" />
               <p className="text-sm text-[#8b949e] text-center max-w-xs leading-relaxed">
-                Generated code analyze karne ke liye pehle app banao ya code paste karo
+                {realApp ? 'Tap "Analyze" to score your app.' : (appSourceGuidance(appSource.kind) + ' Or paste code.')}
               </p>
-              {!generatedCode && (
+              {!realApp && (
                 <button
                   onClick={() => setPasteModal(true)}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 transition-colors"
                 >
                   <Clipboard size={15} />
-                  Code Paste Karo
+                  Paste Code
                 </button>
               )}
             </div>
@@ -607,7 +733,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           {/* Analyzing spinner */}
           {isAnalyzing && (
             <div className="flex flex-col items-center justify-center h-48 gap-3">
-              <span className="inline-block w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <TirangaLoader className="w-8 h-8" />
               <span className="text-sm text-[#8b949e]">Analyzing code...</span>
             </div>
           )}
@@ -695,7 +821,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             style={{ background: '#161b22' }}
           >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-sm text-[#e6edf3]">HTML Code Paste Karo</span>
+              <span className="font-semibold text-sm text-[#e6edf3]">Paste HTML Code</span>
               <button onClick={() => setPasteModal(false)} className="text-[#8b949e] hover:text-white">
                 <X size={18} />
               </button>
@@ -703,7 +829,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             <textarea
               value={pasteValue}
               onChange={(e) => setPasteValue(e.target.value)}
-              placeholder="Apna HTML code yahan paste karo..."
+              placeholder="Paste your HTML code here..."
               className="w-full h-56 rounded-lg border border-[#30363d] bg-[#0d1117] text-xs text-[#e6edf3] p-3 font-mono resize-none focus:outline-none focus:border-indigo-500"
               autoFocus
             />
@@ -719,7 +845,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
                 disabled={!pasteValue.trim()}
                 className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                Analyze Karo
+                Analyze
               </button>
             </div>
           </div>

@@ -21,6 +21,7 @@ import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
+import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
@@ -852,7 +853,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                     >
                       {otpSending ? (
                         <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <TirangaLoader className="w-3.5 h-3.5" />
                           <span>Sending...</span>
                         </>
                       ) : otpCooldown > 0 ? (
@@ -972,7 +973,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                           >
                             {otpSending ? (
                               <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <TirangaLoader className="w-3.5 h-3.5" />
                                 <span>Sending...</span>
                               </>
                             ) : otpCooldown > 0 ? (
@@ -1025,7 +1026,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                   className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-20 text-white rounded-2xl font-black uppercase tracking-[0.3em] transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
                 >
                   {loading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <TirangaLoader className="w-5 h-5" />
                   ) : (
                     isLogin ? 'Login Access' : 'Complete Signup'
                   )}

@@ -17,6 +17,8 @@ import { loadChat, saveChat, clearChat, type PersistedChatMsg } from '../../lib/
 import { probeDevice, recommendTier, TIER_INFO, type TierRecommendation } from '../../lib/offlineDeviceTier';
 import { loadOfflineLlm, resetOfflineLlm, STAGE1_MODEL, type OfflineLlm, type LlmProgress } from '../../lib/offlineLlmEngine';
 import { loadBetaState, saveBetaState, shouldUseLlm, buildLlmMessages, type BetaState } from '../../lib/offlineBeta';
+import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
 // Lookup maps to rehydrate a reloaded bot turn's cards from their stored ids (kept out of the component
 // body so they're built once).
@@ -192,6 +194,10 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-28 = 112px),
+  // snaps back to 1 line when send() clears the input.
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
   const [isTouch, setIsTouch] = useState(false);
 
   // ── Offline Thinking (beta) — on-device LLM, DEFAULT OFF ──────────────────────────────────────────
@@ -449,6 +455,10 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
           </div>
         ) : (
           <div className="max-w-2xl mx-auto space-y-3">
+            {(() => {
+              const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+            })()}
             {messages.map((m) => (
               <div key={m.id} className={`flex items-start gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-white/10 ${m.role === 'user' ? 'bg-zinc-700' : 'bg-gradient-to-br from-indigo-500 to-violet-600'}`}>
@@ -514,8 +524,9 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
             <div className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r from-indigo-500/0 to-violet-500/0 group-focus-within:from-indigo-500/40 group-focus-within:to-violet-500/40 transition-all duration-300 blur-[2px]" />
             <div className="relative flex items-end gap-2">
               <textarea
+                ref={composerRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 112); }}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
                 rows={1}
                 placeholder="Message… (ask, calculate, phone help, or teach me “remember …”)"

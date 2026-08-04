@@ -8,6 +8,7 @@
 // the impure orchestration (capture → repair runner → re-capture) lives in the build route.
 
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
+import { renderRepairGuidance } from './RuntimeErrorClassify';
 
 export interface RuntimeError {
   t: number;
@@ -74,6 +75,69 @@ export function reviewerAutofixOutcome(fixOk: boolean, label: string): ReviewerA
     : { severity: 'warning', code: 'REVIEWER_AUTOFIX_INCOMPLETE', message: `Reviewer auto-fix did NOT complete — ${label} may still be present in the app.`, autoResolved: false };
 }
 
+/**
+ * The HONEST user-facing summary for a build that finished with reviewer-CRITICAL findings that were
+ * NOT verifiably fixed (the auto-fix pass never ran, failed, or was cut off by the wall-clock cap).
+ *
+ * ROOT CAUSE (deep-test 2026-07-21, SaaS-dashboard "fix network error"): the architect captured an
+ * optimistic `{ ok:true, summary:"✅ No runtime errors — Console is clean" }` into `buildResultRef`
+ * BEFORE the reviewer ran; the reviewer then found 2 [CRITICAL]s (a placeholder API URL that IS the
+ * reported network error, + a wrong context null-check) and the C9 auto-fix was cut off mid-repair by
+ * the 120s advisory cap ("🔧 fixing them now…"). Because nothing updated the already-captured verdict,
+ * the deadline finalizer shipped `ok:true` + the "console clean" lie AND billed ₹125 for a broken app —
+ * the failed-build "working app or free" guard never fired (it keys on `!result.ok`). Flipping the
+ * verdict to NOT-ok when criticals remain unresolved makes the summary honest AND makes billing free
+ * (the existing guard), and — on the finalizer path — keeps the build RESUMABLE so the next window
+ * actually fixes the criticals. WHITE-LABEL: never names a provider/model (the specific findings stay
+ * in the ADMIN-only diagnostics); the user only sees the honest count + the action. Pure.
+ */
+export function reviewCriticalUnresolvedSummary(count: number): string {
+  const n = Math.max(1, count);
+  const one = n === 1;
+  return (
+    `Your app is built and saved, but a final code review found ${n} critical issue${one ? '' : 's'} that ` +
+    `${one ? "isn't" : "aren't"} resolved yet — so it isn't fully working. You have NOT been charged for ` +
+    `this build. Reply "fix ${one ? 'it' : 'them'}" (or "continue") and I'll resolve ${one ? 'it' : 'them'} and finish.`
+  );
+}
+
+/**
+ * How long the C9 reviewer-critical REPAIR pass may run, SCALED to how many findings it must fix and
+ * CLAMPED to the wall-clock headroom left. Pure + unit-tested (same idiom as reviewerBudgetMs).
+ *
+ * ROOT CAUSE (admin dashboard autopsy 2026-08-02): "Reviewer critical not resolved" was the TOP failure
+ * pattern across user-submitted reports (5 of 17 failed, 29%). The repair pass had a FLAT 120s cap no
+ * matter how many criticals it had to fix or how much build time remained — a 3-critical repair on the
+ * cheap-coder heal chain routinely died mid-edit at 120s, and the criticals shipped unresolved. Bigger
+ * repairs now get more time (up to 5 min) when the build actually HAS that time, and the cap shrinks
+ * when the wall clock is nearly spent — so a repair is neither starved with headroom to spare, nor
+ * started so large it gets cut off by the deadline (the exact "cut off mid-repair" failure recorded in
+ * reviewCriticalUnresolvedSummary's history).
+ */
+export function reviewerFixBudgetMs(itemCount: number, headroomMs: number): number {
+  const BASE = 120_000, PER_ITEM = 60_000, MIN = 60_000, MAX = 300_000, SAFETY = 30_000;
+  const items = Number.isFinite(itemCount) && itemCount > 0 ? Math.floor(itemCount) : 1;
+  const scaled = Math.min(BASE + Math.max(0, items - 1) * PER_ITEM, MAX);
+  if (!Number.isFinite(headroomMs)) return scaled;             // no wall-clock cap → the scaled budget
+  return Math.max(MIN, Math.min(scaled, headroomMs - SAFETY)); // else keep a 30s wall-clock safety margin
+}
+
+/**
+ * Should the C9 repair get ONE more attempt after a failed pass? Pure. Bounds (all three protect the
+ * "never loop / never overlap" invariants):
+ *  - max 2 attempts total — a structural failure won't converge by hammering;
+ *  - NEVER after a TIMEOUT — the raced-out runner may still be editing files in the background, and a
+ *    second concurrent runner editing the same workspace is a corruption risk (the budget fix above is
+ *    what attacks the timeout class);
+ *  - only with real headroom (> 150s) — a retry that will itself be cut off just burns the wall clock.
+ */
+export function reviewerFixShouldRetry(attempt: number, headroomMs: number, timedOut: boolean): boolean {
+  if (attempt >= 2) return false;
+  if (timedOut) return false;
+  if (!Number.isFinite(headroomMs)) return true;
+  return headroomMs > 150_000;
+}
+
 /** Max repair attempts per build. Default 1, hard-capped at 3 so a flaky error can't loop forever. */
 export function autoFixMaxAttempts(): number {
   const raw = Number(process.env.AGENTV3_AUTOFIX_ATTEMPTS);
@@ -89,7 +153,46 @@ const NOISE = [
   /\[vite\] connecting/i,
   /\[vite\] connected/i,
   /Download the React DevTools/i,
+  /DevTools failed to load source map/i,
+  /Slow network is detected/i,
+  /was preloaded using link preload but not used/i,
+  /\[HMR\]/i, // hot-module-reload chatter
 ];
+
+// M3-S3.1 — signatures that mean the RUNNING app actually crashed (white-screen / thrown render error /
+// infinite loop), as opposed to a recoverable warning or console chatter. Used to tell a genuinely-broken
+// preview apart from benign noise, so the "really works" verdict and the repair pass focus on real crashes.
+const FATAL_RUNTIME_RE = [
+  /cannot read (?:properties|property) of (?:undefined|null)/i,
+  /\bis not a function\b/i,
+  /\bis not defined\b/i, // ReferenceError
+  /maximum update depth exceeded/i, // infinite render loop
+  /rendered (?:more|fewer) hooks than/i, // Rules-of-Hooks crash
+  /change in the order of hooks/i,
+  /objects are not valid as a react child/i,
+  /too many re-?renders/i,
+  /minified react error/i, // prod React invariant
+  /uncaught (?:typeerror|referenceerror|rangeerror)/i,
+  /cannot access '[^']*' before initialization/i,
+  /converting circular structure to json/i,
+];
+
+/**
+ * True when a single runtime-error text is an app-CRASHING error (a real defect), not benign console
+ * noise. Pure — noise-filtered first, then matched against the fatal signatures. M3-S3.1.
+ */
+export function isFatalRuntimeError(text: string): boolean {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (NOISE.some((re) => re.test(t))) return false;
+  return FATAL_RUNTIME_RE.some((re) => re.test(t));
+}
+
+/** How many of the captured runtime errors are app-crashing (real crashes, not chatter). Pure. */
+export function fatalRuntimeErrorCount(errors: RuntimeError[]): number {
+  const list = Array.isArray(errors) ? errors : [];
+  return list.filter((e) => e && isFatalRuntimeError(e.text)).length;
+}
 
 /**
  * Keep only actionable runtime errors — drop known-benign noise and de-duplicate by text, so the
@@ -128,11 +231,16 @@ export function formatRuntimeErrors(errors: RuntimeError[], max = 20): string {
  * exactly what is broken at runtime and to fix → reload → re-verify, without rebuilding from scratch.
  */
 export function buildRepairPrompt(errors: RuntimeError[]): string {
+  // B5 — hand the repair pass root-cause GROUPED guidance (crash-class first, each with a targeted hint
+  // and the recipe to reach for) so it fixes the class, not just the symptom, and converges faster.
+  const guidance = renderRepairGuidance(errors.map((e) => e.text));
   return [
     'The app you just built has RUNTIME errors captured in the browser while it was running',
     '(these do not show up in a successful build/compile). Fix them now without rebuilding from',
-    'scratch — make the smallest targeted edits that resolve each one:',
+    'scratch — make the smallest targeted edits that resolve each one.',
     '',
+    ...(guidance ? ['Grouped by likely root cause — fix the crash-class groups first:', '', guidance, ''] : []),
+    'All captured errors (with a file:line hint where extractable):',
     formatRuntimeErrors(errors),
     '',
     'Steps: locate the cause with grep/read_file, apply a surgical edit_file fix, then RELOAD the',
@@ -149,4 +257,67 @@ export function autoFixWarning(errors: RuntimeError[]): string {
     formatRuntimeErrors(errors, 10),
     'The app was built, but please review these — they were detected in the browser at runtime.',
   ].join('\n');
+}
+
+/**
+ * The HONEST runtime-verification verdict, recorded durably to the build diagnostics (so it folds into
+ * the shipped health card) instead of a one-off narration line.
+ *
+ * ROOT CAUSE (rule 5 — the report must tell the truth): the loop treated an EMPTY console-error capture
+ * as "ran clean", but an empty result also happens when the browser console could NOT be captured at all
+ * (no live preview session / a stub sandbox) — so "runtime UNCHECKED" was silently reported as
+ * "runtime clean", and residual errors after the repair budget were only an ephemeral narration line that
+ * never reached the health card. `captured` (from the actuator) distinguishes "checked & clean" from
+ * "couldn't check", and these records make each of the three real outcomes honest and durable. Pure.
+ *
+ * Shape matches BuildDiagnostics.record's BuildIssue (phase 'autofix'); kept structural to avoid a
+ * circular import. All are advisory (warning/info) — the runtime loop never blocks a build.
+ */
+export interface RuntimeVerifyRecord {
+  phase: 'autofix';
+  severity: 'info' | 'warning';
+  code: 'RUNTIME_VERIFIED' | 'RUNTIME_UNCHECKED' | 'RUNTIME_ERRORS_REMAIN';
+  message: string;
+  autoResolved: boolean;
+}
+
+/** The app ran in a real browser session and no actionable console errors remained — an honest positive. */
+export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
+  return {
+    phase: 'autofix',
+    severity: 'info',
+    code: 'RUNTIME_VERIFIED',
+    message: 'Runtime verified — the app ran in the browser with no actionable console errors after build.',
+    autoResolved: true,
+  };
+}
+
+/** The browser console could not be captured, so runtime was NOT verified — never a clean guarantee. */
+export function runtimeUncheckedRecord(): RuntimeVerifyRecord {
+  return {
+    phase: 'autofix',
+    severity: 'warning',
+    code: 'RUNTIME_UNCHECKED',
+    message:
+      'Runtime was NOT verified — the browser console could not be captured (no live preview session), so ' +
+      'runtime errors, if any, were not detected. This is not a clean-runtime guarantee.',
+    autoResolved: false,
+  };
+}
+
+/** Actionable runtime errors survived the repair budget — the build shipped but they may still be present. */
+export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerifyRecord {
+  // M3-S3.1: name how many of the remaining errors are app-CRASHING (vs recoverable warnings), so the
+  // admin report tells a genuinely-broken preview apart from console chatter instead of a flat count.
+  const fatal = fatalRuntimeErrorCount(errors);
+  const fatalNote = fatal > 0 ? ` ${fatal} of them crash the app at runtime.` : '';
+  return {
+    phase: 'autofix',
+    severity: 'warning',
+    code: 'RUNTIME_ERRORS_REMAIN',
+    message:
+      `${errors.length} runtime error(s) remained after the auto-fix budget was spent — the app was built, ` +
+      `but these were detected in the browser at runtime and may still be present.${fatalNote}`,
+    autoResolved: false,
+  };
 }

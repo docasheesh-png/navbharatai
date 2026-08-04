@@ -5,6 +5,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
+import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
@@ -12,6 +13,9 @@ import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
+import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
+import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
@@ -29,6 +33,7 @@ import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 import { deploymentStore, type DeploymentStatus } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -133,6 +138,21 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const totpCode = String(req.body?.totp || '').trim();
     const validUser = adminUsername();
     const validPass = adminPassword();
+    const clientIp = String(req.ip || 'unknown');
+
+    // SEC (admin 2026-07-19) — escalating brute-force lockout ON TOP of the 5/min IP rate limiter.
+    // Once an IP crosses the failure threshold, each further attempt is refused for a window that
+    // grows with the failure count (1m → 2m → 4m … capped at 30m). A correct login clears it, and
+    // it is per-IP so an attacker can only lock their OWN IP, never the real admin's account.
+    if (adminLockoutEnabled()) {
+      const lock = checkAdminLock(clientIp);
+      if (lock.locked) {
+        const retryAfterSec = Math.ceil(lock.retryAfterMs / 1000);
+        audit('ADMIN_LOGIN_LOCKED', { ip: clientIp, retryAfterSec });
+        res.setHeader('Retry-After', String(retryAfterSec));
+        return res.status(429).json({ error: 'Too many failed attempts. Try again later.', retryAfterSec });
+      }
+    }
 
     if (!validPass) {
       audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
@@ -157,9 +177,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         if (!verifyTotp(mfa.secret, totpCode)) {
           audit('ADMIN_LOGIN_MFA_FAILED', { username, ip: req.ip });
           serverStats.failedLogins++;
+          // A correct password with a wrong TOTP is still a failed attempt — count it toward the
+          // lockout so TOTP guessing (1M codes) also gets throttled, not just password guessing.
+          if (adminLockoutEnabled()) recordAdminFail(clientIp);
           return res.status(401).json({ error: 'Invalid authenticator code.', mfaRequired: true });
         }
       }
+      // Full success (password + MFA if enabled) — clear this IP's failure history immediately so a
+      // legitimate admin who mistyped earlier is never left waiting out a lock.
+      if (adminLockoutEnabled()) recordAdminSuccess(clientIp);
       // SEC Phase 5 (F8): a TIME-STAMPED token with a 30-day TTL (was a static, never-expiring HMAC).
       // The issued-at is signed in, so a leaked token now expires instead of granting permanent access.
       const token = mintAdminToken(validPass, username, Date.now());
@@ -171,6 +197,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     serverStats.failedLogins++;
     serverStats.failedLoginIPs.push({ ip: String(req.ip), time: Date.now(), username });
     if (serverStats.failedLoginIPs.length > 100) serverStats.failedLoginIPs.shift();
+    if (adminLockoutEnabled()) recordAdminFail(clientIp);
     return res.status(401).json({ error: 'Invalid credentials.' });
   });
 
@@ -475,6 +502,44 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // Build Reports inbox (admin 2026-07-29): the reports users submit via the single "Report" button.
+  // Admin-only — the user never sees report content; this is where the admin reads/downloads it.
+  app.get('/api/admin/build-reports', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+      const reports = await listAdminBuildReports(limit);
+      res.json({ reports });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load build reports.' });
+    }
+  });
+
+  // FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the one number that says whether the ENGINE is getting
+  // better, not just whether the heals are. Per the fifth absolute rule's 50/50 law a self-heal is a RED
+  // FLAG, so the headline is the CLEAN rate (builds that needed zero repairs), never the delivered rate.
+  // `topHealCodes` is the actionable half: each entry is an upstream bug to prevent so that heal becomes
+  // dead code. Admin-only — this is internal engine quality, never a user-facing surface.
+  app.get('/api/admin/first-pass-quality', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const reports = await listAdminBuildReports(limit);
+      const stats = firstPassStatsFromMeta(reports);
+      res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
+    }
+  });
+
+  app.get('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const record = await getAdminBuildReport(String(req.params.id));
+      if (!record) { res.status(404).json({ error: 'Build report not found.' }); return; }
+      res.json(record);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load the build report.' });
+    }
+  });
+
   // G2 — structured server log query endpoint.
   app.get('/api/admin/logs', verifyAdminToken, async (req: Request, res: Response) => {
     try {
@@ -703,6 +768,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const newBalance = Math.max(0, (data.tokenBalance || 0) + delta);
       await updateDoc(walletRef, {
         tokenBalance: newBalance,
+        // ROOT-CAUSE FIX (gift-token bug, admin 2026-08-03: "₹0 + 50,000 tokens → app building off"). The
+        // affordability gate reads `remaining_balance` (₹); this path used to bump ONLY tokenBalance, so a
+        // gifted user showed ₹0 and could not build despite the tokens. Keep the ₹ MIRROR in sync (same
+        // rate the welcome bonus + purchases use), so the balance is consistent for the gate AND the UI.
+        remaining_balance: TOKENS_PER_RUPEE > 0 ? newBalance / TOKENS_PER_RUPEE : 0,
         walletLedger: [...(data.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
         updatedAt: new Date().toISOString(),
       });
@@ -889,15 +959,25 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     res.json({ latestKeyVersion: getLatestKeyVersion() });
   });
 
-  // ── Announcement broadcast ────────────────────────────────────────────────
-  app.post('/api/admin/announcement', verifyAdminToken, (req: Request, res: Response) => {
-    const { message, target } = req.body;
-    if (!message) return res.status(400).json({ error: 'message required' });
-    const ann = { id: Date.now().toString(), message, createdAt: new Date().toISOString(), target: target || 'all' };
+  // ── Announcement / user notification ──────────────────────────────────────
+  // Admin 2026-07-30: this now DELIVERS to users for real. Besides the in-memory admin list (kept for
+  // the admin's own recent-announcements view), it persists a durable notification targeted at ALL
+  // users or a SPECIFIC user (by email/userId), which the user's app fetches via /api/notifications.
+  app.post('/api/admin/announcement', verifyAdminToken, async (req: Request, res: Response) => {
+    const { message, target, email, userId } = req.body ?? {};
+    if (!message || !String(message).trim()) return res.status(400).json({ error: 'message required' });
+    const normalizedTarget = normalizeTarget({ target, email, userId });
+    if (normalizedTarget.type === 'user' && !normalizedTarget.userId && !normalizedTarget.email) {
+      return res.status(400).json({ error: 'For a single-user message, provide the user’s email (or user id).' });
+    }
+    // Durable, user-delivered notification.
+    const note = await saveNotification({ message: String(message), target: normalizedTarget, createdBy: 'admin' });
+    // In-memory admin recent-list (unchanged behaviour for the admin's own view).
+    const ann = { id: note?.id ?? Date.now().toString(), message, createdAt: new Date().toISOString(), target: target || 'all' };
     serverStats.announcements.push(ann);
     if (serverStats.announcements.length > 50) serverStats.announcements.shift();
-    audit('ADMIN_ANNOUNCEMENT', { message, target, ip: req.ip });
-    res.json({ ok: true, announcement: ann });
+    audit('ADMIN_ANNOUNCEMENT', { message, target: normalizedTarget.type, ip: req.ip });
+    res.json({ ok: true, announcement: ann, delivered: normalizedTarget.type });
   });
 
   app.get('/api/admin/announcements', verifyAdminToken, (_req: Request, res: Response) => {

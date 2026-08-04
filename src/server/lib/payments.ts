@@ -1,10 +1,12 @@
 import axios from 'axios';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
-import { doc, getDoc, runTransaction, getServerDb as getDb } from './serverDb';
+import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
-import { professionalPassDays } from '../professionals/professionalPaid';
+import {
+  professionalPassPriceInr, passEntitlementForPayment, MAX_PASS_PERIODS,
+} from '../professionals/professionalPaid';
 
 // SECURITY (audit C4 — CRITICAL, financial): the vishwakarma order's paid amount is
 // `tokenAmount₹ + (buyPass ? pass : 0)` (client: createVishwakarmaOrder in App.tsx). The credit path
@@ -17,15 +19,22 @@ export const VISHWAKARMA_PASS_PRICE_RUPEES = 100;
 export const TOKENS_PER_RUPEE = 100;
 
 /**
- * WELCOME BONUS tokens minted for a brand-new wallet (admin routing plan 2026-07-11: raised
- * 1,000 → 50,000 = ₹500 equivalent, so a new user's FIRST real app build fits inside the bonus —
- * it runs on the free-tier cheap engines, never Claude, per NAVBHARATAI_ROUTING_PLAN.md §1).
+ * WELCOME BONUS tokens minted for a brand-new wallet.
+ *
+ * 25,000 = ₹250 (admin 2026-07-28). Previously 50,000 (₹500), from the era when the bonus only had to
+ * cover a first app BUILD. It is now the opening balance of a single wallet that pays for everything —
+ * builds, images, strong-model answers — and it is followed by a weekly top-up (see weeklyTopUp.ts), so
+ * the SIGNUP grant no longer has to carry a user on its own. ₹250 still funds a complete first app.
+ *
+ * What it actually costs us: builds bill at roughly 4x the real provider cost, so ₹250 of credit is
+ * about ₹62 of real spend per new account — the number that matters when signups scale.
+ *
  * Env-overridable (WELCOME_BONUS_TOKENS) so the admin can tune it from Cloud Run without a deploy;
  * non-finite/negative overrides fall back to the default.
  */
 export function welcomeBonusTokens(): number {
   const n = Number(process.env.WELCOME_BONUS_TOKENS);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 50_000;
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 250 * TOKENS_PER_RUPEE;
 }
 
 /**
@@ -38,17 +47,25 @@ export function inrToWalletTokens(inr: number): number {
 }
 
 /**
- * The ₹→token conversion for a DEBIT (a build charge). Rounds UP (ceil), never down — the spec's
- * margin-protection rule: a fractional token of cost is always charged as a whole token so the
- * platform never eats sub-token spend. The difference vs inrToWalletTokens (round, used for
- * credit/display) is at most 1 token (₹0.01) per build. Float noise is scrubbed BEFORE the ceil so a
- * clean ₹ amount (0.3 × 100 = 30.000000000000004 in IEEE-754) can never inflate a whole extra token.
- * Non-finite / non-positive → 0.
+ * The ₹→token conversion for a DEBIT (a build charge), as an EXACT possibly-fractional amount.
+ *
+ * It used to round UP, for margin protection. That had two costs. The small one: every build charged
+ * the user up to ₹0.01 more than it really cost, which the White-Label Law's "the bill they pay is
+ * always the real one" does not allow. The real one: `tokenBalance` was debited with the ceil while
+ * `remaining_balance` was debited with the paisa-rounded ₹, so the wallet's TWO views of the same
+ * money drifted a little further apart on every single build.
+ *
+ * Margin is not given away — the sub-token remainder is CARRIED to the user's next charge
+ * (computeDebitedWallet), so nothing is forgiven, only deferred by at most ₹0.01. That also makes
+ * per-message charges honest: rounding a ₹0.002 chat turn up to ₹0.01 would have billed 5× the real
+ * cost, which is the wrong answer for one shared wallet spent everywhere.
+ *
+ * Float noise is scrubbed so a clean ₹ amount (0.3 × 100 = 30.000000000000004 in IEEE-754) stays
+ * clean. Non-finite / non-positive → 0.
  */
 export function inrToDebitTokens(inr: number): number {
   if (!Number.isFinite(inr) || inr <= 0) return 0;
-  const cleaned = Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // kill IEEE-754 noise before ceil
-  return Math.ceil(cleaned);
+  return Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // exact to a millionth of a token
 }
 
 /** Tokens a vishwakarma order may credit, derived ONLY from the amount actually paid. Pure + tested. */
@@ -240,10 +257,39 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       // client poll can't double-grant). Days/plan come from the tx doc, falling back to the server
       // config (never trusts the client for the entitlement length).
       if (String(txData.productType || '') === 'professional_pass') {
-        const days = Number.isFinite(Number(txData.passDays)) && Number(txData.passDays) > 0 ? Number(txData.passDays) : professionalPassDays();
+        // SECURITY (money): the entitlement is DERIVED from the amount actually paid — which the block
+        // above has already reconciled against what Cashfree really charged — times the SERVER's own
+        // price. The client's `passDays` is deliberately ignored: it used to be trusted, so an order of
+        // `{ amount: 1, passDays: 36500 }` bought a hundred-year pass for one rupee. Same defect class
+        // as the C4 wallet fix (credited tokens derive from the verified paid amount), applied here.
+        const entitlement = passEntitlementForPayment(txData.amountPaid);
         const plan = String(txData.passPlan || 'monthly');
-        const expiresAt = await professionalPassStore.grant(txData.userId, days, plan);
-        return { success: true, data: { professionalPass: true, expiresAt, plan, days } };
+        if (entitlement.days <= 0) {
+          // Paid, but not enough for a single period. The order-creation guard should have refused this,
+          // so reaching here means money moved with nothing to grant — record it loudly for a refund
+          // rather than silently swallowing the payment.
+          console.error(
+            `[PASS] Order ${orderId} paid ₹${txData.amountPaid} — below the ₹${professionalPassPriceInr()} pass price. ` +
+            `NOTHING granted; this payment needs a manual refund.`,
+          );
+          try { await updateDoc(txRef, { fulfilmentError: 'amount_below_pass_price', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
+          return { success: false, error: 'That payment did not cover the Professional Pass price. Please contact support for a refund.' };
+        }
+        if (entitlement.capped) {
+          console.error(
+            `[PASS] Order ${orderId} paid ₹${txData.amountPaid} — covers more than the ${MAX_PASS_PERIODS}-period ` +
+            `automatic maximum. Granted ${entitlement.days} days; the remainder needs an admin decision.`,
+          );
+        }
+        const expiresAt = await professionalPassStore.grant(txData.userId, entitlement.days, plan);
+        try {
+          await updateDoc(txRef, {
+            passDaysGranted: entitlement.days,
+            ...(entitlement.capped ? { passCapped: true } : {}),
+            fulfilledAt: new Date().toISOString(),
+          });
+        } catch { /* the pass is granted; the audit note is best-effort */ }
+        return { success: true, data: { professionalPass: true, expiresAt, plan, days: entitlement.days } };
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);

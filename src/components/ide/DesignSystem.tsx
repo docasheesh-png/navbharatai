@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { LayoutTemplate, Layers, Palette, Type, Copy, Check, Plus, Trash2, Download, Eye, Code, Sparkles, RefreshCw, Sliders } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { LayoutTemplate, Copy, Check, Download, Eye, Code, Loader2, Save, History, AlertTriangle } from 'lucide-react';
+import { injectStyleBlock, canCarryStylesheet } from '../../lib/cssInjection';
+import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
 
 interface ColorToken {
   name: string;
@@ -92,7 +94,7 @@ const COMPONENT_PREVIEWS = [
     name: 'Card',
     code: `<div className="card"><h3>Card Title</h3><p>Card content here.</p></div>`,
     preview: (_: string) => (
-      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '16px', width: 180 }}>
+      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '16px', width: '100%', maxWidth: 180 }}>
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Card Title</div>
         <div style={{ color: '#94a3b8', fontSize: 12 }}>Card content here.</div>
       </div>
@@ -109,17 +111,24 @@ const COMPONENT_PREVIEWS = [
     name: 'Input',
     code: `<input type="text" className="input" placeholder="Type here..." />`,
     preview: (_: string) => (
-      <input type="text" placeholder="Type here..." style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '8px 12px', fontSize: 13, outline: 'none', width: 180 }} />
+      <input type="text" placeholder="Type here..." style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '8px 12px', fontSize: 13, outline: 'none', width: '100%', maxWidth: 180 }} />
     ),
   },
 ];
 
+/** Identifies this tool's block so a re-run replaces its own tokens and nothing else. */
+const TOKENS_MARKER = 'nb-design-tokens';
+
 interface DesignSystemProps {
   onCodeUpdate?: (html: string) => void;
   generatedCode?: string;
+  /** The v5-synced workspace files — kept for the preview handoff only. */
+  files?: Record<string, string>;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
 }
 
-export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps = {}) {
+export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}) {
   const [tokens, setTokens] = useState<DesignTokens>(() => {
     try { return JSON.parse(localStorage.getItem('navbharat_design_tokens') || JSON.stringify(DEFAULT_TOKENS)); } catch { return DEFAULT_TOKENS; }
   });
@@ -128,9 +137,30 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
   const [editingColor, setEditingColor] = useState<number | null>(null);
   const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview');
 
+  // Saving into the user's REAL app (admin 2026-07-27). This used to call onCodeUpdate, which only
+  // changed the in-memory preview — reopen the app tomorrow and the tokens were gone.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [targetPath, setTargetPath] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
+
   useEffect(() => {
     localStorage.setItem('navbharat_design_tokens', JSON.stringify(tokens));
   }, [tokens]);
+
+  // Default to the file most apps keep their styles in, so the common case needs no thought.
+  useEffect(() => {
+    if (targetPath && appFiles.some((f) => f.path === targetPath)) return;
+    const carriers = appFiles.filter((f) => f.writable && canCarryStylesheet(f.path)).map((f) => f.path);
+    const preferred = carriers.find((p) => /(^|\/)(styles?|main|index|app|global)\.css$/i.test(p))
+      || carriers.find((p) => p.endsWith('.css'))
+      || carriers.find((p) => /(^|\/)index\.html?$/i.test(p))
+      || carriers[0]
+      || '';
+    setTargetPath(preferred);
+  }, [appFiles, targetPath]);
 
   const primaryColor = tokens.colors.find(c => c.name === 'primary')?.value || '#6366f1';
 
@@ -159,6 +189,59 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
     return lines.join('\n');
   };
 
+  /**
+   * Write the tokens into the chosen file of the chosen app, for real.
+   *
+   * The file is re-read first so the block is merged into the CURRENT content rather than a stale
+   * copy — someone may have edited it since the picker loaded. The server then saves a verified
+   * restore point before overwriting, so this is always undoable from Versioning.
+   */
+  const saveTokensToApp = useCallback(async () => {
+    if (!targetSession || !targetPath || saving) return;
+    setSaving(true);
+    setSaveNote('');
+    setSaveFailed(false);
+    try {
+      const current = await readAppFile(targetSession, targetPath);
+      // A path the picker offered as "new" simply starts empty; anything else must be readable.
+      const source = current ?? '';
+      const injected = injectStyleBlock(targetPath, source, generateCSS(), TOKENS_MARKER);
+      if (!injected.ok) {
+        setSaveFailed(true);
+        setSaveNote(injected.error || 'That file cannot carry a stylesheet.');
+        return;
+      }
+
+      const outcome = await saveFilesToApp(
+        targetSession,
+        { [targetPath]: injected.code },
+        `Before adding design tokens to ${targetPath}`,
+      );
+      if (!outcome.ok) {
+        setSaveFailed(true);
+        setSaveNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      if (outcome.unchanged) {
+        setSaveNote('Your app already has exactly these tokens — nothing needed changing.');
+        return;
+      }
+      setSaveNote(
+        `${injected.replaced ? 'Updated' : 'Added'} the design tokens in ${targetPath}. ${outcome.undoHint || ''}`.trim(),
+      );
+      void reloadFiles(targetSession);
+      // Also refresh what is on screen, so the change is visible immediately as well as saved.
+      if (onCodeUpdate && /\.html?$/i.test(targetPath)) onCodeUpdate(injected.code);
+    } catch {
+      setSaveFailed(true);
+      setSaveNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setSaving(false);
+    }
+    // generateCSS reads `tokens`, which is already a dependency through the closure below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetSession, targetPath, saving, tokens, onCodeUpdate, reloadFiles]);
+
   const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: '#e2e8f0', fontFamily: 'sans-serif' };
   const cardStyle: React.CSSProperties = { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px' };
   const monoStyle: React.CSSProperties = { fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
@@ -166,7 +249,8 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
   return (
     <div style={containerStyle}>
       {/* Header */}
-      <div style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+      {/* Header. Wraps and scrolls its tabs on a phone — the row used to overflow off-screen. */}
+      <div style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <LayoutTemplate size={20} color="#a855f7" />
           <div>
@@ -174,9 +258,9 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
             <div style={{ color: '#64748b', fontSize: 11 }}>Tokens, components & style guide</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%', paddingBottom: 2 }}>
           {(['colors', 'typography', 'spacing', 'components', 'export'] as const).map(t => (
-            <button key={t} onClick={() => setActiveTab(t)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, background: activeTab === t ? '#a855f7' : '#334155', color: activeTab === t ? '#fff' : '#94a3b8' }}>
+            <button key={t} onClick={() => setActiveTab(t)} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0, background: activeTab === t ? '#a855f7' : '#334155', color: activeTab === t ? '#fff' : '#94a3b8' }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
@@ -214,13 +298,13 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
         {activeTab === 'typography' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {tokens.typography.map((t, idx) => (
-              <div key={idx} style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div key={idx} style={{ ...cardStyle, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: t.fontFamily, fontSize: Math.min(t.fontSize, 32), fontWeight: t.fontWeight, lineHeight: t.lineHeight, color: '#e2e8f0' }}>
                     {t.name.charAt(0).toUpperCase() + t.name.slice(1)} — NavBharatAI
                   </div>
                 </div>
-                <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                <div style={{ flexShrink: 0, textAlign: 'right', minWidth: 0 }}>
                   <div style={{ ...monoStyle, color: '#94a3b8' }}>{t.fontFamily} · {t.fontSize}px · {t.fontWeight}</div>
                   <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>line-height: {t.lineHeight}</div>
                 </div>
@@ -269,7 +353,7 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
                 </button>
               ))}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
               {COMPONENT_PREVIEWS.map(comp => (
                 <div key={comp.name} style={{ ...cardStyle }}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#94a3b8' }}>{comp.name}</div>
@@ -301,27 +385,63 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
                 <button onClick={() => copyText(generateCSS(), 'css')} style={{ padding: '8px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#a855f7', color: '#fff', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {copied === 'css' ? <><Check size={12} />Copied!</> : <><Copy size={12} />Copy CSS</>}
                 </button>
-                {onCodeUpdate && (
-                  <button
-                    onClick={() => {
-                      const css = generateCSS();
-                      const styleTag = `<style id="nb-design-tokens">\n${css}\n</style>`;
-                      let newHtml = generatedCode || '';
-                      if (newHtml.includes('<style id="nb-design-tokens">')) {
-                        newHtml = newHtml.replace(/<style id="nb-design-tokens">[\s\S]*?<\/style>/, styleTag);
-                      } else if (newHtml.includes('</head>')) {
-                        newHtml = newHtml.replace('</head>', `${styleTag}\n</head>`);
-                      } else {
-                        newHtml = styleTag + '\n' + newHtml;
-                      }
-                      onCodeUpdate!(newHtml);
-                    }}
-                    style={{ padding: '8px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
-                  >
-                    <Download size={12} /> Inject CSS Tokens into App
-                  </button>
-                )}
               </div>
+            </div>
+
+            {/* Save into the user's real app. Previously this only updated the on-screen preview, so
+                the tokens vanished the moment the tab closed and the v5 builder never saw them. */}
+            <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '12px 12px 0', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Save size={14} color="#a855f7" /> Save these tokens into your app
+              </div>
+
+              <AppTargetPicker
+                apps={apps}
+                appsLoading={appsLoading}
+                files={appFiles}
+                filesLoading={filesLoading}
+                sessionId={targetSession}
+                onSessionChange={(s) => { setTargetSession(s); setTargetPath(''); setSaveNote(''); }}
+                selectedPath={targetPath}
+                onPathChange={(p) => { setTargetPath(p); setSaveNote(''); }}
+                fileFilter={(f) => canCarryStylesheet(f.path)}
+                fileLabel="Add the tokens to"
+              />
+
+              {apps.length > 0 && (
+                <div style={{ padding: '0 12px 12px' }}>
+                  <button
+                    onClick={() => void saveTokensToApp()}
+                    disabled={!targetSession || !targetPath || saving}
+                    style={{
+                      width: '100%', padding: '13px 16px', borderRadius: 10, border: 'none',
+                      cursor: !targetSession || !targetPath || saving ? 'not-allowed' : 'pointer',
+                      background: '#7c3aed', color: '#fff', fontSize: 15, fontWeight: 700,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      opacity: !targetSession || !targetPath || saving ? 0.4 : 1,
+                    }}
+                  >
+                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                    {saving ? 'Saving into your app…' : 'Save tokens into my app'}
+                  </button>
+                  <p style={{ marginTop: 8, fontSize: 11, color: '#64748b', lineHeight: 1.5, display: 'flex', gap: 5 }}>
+                    <History size={11} style={{ marginTop: 2, flexShrink: 0 }} />
+                    A restore point is saved first, so you can undo this any time from Versioning.
+                    Running it again updates the same block instead of adding another copy.
+                  </p>
+                  {saveNote && (
+                    <p style={{
+                      marginTop: 8, fontSize: 12, lineHeight: 1.5, padding: '8px 10px', borderRadius: 8,
+                      color: saveFailed ? '#fcd34d' : '#86efac',
+                      background: saveFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)',
+                      display: 'flex', gap: 6,
+                    }}>
+                      {saveFailed && <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />}
+                      <span>{saveNote}</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ ...cardStyle }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Tailwind Config</div>

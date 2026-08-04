@@ -1,6 +1,7 @@
-import { AIRouterManager } from '../AI/AIRouterManager';
+import { callProfessionalAIWithUsage, type ProfessionalAnswer } from '../lib/professionalRouting';
+import type { ChatTurnUsage } from '../lib/chatSpend';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
-import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import {
   extractMemory,
@@ -63,7 +64,7 @@ export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBloc
   // config.method (the field's signature method) sits right after the persona so its domain rigor
   // is prominent; EXPERT_METHOD_LAYER gives every professional expert depth even without a bespoke method.
   const methodBlock = config.method ? `YOUR SIGNATURE METHOD (${config.name}) — follow it whenever you do your core work:\n${config.method}` : '';
-  return [config.systemPrompt, methodBlock, PROFESSIONAL_PERSONA_LAYER, EXPERT_METHOD_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), CREATOR_IDENTITY]
+  return [config.systemPrompt, methodBlock, PROFESSIONAL_PERSONA_LAYER, EXPERT_METHOD_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), INDIA_TERRITORIAL_INTEGRITY, CREATOR_IDENTITY]
     .filter(Boolean)
     .join('\n\n');
 }
@@ -84,20 +85,15 @@ export type ProfessionalTier = 'free' | 'paid';
  * Every config-driven professional shares these isolated universes, never mixing routing state with
  * FREE or PRO. (Doctor AI / SDA has its own route.)
  */
-async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<string> {
-  // Tier-1 leader (BOTH tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
+// The resilient chain now lives in the SHARED professionalRouting module, so the Other-AI tools call
+// the exact same engine (admin 2026-07-24) with zero drift. This thin wrapper keeps the callers here
+// unchanged and preserves the professional-specific error message.
+async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<ProfessionalAnswer> {
   try {
-    const freeRouter = AIRouterManager.getRouter('professional-free');
-    const { response, telemetry } = await freeRouter.routeRaced(prompt, systemPrompt);
-    if (telemetry.success && response.content?.trim()) return response.content;
-  } catch { /* fall through to the tier's fallback universe */ }
-
-  // Fallback universe depends on the tier: free → Vertex-only; paid → full race → Haiku.
-  const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
-  const router = AIRouterManager.getRouter(fallbackNs);
-  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
-  if (telemetry.success && response.content?.trim()) return response.content;
-  throw new Error('All AI providers failed for this professional.');
+    return await callProfessionalAIWithUsage(systemPrompt, prompt, tier);
+  } catch {
+    throw new Error('All AI providers failed for this professional.');
+  }
 }
 
 /**
@@ -118,6 +114,30 @@ export async function runProfessionalChat(
   verifiedUserId?: string,
   tier: ProfessionalTier = 'paid',
 ): Promise<string> {
+  const { reply } = await runProfessionalChatWithUsage(config, message, history, verifiedUserId, tier);
+  return reply;
+}
+
+/** One professional turn, with what the model call cost — see ProfessionalAnswer / chatSpend.ts. */
+export interface ProfessionalChatResult {
+  reply: string;
+  spend: ChatTurnUsage;
+}
+
+/**
+ * The same turn as runProfessionalChat, keeping the cost instead of discarding it.
+ *
+ * The wallet is one currency now (aiTurnCharge.ts): a professional answer draws from the same balance
+ * a build does, so the route needs to know what the turn cost. The text-only wrapper above keeps every
+ * other caller unchanged.
+ */
+export async function runProfessionalChatWithUsage(
+  config: ProfessionalConfig,
+  message: string,
+  history: ProfessionalTurn[] = [],
+  verifiedUserId?: string,
+  tier: ProfessionalTier = 'paid',
+): Promise<ProfessionalChatResult> {
   // Per-user memory (memory-enabled professionals): load what we remember about this
   // user and inject it + the memory behaviour layer. Anonymous users still get the
   // introduction behaviour, but with an honest "cannot remember you" constraint.
@@ -174,7 +194,7 @@ export async function runProfessionalChat(
     if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
   } catch { /* live search is best-effort */ }
 
-  const raw = await resilientCall(systemPrompt, prompt, tier);
+  const { content: raw, spend } = await resilientCall(systemPrompt, prompt, tier);
 
   // ALWAYS strip any memory block from what the user sees (even for memory-off
   // professionals / anonymous users — a leaked machine block must never reach the
@@ -196,5 +216,5 @@ export async function runProfessionalChat(
 
   // reply is empty only when the model's ENTIRE output was machine blocks — never
   // fall back to raw there (that would leak the block into the chat).
-  return reply || 'Noted! What would you like to learn next?';
+  return { reply: reply || 'Noted! What would you like to learn next?', spend };
 }

@@ -10,9 +10,12 @@ import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
+import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
+import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
+import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -39,6 +42,10 @@ export interface AgentRunnerOptions {
   /** Max model turns before the loop stops (backstop). Default 50. */
   maxSteps?: number;
   maxTokensPerTurn?: number;
+  /** AP-4 (flag-gated, default off): allow frontend/backend WRITER sub-agents to run in parallel. Safe
+   *  only when the actuator is wrapped with the per-path write lock (lockedActuator) — the caller pairs
+   *  the two. When false/unset, writer sub-agents dispatch serially exactly as before. */
+  parallelBuild?: boolean;
   /** D6 — bill at the Only-Opus rate instead of the standard rate. Legacy boolean. */
   onlyOpus?: boolean;
   /**
@@ -181,12 +188,18 @@ const PARALLEL_SAFE_TASK_ROLES = new Set<string>([
 /**
  * A tool call is parallel-safe when it cannot mutate shared sandbox state: a read-only tool, or
  * a `task` spawn of a review-only specialist. Everything else (write/edit/bash, todo/preview
- * updates, generators, and builder sub-agents) runs serially.
+ * updates, generators) runs serially.
+ *
+ * AP-4 (opts.parallelBuild, flag-gated): when parallel building is enabled, the WRITER task roles
+ * (frontend/backend) also become parallel-eligible — their same-path file writes are serialized by the
+ * lockedActuator write-lock and disjoint paths run concurrently, so two builder sub-agents can work at
+ * once safely. Default OFF ⇒ writers stay serial exactly as before.
  */
-export function isParallelSafeToolUse(toolUse: ToolUse): boolean {
+export function isParallelSafeToolUse(toolUse: ToolUse, opts?: { parallelBuild?: boolean }): boolean {
   if (toolUse.name === 'task') {
     const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
-    return PARALLEL_SAFE_TASK_ROLES.has(role);
+    if (PARALLEL_SAFE_TASK_ROLES.has(role)) return true;
+    return opts?.parallelBuild === true && PARALLEL_WRITER_ROLES.has(role);
   }
   return PARALLEL_SAFE_TOOLS.has(toolUse.name);
 }
@@ -260,6 +273,19 @@ export class AgentRunner {
     const expectsArtifacts = this.opts.expectsArtifacts === true;
     const readinessGate = this.opts.readinessGate === true;
     const lintGate = this.opts.lintGate === true;
+    // P-PIPE — build-end dependency-health advisory (OSV/CVE + strong-copyleft). Default-OFF admin flag
+    // (AGENTV3_DEPHEALTH_GATE=on); read here directly (self-contained) rather than threaded via opts since it
+    // is advisory-only and never influences build control flow. When on, it appends an advisory block to a
+    // successful build's summary — it NEVER blocks or fails a build.
+    const depHealthGate = process.env.AGENTV3_DEPHEALTH_GATE === 'on';
+    // Cap-4 injection — deterministically add a /health route to an Express entry that lacks one, at
+    // build-end. Default-OFF admin flag (AGENTV3_OBSERVABILITY_INJECT=on); read here directly (self-contained,
+    // advisory-adjacent). Purely additive + persisted via the durable write path; it NEVER blocks a build.
+    const observabilityInject = process.env.AGENTV3_OBSERVABILITY_INJECT === 'on';
+    // P-PIPE — build-end PRETTIER advisory. Default-OFF admin flag (AGENTV3_PRETTIER_GATE=on); read here
+    // directly (self-contained, advisory-only). When on, it appends a non-blocking "N file(s) need
+    // formatting" note to a successful build's summary — it NEVER blocks or fails a build.
+    const prettierGate = process.env.AGENTV3_PRETTIER_GATE === 'on';
     const maxBuildMs = this.opts.maxBuildMs;
     // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
@@ -399,6 +425,12 @@ export class AgentRunner {
     };
 
     let steps = 0;
+    // LOOP BREAKER (repeated-probe autopsy 2026-07-21): one state per build run. When the model re-issues
+    // the EXACT same non-progressing tool call to the threshold, inject a corrective steer so it changes
+    // approach instead of looping to the step cap (a weak build ran the same empty grep ~6 times → ok:None).
+    const repeatProbe = newRepeatProbeState();
+    const loopGuardOn = loopGuardEnabled();
+    const loopThreshold = loopGuardThreshold();
     try {
       // eslint-disable-next-line no-labels
       stepResumeLoop: for (;;) {
@@ -571,28 +603,43 @@ export class AgentRunner {
           // with an honest summary of the blockers. The work is preserved (files/preview still
           // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
           // When escalation is active, this ok:false is exactly what triggers a stronger retry.
-          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
           if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
             try {
+              // HEAL-THEN-JUDGE (CLAUDE.md 50/50 law): make orphaned pages reachable BEFORE the gate
+              // judges them — a page the builder created but forgot to route is wired into <Routes>
+              // deterministically, so it stops being an orphan blocker instead of merely being reported.
+              try { const w = await dispatcher.healOrphanPages(); if (w) events.emit({ type: 'narration', agent: 'architect', text: w, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
+              // Redact credential-logging console statements BEFORE the gate scans compliance — a single
+              // pii-in-logs line is the gate's only high-severity privacy/compliance HARD block, so a
+              // complete app was failing on one debug log. Deterministic, non-breaking, best-effort.
+              try { const c = await dispatcher.healCredentialLogs(); if (c) events.emit({ type: 'narration', agent: 'architect', text: c, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
-              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
+              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
               if (!readiness.ready) {
                 ok = false;
-                const blockers = readiness.blockers.length
-                  ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
-                  : '';
-                // HONESTY (deep-test App #7 + #8): the model's turn text almost always OPENS with a
-                // celebratory "fully built and running!" claim. Leading the summary with that prose
-                // and only appending the verdict below misled the user at a glance about a build that
-                // FAILED the gate. Put the honest NOT-READY verdict FIRST; keep the model's prose
-                // below it, clearly labelled as possibly overstating — so the very first thing the
-                // user reads is the truth, not a false success.
-                const claim = turn.text.trim();
-                const claimBlock = claim
-                  ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
-                  : '';
-                summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
+                // USER-FACING SUMMARY = SHORT + PLAIN (admin 2026-08-02: "isko simple short karo"). The raw
+                // technical blockers (file:line, babel code frames like `Duplicate declaration ErrorBoundary`,
+                // Rules-of-Hooks paths) AND the model's long, possibly-overstating "here's everything I built"
+                // prose are developer NOISE to a non-technical user — a wall of text on a failed build. They
+                // are NOT lost: the exact blockers ride the build-health card (buildHealth.blockers) and the
+                // admin build report (rootCause / problems / issues structured fields), and the route appends
+                // the actionable next step (e.g. the weak-tier "switch to a stronger tier" guidance). The user
+                // just gets one honest, calm headline. AGENTV3_VERBOSE_READINESS=on restores the old detailed
+                // summary (blockers dump + labelled agent prose) for deep debugging.
+                if ((process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on') {
+                  const blockers = readiness.blockers.length
+                    ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
+                    : '';
+                  const claim = turn.text.trim();
+                  const claimBlock = claim
+                    ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
+                    : '';
+                  summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
+                } else {
+                  summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
+                }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
           }
@@ -607,6 +654,34 @@ export class AgentRunner {
                 summary = `${summary}\n\n⚠️ Lint gate: ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'} — fix before shipping.${detail}`;
               }
             } catch { /* lint gate is best-effort — a scan error never fails a real build */ }
+          }
+
+          // P-PIPE — build-end dependency-health advisory (CVE + strong-copyleft). Advisory-only: appends to
+          // the summary of a successful artifact build, NEVER blocks it (a transitive CVE / GPL dep must not
+          // break an otherwise-working app). Best-effort — a scan error is swallowed.
+          if (ok && depHealthGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const advisory = await dispatcher.assessDependencyHealthGate();
+              if (advisory) summary = `${summary}\n\n${advisory}`;
+            } catch { /* advisory gate is best-effort — never fails a build */ }
+          }
+
+          // P-PIPE — build-end prettier formatting advisory. Advisory-only: appends to a successful build's
+          // summary, NEVER blocks (a formatting nit must not fail a working app). Best-effort — swallowed.
+          if (ok && prettierGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const advisory = await dispatcher.assessPrettierGate();
+              if (advisory) summary = `${summary}\n\n${advisory}`;
+            } catch { /* advisory gate is best-effort — never fails a build */ }
+          }
+
+          // Cap-4 injection — add a /health route to an Express entry that lacks one (durable write).
+          // Purely additive; never blocks. Best-effort — a failure is swallowed.
+          if (ok && observabilityInject && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const note = await dispatcher.injectObservability();
+              if (note) summary = `${summary}\n\n${note}`;
+            } catch { /* injection is best-effort — never fails a build */ }
           }
 
           await persist(ok ? 'complete' : 'error');
@@ -657,7 +732,7 @@ export class AgentRunner {
         };
         const serialIdx: number[] = [];
         const parallelIdx: number[] = [];
-        turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu) ? parallelIdx : serialIdx).push(i));
+        turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu, { parallelBuild: this.opts.parallelBuild }) ? parallelIdx : serialIdx).push(i));
         for (const i of serialIdx) {
           resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
         }
@@ -673,23 +748,66 @@ export class AgentRunner {
         // file it wrote (esbuild, in-process, free) and hand the exact parse failures back with the
         // tool results — the very next turn rewrites the broken file instead of discovering it later.
         let truncationSteer: string | null = null;
-        if (turn.stopReason === 'max_tokens') {
+        // Trigger on the explicit `truncated` flag (set by EVERY provider adapter from the real finish
+        // reason) — NOT just stopReason === 'max_tokens'. CargoPilot autopsy (NEW-F): the OpenAI/Gemini
+        // adapters MASK a mid-write_file truncation to stopReason 'tool_use', so keying on 'max_tokens'
+        // alone left GLM/Kimi/Gemini truncations (the common cheap-floor case) completely unguarded and a
+        // partial file on disk. `truncated` unmasks them.
+        if (turn.truncated || turn.stopReason === 'max_tokens') {
           try {
             const written: Record<string, string> = {};
+            // A write_file whose arguments were sliced mid-`content` at the token limit: the adapter
+            // salvaged the `path` but there is no `content`, so nothing was written. Name it so the guard
+            // steers a rewrite (the "Unterminated string in JSON" case that previously lost the file's
+            // identity entirely and produced a blind retry).
+            const truncatedToolPaths: string[] = [];
             for (const tu of turn.toolUses) {
-              if (tu.name !== 'write_file') continue;
-              const inp = tu.input as { path?: unknown; content?: unknown };
-              if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+              // Cover write_file AND write_files_batch — a batch write is just as truncatable, and the
+              // old guard only looked at write_file (so a batch's cut-off tail slipped through).
+              if (tu.name === 'write_file') {
+                const inp = tu.input as { path?: unknown; content?: unknown };
+                if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+                else if (typeof inp?.path === 'string' && inp?.content === undefined) truncatedToolPaths.push(inp.path);
+              } else if (tu.name === 'write_files_batch') {
+                const b = tu.input as { files?: unknown };
+                if (Array.isArray(b?.files)) {
+                  for (const f of b.files) {
+                    const ff = f as { path?: unknown; content?: unknown };
+                    if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
+                    else if (typeof ff?.path === 'string' && ff?.content === undefined) truncatedToolPaths.push(ff.path);
+                  }
+                }
+              }
             }
             const broken = Object.keys(written).length > 0 ? await findSyntaxErrors(written) : [];
-            if (broken.length > 0) {
-              const list = broken.map((b) => `${b.path}${b.line ? `:${b.line}` : ''} — ${b.message}`).join('\n');
-              events.emit({ type: 'narration', agent: agentRole, text: `⚠️ The last response was cut off at the token limit and ${broken.length} file(s) it wrote do not parse — rewriting them before moving on.`, ts: Date.now() });
-              truncationSteer = `[TRUNCATION GUARD] Your previous response hit the max-token limit and the following file(s) you wrote in it are syntactically BROKEN (they do not parse):\n${list}\n\nRewrite each listed file COMPLETELY with write_file before doing anything else. Keep each response small enough not to hit the token limit again.`;
+            // Connectly autopsy 2026-07-21: a cheap model that wrote a file as a `<<<FILE …>>>` TEXT block
+            // (not a write_file tool call) and hit its token ceiling loses that file entirely — the main
+            // loop only writes tool calls. Recover those lost/partial text-marker files too, not just the
+            // JS parse-failures. (A path also written via a tool call is not "lost", so exclude it.)
+            const writtenPaths = new Set(Object.keys(written));
+            const textLost = textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p));
+            const truncatedLost = truncatedToolPaths.filter((p) => !writtenPaths.has(p));
+            truncationSteer = truncationRecoverySteer({ brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost });
+            if (truncationSteer) {
+              events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length + truncatedLost.length), ts: Date.now() });
             }
           } catch { /* the guard is best-effort — it must never break a build */ }
         }
-        messages.push({ role: 'user', content: truncationSteer ? [...resultBlocks, { type: 'text', text: truncationSteer }] : resultBlocks });
+        // LOOP BREAKER — steer the model off a repeated non-progressing call (best-effort; never blocks).
+        const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
+        if (loopSteer) {
+          // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and
+          // the same dead call is now banned — say that, rather than repeating the softer first line.
+          const escalated = loopSteer.includes('LOOP GUARD — FINAL');
+          events.emit({
+            type: 'narration', agent: agentRole, ts: Date.now(),
+            text: escalated
+              ? '⚠️ Still repeating the same step — blocking it and moving on to finish the app.'
+              : '⚠️ Noticed a repeated step that isn\'t making progress — nudging a change of approach.',
+          });
+        }
+        const steer = [truncationSteer, loopSteer].filter(Boolean).join('\n\n') || null;
+        messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.
@@ -760,17 +878,20 @@ export class AgentRunner {
         let summary = ok
           ? `Step limit reached (${stepCap}) — stopping here. Your files are saved; send another message to continue.`
           : `Step limit reached (${stepCap}). Stopped without completing.`;
-        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
         if (ok && readinessGate) {
           try {
             const readiness = await dispatcher.assessBuildReadiness();
-            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
+            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
             if (readiness.ready) {
               summary = `Step limit reached (${stepCap}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
             } else {
               ok = false;
-              const blockers = readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : '';
-              summary = `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
+              // User-facing: short + plain (admin 2026-08-02). The exact blockers stay on the health card +
+              // admin report; AGENTV3_VERBOSE_READINESS=on restores the detailed line for debugging.
+              summary = (process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on'
+                ? `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : ''}`
+                : `⚠️ This app isn't fully working yet — a couple of things still need fixing. Send another message and I'll keep going.`;
               // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
               // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
               // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,
@@ -786,7 +907,7 @@ export class AgentRunner {
                   }), 150_000, 'endgame-repair');
                   if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
                     const after = await dispatcher.assessBuildReadiness();
-                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings };
+                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier };
                     if (after.ready) {
                       ok = true;
                       summary = `Step limit reached (${stepCap}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
@@ -809,6 +930,27 @@ export class AgentRunner {
               summary = `Step limit reached (${stepCap}) — and the lint gate found ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'}.${detail}`;
             }
           } catch { /* lint gate is best-effort — a scan error never flips the verdict */ }
+        }
+        // P-PIPE — build-end dependency-health advisory also applies at the step-cap exit (advisory-only).
+        if (ok && depHealthGate && expectsArtifacts && totalToolUses > 0) {
+          try {
+            const advisory = await dispatcher.assessDependencyHealthGate();
+            if (advisory) summary = `${summary}\n\n${advisory}`;
+          } catch { /* advisory gate is best-effort — never fails a build */ }
+        }
+        // P-PIPE — build-end prettier advisory also applies at the step-cap exit (advisory-only, never blocks).
+        if (ok && prettierGate && expectsArtifacts && totalToolUses > 0) {
+          try {
+            const advisory = await dispatcher.assessPrettierGate();
+            if (advisory) summary = `${summary}\n\n${advisory}`;
+          } catch { /* advisory gate is best-effort — never fails a build */ }
+        }
+        // Cap-4 injection — /health route injection also applies at the step-cap exit (additive, never blocks).
+        if (ok && observabilityInject && expectsArtifacts && totalToolUses > 0) {
+          try {
+            const note = await dispatcher.injectObservability();
+            if (note) summary = `${summary}\n\n${note}`;
+          } catch { /* injection is best-effort — never fails a build */ }
         }
         // Slice 3 — AUTO-RESUME: a NOT-ready artifact build at the cap continues (bounded) instead of
         // dying; the model is steered at the remaining blockers so the extension is spent finishing,

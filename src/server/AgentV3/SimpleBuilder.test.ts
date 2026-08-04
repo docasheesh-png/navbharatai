@@ -1,6 +1,50 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance, repairStrategyForAttempt, REPAIR_LADDER, offendingFiles } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance, repairStrategyForAttempt, REPAIR_LADDER, offendingFiles, exportImportConvention } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
+
+describe('exportImportConvention — framework-aware (ShopSphere/Nuxt autopsy: React rules were fed to Nuxt)', () => {
+  const join = (fw: string) => exportImportConvention(fw).join('\n');
+
+  it('Vue/Nuxt gets the Vue convention (SFC + auto-import), NOT React', () => {
+    for (const fw of ['nuxt', 'vue', 'Nuxt 3']) {
+      const t = join(fw);
+      expect(t).toContain('Vue 3 / Nuxt');
+      expect(t).toContain('Single-File Components');
+      expect(t).toContain('AUTO-IMPORTED');
+      expect(t).not.toContain('A React COMPONENT'); // the React-convention marker must be absent
+      // the exact ShopSphere mistakes are explicitly forbidden
+      expect(t).toContain('useSupabaseClient');
+      expect(t).toContain('EXACTLY ONCE'); // duplicate-import guard
+    }
+  });
+
+  it('Svelte/SvelteKit gets the Svelte convention', () => {
+    const t = join('sveltekit');
+    expect(t).toContain('Svelte');
+    expect(t).toContain('export let');
+    expect(t).toContain('$lib');
+    expect(t).not.toContain('A React COMPONENT');
+  });
+
+  it('React family (react / vite-react / next / remix) keeps the React convention', () => {
+    for (const fw of ['react', 'vite-react', 'nextjs', 'remix']) {
+      expect(join(fw)).toContain('A React COMPONENT file');
+    }
+  });
+
+  it('unknown / Angular falls back to the framework-neutral convention (no React specifics)', () => {
+    const t = join('angular');
+    expect(t).not.toContain('A React COMPONENT');
+    expect(t).not.toContain('Vue 3');
+    expect(t).toContain('IDIOMATIC');
+  });
+
+  it('fileSystemPrompt + repairSystemPrompt both carry the framework-correct convention for Nuxt', () => {
+    expect(fileSystemPrompt('nuxt')).toContain('Single-File Components');
+    expect(repairSystemPrompt('nuxt')).toContain('Single-File Components');
+    expect(fileSystemPrompt('nuxt')).not.toContain('A React COMPONENT');
+  });
+});
 
 describe('parseFileManifest', () => {
   it('parses "path :: purpose" lines, stripping bullets', () => {
@@ -98,6 +142,80 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     }
   });
 
+  it('bails FAST on a slow PLAN call (bounded plan timeout) instead of running to the overall cap (buildId 9a88c6e7)', async () => {
+    // Root cause: a storming provider once ran the manifest call 247 s, blowing the 240 s overall budget so
+    // the fast lane always timed out. With planTimeoutMs the plan bails quickly → the full builder recovers.
+    const start = Date.now();
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: false,
+      planTimeoutMs: 40,
+      overallTimeoutMs: 5000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) { await new Promise((res) => setTimeout(res, 400)); return 'src/App.tsx :: root'; }
+        return '<<<FILE src/App.tsx>>>\nexport default function X(){return null}\n<<<ENDFILE>>>';
+      },
+    }));
+    const elapsed = Date.now() - start;
+    expect(r.ok).toBe(false); // the fast lane bailed → the caller hands off to the full builder
+    expect(elapsed).toBeLessThan(2500); // bailed on the ~40ms plan cap, NOT the 5000ms overall cap
+  });
+
+  // WIRING TESTS for the budget allocation (admin report 858f6d7b). FastLaneBudget's own unit tests prove
+  // the arithmetic; these prove runSimpleBuild actually USES it. Without them the pure functions could be
+  // perfect and the lane could still starve its file-generation phase — which is precisely the bug that
+  // shipped. Scaled-down timings (a 1000ms lane instead of 240s) keep the same ratios and run fast.
+  it('a slow PLAN shrinks the contract phase instead of compounding with it (budget allocation)', async () => {
+    // The reported build: the plan consumed nearly the whole preamble, then the contract took another 70s
+    // on top because its cap was INDEPENDENT — 159s of a 240s lane gone before the first file was written.
+    //
+    // Scaled down: a 1000ms lane, so the preamble's share is 40% = 400ms. The plan eats 380ms of it, which
+    // leaves the contract a ~20ms sliver. The contract then needs 300ms, so it is abandoned and the
+    // file-generation phase keeps its reserved majority. Under the OLD independent cap (900ms) the contract
+    // would have completed comfortably and its text would appear in every per-file prompt.
+    //
+    // The assertion is on that OBSERVABLE — whether the contract reached the per-file prompts — deliberately
+    // NOT on wall-clock elapsed time or on r.ok, both of which drift when the whole suite runs in parallel.
+    // A flaky test that reddens CI at random is worse than no test.
+    const filePrompts: string[] = [];
+    await runSimpleBuild(baseDeps({
+      shareContract: true,
+      planTimeoutMs: 900,          // the OLD independent cap — comfortably longer than the contract needs
+      overallTimeoutMs: 1000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) {
+          await new Promise((res) => setTimeout(res, 380));
+          return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list\nsrc/index.css :: styles';
+        }
+        if (user.includes('Design the shared contract')) {
+          await new Promise((res) => setTimeout(res, 300));
+          return 'export type CONTRACT_MARKER = 1;';
+        }
+        filePrompts.push(user);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(filePrompts.length).toBeGreaterThan(0);   // the assertion below must not be vacuous
+    // The contract never made it in — its cap was what the budget could afford, not its own 900ms.
+    for (const p of filePrompts) expect(p).not.toContain('CONTRACT_MARKER');
+  });
+
+  it('a fast plan still gets its full contract phase — the cap only bites when the budget is tight', async () => {
+    let contractCalled = false;
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: true,
+      overallTimeoutMs: 5000,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list\nsrc/index.css :: styles';
+        if (user.includes('Design the shared contract')) { contractCalled = true; return 'export type T = 1;'; }
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(contractCalled).toBe(true);
+    expect(r.ok).toBe(true);
+  });
+
   it('a file that fails to generate gets NO tick — the counter only advances on real success', async () => {
     let calls = 0;
     const logs: string[] = [];
@@ -123,6 +241,30 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(r.ok).toBe(true);
     expect(r.filesWritten).toBe(3);
     expect(written.map((f) => f.path).sort()).toEqual(['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']);
+  });
+
+  // STREAMING FIRST-PAINT — the onFilesReady hook hands the healed files to the caller early so an
+  // in-browser preview can render before the slow verify+install+dev-boot tax.
+  it('streaming preview: calls onFilesReady once with the final files before returning', async () => {
+    let handed: OneShotFile[] | null = null;
+    let callCount = 0;
+    const r = await runSimpleBuild(baseDeps({ onFilesReady: (f) => { callCount += 1; handed = f; } }));
+    expect(r.ok).toBe(true);
+    expect(callCount).toBe(1); // fired exactly once
+    expect(handed).not.toBeNull();
+    expect((handed as unknown as OneShotFile[]).map((f) => f.path).sort()).toEqual(['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']);
+  });
+
+  it('streaming preview: a throwing onFilesReady never fails or blocks the build', async () => {
+    const r = await runSimpleBuild(baseDeps({ onFilesReady: () => { throw new Error('hook boom'); } }));
+    expect(r.ok).toBe(true); // the hook is best-effort — its failure is swallowed
+    expect(r.filesWritten).toBe(3);
+  });
+
+  it('streaming preview: omitting onFilesReady leaves the build exactly as before', async () => {
+    const r = await runSimpleBuild(baseDeps()); // no hook wired
+    expect(r.ok).toBe(true);
+    expect(r.filesWritten).toBe(3);
   });
 
   it('auto-adds a forgotten shared-symbol import before writing (jungle-game CANVAS_HEIGHT crash)', async () => {

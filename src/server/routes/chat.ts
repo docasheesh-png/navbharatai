@@ -5,9 +5,12 @@ import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
-import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
+import { fetchPollinationsImage, imageMarkdown } from '../lib/imageGen';
 
 /**
  * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
@@ -267,6 +270,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     // Every chat tier credits its creators consistently (single source of truth).
     systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;
+    // India-first: answer territorial/map questions per India's official position (single source of truth).
+    systemPrompt = `${systemPrompt}\n\n${INDIA_TERRITORIAL_INTEGRITY}`;
     // Anchor every reply to TODAY so the AI never presents stale training-cutoff facts as current
     // (admin 2026-07-12: "cricket squad ka 2025 data current bata diya"). Honesty directive, all tiers.
     systemPrompt = `${systemPrompt}\n\n${recencyDirective()}`;
@@ -315,6 +320,49 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         res.json({ reply: replyText });
       }
       return;
+    }
+
+    // IMAGE-GENERATION INTENT (admin 2026-08-01 + 2026-08-02). If a plain-text message asks to CREATE an
+    // image (no attachment — an attached image is a vision request, handled above):
+    //   • NavBharatAI FREE generates one inline for free (Pollinations) AND points to the fuller tool.
+    //   • NavBharatAI PRO (and any other tier) does NOT generate inline, so it GUIDES the user to the
+    //     dedicated AI Image Gen tool (Home → Other AI → AI Image Gen) — every AI must point image
+    //     requests there, never leave them unanswered.
+    if (attachments.length === 0) {
+      const imgIntent = detectImageIntent(message);
+      if (imgIntent.wants) {
+        const streamOut = req.body.stream === true;
+        const send = (reply: string) => {
+          if (streamOut) {
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.flushHeaders();
+            }
+            if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
+            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          } else {
+            res.json({ reply });
+          }
+        };
+        if (isFree) {
+          console.log(`[CHAT/IMAGE] tier=${tier} free image intent — prompt="${imgIntent.prompt.slice(0, 80)}"`);
+          const pr = await fetchPollinationsImage(imgIntent.prompt, 'square');
+          if (pr.image) {
+            send(`Ye rahi aapki image 🎨\n\n${imageMarkdown(pr.image, imgIntent.prompt.slice(0, 60))}\n\nKuch aur banwana ho to bas bata dein — bilkul free!\n\n${imageGenToolPointer()}`);
+          } else {
+            // Honest failure — never a fake/placeholder image; guide to the full tool + let the user retry.
+            send(`Abhi image nahi ban paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
+          }
+        } else {
+          // Pro (and any non-free tier): point to the dedicated image tool instead of leaving the ask unanswered.
+          console.log(`[CHAT/IMAGE] tier=${tier} image intent — guiding to AI Image Gen`);
+          send(imageGenGuidance());
+        }
+        return;
+      }
     }
 
     // LIVE WEB GROUNDING (admin 2026-07-12): for a message that needs current facts (sports/news/
@@ -379,7 +427,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);
       if (!res.headersSent) {
-        res.status(500).json({ reply: 'Backend AI inference failed', error: e.message });
+        // Never leak the raw inference error (may name a provider/model) to the client.
+        res.status(500).json({ reply: 'Backend AI inference failed', error: toSafeClientMessage(e, 'Backend AI inference failed') });
       }
     }
   };

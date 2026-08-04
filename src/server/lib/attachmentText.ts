@@ -52,18 +52,58 @@ async function extractDocx(buf: Buffer): Promise<string> {
   return (result?.value || '').trim();
 }
 
-/** Excel .xlsx/.xls → CSV-per-sheet via the xlsx (SheetJS) reader. */
+/**
+ * Excel .xlsx → CSV-per-sheet via exceljs.
+ *
+ * THIS IS THE PATH THAT MADE THE SheetJS CVEs REAL RATHER THAN THEORETICAL: the buffer parsed here is
+ * a file a USER uploaded. SheetJS 0.18.5 — the last version on npm, since the vendor stopped
+ * publishing there — carries CVE-2023-30533, prototype pollution reachable by parsing a crafted
+ * spreadsheet. An attacker-controlled workbook was being handed straight to it. exceljs is maintained,
+ * on the registry, and CVE-free.
+ *
+ * Legacy .xls (the pre-2007 binary format) is NOT supported by exceljs. It now returns an empty string
+ * and the caller falls back to its normal "no text extracted" handling — an honest nothing, never a
+ * fabricated or partial reading of a file we cannot actually parse.
+ */
 async function extractSpreadsheet(buf: Buffer): Promise<string> {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.read(buf, { type: 'buffer' });
-  const parts: string[] = [];
-  for (const sheetName of wb.SheetNames) {
-    const ws = wb.Sheets[sheetName];
-    if (!ws) continue;
-    const csv = XLSX.utils.sheet_to_csv(ws).trim();
-    if (csv) parts.push(`# Sheet: ${sheetName}\n${csv}`);
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  try {
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+  } catch {
+    return ''; // not a readable .xlsx (legacy .xls, corrupt, or password-protected)
   }
+  const parts: string[] = [];
+  wb.eachSheet((ws) => {
+    const lines: string[] = [];
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+      lines.push(values.map((v) => csvCell(v)).join(','));
+    });
+    const csv = lines.join('\n').trim();
+    if (csv) parts.push(`# Sheet: ${ws.name}\n${csv}`);
+  });
   return parts.join('\n\n');
+}
+
+/**
+ * One spreadsheet cell → a CSV field (RFC 4180 quoting). exceljs hands back rich cell objects —
+ * formulas, hyperlinks, rich text — not just primitives; rendering those with String() would put
+ * "[object Object]" into the text the AI reads about the user's file.
+ */
+function csvCell(value: unknown): string {
+  let s: string;
+  if (value === null || value === undefined) s = '';
+  else if (value instanceof Date) s = value.toISOString();
+  else if (typeof value === 'object') {
+    const v = value as { result?: unknown; text?: unknown; richText?: { text?: string }[]; hyperlink?: string };
+    if (Array.isArray(v.richText)) s = v.richText.map((r) => r?.text ?? '').join('');
+    else if (v.result !== undefined && v.result !== null) s = String(v.result);   // formula → its value
+    else if (v.text !== undefined && v.text !== null) s = String(v.text);
+    else if (v.hyperlink) s = String(v.hyperlink);
+    else s = '';
+  } else s = String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /** PowerPoint .pptx → slide text by unzipping and stripping the slide XML. */

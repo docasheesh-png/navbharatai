@@ -8,6 +8,7 @@ import {
   MessageSquare, User, Clock, AlertCircle, ChevronDown, ChevronUp, Send, CheckCircle2, Flag
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { TirangaLoader } from './ui/TirangaLoader';
 
 export const ReportsListView = ({ user }: { user: any }) => {
   const [reports, setReports] = useState<any[]>([]);
@@ -53,7 +54,7 @@ export const ReportsListView = ({ user }: { user: any }) => {
     return (
       <div className="flex-1 flex items-center justify-center bg-[#0d1117]">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+          <TirangaLoader className="w-12 h-12" />
           <span className="text-[10px] font-black text-[#484f58] uppercase tracking-widest">Loading Bug Matrix...</span>
         </div>
       </div>

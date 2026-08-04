@@ -60,7 +60,25 @@ on:
         type: boolean
         default: false
       apple_signin:
-        description: 'Enable native "Sign in with Apple" (needs the Firebase Apple provider enabled first; this run will enable the App-ID capability via the API key)'
+        # DEFAULT TRUE (root-cause fix, admin 2026-07-20): "Sign in with Apple" is a SHIPPED user-facing
+        # capability. When this defaulted to false, a routine rebuild triggered without inputs silently
+        # dropped the applesignin entitlement and broke Apple login for every updated user (real
+        # incident: the 2026-07-20 rebuild). A shipped capability must be opt-OUT, never opt-in.
+        # Prerequisites (App-ID capability + Firebase Apple provider) are one-time and already done.
+        description: 'Include native "Sign in with Apple" (default ON — it is a shipped capability; untick only to intentionally build without it)'
+        type: boolean
+        default: true
+      changelog:
+        description: 'TestFlight "What to Test" note for this build (optional — defaults to the build number)'
+        type: string
+        default: ''
+      enable_push_notifications:
+        # OPT-IN, default OFF (admin 2026-07-26 — push notifications just built, see MOBILE_PUBLISHING.md
+        # §7.5). Unlike apple_signin above this does NOT default to true, because its prerequisite (the
+        # Push Notifications capability on the com.navbharat.ai App ID + an APNs key uploaded to Firebase
+        # Console) has not been done yet — defaulting ON here would break the FIRST build for anyone who
+        # hasn't done that one-time setup. Flip the default to true (like apple_signin) once it's proven.
+        description: 'Include the push-notifications entitlement (needs the one-time Apple Developer + Firebase Console setup in MOBILE_PUBLISHING.md §7.5 first — leave OFF until that''s done)'
         type: boolean
         default: false
 
@@ -135,6 +153,26 @@ jobs:
         run: |
           npx cap add ios || echo "ios/ already present — continuing"
           npx cap sync ios
+
+      # Real app icon (Apple App Review Guideline 2.3.8 — iOS v1.0(46) was rejected because the icon was a
+      # PLACEHOLDER: `cap add ios` scaffolds the project with Capacitor's default icon and nothing replaced
+      # it). Capacitor 8's iOS project uses a SINGLE 1024x1024 universal icon, so we overwrite every PNG in
+      # the generated AppIcon.appiconset with our real, verified 1024x1024 no-alpha brand icon
+      # (ios-config/app-icon.png, built by scripts/make-app-icon.py). Fail LOUDLY if the icon set or our
+      # source is missing — never silently ship the placeholder again.
+      - name: Replace placeholder app icon with the real NavBharatAI icon (Apple 2.3.8)
+        run: |
+          set -e
+          SRC="ios-config/app-icon.png"
+          ICONSET="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          test -f "$SRC" || { echo "::error::Missing $SRC (the real app icon source)"; exit 1; }
+          test -d "$ICONSET" || { echo "::error::AppIcon.appiconset not found at $ICONSET"; exit 1; }
+          shopt -s nullglob
+          pngs=("$ICONSET"/*.png)
+          if [ ${#pngs[@]} -eq 0 ]; then echo "::error::No icon PNG found in $ICONSET"; exit 1; fi
+          for f in "${pngs[@]}"; do cp "$SRC" "$f"; done
+          echo "Replaced ${#pngs[@]} icon file(s) in $ICONSET with the real NavBharatAI icon:"
+          ls -la "$ICONSET"
 
       # Firebase iOS config. The @capacitor-firebase/authentication plugin calls FirebaseApp.configure()
       # at launch, which reads GoogleService-Info.plist from the app bundle — WITHOUT it the app CRASHES
@@ -240,6 +278,40 @@ jobs:
           puts 'OK: App.entitlements wired to the App target (Sign in with Apple).'
           RUBY
           echo "Sign in with Apple entitlement in place."
+
+      # Push notifications (OPT-IN — off by default, see the workflow_dispatch input above). Declares the
+      # aps-environment entitlement Apple requires for ANY push capability. PREREQUISITES (one-time, done
+      # by hand — see MOBILE_PUBLISHING.md §7.5, same pattern as the Sign in with Apple prerequisites
+      # above): (1) Apple Developer → Identifiers → com.navbharat.ai → "Push Notifications" ✅ (so the
+      # profile `sigh` creates includes the entitlement), (2) Firebase Console → Project Settings → Cloud
+      # Messaging → Apple app configuration → upload an APNs Authentication Key (so Firebase can actually
+      # deliver to APNs on our behalf — @capacitor-firebase/messaging's iOS side routes through Firebase,
+      # so this step is required even though we're not calling raw APNs ourselves).
+      - name: Enable push-notifications entitlement (opt-in)
+        if: ${{ inputs.enable_push_notifications }}
+        run: |
+          set -e
+          ENT="ios/App/App/App.entitlements"
+          if [ ! -f "$ENT" ]; then
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict></dict></plist>' > "$ENT"
+          fi
+          /usr/libexec/PlistBuddy -c "Add :aps-environment string production" "$ENT" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENT"
+          gem install xcodeproj --no-document --quiet
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('ios/App/App.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'App' } or abort('App target not found')
+          target.build_configurations.each do |c|
+            c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements'
+          end
+          proj.save
+          puts 'OK: App.entitlements wired to the App target (push notifications).'
+          RUBY
+          echo "Push-notifications entitlement in place."
 
       # App Store REQUIRES a purpose string for every device permission the app can request, or review
       # REJECTS the binary (and iOS crashes on the first getUserMedia call without it). The app uses the
@@ -354,9 +426,18 @@ jobs:
           IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
           IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
           DO_UPLOAD: ${{ inputs.upload }}
+          # Optional TestFlight delivery controls. IOS_CHANGELOG = the "What to Test" note testers see
+          # (defaults to the build number). IOS_TESTFLIGHT_GROUPS (a repo secret) = comma-separated EXTERNAL
+          # TestFlight group names; when set, each build is submitted + notified to those external testers.
+          # Unset ⇒ internal testers only, who receive every processed build automatically.
+          IOS_CHANGELOG: ${{ inputs.changelog }}
+          IOS_TESTFLIGHT_GROUPS: ${{ secrets.IOS_TESTFLIGHT_GROUPS }}
           # Opt-in native Apple sign-in: when true, the Fastfile enables the App-ID capability via produce
           # before sigh so the profile includes com.apple.developer.applesignin.
           APPLE_SIGNIN: ${{ inputs.apple_signin }}
+          # Opt-in push notifications: when true, forces sigh to regenerate the provisioning profile so
+          # it picks up the aps-environment entitlement injected above.
+          ENABLE_PUSH: ${{ inputs.enable_push_notifications }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
@@ -390,4 +471,4 @@ jobs:
             echo "Download the **navbharatai-release-ipa** artifact above. To publish, re-run with **upload** checked (sends it to TestFlight/App Store Connect)." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Bundle id \`com.navbharat.ai\` · hosted mode loads https://navbharatai.com — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"
+          echo "Bundle id \`com.navbharat.ai\` · bundled mode runs from this build (API calls still hit navbharatai.com) — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

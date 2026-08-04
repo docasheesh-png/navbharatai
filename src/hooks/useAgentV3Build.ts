@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
+import { createRevealPacer } from '../components/agentv3/revealPacer';
+import { carryOverActivity } from '../components/agentv3/activityTimeline';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
-import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
+import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../App';
+
+// FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
+// reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
+// building, instead of a burst-then-stall. HONEST (rule 2): only real events, in real order — the terminal
+// result/done/error event still FLUSHES everything instantly (a finished build is never held back), so the
+// drip only fills the time the build is genuinely still working. maxQueue is raised so a fast-lane burst
+// (~40 files landing at once) drips at the full interval rather than tripping the 4×-speedup guard. Tune
+// the cadence here; set minIntervalMs to 0 to disable pacing (instant, pre-2026-07-21 behavior).
+const FILE_REVEAL_PACER_OPTS = { minIntervalMs: 6000, maxQueue: 60 } as const;
 
 /**
  * Build JSON headers carrying the signed-in user's Firebase ID token when available.
@@ -36,7 +47,7 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
@@ -49,6 +60,10 @@ export interface UseAgentV3Build {
    *  durably-saved files back) and reflect the real file list. Returns count + whether it restored. */
   restoreAllFiles: () => Promise<{ ok: boolean; count: number; restored: boolean }>;
   stop: () => void;
+  /** UNSEND — take back the last message: stop any in-flight build AND purge it from the server
+   *  transcript + workspace memory so it never resurfaces. Resolves true when the server confirmed the
+   *  purge (the caller then removes the message from the visible thread). Never throws. */
+  unsend: () => Promise<boolean>;
   reset: () => void;
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */
@@ -80,7 +95,7 @@ export interface UseAgentV3Build {
    * own restored messages so the panel can re-display them too. Returns null if nothing was loaded.
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
-  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null>;
+  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string; unfinished?: boolean } | null>;
   conversationLoadDiag: () => string | null;
   /**
    * List the user's saved v5.0 conversations (metadata only) for the history menu.
@@ -314,6 +329,51 @@ export function useAgentV3Build(): UseAgentV3Build {
     })();
   }, []);
 
+  // UNSEND — take back the last message. Stops any in-flight build (same abort + generation-bump as
+  // stop(), so this UI detaches cleanly) then asks the server to purge the message from the durable
+  // transcript AND workspace memory. The panel removes it from the visible thread on a truthy result.
+  const unsend = useCallback(async (): Promise<boolean> => {
+    generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive()
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setRunning(false);
+    setServerBuildRunning(false);
+    setError(null);
+    const workspaceId = workspaceIdRef.current;
+    if (!workspaceId) return false; // no server session yet (a message that never reached the server)
+    try {
+      const res = await fetch('/api/agentv3/unsend', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId }),
+      });
+      if (!res.ok) return false;
+      const j = await res.json().catch(() => null);
+      if (j?.ok !== true) return false;
+      // Purge succeeded — clear the removed turn's LIVE chat output (narration / working feed / agent
+      // cards / pending gates) while PRESERVING the accumulated project surfaces (files, diffs, terminal,
+      // checkpoints, preview, workspaceId, repo). Earlier turns already live in the panel's agentHistory;
+      // only the just-removed turn's response sits in `narration`, so this leaves the thread exactly at
+      // the message before the unsent one. Files aren't rolled back (unsend forgets the message, it does
+      // not time-travel the filesystem — the surfaces reflect reality, honestly).
+      setState((s) => ({
+        ...s,
+        narration: [],
+        activity: [],
+        agents: {},
+        proposedSteps: undefined,
+        pendingPermission: undefined,
+        done: false,
+        ok: undefined,
+        summary: undefined,
+        error: undefined,
+      }));
+      return true;
+    } catch {
+      return false; // network error — the panel keeps the message (never a fake "unsent")
+    }
+  }, []);
+
   // Read the NDJSON event stream line by line and fold each event into the reducer. Used by resume()'s
   // replay/attach stream. `gen` is the generation captured when the stream was started (see
   // generationRef above) — every event is dropped once it no longer matches the LIVE generation (the
@@ -329,8 +389,12 @@ export function useAgentV3Build(): UseAgentV3Build {
     let buffer = '';
     let gotEvent = false;
     let rawSample = '';
+    // FILE-REVEAL PACING (admin 2026-07-21): burst-completed "✓ file (n/m)" lines drip into the feed
+    // one-by-one (order-preserving, real events only; a terminal event flushes instantly). The build
+    // itself is untouched — this paces only what the user SEES. See revealPacer.ts for the honesty rules.
+    const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)), FILE_REVEAL_PACER_OPTS);
     for (;;) {
-      if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+      if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -346,10 +410,10 @@ export function useAgentV3Build(): UseAgentV3Build {
           if (rawSample.length < 400) rawSample += trimmed + '\n';
           continue;
         }
-        if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+        if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
         gotEvent = true;
         lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity
-        setState((prev) => agentV3Reducer(prev, event));
+        pacer.push(event);
         // TERMINAL EVENT → clear `running` immediately on a re-attached/resumed stream too, so a build
         // whose post-result cleanup keeps the stream open never leaves the UI stuck "building" after the
         // result is in. Key ONLY on `result` (build-terminal, once per build) — NOT `done`, which
@@ -362,6 +426,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         }
       }
     }
+    pacer.flush(); // stream closed — reveal anything still queued immediately (nothing is ever dropped)
     if (!gotEvent) {
       const sample = (rawSample || buffer).trim();
       setError(
@@ -475,7 +540,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // Allowed even while a build is actively streaming HERE (opening a different saved conversation is
   // navigation, same as "+ New chat" — see reset()/start()'s generation-guard comments). Detaches from
   // whatever's currently attached; the underlying server build, if any, keeps running in the background.
-  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null> => {
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string; unfinished?: boolean } | null> => {
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     lastLoadDiagRef.current = null;
     try {
@@ -558,7 +623,13 @@ export function useAgentV3Build(): UseAgentV3Build {
       // restored workspaceId so the panel can adopt the SAME session id → a follow-up continues
       // this exact project/memory, AND the durable framework so a reopened non-Vite session's next
       // build doesn't silently reset to vite-react (the framework-reset defect from the reopen audit).
-      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework };
+      // AP-3 (cross-restart resume): a build whose durable status is still 'running' on reopen — with no
+      // live build anywhere (the panel checks serverBuildRunning) — was cut off before it could settle
+      // (a server restart/crash mid-build). The AgentRunner patches a terminal status at EVERY normal exit
+      // (complete/error/stopped), so 'running' + not-live is a TRUTHFUL "unfinished" signal, never a
+      // cleanly-finished build. The panel uses it to honestly offer a one-click Continue.
+      const unfinished = isUnfinishedBuild(conv);
+      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework, unfinished };
     } catch (e) {
       lastLoadDiagRef.current = `network/exception while loading (${e instanceof Error ? e.message : String(e)})`;
       return null; // best-effort — never disrupt the panel on a load failure
@@ -639,7 +710,16 @@ export function useAgentV3Build(): UseAgentV3Build {
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     const gen = ++generationRef.current;  // this resume is now the authoritative generation
-    setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
+    // The replayed buffer rebuilds the CURRENT build's live state — but it only replays THIS
+    // build's events, so state that outlives a single turn must survive the reconnect (admin
+    // 2026-07-21, same vanish class as the send-reset): prior turns' archived action rows
+    // (activityLog), the diff decorations, and the running plan all stay.
+    setState((prev) => ({
+      ...initialAgentV3State(),
+      activityLog: prev.activityLog,
+      diffs: prev.diffs,
+      todos: prev.todos,
+    }));
     // NOTE (root-cause fix 2026-07-05, IMG_5709): the optimistic "re-attached live" `notice` is NOT
     // emitted here anymore. It is a PROMISE that a live build exists — printing it before /attach
     // confirms one is exactly what produced the contradiction "re-attached live" + "No running build
@@ -925,7 +1005,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => {
+    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => {
       if (running) return;
       // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
       // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
@@ -939,15 +1019,23 @@ export function useAgentV3Build(): UseAgentV3Build {
       // false; see the comment on the reader loop below). Bumping here means a stale event from an
       // ABANDONED build can never land on the session the user switched to.
       const gen = ++generationRef.current;
-      // Reset only the TRANSIENT build state for the new turn (narration, todos, plan,
+      // Reset only the TRANSIENT build state for the new turn (narration, plan,
       // agents, done/health). PRESERVE the durable project view — files, workspace, live
       // preview and repo — so a follow-up/retry message does NOT blank the user's files to
       // 0 the instant Send is pressed. The build's file_changed events upsert by path, so
       // keeping the existing list shows no duplicates and the project stays visible.
+      // ALSO preserved (admin 2026-07-21):
+      //  • the settled turn's ACTIVITY → archived into activityLog (deactivated), so the finished
+      //    build's action rows + diff decorations stay in the chat instead of vanishing on the
+      //    next send/auto-continue ("app banne ke bad diff gayab" root cause);
+      //  • TODOS → the plan stays on screen across the send gap; the server's merged
+      //    todo_updated (todoMerge.ts) then folds the new turn into the SAME plan.
       setState((prev) => ({
         ...initialAgentV3State(),
         files: prev.files,
         diffs: prev.diffs,
+        activityLog: carryOverActivity(prev.activityLog, prev.activity),
+        todos: prev.todos,
         workspaceId: prev.workspaceId,
         previewUrl: prev.previewUrl,
         repoUrl: prev.repoUrl,
@@ -992,6 +1080,9 @@ export function useAgentV3Build(): UseAgentV3Build {
             chatRole: opts?.chatRole || undefined,
             attachments: opts?.attachments && opts.attachments.length > 0 ? opts.attachments : undefined,
             framework: opts?.framework || undefined,
+            // Bidirectional-selection (admin 2026-07-20): true when the framework was a DELIBERATE pick
+            // (picker or a reopened session) → the server honours it over chat-text detection.
+            frameworkExplicit: opts?.frameworkExplicit === true ? true : undefined,
             importUrl: opts?.importUrl || undefined,
             // R5 §5.1 — the hosting provider the user chose for a deploy turn (no lock-in).
             deployProvider: opts?.deployProvider || undefined,
@@ -1080,8 +1171,10 @@ export function useAgentV3Build(): UseAgentV3Build {
         // streaming (reset() no longer waits for `running` to go false) — abort() ends the fetch, but
         // any event already in-flight when that happens must still be dropped, exactly like
         // pumpStream/subscribeLive, or it silently repopulates the session the user just switched to.
+        // FILE-REVEAL PACING (admin 2026-07-21): same honest drip as the attach stream — see revealPacer.ts.
+        const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)), FILE_REVEAL_PACER_OPTS);
         for (;;) {
-          if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+          if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -1097,10 +1190,10 @@ export function useAgentV3Build(): UseAgentV3Build {
               if (rawSample.length < 400) rawSample += trimmed + '\n';
               continue;
             }
-            if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+            if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
             gotEvent = true;
             lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity (incl. 15s pings)
-            setState((prev) => agentV3Reducer(prev, event));
+            pacer.push(event);
             // TERMINAL EVENT → stop "running" the INSTANT the build's `result` arrives, instead of
             // waiting for the stream to physically CLOSE. The server holds the stream open (15s pings)
             // through the post-result cleanup/finally (checkpoint flush, durable saves), so waiting for
@@ -1118,6 +1211,8 @@ export function useAgentV3Build(): UseAgentV3Build {
             }
           }
         }
+
+        pacer.flush(); // stream closed — reveal anything still queued immediately (nothing is ever dropped)
 
         // If the stream produced no usable events, surface what came back so a
         // silent failure (e.g. an HTML error page, or an empty body) is visible. Skipped if the user
@@ -1258,5 +1353,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

@@ -26,8 +26,13 @@ export interface DialogueSignals {
 const DEBUG_RE =
   /\b(error|errors|bug|bugs|broken|broke|crash(?:es|ing|ed)?|not\s+working|doesn'?t\s+work|isn'?t\s+working|won'?t\s+(?:work|load|run|build|start)|does\s+nothing|doing\s+nothing|no\s+response|nothing\s+happens?|fails?|failing|failed|exception|stack\s*trace|undefined|null|blank\s+(?:screen|page)|white\s+screen|console\s+error|throws?|stuck|hang(?:s|ing)?)\b/i;
 
-// Words that mark a DEPLOYED/ship turn.
-const DEPLOY_RE = /\b(deploy|deployed|publish|published|go\s+live|going\s+live|ship\s+it|host(?:ing|ed)?|production|make\s+it\s+live)\b/i;
+// Words that mark a DEPLOYED/ship turn. NOTE the `production` guard: a build prompt routinely says
+// "production-clean / production-ready / production-grade / production quality" as a QUALITY bar, NOT a
+// deploy request — ShopSphere (App #12) ended with "Production-clean, mobile-responsive" and was
+// misclassified as DEPLOY/SHIP, so the builder got a "the user wants to publish" posture on a fresh
+// build. The negative lookahead keeps a real "deploy to production" signal while ignoring the quality
+// compounds.
+const DEPLOY_RE = /\b(deploy|deployed|publish|published|go\s+live|going\s+live|ship\s+it|host(?:ing|ed)?|production(?![-\s](?:clean|ready|grade|quality|level|worthy|ise|ize))|make\s+it\s+live)\b/i;
 
 /**
  * Infer the conversation phase from the current signals. Deterministic. Order matters: an explicit

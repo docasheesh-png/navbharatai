@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Lock, Eye, EyeOff, Save, Trash2 } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
+// Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
+// here used to omit it, so requireUserMatch rejected every save (401) → keys never saved (admin fix).
+import { saveSecret, deleteSecret } from '../lib/secretsApi';
 
 interface Secret {
   id: string;
@@ -40,21 +42,21 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
     setIsLoading(true);
     setAddError('');
     try {
-      await axios.post(`/api/secrets/${userId}`, { secret_name: name.trim(), secret_value: value.trim() });
+      await saveSecret(userId, name.trim(), value.trim());
       setName('');
       setValue('');
     } catch (err: any) {
       // Honest, visible failure — a silent console.error left the user thinking the key saved when it didn't.
       console.error('Failed to add secret:', err);
-      setAddError(err?.response?.data?.error || 'Could not save the key. Please check your connection and try again.');
+      setAddError(err?.message || 'Could not save the key. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const deleteSecret = async (id: string) => {
+  const handleDeleteSecret = async (id: string) => {
     try {
-      await axios.delete(`/api/secrets/${userId}/${id}`);
+      await deleteSecret(userId, id);
     } catch (err) {
       console.error('Failed to delete secret:', err);
     }
@@ -111,7 +113,7 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
         {secrets.map((s) => (
           <div key={s.id} className="flex justify-between items-center bg-gray-800 p-3 rounded font-mono text-xs">
             <span>{s.secret_name}</span>
-            <button onClick={() => deleteSecret(s.id)} className="text-red-400 hover:text-red-300">
+            <button onClick={() => handleDeleteSecret(s.id)} className="text-red-400 hover:text-red-300">
               <Trash2 size={16} />
             </button>
           </div>

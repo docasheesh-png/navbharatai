@@ -12,24 +12,76 @@ import {
 } from './professionalPaid';
 import { professionalPassStore } from './ProfessionalPassStore';
 import { professionalUsageStore } from './ProfessionalUsageStore';
+import { aiWalletSpendEnabled } from '../lib/aiTurnCharge';
+import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { getServerDb } from '../lib/serverDb';
 
 export type ProfessionalTier = 'free' | 'paid';
 
+/**
+ * Is the wallet empty enough to refuse a turn? PURE, so the money-sensitive comparison is testable.
+ *
+ * `null` means the balance could not be read at all, and that is deliberately ALLOWED through —
+ * fail-open, matching the build gate. Refusing on a Firestore blip would deny a paying user their
+ * assistant over an infrastructure hiccup; allowing means at worst one cheap turn we do not collect,
+ * and the debit still records the debt honestly.
+ *
+ * A ₹0 or negative balance IS refused, because the alternative is unbounded free usage: unlike a build,
+ * a chat turn has no "next pre-flight gate" to catch the overdraft later.
+ */
+export function walletTooEmptyForTurn(balanceInr: number | null): boolean {
+  return balanceInr !== null && balanceInr <= 0;
+}
+
 export type PassGateResult =
-  | { allow: true; countsAgainstFree: boolean; remainingFree?: number; uid: string | null; tier: ProfessionalTier }
+  | {
+      allow: true; countsAgainstFree: boolean; remainingFree?: number; uid: string | null; tier: ProfessionalTier;
+      /** Carried so the caller can charge the wallet without re-deriving (or re-reading) either fact. */
+      isFreeListed: boolean; hasActivePass: boolean;
+    }
   | { allow: false; status: number; body: Record<string, unknown> };
 
 /** Decide access + model tier for one professional/Doctor-AI turn. `uid`/`email` MUST be the server-
  *  verified identity (never a client-claimed body field). */
 export async function gateProfessionalTurn(uid: string | null, email: string | null): Promise<PassGateResult> {
+  const freeListed = isProfessionalFreeUser(uid, email);
+  const walletSpend = aiWalletSpendEnabled();
+  // The pass is read at most ONCE per turn and shared by both gates below — it decides "unlimited
+  // access" for the paywall AND "already paid for, do not charge the wallet" for the spend gate.
+  const needsPass = !!uid && !freeListed && (walletSpend || professionalPaidEnabled());
+  const hasActivePass = needsPass
+    ? (await professionalPassStore.getStatus(uid as string).catch(() => ({ active: false }))).active
+    : false;
+
+  // ONE WALLET (admin 2026-08-01). When AI spending is on, every assistant draws from the SAME balance
+  // as a build, so an empty wallet is refused here — before any provider is called. This runs
+  // independently of the Pass paywall below: the two answer different questions ("has this user paid for
+  // unlimited access?" vs "does this user have any credit left at all?"), and the wallet promise should
+  // not require the paywall to be switched on. Entirely inert — not even a Firestore read — while the
+  // flag is off, which is the default.
+  if (walletSpend && uid && !freeListed && !hasActivePass) {
+    const balanceInr = await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid).catch(() => null);
+    if (walletTooEmptyForTurn(balanceInr)) {
+      return {
+        allow: false,
+        status: 402,
+        body: {
+          error: 'Your balance is empty. Add credit to keep using NavBharatAI, or get the Professional Pass for unlimited access to every professional.',
+          code: 'wallet_empty',
+          reason: 'wallet-empty',
+          balanceInr: balanceInr ?? 0,
+          passPriceInr: professionalPassPriceInr(),
+          passDays: professionalPassDays(),
+        },
+      };
+    }
+  }
+
   if (!professionalPaidEnabled()) {
     // Flag off → today's behaviour: full paid-quality chain, no metering.
-    return { allow: true, countsAgainstFree: false, uid, tier: 'paid' };
+    return { allow: true, countsAgainstFree: false, uid, tier: 'paid', isFreeListed: freeListed, hasActivePass };
   }
-  const freeListed = isProfessionalFreeUser(uid, email);
   const freeDailyLimit = professionalFreeDailyLimit();
-  // Only touch Firestore for a signed-in, non-free-listed user (pass + today's count).
-  const hasActivePass = !!uid && !freeListed ? (await professionalPassStore.getStatus(uid)).active : false;
   const usedToday = !!uid && !freeListed && !hasActivePass ? await professionalUsageStore.getTodayCount(uid) : 0;
   const decision = decideProfessionalAccess({
     enabled: true, signedIn: !!uid, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
@@ -38,7 +90,10 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
     // Model tier: an active Pass (or the admin free-list) → the full paid chain; a within-quota free
     // user → the free chain (GLM → Vertex only). This is what makes "free = cheap models" real.
     const tier: ProfessionalTier = decision.reason === 'within-free-quota' ? 'free' : 'paid';
-    return { allow: true, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid, tier };
+    return {
+      allow: true, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid, tier,
+      isFreeListed: freeListed, hasActivePass,
+    };
   }
   const login = decision.reason === 'login-required';
   return {

@@ -51,6 +51,8 @@ html[data-theme] .text-zinc-100,
 html[data-theme] .text-zinc-200,
 html[data-theme] .text-slate-200             { color: var(--text-body); }
 html[data-theme] .text-\[\#8b949e\],
+html[data-theme] .text-\[\#969696\],
+html[data-theme] .text-\[\#858585\],
 html[data-theme] .text-gray-300,
 html[data-theme] .text-gray-400,
 html[data-theme] .text-zinc-300,

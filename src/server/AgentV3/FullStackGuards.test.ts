@@ -1,11 +1,48 @@
 import { describe, it, expect } from 'vitest';
 import {
   stripPrismaSqliteEnums,
+  fixPrismaSqliteScalarList,
   fixCjsDefaultImport,
+  fixPrismaDateStringDefault,
+  fixPrismaSeedRunner,
+  dedupeSameModuleImports,
   ensureViteTypeModule,
   applyFullStackGuards,
   fullStackGuardsEnabled,
 } from './FullStackGuards';
+
+describe('dedupeSameModuleImports — kill "Duplicate declaration" (Bazaar-era autopsy)', () => {
+  it('removes a duplicate same-name import of the same module (the exact ErrorBoundary crash)', () => {
+    const src = `import App from './App';\nimport ErrorBoundary from './ErrorBoundary';\nimport { ErrorBoundary } from "./ErrorBoundary";\n`;
+    const out = dedupeSameModuleImports('src/main.tsx', src);
+    expect(out).toContain("import ErrorBoundary from './ErrorBoundary';");
+    expect(out).not.toMatch(/\{\s*ErrorBoundary\s*\}/); // the duplicate named import is gone
+    expect(out.split('\n').filter((l) => /ErrorBoundary/.test(l) && /^\s*import\b/.test(l)).length).toBe(1); // one import line binds it
+  });
+
+  it('keeps the surviving named specifiers when only one is a duplicate', () => {
+    const out = dedupeSameModuleImports('a.tsx', `import ErrorBoundary from './EB';\nimport { ErrorBoundary, Foo } from './EB';`);
+    expect(out).toContain("import ErrorBoundary from './EB';");
+    expect(out).toContain("import { Foo } from './EB';");
+  });
+
+  it('NEVER touches a same-name import from a DIFFERENT module (a real conflict — reconciler owns it)', () => {
+    const src = `import X from './a';\nimport { X } from './b';`;
+    expect(dedupeSameModuleImports('a.tsx', src)).toBe(src);
+  });
+
+  it('leaves side-effect and non-code files alone', () => {
+    const src = `import './styles.css';\nimport App from './App';`;
+    expect(dedupeSameModuleImports('a.tsx', src)).toBe(src);
+    expect(dedupeSameModuleImports('readme.md', src)).toBe(src);
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    const src = `import EB from './EB';\nimport { EB } from './EB';`;
+    expect((applyFullStackGuards('src/main.tsx', src).match(/EB/g) || []).length).toBe(2); // one import line, module+name once each
+    expect(applyFullStackGuards('src/main.tsx', src, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(src);
+  });
+});
 
 // The exact TaskFlow failures (build report 2026-07-17): Prisma-on-SQLite rejected `enum TaskStatus`
 // ("the current connector does not support enums") and the seed crashed with
@@ -59,6 +96,58 @@ describe('stripPrismaSqliteEnums', () => {
   });
 });
 
+// LearnLoop autopsy 2026-07-21: on a SQLite datasource the builder modelled `attachments String[]` etc.
+// SQLite has NO scalar lists → `prisma validate` failed ("can't be a list. The current connector does not
+// support lists of primitive types"), looping DB setup. The guard collapses every scalar list to `String?`
+// (a serialized string) while leaving relation lists — which ARE valid on SQLite — untouched.
+describe('fixPrismaSqliteScalarList — SQLite has no scalar lists (LearnLoop autopsy)', () => {
+  const P = 'prisma/schema.prisma';
+  const wrap = (fields: string) =>
+    `datasource db {\n  provider = "sqlite"\n  url = env("DATABASE_URL")\n}\nmodel Lesson {\n${fields}\n}`;
+
+  it('rewrites a String[] scalar list to String?', () => {
+    const out = fixPrismaSqliteScalarList(P, wrap('  id String @id\n  attachments String[]'));
+    expect(out).toMatch(/attachments\s+String\?/);
+    expect(out).not.toMatch(/attachments\s+String\[\]/);
+  });
+
+  it('rewrites Int[]/Float[]/Boolean[]/Json[] scalar lists and drops @default([])', () => {
+    const out = fixPrismaSqliteScalarList(P, wrap('  scores Int[]\n  tags String[] @default([])\n  flags Boolean[]'));
+    expect(out).toMatch(/scores\s+String\?/);
+    expect(out).toMatch(/flags\s+String\?/);
+    expect(out).toMatch(/tags\s+String\?/);
+    expect(out).not.toContain('@default([])');
+  });
+
+  it('LEAVES a relation list (Model[]) alone — relations are valid on SQLite', () => {
+    const out = fixPrismaSqliteScalarList(P, wrap('  id String @id\n  students User[]\n  quizzes Quiz[]'));
+    expect(out).toMatch(/students\s+User\[\]/);
+    expect(out).toMatch(/quizzes\s+Quiz\[\]/);
+  });
+
+  it('finishes the job for an enum LIST: stripPrismaSqliteEnums makes it String[], scalar-list makes it String?', () => {
+    const schema = `datasource db {\n  provider = "sqlite"\n  url = env("DATABASE_URL")\n}\nenum Tag {\n  A\n  B\n}\nmodel Post {\n  id String @id\n  tags Tag[]\n}`;
+    const after = fixPrismaSqliteScalarList(P, stripPrismaSqliteEnums(P, schema));
+    expect(after).not.toContain('Tag[]');
+    expect(after).not.toContain('String[]');
+    expect(after).toMatch(/tags\s+String\?/);
+  });
+
+  it('is a no-op for POSTGRES (supports scalar lists), non-schema files, and a schema with no scalar list', () => {
+    const pg = wrap('  attachments String[]').replace('"sqlite"', '"postgresql"');
+    expect(fixPrismaSqliteScalarList(P, pg)).toBe(pg);
+    expect(fixPrismaSqliteScalarList('src/App.tsx', wrap('  attachments String[]'))).toBe(wrap('  attachments String[]'));
+    const clean = wrap('  id String @id\n  title String');
+    expect(fixPrismaSqliteScalarList(P, clean)).toBe(clean);
+  });
+
+  it('rides applyFullStackGuards end-to-end (no scalar list survives on a SQLite schema)', () => {
+    const out = applyFullStackGuards(P, wrap('  id String @id\n  attachments String[]'));
+    expect(out).not.toContain('String[]');
+    expect(out).toMatch(/attachments\s+String\?/);
+  });
+});
+
 describe('fixCjsDefaultImport', () => {
   it('converts `import * as bcrypt` to a default import (kills "bcrypt.hash is not a function")', () => {
     const src = `import * as bcrypt from 'bcrypt';\nconst h = await bcrypt.hash(pw, 10);`;
@@ -75,6 +164,42 @@ describe('fixCjsDefaultImport', () => {
   it('NEVER touches a legitimate namespace import (React, fs, a local module)', () => {
     const keep = `import * as React from 'react';\nimport * as fs from 'fs';\nimport * as utils from './utils';`;
     expect(fixCjsDefaultImport('a.tsx', keep)).toBe(keep);
+  });
+});
+
+describe('fixPrismaDateStringDefault — a date field defaulted to now() must be DateTime (MediConnect autopsy)', () => {
+  // The exact MediConnect failure: `createdAt String @default(now())` → prisma generate fails with
+  // "The function `now()` cannot be used on fields of type `String`" (19 such errors).
+  const BROKEN = `model Message {
+  id        String   @id @default(cuid())
+  notes     String?
+  createdAt String   @default(now())
+  updatedAt String   @updatedAt
+  isTyping  Boolean  @default(false)
+}`;
+
+  it('rewrites String→DateTime for @default(now()) and @updatedAt fields, keeping optionality', () => {
+    const out = fixPrismaDateStringDefault('prisma/schema.prisma', BROKEN);
+    expect(out).toContain('createdAt DateTime   @default(now())');
+    expect(out).toContain('updatedAt DateTime   @updatedAt');
+  });
+
+  it('leaves ordinary String fields and non-date defaults untouched', () => {
+    const out = fixPrismaDateStringDefault('prisma/schema.prisma', BROKEN);
+    expect(out).toContain('notes     String?');            // a plain optional String — unchanged
+    expect(out).toContain('isTyping  Boolean  @default(false)'); // not a String field
+    expect(out).toContain('id        String   @id @default(cuid())'); // @default(cuid()) is a valid String default
+  });
+
+  it('is a no-op for a non-schema path or content without the bug', () => {
+    expect(fixPrismaDateStringDefault('src/App.tsx', BROKEN)).toBe(BROKEN);
+    const ok = `model X {\n  createdAt DateTime @default(now())\n}`;
+    expect(fixPrismaDateStringDefault('prisma/schema.prisma', ok)).toBe(ok);
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    expect(applyFullStackGuards('prisma/schema.prisma', BROKEN)).toContain('createdAt DateTime');
+    expect(applyFullStackGuards('prisma/schema.prisma', BROKEN, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(BROKEN);
   });
 });
 
@@ -99,6 +224,35 @@ describe('applyFullStackGuards — orchestration + kill switch', () => {
 // "vite-tsconfig-paths resolved to an ESM file. ESM file cannot be loaded by `require`" because the
 // workspace package.json had no "type": "module". The guard re-inserts the invariant on every vite
 // package.json write, so a builder rewrite can never kill config loading again.
+describe('fixPrismaSeedRunner — seed runs on tsx, not ts-node (LedgerLoop autopsy)', () => {
+  it('rewrites a ts-node seed script to tsx and adds tsx to devDependencies', () => {
+    const pkg = JSON.stringify({ name: 'app', scripts: { seed: 'ts-node prisma/seed.ts' }, devDependencies: { 'ts-node': '^10' } });
+    const out = JSON.parse(fixPrismaSeedRunner('package.json', pkg));
+    expect(out.scripts.seed).toBe('tsx prisma/seed.ts');
+    expect(out.devDependencies.tsx).toBe('^4');
+  });
+
+  it('rewrites the prisma.seed command form too (node --loader ts-node/esm)', () => {
+    const pkg = JSON.stringify({ name: 'app', prisma: { seed: 'node --loader ts-node/esm prisma/seed.ts' } });
+    const out = JSON.parse(fixPrismaSeedRunner('package.json', pkg));
+    expect(out.prisma.seed).toBe('tsx prisma/seed.ts');
+    expect(out.devDependencies.tsx).toBe('^4');
+  });
+
+  it('leaves a seed already on tsx (or absent) untouched', () => {
+    const onTsx = JSON.stringify({ name: 'app', scripts: { seed: 'tsx prisma/seed.ts' } });
+    expect(fixPrismaSeedRunner('package.json', onTsx)).toBe(onTsx);
+    const none = JSON.stringify({ name: 'app', scripts: { dev: 'next dev' } });
+    expect(fixPrismaSeedRunner('package.json', none)).toBe(none);
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    const pkg = JSON.stringify({ name: 'app', scripts: { seed: 'ts-node prisma/seed.ts' } });
+    expect(JSON.parse(applyFullStackGuards('package.json', pkg)).scripts.seed).toBe('tsx prisma/seed.ts');
+    expect(applyFullStackGuards('package.json', pkg, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(pkg);
+  });
+});
+
 describe('ensureViteTypeModule — a vite package.json always carries type:module', () => {
   it('adds type:module to a vite app package.json that lacks it (the ShopKhata wall)', () => {
     const pkg = JSON.stringify({ name: 'project', version: '0.1.0', scripts: { dev: 'vite' }, devDependencies: { vite: '^5.4.1', 'vite-tsconfig-paths': '5.1.4' } });

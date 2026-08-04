@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scanSecurity, securitySummary } from './SecurityAnalysis';
+import { scanSecurity, securitySummary, isPlaceholderValue } from './SecurityAnalysis';
 
 describe('scanSecurity', () => {
   it('flags a hardcoded credential but ignores env-based and placeholder values', () => {
@@ -59,6 +59,26 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const url = "mysql://user:<password>@host";')).toEqual([]);
     // a non-DB scheme with a colon/at is not a DB credential leak
     expect(scanSecurity('a.ts', 'const u = "https://api.example.com/v1";')).toEqual([]);
+  });
+
+  it('does NOT build-block on credentials in a .env file (they belong there) — downgraded to low, still reported', () => {
+    // ROOT-CAUSE lock (autopsy build 6478f94d): `connection-string-credentials @ .env:2` was flagged HIGH,
+    // blocked the readiness gate, and the un-fixable finding looped the reviewer to the 1740s wall-clock cap.
+    for (const envName of ['.env', '.env.local', '.env.production', '.env.development.local']) {
+      const f = scanSecurity(envName, 'DATABASE_URL=postgres://user:p4ssword@db.host:5432/app');
+      const hit = f.find((x) => x.rule === 'connection-string-credentials');
+      expect(hit).toBeDefined();                 // still REPORTED (honest, visible)
+      expect(hit?.severity).toBe('low');          // but NEVER build-blocking high
+    }
+    // a redis/amqp connection string with a password in .env is likewise 'low', never a blocking high.
+    expect(scanSecurity('.env', 'REDIS_URL=redis://:hunter2pw@redis.host:6379').find((x) => x.rule === 'connection-string-credentials')?.severity).toBe('low');
+  });
+
+  it('STILL blocks (high) on the same credential in real source, and in a committed .env.example template', () => {
+    // real source — a DB URL hardcoded in a .ts must still fail the gate.
+    expect(scanSecurity('src/db.ts', 'const url = "postgres://user:p4ssword@db.host:5432/app";').some((x) => x.rule === 'connection-string-credentials' && x.severity === 'high')).toBe(true);
+    // .env.example is a COMMITTED template — a real secret there is a genuine leak, so it stays high (not downgraded).
+    expect(scanSecurity('.env.example', 'DATABASE_URL=postgres://user:p4ssword@db.host:5432/app').some((x) => x.rule === 'connection-string-credentials' && x.severity === 'high')).toBe(true);
   });
 
   it('flags a client-exposed secret env var but not a publishable key', () => {
@@ -505,5 +525,53 @@ describe('securitySummary', () => {
     expect(sum).toContain('1 high');
     expect(sum).toContain('1 low');
     expect(sum).toContain('a.ts:1');
+  });
+});
+
+describe('isPlaceholderValue — a template is not a leak (autopsy 56ee622f, 2026-08-04)', () => {
+  it('recognises the canonical .env.example template words that BLOCKED a correct build', () => {
+    // The exact value that became a READINESS_BLOCKER on `.env.example:2`:
+    //   DATABASE_URL=postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+    for (const v of ['PASSWORD', 'USER', 'HOST', 'DB', 'USERNAME', 'DBNAME', 'YOUR_PASSWORD', 'REPLACE_ME']) {
+      expect(isPlaceholderValue(v)).toBe(true);
+    }
+  });
+
+  it('keeps the existing markers working', () => {
+    for (const v of ['your-key', 'xxxx', '${DB_PASS}', 'changeme', 'dummy', 'placeholder', '<secret>']) {
+      expect(isPlaceholderValue(v)).toBe(true);
+    }
+  });
+
+  it('still catches a REAL credential — no weakening of detection', () => {
+    // NOTE: AWS's documented sample key contains "EXAMPLE" and is intentionally treated as a
+    // placeholder by the pre-existing marker list — that is correct and unchanged here.
+    for (const v of ['s3cr3t!Abc', 'p4ssw0rd-live-9912', 'user_a8f3k2', 'Tr0ub4dor-3x', 'hunter2']) {
+      expect(isPlaceholderValue(v)).toBe(false);
+    }
+  });
+
+  it('matches the WHOLE value only — a secret merely containing a template word is still a secret', () => {
+    expect(isPlaceholderValue('password')).toBe(true);
+    expect(isPlaceholderValue('passwordX9!')).toBe(false);
+    expect(isPlaceholderValue('mypassword123')).toBe(false);
+  });
+
+  it('empty / missing counts as a placeholder, never a leak', () => {
+    expect(isPlaceholderValue('')).toBe(true);
+    expect(isPlaceholderValue(null)).toBe(true);
+    expect(isPlaceholderValue(undefined)).toBe(true);
+  });
+});
+
+describe('the reported build must no longer be blocked by its own fix', () => {
+  it('a canonical .env.example connection-string template produces NO high finding', () => {
+    const findings = scanSecurity('.env.example', '# Database\nDATABASE_URL=postgresql://USER:PASSWORD@HOST/DB?sslmode=require\n');
+    expect(findings.filter((f) => f.severity === 'high')).toEqual([]);
+  });
+
+  it('a REAL credential committed to .env.example is still a high finding', () => {
+    const findings = scanSecurity('.env.example', 'DATABASE_URL=postgresql://admin:Tr0ub4dor-3x@db.prod.internal/main\n');
+    expect(findings.some((f) => f.severity === 'high' && f.rule === 'connection-string-credentials')).toBe(true);
   });
 });

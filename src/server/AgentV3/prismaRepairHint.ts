@@ -50,6 +50,14 @@ const RULES: readonly HintRule[] = [
       'did not, add the field by hand.)',
   },
   {
+    id: 'one-to-one-needs-unique',
+    match: /one-to-one relation must use unique fields|add an? [`'"]?@unique[`'"]? attribute/i,
+    hint:
+      'A one-to-one Prisma relation needs the foreign-key scalar to be `@unique`. Either add `@unique` to the FK ' +
+      'field (e.g. `vehicleId String? @unique`), OR make it one-to-many by changing the other side to a list ' +
+      '(e.g. `Vehicle` → `vehicles Vehicle[]`).',
+  },
+  {
     id: 'referenced-not-unique',
     match: /references[^\n]*must (point|refer) to[^\n]*unique|referenced field[^\n]*is not unique|must be unique to be used in an? (@relation|relation)/i,
     hint:
@@ -87,6 +95,17 @@ const GENERIC_VALIDATION =
  * Return a single actionable fix instruction for a failed Prisma command's combined stdout+stderr, or
  * null when the output is not a recognised Prisma schema error. PURE.
  */
+/**
+ * True when a failed prisma command's output shows the `prisma` CLI itself is NOT INSTALLED (so
+ * `npx prisma …` tried to auto-fetch it and, being non-interactive, aborted). Drives the ToolDispatcher
+ * "install prisma + retry" self-heal (Bazaar-era autopsy 2026-07-20: 13 failed generates over ~10 min
+ * because prisma wasn't in node_modules after a sandbox recycle). Pure + unit-tested.
+ */
+export function isPrismaCliMissingError(output: string | null | undefined): boolean {
+  if (typeof output !== 'string' || !output) return false;
+  return /npx canceled due to missing packages|missing packages and no YES option|could not determine executable to run|\bprisma: not found\b|Cannot find module ['"]?prisma['"]?|["']?prisma@[\d.]+["']?\s+is not|npm error 404[^\n]*\bprisma\b/i.test(output);
+}
+
 export function prismaRepairHint(output: string): string | null {
   const text = output || '';
   if (!looksLikePrisma(text)) return null;

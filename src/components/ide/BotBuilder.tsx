@@ -2,8 +2,10 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Play, Download, Webhook, Trash2, Plus, X, ChevronRight,
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
-  Send, Bot, User, Copy, Check
+  Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle
 } from 'lucide-react';
+import { auth } from '../../App';
+import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -108,18 +110,37 @@ function getNextNodes(edges: BotEdge[], fromId: string, nodes: BotNode[]) {
     .filter(x => x.node) as { node: BotNode; label?: string }[];
 }
 
+// The old Pro-v5.0 handoff button was removed (admin 2026-07-23): its name misled (implied it built the bot
+// but it only produced a generic web-app clone), and real deployment now lives in "Go Live" (Telegram/WhatsApp).
 export const BotBuilder: React.FC = () => {
   const [nodes, setNodes] = useState<BotNode[]>(defaultNodes);
   const [edges, setEdges] = useState<BotEdge[]>(defaultEdges);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [platform, setPlatform] = useState<Platform>('whatsapp');
   const [showWebhookModal, setShowWebhookModal] = useState(false);
+  // Go-Live (real Telegram/WhatsApp connect) state.
+  const [showConnect, setShowConnect] = useState(false);
+  const [connPlatform, setConnPlatform] = useState<'telegram' | 'whatsapp'>('telegram');
+  const [tgToken, setTgToken] = useState('');
+  const [waToken, setWaToken] = useState('');
+  const [waPhoneId, setWaPhoneId] = useState('');
+  const [connBusy, setConnBusy] = useState(false);
+  const [connErr, setConnErr] = useState('');
+  const [connResult, setConnResult] = useState<{ platform: 'telegram' | 'whatsapp'; link?: string | null; username?: string | null; callbackUrl?: string; verifyToken?: string } | null>(null);
+  const [copiedField, setCopiedField] = useState('');
+  const [helpMode, setHelpMode] = useState<HelpMode>('closed');
   const [showSimulator, setShowSimulator] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // Node-connection state (mobile autopsy 2026-07-23): the designer could ADD nodes but there was NO way
+  // to WIRE them — tap a node's link handle to start a connection, then tap the target node to finish it.
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  // A single tap now SELECTS a node and shows a floating action toolbar around it (Edit · Connect · Move ·
+  // Duplicate · Delete) instead of jumping straight into the full editor (admin 2026-07-23). The editor
+  // opens explicitly — the toolbar's Edit button or a double-tap.
+  const [editorOpen, setEditorOpen] = useState(false);
 
   // Drag state
-  const dragging = useRef<{ id: string; ox: number; oy: number } | null>(null);
+  const dragging = useRef<{ id: string; ox: number; oy: number; pointerId: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // Simulator state
@@ -129,57 +150,101 @@ export const BotBuilder: React.FC = () => {
 
   const selectedNode = nodes.find(n => n.id === selectedId) ?? null;
 
-  // ——— Drag handlers ———
-  const handleNodeMouseDown = useCallback((e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setSelectedId(id);
+  // Pointer position inside the (scrollable) canvas content, so a node lands under the finger/cursor
+  // regardless of how far the canvas is scrolled (touch scroll on mobile made this essential).
+  function canvasPoint(clientX: number, clientY: number) {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return { x: clientX, y: clientY };
     const rect = canvas.getBoundingClientRect();
+    return { x: clientX - rect.left + canvas.scrollLeft, y: clientY - rect.top + canvas.scrollTop };
+  }
+
+  // ——— Pointer drag (mouse + touch + pen, unified) ———
+  const handleNodePointerDown = useCallback((e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    // If we're wiring nodes, a tap on a node COMPLETES the connection instead of starting a drag.
+    if (connectingFrom) {
+      if (connectingFrom !== id) addEdge(connectingFrom, id);
+      setConnectingFrom(null);
+      setSelectedId(id);
+      return;
+    }
+    setSelectedId(id);
     const node = nodes.find(n => n.id === id);
     if (!node) return;
-    dragging.current = {
-      id,
-      ox: e.clientX - rect.left - node.x,
-      oy: e.clientY - rect.top - node.y,
-    };
-  }, [nodes]);
+    const p = canvasPoint(e.clientX, e.clientY);
+    dragging.current = { id, ox: p.x - node.x, oy: p.y - node.y, pointerId: e.pointerId };
+  }, [nodes, connectingFrom]);
 
-  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!dragging.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.max(0, e.clientX - rect.left - dragging.current.ox);
-    const y = Math.max(0, e.clientY - rect.top - dragging.current.oy);
+  const handleCanvasPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragging.current || e.pointerId !== dragging.current.pointerId) return;
+    const p = canvasPoint(e.clientX, e.clientY);
+    const x = Math.max(0, p.x - dragging.current.ox);
+    const y = Math.max(0, p.y - dragging.current.oy);
     setNodes(prev => prev.map(n => n.id === dragging.current!.id ? { ...n, x, y } : n));
   }, []);
 
-  const handleCanvasMouseUp = useCallback(() => {
+  const handleCanvasPointerUp = useCallback(() => {
     dragging.current = null;
   }, []);
 
   // ——— Keyboard delete ———
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && connectingFrom) { setConnectingFrom(null); return; }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !(e.target as HTMLElement).matches('input,textarea')) {
         deleteNode(selectedId);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedId]);
+  }, [selectedId, connectingFrom]);
 
   function deleteNode(id: string) {
     setNodes(prev => prev.filter(n => n.id !== id));
     setEdges(prev => prev.filter(e => e.from !== id && e.to !== id));
     if (selectedId === id) setSelectedId(null);
+    if (connectingFrom === id) setConnectingFrom(null);
+  }
+
+  function addEdge(from: string, to: string) {
+    if (from === to) return;
+    setEdges(prev => prev.some(e => e.from === from && e.to === to) ? prev : [...prev, { id: 'e' + genId(), from, to }]);
+  }
+
+  function deleteEdge(id: string) {
+    setEdges(prev => prev.filter(e => e.id !== id));
+  }
+
+  function openEditor(id: string) {
+    setSelectedId(id);
+    setEditorOpen(true);
+  }
+
+  function duplicateNode(id: string) {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+    const nid = genId();
+    setNodes(prev => [...prev, {
+      ...node,
+      id: nid,
+      x: node.x + 40,
+      y: node.y + 40,
+      data: { ...node.data, options: node.data.options ? [...node.data.options] : undefined },
+    }]);
+    setSelectedId(nid);
+    setEditorOpen(false);
   }
 
   function addNode(type: NodeType) {
     const id = genId();
-    const x = 100 + Math.random() * 300;
-    const y = 100 + Math.random() * 300;
+    // Drop new nodes into the CURRENT view of the canvas so they're visible on a small screen (not off in
+    // a random far corner the user has to hunt for).
+    const canvas = canvasRef.current;
+    const baseX = canvas ? canvas.scrollLeft + 40 : 100;
+    const baseY = canvas ? canvas.scrollTop + 40 : 100;
+    const x = baseX + Math.random() * 80;
+    const y = baseY + Math.random() * 80;
     const newNode: BotNode = {
       id,
       type,
@@ -224,6 +289,36 @@ Content-Type: application/json
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  }
+
+  function copyField(field: string, value: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(''), 2000);
+    });
+  }
+
+  // ——— GO LIVE — publish the designed flow as a REAL Telegram/WhatsApp bot ———
+  async function goLive() {
+    setConnBusy(true); setConnErr(''); setConnResult(null);
+    try {
+      const tok = await auth.currentUser?.getIdToken();
+      if (!tok) { setConnErr('Please sign in first to publish your bot.'); setConnBusy(false); return; }
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` };
+      const flow = { platform: connPlatform, nodes, edges };
+      if (connPlatform === 'telegram') {
+        const res = await fetch('/api/bots/telegram/connect', { method: 'POST', headers, body: JSON.stringify({ token: tgToken.trim(), flow }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setConnResult({ platform: 'telegram', link: data.link, username: data.botUsername });
+      } else {
+        const res = await fetch('/api/bots/whatsapp/connect', { method: 'POST', headers, body: JSON.stringify({ token: waToken.trim(), phoneNumberId: waPhoneId.trim(), flow }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setConnResult({ platform: 'whatsapp', callbackUrl: data.callbackUrl, verifyToken: data.verifyToken });
+      }
+    } catch { setConnErr('Network error — please try again.'); }
+    setConnBusy(false);
   }
 
   // ——— Simulator ———
@@ -302,100 +397,234 @@ Content-Type: application/json
   const canvasW = Math.max(800, ...nodes.map(n => n.x + NODE_WIDTH + 80));
   const canvasH = Math.max(600, ...nodes.map(n => n.y + NODE_HEIGHT + 80));
 
+  // ——— Properties editor (shared by the desktop side panel AND the mobile bottom sheet) ———
+  function renderProperties(node: BotNode) {
+    return (
+      <div className="flex flex-col gap-4 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div style={{ color: nodeConfig[node.type].color }}>{nodeConfig[node.type].icon}</div>
+            <span className="text-sm font-semibold">{nodeConfig[node.type].label}</span>
+          </div>
+          <button onClick={() => deleteNode(node.id)} className="text-red-400 hover:text-red-300 transition-colors" aria-label="Delete node">
+            <Trash2 size={16} />
+          </button>
+        </div>
+
+        <div className="text-[10px] text-gray-500 font-mono">ID: {node.id}</div>
+
+        {(node.type === 'message' || node.type === 'start' || node.type === 'end') && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-gray-400">Message Text</label>
+            <textarea
+              className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 resize-none focus:outline-none focus:border-white/30"
+              style={{ background: '#0d1117', minHeight: 80 }}
+              value={node.data.text || ''}
+              onChange={e => updateNodeData(node.id, { text: e.target.value })}
+            />
+          </div>
+        )}
+
+        {/* Tappable quick-reply buttons ON a message (admin 2026-07-23) — WhatsApp/Telegram style. */}
+        {node.type === 'message' && (
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-gray-400">Buttons <span className="text-gray-600">(optional — tappable quick replies)</span></label>
+            {(node.data.options || []).map((opt, i) => (
+              <div key={i} className="flex gap-1.5">
+                <input
+                  className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                  style={{ background: '#0d1117' }}
+                  value={opt}
+                  placeholder={`Button ${i + 1}`}
+                  onChange={e => { const opts = [...(node.data.options || [])]; opts[i] = e.target.value; updateNodeData(node.id, { options: opts }); }}
+                />
+                <button onClick={() => updateNodeData(node.id, { options: (node.data.options || []).filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-300 px-1" aria-label="Remove button"><X size={14} /></button>
+              </div>
+            ))}
+            <button
+              onClick={() => updateNodeData(node.id, { options: [...(node.data.options || []), 'New button'] })}
+              className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors self-start"
+            >
+              <Plus size={12} /> Add button
+            </button>
+            {(node.data.options || []).length > 0 && (
+              <p className="text-[10px] text-gray-500 leading-snug">Now connect each button to its next node: tap this node → Connect 🔗 → tap the target. The buttons follow the connections in order.</p>
+            )}
+          </div>
+        )}
+
+        {node.type === 'menu' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400">Prompt Text</label>
+              <input
+                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                style={{ background: '#0d1117' }}
+                value={node.data.text || ''}
+                onChange={e => updateNodeData(node.id, { text: e.target.value })}
+              />
+            </div>
+            <label className="text-xs text-gray-400">Button Options</label>
+            {(node.data.options || []).map((opt, i) => (
+              <div key={i} className="flex gap-1.5">
+                <input
+                  className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                  style={{ background: '#0d1117' }}
+                  value={opt}
+                  onChange={e => {
+                    const opts = [...(node.data.options || [])];
+                    opts[i] = e.target.value;
+                    updateNodeData(node.id, { options: opts });
+                  }}
+                />
+                <button
+                  onClick={() => updateNodeData(node.id, { options: (node.data.options || []).filter((_, j) => j !== i) })}
+                  className="text-red-400 hover:text-red-300 px-1"
+                  aria-label="Remove option"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => updateNodeData(node.id, { options: [...(node.data.options || []), 'New Option'] })}
+              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <Plus size={12} /> Add Option
+            </button>
+          </div>
+        )}
+
+        {node.type === 'condition' && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-gray-400">Condition Expression</label>
+            <input
+              className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
+              style={{ background: '#0d1117' }}
+              value={node.data.condition || ''}
+              onChange={e => updateNodeData(node.id, { condition: e.target.value })}
+              placeholder='e.g. user_input == "yes"'
+            />
+          </div>
+        )}
+
+        {node.type === 'api' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400">API URL</label>
+              <input
+                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
+                style={{ background: '#0d1117' }}
+                value={node.data.apiUrl || ''}
+                onChange={e => updateNodeData(node.id, { apiUrl: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400">Method</label>
+              <select
+                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                style={{ background: '#0d1117' }}
+                value={node.data.method || 'GET'}
+                onChange={e => updateNodeData(node.id, { method: e.target.value })}
+              >
+                {['GET', 'POST', 'PUT', 'DELETE'].map(m => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400">Response Variable</label>
+              <input
+                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
+                style={{ background: '#0d1117' }}
+                value={node.data.responseVar || ''}
+                onChange={e => updateNodeData(node.id, { responseVar: e.target.value })}
+                placeholder="result"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-2 border-t border-white/10">
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-[10px] text-gray-500">X</label>
+            <input
+              type="number"
+              className="w-full rounded p-1.5 text-sm text-gray-300 border border-white/10 focus:outline-none"
+              style={{ background: '#0d1117' }}
+              value={Math.round(node.x)}
+              onChange={e => setNodes(prev => prev.map(n => n.id === node.id ? { ...n, x: Number(e.target.value) } : n))}
+            />
+          </div>
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-[10px] text-gray-500">Y</label>
+            <input
+              type="number"
+              className="w-full rounded p-1.5 text-sm text-gray-300 border border-white/10 focus:outline-none"
+              style={{ background: '#0d1117' }}
+              value={Math.round(node.y)}
+              onChange={e => setNodes(prev => prev.map(n => n.id === node.id ? { ...n, y: Number(e.target.value) } : n))}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full w-full" style={{ background: '#0d1117', color: '#e6edf3' }}>
-      {/* ——— Toolbar ——— */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10 flex-shrink-0" style={{ background: '#161b22' }}>
-        {/* Platform tabs */}
-        <div className="flex rounded-lg overflow-hidden border border-white/10">
+      {/* ——— Toolbar (horizontally scrollable so every action stays reachable on a phone) ——— */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-shrink-0 overflow-x-auto no-scrollbar" style={{ background: '#161b22' }}>
+        <div className="flex rounded-lg overflow-hidden border border-white/10 flex-shrink-0">
           {(['whatsapp', 'telegram', 'both'] as Platform[]).map(p => (
             <button
               key={p}
               onClick={() => setPlatform(p)}
-              className={`px-3 py-1 text-xs capitalize transition-colors ${platform === p ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              className={`px-3 py-1.5 text-xs capitalize transition-colors whitespace-nowrap ${platform === p ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}
             >
               {p === 'both' ? 'Both' : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
         </div>
 
-        <div className="flex-1" />
-
-        {/* Node count */}
-        <span className="text-xs text-gray-400 border border-white/10 rounded px-2 py-1">{nodes.length} nodes</span>
-
-        <button
-          onClick={startSim}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors"
-        >
+        <span className="text-xs text-gray-400 border border-white/10 rounded px-2 py-1.5 flex-shrink-0 whitespace-nowrap">{nodes.length} nodes</span>
+        <button onClick={startSim} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Zap size={13} /> Simulate
         </button>
-        <button
-          onClick={() => setShowWebhookModal(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-purple-700 hover:bg-purple-600 text-white transition-colors"
-        >
-          <Webhook size={13} /> Export Webhook
+        <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex-shrink-0 whitespace-nowrap">
+          <Rocket size={13} /> Go Live
         </button>
-        <button
-          onClick={exportJson}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors"
-        >
+        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-100 transition-colors flex-shrink-0 whitespace-nowrap">
+          <HelpCircle size={13} /> Help
+        </button>
+        <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
           <Download size={13} /> Export JSON
         </button>
-        <button
-          onClick={() => { setNodes([]); setEdges([]); setSelectedId(null); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors"
-        >
+        <button onClick={() => { setNodes([]); setEdges([]); setSelectedId(null); setConnectingFrom(null); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors flex-shrink-0 whitespace-nowrap">
           <Trash2 size={13} /> Clear
         </button>
       </div>
 
-      {/* ——— Main area ——— */}
+      {/* ——— Canvas + (desktop) properties ——— */}
       <div className="flex flex-1 min-h-0">
-        {/* ——— Left sidebar: Node palette ——— */}
-        <div className="w-[200px] flex-shrink-0 border-r border-white/10 flex flex-col p-3 gap-2 overflow-y-auto" style={{ background: '#161b22' }}>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Node Palette</p>
-          {(Object.entries(nodeConfig) as [NodeType, typeof nodeConfig[NodeType]][]).map(([type, cfg]) => (
-            <button
-              key={type}
-              onClick={() => addNode(type)}
-              className="flex items-center gap-2 p-2.5 rounded-lg border border-white/10 hover:border-white/20 text-left transition-all group"
-              style={{ background: '#0d1117' }}
-            >
-              <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0" style={{ background: cfg.color + '33', color: cfg.color }}>
-                {cfg.icon}
-              </div>
-              <div>
-                <div className="text-xs font-medium text-gray-200">{cfg.label}</div>
-                <div className="text-[10px] text-gray-500">{cfg.desc}</div>
-              </div>
-            </button>
-          ))}
-          <p className="text-[10px] text-gray-600 mt-2 text-center">Click to add node</p>
-        </div>
-
-        {/* ——— Center canvas ——— */}
         <div
           ref={canvasRef}
           className="flex-1 overflow-auto relative"
           style={{ background: '#0d1117', cursor: dragging.current ? 'grabbing' : 'default' }}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseUp}
-          onClick={() => setSelectedId(null)}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={handleCanvasPointerUp}
+          onPointerLeave={handleCanvasPointerUp}
+          onClick={() => { setSelectedId(null); setEditorOpen(false); if (connectingFrom) setConnectingFrom(null); }}
         >
-          {/* Grid background */}
-          <svg
-            style={{ position: 'absolute', top: 0, left: 0, width: canvasW, height: canvasH, pointerEvents: 'none' }}
-          >
+          <svg style={{ position: 'absolute', top: 0, left: 0, width: canvasW, height: canvasH }}>
             <defs>
               <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
                 <path d="M 24 0 L 0 0 0 24" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
               </pattern>
+              <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L8,3 z" fill="rgba(255,255,255,0.3)" />
+              </marker>
             </defs>
-            <rect width="100%" height="100%" fill="url(#grid)" />
+            <rect width="100%" height="100%" fill="url(#grid)" style={{ pointerEvents: 'none' }} />
 
-            {/* Edges */}
             {edges.map(edge => {
               const fromNode = nodes.find(n => n.id === edge.from);
               const toNode = nodes.find(n => n.id === edge.to);
@@ -404,29 +633,34 @@ Content-Type: application/json
               const mid = nodeCenter(toNode);
               return (
                 <g key={edge.id}>
-                  <path d={path} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2" markerEnd="url(#arrow)" />
+                  <path d={path} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2" markerEnd="url(#arrow)" style={{ pointerEvents: 'none' }} />
+                  {/* Wide transparent hit-area so an edge can be TAPPED to delete it (touch-friendly). */}
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth="16"
+                    style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                    onClick={(e) => { e.stopPropagation(); deleteEdge(edge.id); }}
+                  >
+                    <title>Tap to delete this connection</title>
+                  </path>
                   {edge.label && (
-                    <text x={mid.x} y={toNode.y - 10} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="10">
+                    <text x={mid.x} y={toNode.y - 10} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="10" style={{ pointerEvents: 'none' }}>
                       {edge.label}
                     </text>
                   )}
                 </g>
               );
             })}
-
-            {/* Arrow marker */}
-            <defs>
-              <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L8,3 z" fill="rgba(255,255,255,0.3)" />
-              </marker>
-            </defs>
           </svg>
 
-          {/* Nodes */}
           <div style={{ width: canvasW, height: canvasH, position: 'relative' }}>
             {nodes.map(node => {
               const cfg = nodeConfig[node.type];
               const isSelected = selectedId === node.id;
+              const isConnectSource = connectingFrom === node.id;
+              const isConnectTarget = connectingFrom && connectingFrom !== node.id;
               return (
                 <div
                   key={node.id}
@@ -437,15 +671,16 @@ Content-Type: application/json
                     width: NODE_WIDTH,
                     height: NODE_HEIGHT,
                     zIndex: isSelected ? 10 : 1,
-                    cursor: 'grab',
+                    cursor: connectingFrom ? 'crosshair' : 'grab',
+                    touchAction: 'none', // let pointer-drag work instead of the browser scrolling/zooming
                   }}
-                  onMouseDown={e => handleNodeMouseDown(e, node.id)}
-                  onClick={e => { e.stopPropagation(); setSelectedId(node.id); }}
-                  onDoubleClick={e => { e.stopPropagation(); setEditingId(node.id); setSelectedId(node.id); }}
+                  onPointerDown={e => handleNodePointerDown(e, node.id)}
+                  onClick={e => e.stopPropagation()}
+                  onDoubleClick={e => { e.stopPropagation(); openEditor(node.id); }}
                 >
                   <div
-                    className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-white/40 ring-offset-1 ring-offset-transparent' : ''}`}
-                    style={{ background: '#161b22', borderColor: isSelected ? cfg.color : cfg.color + '66' }}
+                    className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-white/40' : ''} ${isConnectTarget ? 'ring-2 ring-emerald-400/70' : ''}`}
+                    style={{ background: '#161b22', borderColor: isConnectSource ? '#34d399' : (isSelected ? cfg.color : cfg.color + '66') }}
                   >
                     <div className="flex items-center gap-1.5">
                       <div className="flex-shrink-0" style={{ color: cfg.color }}>{cfg.icon}</div>
@@ -458,216 +693,191 @@ Content-Type: application/json
                 </div>
               );
             })}
+
+            {/* Floating node action toolbar (admin 2026-07-23): a single tap selects a node and pops
+                these actions right above it — Edit · Connect · Move · Duplicate · Delete — instead of
+                jumping straight into the full editor. Positioned in canvas-content coordinates so it stays
+                pinned to the node while the canvas scrolls; flips below when the node hugs the top edge. */}
+            {selectedNode && !connectingFrom && (() => {
+              const TB_W = 224;
+              const below = selectedNode.y < 60;
+              const top = below ? selectedNode.y + NODE_HEIGHT + 12 : selectedNode.y - 52;
+              const left = Math.max(4, selectedNode.x + NODE_WIDTH / 2 - TB_W / 2);
+              return (
+                <div
+                  className="absolute z-20 flex items-center gap-0.5 p-1 rounded-xl border border-white/15 shadow-2xl"
+                  style={{ left, top, width: TB_W, background: '#1c2230' }}
+                  onClick={e => e.stopPropagation()}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <button title="Edit" aria-label="Edit node" onClick={e => { e.stopPropagation(); openEditor(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Pencil size={15} /></button>
+                  <button title="Connect" aria-label="Connect node" onClick={e => { e.stopPropagation(); setConnectingFrom(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-emerald-400 hover:bg-white/10 active:scale-90 transition-all"><Link2 size={15} /></button>
+                  <button title="Move — drag to reposition" aria-label="Move node"
+                    onPointerDown={e => {
+                      e.stopPropagation();
+                      const node = nodes.find(n => n.id === selectedNode.id);
+                      if (!node) return;
+                      const p = canvasPoint(e.clientX, e.clientY);
+                      dragging.current = { id: node.id, ox: p.x - node.x, oy: p.y - node.y, pointerId: e.pointerId };
+                    }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-sky-400 hover:bg-white/10 active:scale-90 transition-all cursor-grab" style={{ touchAction: 'none' }}><Move size={15} /></button>
+                  <button title="Duplicate" aria-label="Duplicate node" onClick={e => { e.stopPropagation(); duplicateNode(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Copy size={15} /></button>
+                  <button title="Delete" aria-label="Delete node" onClick={e => { e.stopPropagation(); deleteNode(selectedNode.id); }}
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/15 active:scale-90 transition-all"><Trash2 size={15} /></button>
+                </div>
+              );
+            })()}
           </div>
+
+          {/* Connecting banner */}
+          {connectingFrom && (
+            <div className="sticky top-2 left-2 z-20 inline-flex items-center gap-2 mx-2 mt-2 px-3 py-1.5 rounded-full bg-emerald-600 text-white text-xs shadow-lg">
+              <Link2 size={12} /> Tap a target node to connect
+              <button onClick={() => setConnectingFrom(null)} className="ml-1 opacity-80 hover:opacity-100" aria-label="Cancel connect"><X size={12} /></button>
+            </div>
+          )}
         </div>
 
-        {/* ——— Right panel: Properties ——— */}
-        <div className="w-[280px] flex-shrink-0 border-l border-white/10 flex flex-col" style={{ background: '#161b22' }}>
-          {selectedNode ? (
-            <div className="flex flex-col h-full overflow-y-auto p-4 gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div style={{ color: nodeConfig[selectedNode.type].color }}>{nodeConfig[selectedNode.type].icon}</div>
-                  <span className="text-sm font-semibold">{nodeConfig[selectedNode.type].label}</span>
-                </div>
-                <button
-                  onClick={() => deleteNode(selectedNode.id)}
-                  className="text-red-400 hover:text-red-300 transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-
-              <div className="text-[10px] text-gray-500 font-mono">ID: {selectedNode.id}</div>
-
-              {/* Message node */}
-              {(selectedNode.type === 'message' || selectedNode.type === 'start' || selectedNode.type === 'end') && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-gray-400">Message Text</label>
-                  <textarea
-                    className="w-full rounded-lg p-2 text-xs text-gray-200 border border-white/10 resize-none focus:outline-none focus:border-white/30"
-                    style={{ background: '#0d1117', minHeight: 80 }}
-                    value={selectedNode.data.text || ''}
-                    onChange={e => updateNodeData(selectedNode.id, { text: e.target.value })}
-                  />
-                </div>
-              )}
-
-              {/* Menu node */}
-              {selectedNode.type === 'menu' && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-gray-400">Prompt Text</label>
-                    <input
-                      className="w-full rounded-lg p-2 text-xs text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                      style={{ background: '#0d1117' }}
-                      value={selectedNode.data.text || ''}
-                      onChange={e => updateNodeData(selectedNode.id, { text: e.target.value })}
-                    />
-                  </div>
-                  <label className="text-xs text-gray-400">Button Options</label>
-                  {(selectedNode.data.options || []).map((opt, i) => (
-                    <div key={i} className="flex gap-1.5">
-                      <input
-                        className="flex-1 rounded-lg p-1.5 text-xs text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                        style={{ background: '#0d1117' }}
-                        value={opt}
-                        onChange={e => {
-                          const opts = [...(selectedNode.data.options || [])];
-                          opts[i] = e.target.value;
-                          updateNodeData(selectedNode.id, { options: opts });
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          const opts = (selectedNode.data.options || []).filter((_, j) => j !== i);
-                          updateNodeData(selectedNode.id, { options: opts });
-                        }}
-                        className="text-red-400 hover:text-red-300"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => updateNodeData(selectedNode.id, { options: [...(selectedNode.data.options || []), 'New Option'] })}
-                    className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                  >
-                    <Plus size={12} /> Add Option
-                  </button>
-                </div>
-              )}
-
-              {/* Condition node */}
-              {selectedNode.type === 'condition' && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-gray-400">Condition Expression</label>
-                  <input
-                    className="w-full rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
-                    style={{ background: '#0d1117' }}
-                    value={selectedNode.data.condition || ''}
-                    onChange={e => updateNodeData(selectedNode.id, { condition: e.target.value })}
-                    placeholder='e.g. user_input == "yes"'
-                  />
-                </div>
-              )}
-
-              {/* API node */}
-              {selectedNode.type === 'api' && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-gray-400">API URL</label>
-                    <input
-                      className="w-full rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
-                      style={{ background: '#0d1117' }}
-                      value={selectedNode.data.apiUrl || ''}
-                      onChange={e => updateNodeData(selectedNode.id, { apiUrl: e.target.value })}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-gray-400">Method</label>
-                    <select
-                      className="w-full rounded-lg p-2 text-xs text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                      style={{ background: '#0d1117' }}
-                      value={selectedNode.data.method || 'GET'}
-                      onChange={e => updateNodeData(selectedNode.id, { method: e.target.value })}
-                    >
-                      {['GET', 'POST', 'PUT', 'DELETE'].map(m => <option key={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-gray-400">Response Variable</label>
-                    <input
-                      className="w-full rounded-lg p-1.5 text-xs text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
-                      style={{ background: '#0d1117' }}
-                      value={selectedNode.data.responseVar || ''}
-                      onChange={e => updateNodeData(selectedNode.id, { responseVar: e.target.value })}
-                      placeholder="result"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Position */}
-              <div className="flex gap-2 mt-auto pt-2 border-t border-white/10">
-                <div className="flex flex-col gap-1 flex-1">
-                  <label className="text-[10px] text-gray-500">X</label>
-                  <input
-                    type="number"
-                    className="w-full rounded p-1 text-xs text-gray-300 border border-white/10 focus:outline-none"
-                    style={{ background: '#0d1117' }}
-                    value={Math.round(selectedNode.x)}
-                    onChange={e => setNodes(prev => prev.map(n => n.id === selectedNode.id ? { ...n, x: Number(e.target.value) } : n))}
-                  />
-                </div>
-                <div className="flex flex-col gap-1 flex-1">
-                  <label className="text-[10px] text-gray-500">Y</label>
-                  <input
-                    type="number"
-                    className="w-full rounded p-1 text-xs text-gray-300 border border-white/10 focus:outline-none"
-                    style={{ background: '#0d1117' }}
-                    value={Math.round(selectedNode.y)}
-                    onChange={e => setNodes(prev => prev.map(n => n.id === selectedNode.id ? { ...n, y: Number(e.target.value) } : n))}
-                  />
-                </div>
-              </div>
-            </div>
-          ) : (
+        {/* Desktop properties (hidden on mobile — the mobile sheet below takes over) */}
+        <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-white/10 flex-col overflow-y-auto" style={{ background: '#161b22' }}>
+          {editorOpen && selectedNode ? renderProperties(selectedNode) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
               <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
                 <Bot size={22} className="text-gray-500" />
               </div>
-              <p className="text-sm text-gray-400">Select a node to edit its properties</p>
-              <p className="text-xs text-gray-600">Click on any node in the canvas</p>
+              <p className="text-sm text-gray-400">{selectedNode ? 'Tap Edit ✏️ on the node toolbar to edit it here' : 'Select a node to edit its properties'}</p>
+              <p className="text-xs text-gray-600">Tap a node, or double-tap to edit</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ——— Webhook Modal ——— */}
-      {showWebhookModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="rounded-xl border border-white/10 p-6 w-[480px] flex flex-col gap-4" style={{ background: '#161b22' }}>
+      {/* ——— Mobile properties sheet (opens only via the toolbar's Edit / a double-tap) ——— */}
+      {editorOpen && selectedNode && (
+        <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] overflow-y-auto" style={{ background: '#161b22' }}>
+          <div className="flex items-center justify-between px-4 pt-3">
+            <span className="text-xs text-gray-500 uppercase tracking-wider">Edit node</span>
+            <button onClick={() => setEditorOpen(false)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
+          </div>
+          {renderProperties(selectedNode)}
+        </div>
+      )}
+
+      {/* ——— Node palette FOOTER (moved from the old left sidebar; horizontal scroll) ——— */}
+      <div className="flex-shrink-0 border-t border-white/10 overflow-x-auto no-scrollbar flex items-stretch gap-2 px-3 py-2.5" style={{ background: '#161b22' }}>
+        {(Object.entries(nodeConfig) as [NodeType, typeof nodeConfig[NodeType]][]).map(([type, cfg]) => (
+          <button
+            key={type}
+            onClick={() => addNode(type)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 hover:border-white/25 active:scale-95 text-left transition-all flex-shrink-0"
+            style={{ background: '#0d1117' }}
+            title={`Add ${cfg.label} — ${cfg.desc}`}
+          >
+            <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0" style={{ background: cfg.color + '33', color: cfg.color }}>
+              {cfg.icon}
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-gray-200 whitespace-nowrap">{cfg.label}</div>
+              <div className="text-[10px] text-gray-500 whitespace-nowrap">{cfg.desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* ——— GO LIVE — real Telegram / WhatsApp connect ——— */}
+      {showConnect && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] max-h-[85vh] overflow-y-auto flex flex-col gap-4" style={{ background: '#161b22' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Webhook size={16} className="text-purple-400" />
-                <h2 className="text-sm font-semibold">Webhook Setup</h2>
+                <Rocket size={16} className="text-emerald-400" />
+                <h2 className="text-sm font-semibold">Go Live — publish your bot</h2>
               </div>
-              <button onClick={() => setShowWebhookModal(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
+              <button onClick={() => setShowConnect(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
             </div>
-            <p className="text-xs text-gray-400">Send your exported JSON flow to your server via a POST request:</p>
-            <div className="relative rounded-lg p-4 font-mono text-xs text-green-300 border border-white/10 overflow-x-auto" style={{ background: '#0d1117' }}>
-              <pre className="whitespace-pre-wrap">{webhookSnippet}</pre>
-              <button
-                onClick={copyWebhook}
-                className="absolute top-2 right-2 p-1 rounded text-gray-500 hover:text-white transition-colors"
-              >
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-              </button>
-            </div>
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Steps</p>
-              {['1. Export your flow as JSON', '2. Host your webhook endpoint', '3. POST the JSON to your endpoint', '4. Parse and execute the flow server-side'].map(s => (
-                <div key={s} className="flex items-center gap-2 text-xs text-gray-400">
-                  <ChevronRight size={12} className="text-purple-400" /> {s}
-                </div>
+
+            {/* Platform toggle */}
+            <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">
+              {(['telegram', 'whatsapp'] as const).map(p => (
+                <button key={p} onClick={() => { setConnPlatform(p); setConnResult(null); setConnErr(''); }}
+                  className={`px-4 py-1.5 text-xs capitalize transition-colors ${connPlatform === p ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>{p}</button>
               ))}
             </div>
-            <button
-              onClick={() => setShowWebhookModal(false)}
-              className="w-full py-2 rounded-lg text-xs bg-purple-700 hover:bg-purple-600 text-white transition-colors"
-            >
-              Close
-            </button>
+
+            {connResult ? (
+              connResult.platform === 'telegram' ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Your bot is LIVE on Telegram!</div>
+                  <p className="text-xs text-gray-400">Anyone can now message {connResult.username ? `@${connResult.username}` : 'your bot'} and it will run your exact flow.</p>
+                  {connResult.link && (
+                    <a href={connResult.link} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 text-white transition-colors">
+                      <ExternalLink size={14} /> Open your bot in Telegram
+                    </a>
+                  )}
+                  <p className="text-[11px] text-gray-500">Edit the flow anytime and hit Go Live again to update the live bot.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Almost done — finish in Meta</div>
+                  <p className="text-xs text-gray-400">In your Meta app → WhatsApp → Configuration → Edit the webhook, paste these two values, then click Verify and Save:</p>
+                  {[{ label: 'Callback URL', value: connResult.callbackUrl || '' }, { label: 'Verify token', value: connResult.verifyToken || '' }].map(({ label, value }) => (
+                    <div key={label} className="flex flex-col gap-1">
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</span>
+                      <div className="flex gap-1.5">
+                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono" style={{ background: '#0d1117' }} />
+                        <button onClick={() => copyField(label, value)} className="px-2 rounded-lg border border-white/10 text-gray-400 hover:text-white">{copiedField === label ? <Check size={12} /> : <Copy size={12} />}</button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-gray-500">Then subscribe to the <span className="text-gray-300">messages</span> field. After that, message your WhatsApp business number and the bot runs your flow.</p>
+                </div>
+              )
+            ) : connPlatform === 'telegram' ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5 text-xs text-gray-400">
+                  {['Tap "Open @BotFather" below and send /newbot', 'Choose a name + username for your bot', 'Copy the token BotFather gives you (looks like 123456789:ABC-def…)', 'Paste it below and tap Connect'].map((s, i) => (
+                    <div key={i} className="flex items-start gap-2"><span className="text-emerald-400 font-bold">{i + 1}.</span> {s}</div>
+                  ))}
+                </div>
+                <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                  <ExternalLink size={13} /> Open @BotFather to get your token
+                </a>
+                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                  {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect &amp; Go Live</>}
+                </button>
+                <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 self-center"><HelpCircle size={11} /> Stuck? Ask NavBharatAI to guide you step-by-step</button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-gray-400">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-gray-200">permanent access token</span> and <span className="text-gray-200">Phone Number ID</span> from the Meta dashboard, then paste them here:</p>
+                <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                  <ExternalLink size={13} /> Open Meta App Dashboard (WhatsApp → API Setup)
+                </a>
+                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                  {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
+                </button>
+                <div className="flex items-center justify-between">
+                  <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">Setup guide <ExternalLink size={10} /></a>
+                  <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1"><HelpCircle size={11} /> Ask NavBharatAI to help</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* ——— Simulator Modal ——— */}
       {showSimulator && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="rounded-xl border border-white/10 flex flex-col w-[380px] max-h-[600px]" style={{ background: '#161b22' }}>
-            {/* Header */}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="rounded-xl border border-white/10 flex flex-col w-full max-w-[380px] max-h-[80vh]" style={{ background: '#161b22' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -675,18 +885,14 @@ Content-Type: application/json
                 <span className="text-xs text-gray-500 capitalize">({platform})</span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={startSim}
-                  className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                >
+                <button onClick={startSim} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors">
                   <RotateCcw size={12} /> Restart
                 </button>
                 <button onClick={() => setShowSimulator(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
               </div>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2 min-h-0" style={{ maxHeight: 380 }}>
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2 min-h-0">
               {simMessages.length === 0 && (
                 <div className="text-center text-xs text-gray-600 py-8">Starting simulation...</div>
               )}
@@ -698,11 +904,7 @@ Content-Type: application/json
                     </div>
                   )}
                   <div
-                    className={`max-w-[75%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'text-white rounded-br-sm'
-                        : 'text-gray-200 rounded-bl-sm'
-                    }`}
+                    className={`max-w-[75%] rounded-xl px-3 py-2 text-xs leading-relaxed ${msg.role === 'user' ? 'text-white rounded-br-sm' : 'text-gray-200 rounded-bl-sm'}`}
                     style={{ background: msg.role === 'user' ? '#1d4ed8' : '#0d1117' }}
                   >
                     {msg.text}
@@ -716,7 +918,6 @@ Content-Type: application/json
               ))}
             </div>
 
-            {/* Options / input */}
             <div className="border-t border-white/10 p-3 flex flex-col gap-2">
               {simOptions.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
@@ -736,7 +937,7 @@ Content-Type: application/json
               ) : (
                 <div className="flex gap-2">
                   <input
-                    className="flex-1 rounded-lg px-3 py-2 text-xs text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                    className="flex-1 rounded-lg px-3 py-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
                     style={{ background: '#0d1117' }}
                     placeholder="Type a message..."
                     onKeyDown={e => {
@@ -759,6 +960,9 @@ Content-Type: application/json
           </div>
         </div>
       )}
+
+      {/* ——— Help widget — NavBharatAI Free, primed to guide bot building/connecting (minimizes to a 🤖 bubble) ——— */}
+      <BotBuildHelp mode={helpMode} onModeChange={setHelpMode} />
     </div>
   );
 };

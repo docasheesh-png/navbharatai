@@ -4,15 +4,16 @@ This is the end-to-end guide to ship NavBharatAI as a native mobile app to **Goo
 **Apple App Store**. It is honest about what is already done in this repo and what only *you* can do
 (store accounts cost money, and an iOS build **requires a Mac** — Apple's hard rule).
 
-The app uses **Capacitor in HOSTED MODE**: the native shell is a real APK/IPA that loads the live site
-`https://navbharatai.com` inside a native WebView. Auth, payments, and every API call work exactly as on
-the web. This is a genuine, store-installable app — not a bookmark.
+The app uses **Capacitor in BUNDLED MODE** (switched from hosted mode 2026-07-10): the native shell ships the
+built web app INSIDE the APK/IPA (true native polish — splash screen, status bar, back-button handling) and
+rewrites `/api/*` calls to `https://navbharatai.com` via the transport interceptor. Auth, payments, and every
+API call work exactly as on the web. This is a genuine, store-installable app — not a bookmark.
 
 ---
 
 ## 0. What is already done in this repo ✅
 
-- `capacitor.config.ts` — appId `com.navbharat.ai`, appName `NavBharatAI`, hosted mode, iOS + Android.
+- `capacitor.config.ts` — appId `com.navbharat.ai`, appName `NavBharatAI`, bundled mode, iOS + Android.
 - `@capacitor/core`, `@capacitor/android`, `@capacitor/ios`, `@capacitor/cli` — all installed (v8.4.1).
 - `android/` — the full native Android project is committed and ready to build.
 - `public/manifest.json` + mobile meta tags — PWA basics in place.
@@ -220,8 +221,8 @@ balance and say "add credits on the web", but must not open a purchase/checkout 
 - Later (v2), if you want in-app purchases: integrate `@capacitor/in-app-purchases` (StoreKit / Play
   Billing) and let the store take its cut — a separate project.
 
-The hosted WebView already respects this as long as the site hides the purchase UI when opened from the
-app. Detect the app via the Capacitor user-agent / `Capacitor.isNativePlatform()` and hide the buy buttons.
+The bundled WebView already respects this as long as the app hides the purchase UI when running natively.
+Detect the app via the Capacitor user-agent / `Capacitor.isNativePlatform()` and hide the buy buttons.
 
 ---
 
@@ -243,12 +244,42 @@ app. Detect the app via the Capacitor user-agent / `Capacitor.isNativePlatform()
 
 A pure WebView wrapper *can* be rejected for "not enough native value". To be safe, add at least one real
 native capability before the App Store submission (Android review is more lenient):
-- **Push notifications** (`@capacitor/push-notifications`) — build-finished / credit alerts. Highest value.
+- ✅ **Push notifications** (`@capacitor-firebase/messaging`, admin 2026-07-26) — build-finished / low-balance
+  alerts. Highest value. **DONE** — see §7.5 for the two remaining one-time console steps.
 - **Native share** (`@capacitor/share`), **status bar** styling (`@capacitor/status-bar`), **splash
   screen** (`@capacitor/splash-screen`).
 
-If the App Store reviewer pushes back with 4.2, adding push notifications almost always resolves it.
-(Choosing "Pehle native features add karo" in the panel builds these — ask and I'll wire them.)
+If the App Store reviewer pushes back with 4.2, push notifications (already wired) almost always resolves it.
+
+### 7.5 Push notifications — what's built vs. the two one-time console steps left
+
+**Built (code-complete, admin 2026-07-26):** `@capacitor-firebase/messaging` (same plugin family as the
+already-shipped `@capacitor-firebase/authentication` — it bridges APNs↔FCM internally on iOS, so the
+server only ever deals in FCM tokens on both platforms). Client requests permission + registers the FCM
+token against the signed-in user (`src/lib/pushNotifications.ts`, wired from the auth listener in
+`App.tsx`); server stores tokens per-user in Firestore (`src/server/lib/DeviceTokenStore.ts`) and sends via
+`admin.messaging()` (`src/server/lib/PushNotificationService.ts`), using the SAME Firebase project the app
+already authenticates against (`gen-lang-client-0866594388`) — no new infrastructure. Two real triggers are
+wired: a build finishing (success or failure) and the wallet hitting ₹0.
+
+**Android:** works as soon as this ships — `google-services.json` is already committed, and
+`npx cap sync android` (already in `android-aab.yml`) auto-registers the plugin via manifest merge. Nothing
+else to do.
+
+**iOS: two one-time steps only YOU can do (then rebuild with the toggle on)** — the `ios-ipa.yml` workflow
+has an `enable_push_notifications` input, **default OFF** until these are done (turning it on before they're
+done would break the build's provisioning-profile step):
+1. **Apple Developer → Certificates, Identifiers & Profiles → Identifiers → `com.navbharat.ai` → tick "Push
+   Notifications" → Save.** (Same one-reliable-checkbox pattern as the Sign in with Apple capability in §4.5
+   — the build can't enable this itself with an App Store Connect API key.)
+2. **Firebase Console → Project Settings → Cloud Messaging → Apple app configuration (com.navbharat.ai) →
+   upload an APNs Authentication Key** (a `.p8` you generate once in Apple Developer → Certificates → Keys →
+   + → "Apple Push Notifications service (APNs)"). Without this, Firebase has no way to actually hand a
+   push to Apple's servers — the app would register a token successfully but never receive anything.
+3. **Rebuild with the flag on:** Actions → "Build iOS App (.ipa, signed)" → Run workflow → tick **"Include
+   the push-notifications entitlement"**. That run injects `aps-environment` + forces the provisioning
+   profile to regenerate (step 1 is what makes the regenerated profile valid). Leave OFF for a build without
+   push (today's default — nothing changes for users until you do steps 1–2 and rebuild with the flag on).
 
 ---
 

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Send, Clock, Copy, Check, Trash2, Plus, ChevronDown,
-  ArrowRight, Save, RefreshCcw, Globe
+  ArrowRight, Save, RefreshCcw, Globe, X, ShieldAlert
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,10 +59,13 @@ const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const LS_KEY = 'navbharatai_api_history';
 const MAX_HISTORY = 20;
 
+// Quick tests point at REAL same-origin NavBharatAI endpoints (admin autopsy 2026-07-21) — the old
+// presets hit http://localhost:3000, a dev-only host that 404s for every deployed user. Relative
+// URLs resolve against the app's own origin, so these return live data on web and in the app.
 const QUICK_TESTS: { label: string; method: HttpMethod; url: string; body?: string }[] = [
-  { label: 'Test /api/health', method: 'GET', url: 'http://localhost:3000/api/health' },
-  { label: 'Test /api/ai-chat', method: 'POST', url: 'http://localhost:3000/api/ai-chat', body: '{"message":"Hello"}' },
-  { label: 'Test /api/sda-chat', method: 'POST', url: 'http://localhost:3000/api/sda-chat', body: '{"message":"Hello"}' },
+  { label: 'GET /api/capabilities', method: 'GET', url: '/api/capabilities' },
+  { label: 'GET /api/release/gate', method: 'GET', url: '/api/release/gate' },
+  { label: 'GET /api/knowledge-base', method: 'GET', url: '/api/knowledge-base' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -86,6 +90,15 @@ function buildUrl(base: string, params: KVRow[]): string {
   if (!active.length) return base;
   const qs = active.map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join('&');
   return base.includes('?') ? `${base}&${qs}` : `${base}?${qs}`;
+}
+
+// SECURITY: never persist auth/secret-bearing headers to localStorage history (they'd sit in plaintext
+// on disk). The Auth-tab Bearer token is already kept out of history; this also strips a manually-typed
+// Authorization/Cookie/api-key header before saving. The user re-enters the secret when replaying — safer.
+const SENSITIVE_HEADER_RE = /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|api-key|x-auth-token|x-access-token|x-secret)$/i;
+
+function stripSensitiveHeaders(rows: KVRow[]): KVRow[] {
+  return rows.filter((r) => !SENSITIVE_HEADER_RE.test((r.key || '').trim()));
 }
 
 function loadHistory(): RequestConfig[] {
@@ -176,11 +189,17 @@ const APITester: React.FC<APITesterProps> = () => {
   const [copied, setCopied] = useState(false);
   const [methodOpen, setMethodOpen] = useState(false);
   const [showRawHeaders, setShowRawHeaders] = useState(false);
+  // History is a slide-out drawer now (mobile-friendly) instead of a permanent half-screen column.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // Route via the SSRF-guarded server proxy (default ON) so cross-origin APIs work despite browser
+  // CORS. Turn off for a direct browser fetch (same-origin or CORS-enabled endpoints).
+  const [useProxy, setUseProxy] = useState(true);
 
   useEffect(() => { saveHistory(history); }, [history]);
 
   const addToHistory = useCallback((cfg: Omit<RequestConfig, 'id' | 'savedAt'>) => {
-    const entry: RequestConfig = { ...cfg, id: crypto.randomUUID(), savedAt: new Date() };
+    // Never write a secret-bearing header to localStorage (see stripSensitiveHeaders).
+    const entry: RequestConfig = { ...cfg, headers: stripSensitiveHeaders(cfg.headers), id: crypto.randomUUID(), savedAt: new Date() };
     setHistory(prev => [entry, ...prev].slice(0, MAX_HISTORY));
   }, []);
 
@@ -199,45 +218,62 @@ const APITester: React.FC<APITesterProps> = () => {
       activeHeaders['Authorization'] = `Bearer ${authToken.trim()}`;
     }
 
-    const init: RequestInit = { method, headers: activeHeaders };
-    if (['POST', 'PUT', 'PATCH'].includes(method) && body.trim()) {
-      init.body = body.trim();
-    }
-
+    const reqBody = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && body.trim() ? body.trim() : undefined;
+    // Same-origin / relative URLs have no CORS problem and the proxy needs an absolute URL — always
+    // fetch those directly. The proxy is only for cross-origin absolute URLs.
+    const sameOrigin = finalUrl.startsWith('/') || (typeof window !== 'undefined' && finalUrl.startsWith(window.location.origin));
+    const routeViaProxy = useProxy && !sameOrigin;
     const start = performance.now();
     try {
-      const res = await fetch(finalUrl, init);
+      let status: number, statusText: string, resHeaders: Record<string, string>, resBody: string, truncated = false;
+      if (routeViaProxy) {
+        // Route through NavBharatAI's SSRF-guarded server proxy so cross-origin APIs (which the
+        // browser would block with CORS) actually return a response. The server fetches, we render.
+        const pr = await fetch('/api/devtools/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: finalUrl, method, headers: activeHeaders, body: reqBody }),
+        });
+        const data = await pr.json().catch(() => null);
+        if (!pr.ok || !data) throw new Error((data && data.error) || `Proxy error (${pr.status}).`);
+        status = data.status; statusText = data.statusText || ''; resHeaders = data.headers || {};
+        resBody = String(data.body ?? ''); truncated = !!data.truncated;
+      } else {
+        // Direct browser fetch (same-origin or a CORS-enabled API).
+        const init: RequestInit = { method, headers: activeHeaders };
+        if (reqBody !== undefined) init.body = reqBody;
+        const res = await fetch(finalUrl, init);
+        status = res.status; statusText = res.statusText; resHeaders = {};
+        res.headers.forEach((v, k) => { resHeaders[k] = v; });
+        resBody = await res.text();
+      }
       const elapsed = Math.round(performance.now() - start);
-      const resHeaders: Record<string, string> = {};
-      res.headers.forEach((v, k) => { resHeaders[k] = v; });
-      const resBody = await res.text();
-
       setResponse({
-        status: res.status,
-        statusText: res.statusText,
+        status,
+        statusText,
         headers: resHeaders,
-        body: tryPrettyJson(resBody),
+        body: tryPrettyJson(resBody) + (truncated ? '\n\n…(response truncated at 5 MB)' : ''),
         time: elapsed,
       });
-
       addToHistory({ name: saveName || finalUrl, method, url: finalUrl, headers, body });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(
-        msg.toLowerCase().includes('cors') || msg.toLowerCase().includes('network')
-          ? `Network error: ${msg}\n\nThis may be a CORS issue. Ensure the server allows requests from this origin, or use a proxy.`
+        !routeViaProxy && (msg.toLowerCase().includes('cors') || msg.toLowerCase().includes('failed to fetch'))
+          ? `Network/CORS error: ${msg}\n\nTip: turn ON "Route via NavBharatAI" to bypass CORS.`
           : `Request failed: ${msg}`
       );
     } finally {
       setLoading(false);
     }
-  }, [url, method, params, headers, body, authToken, saveName, addToHistory]);
+  }, [url, method, params, headers, body, authToken, saveName, addToHistory, useProxy]);
 
   const handleQuickTest = (qt: typeof QUICK_TESTS[0]) => {
     setMethod(qt.method);
     setUrl(qt.url);
     if (qt.body) setBody(qt.body);
     setActiveTab(qt.body ? 'body' : 'params');
+    setHistoryOpen(false); // dismiss the drawer after picking (mobile-friendly)
   };
 
   const loadFromHistory = (cfg: RequestConfig) => {
@@ -245,6 +281,7 @@ const APITester: React.FC<APITesterProps> = () => {
     setUrl(cfg.url);
     setHeaders(cfg.headers);
     setBody(cfg.body);
+    setHistoryOpen(false); // dismiss the drawer after picking (mobile-friendly)
   };
 
   const handleCopy = () => {
@@ -266,6 +303,10 @@ const APITester: React.FC<APITesterProps> = () => {
     setBody(tryPrettyJson(body));
   };
 
+  // Safety: an absolute http:// target sends the request (and any token) in PLAINTEXT on the wire.
+  // Relative/same-origin URLs inherit the page's HTTPS, so they are not flagged.
+  const insecureTarget = /^http:\/\//i.test(url.trim());
+
   const tabs: { id: ActiveTab; label: string }[] = [
     { id: 'params', label: 'Params' },
     { id: 'headers', label: 'Headers' },
@@ -274,11 +315,22 @@ const APITester: React.FC<APITesterProps> = () => {
   ];
 
   return (
-    <div className="flex h-full bg-[#0d1117] text-gray-200 font-mono text-sm overflow-hidden">
-      {/* ── History sidebar ────────────────────────────────────────── */}
-      <div className="w-[200px] shrink-0 bg-[#161b22] border-r border-[#30363d] flex flex-col">
-        <div className="px-3 py-2 border-b border-[#30363d] flex items-center gap-2 text-xs text-gray-400 uppercase tracking-wide">
-          <Clock size={12} /> History
+    <div className="relative flex h-full bg-[#0d1117] text-gray-200 font-mono text-sm overflow-hidden">
+      {/* ── History slide-out drawer (mobile-friendly) ─────────────── */}
+      {historyOpen && (
+        <div className="absolute inset-0 bg-black/50 z-30" onClick={() => setHistoryOpen(false)} aria-hidden />
+      )}
+      <div
+        className={cn(
+          'absolute top-0 left-0 h-full w-[270px] max-w-[82%] bg-[#161b22] border-r border-[#30363d] z-40 flex flex-col transition-transform duration-200 ease-out',
+          historyOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        <div className="px-3 py-2.5 border-b border-[#30363d] flex items-center justify-between text-xs text-gray-400 uppercase tracking-wide">
+          <span className="flex items-center gap-2"><Clock size={12} /> History</span>
+          <button onClick={() => setHistoryOpen(false)} className="p-1 -mr-1 text-gray-500 hover:text-gray-200 transition-colors">
+            <X size={16} />
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {history.length === 0 && (
@@ -288,7 +340,7 @@ const APITester: React.FC<APITesterProps> = () => {
             <button
               key={cfg.id}
               onClick={() => loadFromHistory(cfg)}
-              className="w-full text-left px-3 py-2 hover:bg-[#21262d] border-b border-[#21262d] transition-colors group"
+              className="w-full text-left px-3 py-2.5 hover:bg-[#21262d] border-b border-[#21262d] transition-colors group"
             >
               <div className={cn('text-[10px] font-bold', METHOD_COLORS[cfg.method])}>{cfg.method}</div>
               <div className="text-xs text-gray-300 truncate">{cfg.name}</div>
@@ -296,9 +348,9 @@ const APITester: React.FC<APITesterProps> = () => {
                 <span className="text-[10px] text-gray-600 truncate">{cfg.url}</span>
                 <button
                   onClick={e => { e.stopPropagation(); setHistory(prev => prev.filter(h => h.id !== cfg.id)); }}
-                  className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all"
+                  className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all p-1 -mr-1"
                 >
-                  <Trash2 size={10} />
+                  <Trash2 size={12} />
                 </button>
               </div>
             </button>
@@ -311,7 +363,7 @@ const APITester: React.FC<APITesterProps> = () => {
             <button
               key={qt.label}
               onClick={() => handleQuickTest(qt)}
-              className="w-full text-left flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded px-1.5 py-1 transition-colors"
+              className="w-full text-left flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded px-1.5 py-1.5 transition-colors"
             >
               <ArrowRight size={10} className="shrink-0" />
               <span className="truncate">{qt.label}</span>
@@ -320,61 +372,100 @@ const APITester: React.FC<APITesterProps> = () => {
         </div>
       </div>
 
-      {/* ── Main area ──────────────────────────────────────────────── */}
+      {/* ── Main area (full width) ─────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* URL bar */}
-        <div className="px-4 py-3 bg-[#161b22] border-b border-[#30363d] flex items-center gap-2">
-          {/* Method selector */}
-          <div className="relative">
+        {/* Top bar — wraps into two rows on narrow screens so nothing gets clipped */}
+        <div className="px-2 sm:px-4 py-2 bg-[#161b22] border-b border-[#30363d] flex flex-col gap-2">
+          {/* Row 1: history toggle + method + URL */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setMethodOpen(o => !o)}
-              className={cn(
-                'flex items-center gap-1 px-3 py-1.5 rounded border text-xs font-bold transition-colors',
-                METHOD_BG[method], METHOD_COLORS[method]
-              )}
+              onClick={() => setHistoryOpen(o => !o)}
+              title="History & quick tests"
+              className="relative flex items-center gap-1.5 px-2 py-1.5 rounded border border-[#30363d] text-gray-400 hover:text-gray-200 hover:border-indigo-500/50 transition-colors shrink-0"
             >
-              {method} <ChevronDown size={12} />
+              <Clock size={14} />
+              <span className="hidden sm:inline text-xs">History</span>
+              {history.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-indigo-600 text-white text-[9px] leading-none rounded-full min-w-[15px] h-[15px] px-1 flex items-center justify-center">
+                  {history.length}
+                </span>
+              )}
             </button>
-            {methodOpen && (
-              <div className="absolute top-full left-0 mt-1 bg-[#161b22] border border-[#30363d] rounded shadow-xl z-50">
-                {HTTP_METHODS.map(m => (
-                  <button
-                    key={m}
-                    onClick={() => { setMethod(m); setMethodOpen(false); }}
-                    className={cn('block w-full text-left px-4 py-1.5 text-xs font-bold hover:bg-[#21262d] transition-colors', METHOD_COLORS[m])}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            )}
+
+            {/* Method selector */}
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setMethodOpen(o => !o)}
+                className={cn(
+                  'flex items-center gap-1 px-2.5 py-1.5 rounded border text-xs font-bold transition-colors',
+                  METHOD_BG[method], METHOD_COLORS[method]
+                )}
+              >
+                {method} <ChevronDown size={12} />
+              </button>
+              {methodOpen && (
+                <div className="absolute top-full left-0 mt-1 bg-[#161b22] border border-[#30363d] rounded shadow-xl z-50">
+                  {HTTP_METHODS.map(m => (
+                    <button
+                      key={m}
+                      onClick={() => { setMethod(m); setMethodOpen(false); }}
+                      className={cn('block w-full text-left px-4 py-1.5 text-xs font-bold hover:bg-[#21262d] transition-colors', METHOD_COLORS[m])}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <input
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              placeholder="https://api.example.com/endpoint"
+              className="flex-1 min-w-0 bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors"
+            />
           </div>
 
-          <input
-            value={url}
-            onChange={e => setUrl(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder="https://api.example.com/endpoint"
-            className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors"
-          />
+          {/* Row 2: send + save + CORS toggle (wraps as needed) */}
+          <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
+            <button
+              onClick={handleSend}
+              disabled={loading || !url.trim()}
+              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-xs font-semibold transition-colors flex-1 sm:flex-none"
+            >
+              {loading ? <TirangaLoader size={14} /> : <Send size={14} />}
+              Send
+            </button>
 
-          <button
-            onClick={handleSend}
-            disabled={loading || !url.trim()}
-            className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-xs font-semibold transition-colors"
-          >
-            {loading ? <RefreshCcw size={14} className="animate-spin" /> : <Send size={14} />}
-            Send
-          </button>
+            <button
+              onClick={() => setShowSaveInput(s => !s)}
+              title="Save request"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-[#30363d] text-gray-500 hover:text-indigo-400 hover:border-indigo-500/50 transition-colors text-xs shrink-0"
+            >
+              <Save size={14} /> <span className="hidden sm:inline">Save</span>
+            </button>
 
-          <button
-            onClick={() => setShowSaveInput(s => !s)}
-            title="Save request"
-            className="p-1.5 text-gray-500 hover:text-indigo-400 transition-colors"
-          >
-            <Save size={16} />
-          </button>
+            {/* CORS bypass toggle — route cross-origin requests through NavBharatAI's SSRF-guarded proxy. */}
+            <label className="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer select-none" title="Cross-origin APIs are blocked by the browser (CORS). Routing through NavBharatAI's server fetches them for you.">
+              <input
+                type="checkbox"
+                checked={useProxy}
+                onChange={(e) => setUseProxy(e.target.checked)}
+                className="accent-indigo-500"
+              />
+              Route via NavBharatAI (bypass CORS)
+            </label>
+          </div>
         </div>
+
+        {/* Safety: warn when the target is unencrypted http:// */}
+        {insecureTarget && (
+          <div className="flex items-start gap-2 px-2 sm:px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-400">
+            <ShieldAlert size={13} className="shrink-0 mt-0.5" />
+            <span>This is an <b>http://</b> (unencrypted) URL — the request and any auth token travel in plaintext. Prefer <b>https://</b> where the API supports it.</span>
+          </div>
+        )}
 
         {/* Save request input */}
         {showSaveInput && (
@@ -396,7 +487,7 @@ const APITester: React.FC<APITesterProps> = () => {
         )}
 
         {/* Top half: request config */}
-        <div className="h-[50%] flex flex-col border-b border-[#30363d] overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col border-b border-[#30363d] overflow-hidden">
           {/* Tabs */}
           <div className="flex border-b border-[#30363d] bg-[#161b22] shrink-0">
             {tabs.map(tab => (
@@ -469,7 +560,7 @@ const APITester: React.FC<APITesterProps> = () => {
         </div>
 
         {/* Bottom half: response */}
-        <div className="h-[50%] flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#161b22] border-b border-[#30363d] shrink-0">
             <span className="text-xs text-gray-400 uppercase tracking-wide">Response</span>
             {response && (
@@ -500,7 +591,7 @@ const APITester: React.FC<APITesterProps> = () => {
           <div className="flex-1 overflow-y-auto p-3 bg-[#0d1117]">
             {loading && (
               <div className="flex items-center gap-2 text-indigo-400 text-xs">
-                <RefreshCcw size={14} className="animate-spin" /> Sending request...
+                <TirangaLoader size={14} /> Sending request...
               </div>
             )}
             {error && (

@@ -3,7 +3,6 @@ import {
   Upload,
   X,
   Copy,
-  ExternalLink,
   Loader2,
   AlertCircle,
   ChevronDown,
@@ -13,9 +12,16 @@ import {
   Image as ImageIcon,
   Clipboard,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface ScreenshotToCodeProps {
-  onCodeGenerated?: (code: string) => void;
+  /**
+   * Hands the screenshot-derived build prompt to the REAL engine (NavBharatAI Pro v5.0): the app
+   * switches to the Pro chat with the composer prefilled, and pressing Send builds the real app.
+   * Replaced onCodeGenerated, whose old generate-from-image endpoint never existed — the tool used
+   * to silently emit a hardcoded fallback page regardless of the screenshot (admin autopsy 2026-07-20).
+   */
+  onBuildViaV5: (prompt: string) => void;
 }
 
 type StyleOption = 'Tailwind CSS' | 'Plain CSS' | 'Bootstrap';
@@ -30,20 +36,19 @@ interface HistoryEntry {
 const STORAGE_KEY = 'navbharatai_s2c_history';
 const MAX_HISTORY = 5;
 
-const FALLBACK_CODE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Generated App</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-white min-h-screen p-8">
-  <div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6">My App</h1>
-    <p class="text-gray-400">Screenshot se generate kiya gaya app. Apne screenshot ke hisaab se customize karo.</p>
-  </div>
-</body>
-</html>`;
+// FALLBACK_CODE removed (admin autopsy 2026-07-20): it was a hardcoded page the tool emitted on every
+// failure — the whole time its old image endpoint did not exist — so the screenshot was never
+// actually used. Failures are now honest and the real path reads the screenshot via vision.
+
+/** Read a File to raw base64 (no data: prefix), for the vision route. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
 
 function loadHistory(): HistoryEntry[] {
   try {
@@ -76,7 +81,7 @@ function formatTime(ts: number): string {
 const styleOptions: StyleOption[] = ['Tailwind CSS', 'Plain CSS', 'Bootstrap'];
 const frameworkOptions: FrameworkOption[] = ['Vanilla HTML', 'React JSX'];
 
-export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenerated }) => {
+export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5 }) => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [selectedStyle, setSelectedStyle] = useState<StyleOption>('Tailwind CSS');
@@ -187,41 +192,37 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
     if (!imageFile) return;
     setStatus('generating');
     setErrorMsg('');
-
-    const formData = new FormData();
-    formData.append('image', imageFile);
-    formData.append('style', selectedStyle);
-    formData.append('framework', selectedFramework);
-    formData.append('includeJs', String(includeJs));
-
     try {
-      const res = await fetch('/api/generate-from-image', {
+      const image = await fileToBase64(imageFile);
+      // Real vision read → a detailed build prompt (server: /api/screenshot/to-prompt).
+      const res = await fetch('/api/screenshot/to-prompt', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image,
+          imageType: imageFile.type || 'image/png',
+          style: selectedStyle,
+          framework: selectedFramework,
+          includeJs,
+        }),
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = await res.json();
-      const code: string = data.code || data.html || String(data);
-      finalizeCode(code);
-    } catch {
-      finalizeCode(FALLBACK_CODE);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || typeof data.prompt !== 'string') {
+        throw new Error((data && data.error) || 'Could not read the screenshot — please try again.');
+      }
+      setStatus('done');
+      setGeneratedCode(data.prompt);
+      const entry: HistoryEntry = { timestamp: Date.now(), preview: data.prompt.slice(0, 200) };
+      const updated = [entry, ...history].slice(0, MAX_HISTORY);
+      setHistory(updated);
+      saveHistory(updated);
+      // Hand the build spec to the real engine — Send there builds the app.
+      onBuildViaV5(data.prompt);
+    } catch (e) {
+      // Honest failure — no canned page, ever.
+      setStatus('error');
+      setErrorMsg(e instanceof Error ? e.message : 'Screenshot conversion failed — please try again.');
     }
-  };
-
-  const finalizeCode = (code: string) => {
-    setGeneratedCode(code);
-    setStatus('done');
-    onCodeGenerated?.(code);
-
-    const entry: HistoryEntry = {
-      timestamp: Date.now(),
-      preview: code.slice(0, 200),
-    };
-    const updated = [entry, ...history].slice(0, MAX_HISTORY);
-    setHistory(updated);
-    saveHistory(updated);
   };
 
   const handleCopy = async () => {
@@ -243,82 +244,12 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
     }
   };
 
-  const handleOpenPreview = () => {
-    if (!generatedCode) return;
-    const blob = new Blob([generatedCode], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-  };
-
-  const renderSyntaxLine = (line: string, idx: number): React.ReactNode => {
-    const parts: React.ReactNode[] = [];
-    let remaining = line;
-    let key = 0;
-
-    const tagPattern = /(<\/?[a-zA-Z][a-zA-Z0-9-]*)/g;
-    const attrPattern = /\s([a-zA-Z-:]+)=/g;
-
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    const combined = line;
-
-    const segments: { start: number; end: number; type: 'tag' | 'attr' | 'text' }[] = [];
-
-    tagPattern.lastIndex = 0;
-    while ((match = tagPattern.exec(combined)) !== null) {
-      segments.push({ start: match.index, end: match.index + match[0].length, type: 'tag' });
-    }
-
-    attrPattern.lastIndex = 0;
-    while ((match = attrPattern.exec(combined)) !== null) {
-      const start = match.index + 1;
-      const end = start + match[1].length;
-      if (!segments.some(s => s.start <= start && s.end >= end)) {
-        segments.push({ start, end, type: 'attr' });
-      }
-    }
-
-    segments.sort((a, b) => a.start - b.start);
-
-    lastIndex = 0;
-    remaining = '';
-    const nodes: React.ReactNode[] = [];
-
-    for (const seg of segments) {
-      if (seg.start > lastIndex) {
-        nodes.push(
-          <span key={key++} className="text-gray-300">
-            {combined.slice(lastIndex, seg.start)}
-          </span>
-        );
-      }
-      const cls = seg.type === 'tag' ? 'text-green-300' : 'text-yellow-300';
-      nodes.push(
-        <span key={key++} className={cls}>
-          {combined.slice(seg.start, seg.end)}
-        </span>
-      );
-      lastIndex = seg.end;
-    }
-
-    if (lastIndex < combined.length) {
-      nodes.push(
-        <span key={key++} className="text-gray-300">
-          {combined.slice(lastIndex)}
-        </span>
-      );
-    }
-
-    return (
-      <div key={idx} className="leading-relaxed">
-        {nodes.length > 0 ? nodes : <span className="text-gray-300">{line}</span>}
-      </div>
-    );
-  };
+  // handleOpenPreview + renderSyntaxLine removed: the output is now a build spec (text), not
+  // renderable HTML — the spec is shown as plain text and handed to Pro v5.0.
 
   return (
     <div
-      className="flex flex-col lg:flex-row gap-4 p-4 min-h-screen"
+      className="flex flex-col lg:flex-row gap-4 p-4 h-full overflow-y-auto overscroll-contain"
       style={{ backgroundColor: '#0d1117', color: 'rgb(209 213 219)' }}
     >
       {/* LEFT COLUMN */}
@@ -338,7 +269,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
         >
           <ImageIcon className="w-10 h-10 text-gray-500 mb-3" />
           <p className="text-gray-400 text-sm text-center leading-relaxed">
-            Screenshot yahan drop karo ya click karke select karo
+            Drop a screenshot here, or click to select
           </p>
           {imageFile && (
             <p className="mt-2 text-xs text-indigo-400 truncate max-w-full px-4">
@@ -456,7 +387,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-            <h2 className="text-sm font-semibold text-gray-300">Generated Code</h2>
+            <h2 className="text-sm font-semibold text-gray-300">Build spec (from your screenshot)</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopy}
@@ -465,14 +396,6 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
               >
                 {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? 'Copied!' : 'Copy'}
-              </button>
-              <button
-                onClick={handleOpenPreview}
-                disabled={!generatedCode}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open in Preview
               </button>
             </div>
           </div>
@@ -483,7 +406,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <Upload className="w-8 h-8 text-gray-600" />
                 <p className="text-sm text-gray-500">
-                  Screenshot upload karo, AI code generate karega
+                  Upload any website screenshot — AI will build a same-to-same app
                 </p>
               </div>
             )}
@@ -492,15 +415,15 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <ImageIcon className="w-8 h-8 text-indigo-500" />
                 <p className="text-sm text-gray-400">
-                  Image ready hai — "Code Generate Karo" dabao
+                  Image ready — press "Build from Screenshot"
                 </p>
               </div>
             )}
 
             {status === 'generating' && (
               <div className="h-full flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-                <p className="text-sm text-gray-400">AI analyze kar raha hai...</p>
+                <TirangaLoader className="w-8 h-8" />
+                <p className="text-sm text-gray-400">AI is analyzing...</p>
               </div>
             )}
 
@@ -512,12 +435,17 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
             )}
 
             {status === 'done' && generatedCode && (
-              <pre
-                className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-all"
-                style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace" }}
-              >
-                {generatedCode.split('\n').map((line, idx) => renderSyntaxLine(line, idx))}
-              </pre>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-xs">
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  Build spec ready — sent to NavBharatAI Pro v5.0. Press Send there to build your app.
+                </div>
+                <pre
+                  className="text-xs leading-relaxed whitespace-pre-wrap break-words text-gray-300"
+                >
+                  {generatedCode}
+                </pre>
+              </div>
             )}
           </div>
         </div>
@@ -530,13 +458,20 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
         >
           {status === 'generating' ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Generating...
+              <TirangaLoader className="w-4 h-4" />
+              Reading screenshot...
             </>
           ) : (
-            'Code Generate Karo'
+            'Build from Screenshot'
           )}
         </button>
+
+        {/* Honest, intent-aware note — inspired-by is built as asked; only a deceptive real-brand clone is guarded. */}
+        <p className="text-[11px] text-amber-300/70 leading-relaxed">
+          Want a page in <span className="font-semibold">your own</span> app to just <span className="font-semibold">look like</span> this
+          (your brand, your name)? It’s built exactly as you ask. A pixel-perfect clone of a real branded site (login/payment) ships as a
+          watermarked, non-original demo — so it can’t be used to impersonate or phish the real site.
+        </p>
 
         {/* History */}
         {history.length > 0 && (

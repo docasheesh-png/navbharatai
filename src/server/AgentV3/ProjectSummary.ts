@@ -70,7 +70,10 @@ function runHint(stack: string, previewLive: boolean): string {
  * graph. PURE — no I/O, fully deterministic. Returns '' for an essentially empty
  * graph (no files) so the caller never shows an empty summary.
  */
-export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean }): string {
+/** Engine-written setup files (dev env/config) — changes the PIPELINE made, never the user's source. */
+const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.npmrc|\.nvmrc)$/;
+
+export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[] }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
   if (!graph || graph.files.length === 0) return '';
   // Default TRUE (backward-compatible) — the caller passes the REAL preview state (whether a live
@@ -90,10 +93,20 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   const lines: string[] = [];
   const analysisOnly = changed === 0;
   const editRun = typeof changed === 'number' && changed > 0 && opts?.editMode === true;
+  // WHICH files changed (mitrify autopsy 2026-08-04): on a "do not change any files" survey turn the
+  // header said "I changed 1 file in your project" — the pipeline's own dev .env from key-provisioning —
+  // and named nothing. To the user that read as a broken promise. Naming the files (≤3) turns the
+  // confusion into information, and a change-set that is ONLY engine-written setup config is said as
+  // exactly that: setup, with their source untouched.
+  const paths = (opts?.changedPaths ?? []).filter((p) => typeof p === 'string' && p);
+  const named = paths.length > 0 && paths.length <= 3 ? ` (${paths.join(', ')})` : '';
+  const onlyEngineConfig = paths.length > 0 && paths.every((p) => ENGINE_CONFIG_PATH.test(p));
   if (analysisOnly) {
     lines.push('🔍 I analyzed your project — no files were changed. Overview:');
+  } else if (editRun && onlyEngineConfig) {
+    lines.push(`🔍 I analyzed your project. Your source files are untouched — I only wrote ${paths.length === 1 ? 'a setup file' : `${paths.length} setup files`}${named} so the app can run here. Overview:`);
   } else if (editRun) {
-    lines.push(`✅ Done — I changed ${changed} file${changed === 1 ? '' : 's'} in your project. Overview:`);
+    lines.push(`✅ Done — I changed ${changed} file${changed === 1 ? '' : 's'} in your project${named}. Overview:`);
   } else {
     lines.push("✅ Here's what I built:");
   }

@@ -1,5 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import type { AgentRole, FileChange, GitCheckpoint, TodoItem, WorkspaceSnapshot } from './types';
+import { mergeTodoLists } from './todoMerge';
 
 /**
  * WorkspaceState — the single source of truth a v5.0 session's surfaces read
@@ -28,7 +29,10 @@ export class WorkspaceState {
   }
 
   setTodos(todos: TodoItem[]): void {
-    this.todos = [...todos];
+    // ONE continuous plan (admin 2026-07-21): a fresh sub-plan mid-build must never reset the
+    // user's "Plan x/y" back to 0/y — merge instead of replace (see todoMerge.ts for the rules:
+    // done items are kept forever, stale pending items are pruned, new items append).
+    this.todos = mergeTodoLists(this.todos, todos);
     this.events?.emit({ type: 'todo_updated', todos: this.todos, ts: Date.now() });
   }
 

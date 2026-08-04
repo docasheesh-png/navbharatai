@@ -3,7 +3,7 @@
 // 2-continue budget that was designed for wall-clock pauses.
 
 import { describe, it, expect } from 'vitest';
-import { decideAutoContinue, PAUSE_CONTINUE_MAX, PLAN_CONTINUE_MAX } from './planAutoContinue';
+import { decideAutoContinue, PAUSE_CONTINUE_MAX, PAUSE_PROGRESS_MAX, PLAN_CONTINUE_MAX } from './planAutoContinue';
 
 describe('decideAutoContinue — classic (no plan signal)', () => {
   it('continues a deadline pause within the pause budget', () => {
@@ -11,10 +11,43 @@ describe('decideAutoContinue — classic (no plan signal)', () => {
     expect(d).toEqual({ proceed: true, resetPauseBudget: false, isPlanContinue: false });
   });
 
-  it('stops honestly once the pause budget is spent', () => {
-    const d = decideAutoContinue({ planRemaining: null, lastPlanRemaining: null, pauseContinues: PAUSE_CONTINUE_MAX, planContinues: 0 });
+  it('stops honestly once the NO-PROGRESS pause budget is spent (a stuck build)', () => {
+    const d = decideAutoContinue({ planRemaining: null, lastPlanRemaining: null, pauseContinues: PAUSE_CONTINUE_MAX, planContinues: 0, noProgressPauses: PAUSE_CONTINUE_MAX });
     expect(d.proceed).toBe(false);
     expect(d.stopMessage).toContain('continue');
+  });
+});
+
+describe('decideAutoContinue — progress-driven wall-clock pause (FleetOps: big full-stack app)', () => {
+  it('KEEPS continuing while files are still being added, even past the no-progress budget', () => {
+    // 5 pauses in, but each window added files (30 → 55). PAUSE_CONTINUE_MAX (2) would have stopped a
+    // fixed-count budget long ago; progress keeps it going.
+    const d = decideAutoContinue({ planRemaining: undefined, lastPlanRemaining: null, pauseContinues: 5, planContinues: 0, filesWritten: 55, lastFilesWritten: 30, noProgressPauses: 0 });
+    expect(d.proceed).toBe(true);
+    expect(d.isPlanContinue).toBe(false);
+    expect(d.resetPauseBudget).toBe(false); // absolute counter must keep climbing (never reset)
+  });
+
+  it('the FIRST pause with files written counts as progress (no prior value)', () => {
+    const d = decideAutoContinue({ planRemaining: undefined, lastPlanRemaining: null, pauseContinues: 0, planContinues: 0, filesWritten: 12, lastFilesWritten: null, noProgressPauses: 0 });
+    expect(d.proceed).toBe(true);
+  });
+
+  it('STOPS once a window makes NO new files for PAUSE_CONTINUE_MAX pauses (genuinely stuck)', () => {
+    const d = decideAutoContinue({ planRemaining: undefined, lastPlanRemaining: null, pauseContinues: 4, planContinues: 0, filesWritten: 40, lastFilesWritten: 40, noProgressPauses: PAUSE_CONTINUE_MAX });
+    expect(d.proceed).toBe(false);
+    expect(d.stopMessage).toContain('continue');
+  });
+
+  it('STOPS at the absolute progress backstop even while still progressing', () => {
+    const d = decideAutoContinue({ planRemaining: undefined, lastPlanRemaining: null, pauseContinues: PAUSE_PROGRESS_MAX, planContinues: 0, filesWritten: 200, lastFilesWritten: 180, noProgressPauses: 0 });
+    expect(d.proceed).toBe(false);
+    expect(d.stopMessage).toContain('checkpoint');
+  });
+
+  it('one no-progress window is tolerated if under the budget (a slow DB-install window)', () => {
+    const d = decideAutoContinue({ planRemaining: undefined, lastPlanRemaining: null, pauseContinues: 3, planContinues: 0, filesWritten: 40, lastFilesWritten: 40, noProgressPauses: 1 });
+    expect(d.proceed).toBe(true);
   });
 });
 

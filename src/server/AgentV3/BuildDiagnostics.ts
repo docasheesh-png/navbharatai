@@ -12,6 +12,10 @@
 
 import type { AgentEvent } from './types';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
+import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
+import { sandboxCost, describeSandboxCost } from './sandboxCost';
+import { redactProvidersText } from '../lib/providerRedaction';
+import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -29,6 +33,19 @@ export interface BuildIssue {
   message: string;
   /** True if v5.0 recovered on its own; false if it remained a problem in the final build. */
   autoResolved: boolean;
+  /**
+   * True when this entry is an OBSERVATION about the user's pre-existing code rather than a defect of
+   * ours — nothing was broken by us and nothing was fixed by us (mitrify autopsy 2026-08-04).
+   *
+   * Why it exists: an import/survey turn records advisory notes (unused deps, focus conflicts) that must
+   * not count as OUR unresolved defects, so `importTurnObservation` set `autoResolved: true`. That
+   * silenced the false-defect count but created a false SELF-HEAL count instead — the reported build
+   * claimed "32 auto-resolved" when it had healed essentially nothing; 14 of those were notes about code
+   * it never touched. A self-heal tally that inflates itself is exactly the dishonest reporting the
+   * fifth absolute rule forbids, because it is the number the autopsy reads to judge the engine.
+   * Observations are now their OWN bucket: neither auto-resolved nor unresolved.
+   */
+  observation?: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
   /** Set when the SAME code+message repeated back-to-back (e.g. many identical "▶ write_file" tool
@@ -166,7 +183,10 @@ export interface BuildDiagnosticsReport {
   sessionId?: string;
   workspaceId?: string;
   prompt?: string;
+  /** What ACTUALLY delivered (last successful call). See honestModelLabel. */
   model?: string;
+  /** What the router INTENDED at build start — kept so routing intent is never lost. */
+  plannedModel?: string;
   framework?: string;
   startedAt: number;
   endedAt?: number;
@@ -178,6 +198,8 @@ export interface BuildDiagnosticsReport {
     warnings: number;
     autoResolved: number;
     unresolved: number;
+    /** Advisory notes about the user's PRE-EXISTING code — not our defects and not our fixes. */
+    observations?: number;
   };
   issues: BuildIssue[];
   /** AI Diagnosis Bundle — sandbox command raw logs (#3), LLM I/O (#4), full errors+stack (#1). */
@@ -200,6 +222,14 @@ export interface BuildDiagnosticsReport {
   /** Per-provider REAL token spend for this build (reconciled to the billed total; 'other' = aux
    *  calls). The report-level view of the Billing-Phase-3 ledger. */
   providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /**
+   * ADMIN-ONLY infrastructure cost: how long this build held a real E2B VM, and our estimated spend on
+   * it. Billed by WALL-CLOCK, so it is a completely different cost shape from token spend — a build
+   * that used almost no tokens but sat on a VM for forty minutes still cost real money, and nothing in
+   * this report used to show it. Never part of the user's bill (White-Label Law §3); absent when the
+   * time was not measured on this instance. See sandboxCost.ts.
+   */
+  sandboxCost?: { seconds: number; usd: number; estimated: true };
   /** Fix 66 — total prefix-cache HIT input tokens (GLM/Kimi auto-cache). Compare against providerTokens'
    *  input total for the real cache-hit rate on this build. Absent/0 when nothing was cache-served. */
   cacheReadInputTokens?: number;
@@ -311,6 +341,7 @@ export class BuildDiagnostics {
   private readonly providerDelivery = new Map<string, number>();
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
   private reviewText?: string;
@@ -358,6 +389,24 @@ export class BuildDiagnostics {
   }
 
   /**
+   * True when an UNRESOLVED readiness blocker proving a RUNTIME CRASH is on the timeline — a React
+   * Rules-of-Hooks violation, an undefined JSX component, or an undefined hook (all recorded with the
+   * literal "crash at runtime"). Such a defect renders fine on the first paint and white-screens on a
+   * later re-render, so the render-rescue (a one-shot snapshot) must NOT upgrade the build to success
+   * while one is present (real report 8a6e4585). Reads the already-computed, full-workspace readiness
+   * result — no re-analysis. Pure query; never throws.
+   */
+  hasRuntimeCrashBlocker(): boolean {
+    return this.issues.some(
+      (i) =>
+        i.code === 'READINESS_BLOCKER' &&
+        i.severity === 'error' &&
+        i.autoResolved !== true &&
+        /crash(es)? at runtime/i.test(i.message || ''),
+    );
+  }
+
+  /**
    * Record a periodic "still working" marker so even a long quiet stretch (a slow or hung step)
    * shows minute-by-minute progress in the report instead of a blank gap. Called on a timer by the
    * route. If a tool call is in-flight, it names it — so a hang is visible as "minute N — stuck on X".
@@ -399,6 +448,44 @@ export class BuildDiagnostics {
       && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
     const cmdHead = rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
+    // HONESTY (ShopSphere autopsy 2026-07-19): an `exit -1 (0s, empty)` means the command COULD NOT RUN
+    // because the sandbox was reaped/expired/unreachable — an INFRASTRUCTURE condition, NOT an app-build
+    // error. Reported as SANDBOX_CMD_FAILED it read like the app failed to compile (`tsc → exit -1`,
+    // `tsconfig.json does not exist`) and could become the build's rootCause, falsely blaming the app.
+    // Classify it distinctly so the report tells the truth and deriveRootCause never blames the app.
+    const deadSandbox = failed && isDeadSandboxSignal({
+      exitCode: rec.exitCode ?? 0,
+      durationMs: rec.durationMs,
+      stdout: rec.stdout,
+      stderr: rec.stderr,
+    });
+    if (deadSandbox) {
+      this.record({
+        phase: 'build',
+        severity: 'warning',
+        code: 'SANDBOX_UNAVAILABLE',
+        message: `$ ${cmdHead} → could not run — the build sandbox was unavailable (reaped/expired/unreachable). Infrastructure condition, not an app error.`,
+        autoResolved: false,
+        detail: capTail(rec.stderr || rec.stdout, 400) || undefined,
+      });
+      return;
+    }
+    // HONESTY (MediConnect autopsy 2026-07-19): a `prisma migrate`/`seed` can EXIT 0 while its output
+    // proves the DB was never reachable (`P1001: Can't reach database server`, `did not come up on port
+    // 5432`). The exit code lies — the migration did NOT apply. Recording it as a benign SANDBOX_CMD
+    // let the builder believe the DB was ready and improvise a broken SQLite downgrade. Surface it as a
+    // distinct DB_UNREACHABLE problem so the report tells the truth and the builder isn't fooled.
+    if (!failed && detectSilentDbFailure({ command: rec.command, exitCode: rec.exitCode, stdout: rec.stdout, stderr: rec.stderr })) {
+      this.record({
+        phase: 'build',
+        severity: 'error',
+        code: 'DB_UNREACHABLE',
+        message: `$ ${cmdHead} → reported exit 0 but the database was NOT reachable — the migration/query did not actually run.`,
+        autoResolved: false,
+        detail: capTail(rec.stderr || rec.stdout, 400) || undefined,
+      });
+      return;
+    }
     this.record({
       phase: 'build',
       severity: failed ? 'error' : 'info',
@@ -619,8 +706,18 @@ export class BuildDiagnostics {
         // failure phrase can classify a narration as a problem.
         const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
           .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
-        if (statusLike && /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch)) {
-          this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
+        const problemWord = /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch);
+        // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
+        // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.
+        const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch);
+        // REMEDIATION INTENT is progress, not a failure (PaisaTrack "fix all error" autopsy 2026-07-21:
+        // "Now I'll fix both errors: … Fix the TypeScript type error" was recorded severity=error on a
+        // SUCCESSFUL build, inflating the count to "1 error" under an "All Errors Fixed!" summary). When a
+        // note is the agent fixing/removing/resolving something and carries NO real failure verb, it is a
+        // build STEP, not a problem.
+        const remediationIntent = /\b(fix(?:ing|ed|es)?|remov(?:e|es|ing|ed)|resolv(?:e|es|ing|ed)|correct(?:s|ing|ed)?|clean(?:s|ing|ed)?\s+up|delet(?:e|es|ing|ed))\b/i.test(tForMatch);
+        if (statusLike && problemWord && !(remediationIntent && !failureVerb)) {
+          this.record({ phase: 'build', severity: failureVerb ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });
         }
@@ -659,12 +756,32 @@ export class BuildDiagnostics {
       }
     }
     this.pending.clear();
-    for (const issue of this.issues) {
-      if ((issue.code === 'TOOL_ERROR' || issue.code === 'NO_BUILD_NUDGE' || issue.code === 'EMPTY_BUILD_RETRY') && ok) {
-        issue.autoResolved = true;
-      }
-    }
+    // When the build ULTIMATELY SUCCEEDED, any intermediate failure it recovered from is resolved by
+    // definition (see resolveRecoveredOnSuccess). This is also applied at serialization time (toReport),
+    // so a finalize path that bypasses finish() still yields an honest report.
+    this.resolveRecoveredOnSuccess();
     this.notify();
+  }
+
+  /**
+   * Mark every RECOVERABLE-ON-SUCCESS issue (a failed tool call, a "no build" nudge, an empty-build
+   * retry, a sandbox command that exited non-zero) as resolved WHEN the build ultimately succeeded —
+   * because a successful build recovered from them by definition. Idempotent and gated on ok, so it is
+   * safe to run more than once and at serialization time.
+   *
+   * ROOT CAUSE this centralization closes (PaisaTrack "fix all error" autopsy 2026-07-21): the build
+   * SUCCEEDED (app live, `ok:true`) yet the downloaded report showed "3 unresolved" TOOL_ERRORs (a
+   * truncated large tool-call — "Unterminated string in JSON" — and two benign `npm run build | grep -i
+   * error` exit-1 no-match probes) AND named one of them as the build's `rootCause`. The one-shot
+   * back-fill in finish() had not taken effect for that serialized report (a finalize path bypassed it).
+   * Making the truth a property of SERIALIZATION, not a single mutation, guarantees a successful build
+   * never reports a recovered transient as an unresolved failure or as its root cause.
+   */
+  private resolveRecoveredOnSuccess(): void {
+    if (this.ok !== true) return;
+    for (const issue of this.issues) {
+      if (isRecoverableOnSuccess(issue.code)) issue.autoResolved = true;
+    }
   }
 
   /**
@@ -698,6 +815,16 @@ export class BuildDiagnostics {
   /** Per-provider real token spend (the Billing-Phase-3 ledger, reconciled to the billed total). */
   setProviderTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
     if (u && Object.keys(u).length > 0) this.providerTokens = u;
+  }
+
+  /**
+   * Record the build's sandbox wall-clock. Pass the seconds the actuator actually held the VM; a null
+   * or unmeasurable value records NOTHING, so the report says "not measured" instead of showing a zero
+   * that reads like a fact.
+   */
+  setSandboxSeconds(seconds: number | null | undefined): void {
+    const cost = sandboxCost(seconds);
+    if (cost) this.sandboxCostRecord = cost;
   }
 
   /** Fix 66 (measure-first) — the total prefix-cache HIT input tokens the cheap-floor providers
@@ -746,9 +873,19 @@ export class BuildDiagnostics {
   }
 
   report(): BuildDiagnosticsReport {
+    // Normalize recovered-on-success issues at SERIALIZATION time, so counts, issues[] and the derived
+    // rootCause are all consistent even when a finalize path bypassed finish()'s back-fill. Idempotent.
+    this.resolveRecoveredOnSuccess();
     const errors = this.issues.filter((i) => i.severity === 'error').length;
     const warnings = this.issues.filter((i) => i.severity === 'warning').length;
-    const autoResolved = this.issues.filter((i) => i.autoResolved).length;
+    // Observations are neither ours to have healed nor ours to still owe — they get their own bucket, so
+    // the auto-resolved tally means "v5.0 genuinely fixed this" and nothing else (mitrify 2026-08-04).
+    const observations = this.issues.filter((i) => i.observation === true).length;
+    // INFO events are excluded too (mitrify autopsy #2, same day): a read-only import+survey turn with
+    // ZERO real heals reported healCount 32, because every heartbeat, tool call and narration line is
+    // recorded `severity:'info', autoResolved:true`. Narration is not a fix; a heal tally that counts
+    // heartbeats is a green number wearing a lie. Only a WARNING/ERROR that v5 genuinely resolved counts.
+    const autoResolved = this.issues.filter((i) => i.autoResolved && i.observation !== true && i.severity !== 'info').length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,
@@ -757,7 +894,14 @@ export class BuildDiagnostics {
       sessionId: this.meta.sessionId,
       workspaceId: this.meta.workspaceId,
       prompt: this.meta.prompt,
-      model: this.meta.model,
+      // HONEST MODEL LABEL (autopsy 2026-07-27): `meta.model` is the ROUTER'S INTENT, captured at
+      // build start (selectBuildModel) and never revisited. On the reported build it read
+      // `claude-sonnet-4-6` while `noClaude: true`, `builtBy: "KIMI"` and every one of the 8 delivered
+      // turns was kimi-k2.5 — the admin diagnostic named a model that provably never ran. The report
+      // now leads with what ACTUALLY delivered and keeps the intent under `plannedModel`, so no
+      // information is lost and the headline field stops asserting something untrue.
+      model: honestModelLabel(this.meta.model, this.llmCalls),
+      plannedModel: this.meta.model,
       framework: this.meta.framework,
       startedAt: this.startedAt,
       endedAt: this.endedAt,
@@ -768,7 +912,8 @@ export class BuildDiagnostics {
         errors,
         warnings,
         autoResolved,
-        unresolved: this.issues.filter((i) => !i.autoResolved).length,
+        unresolved: this.issues.filter((i) => !i.autoResolved && i.observation !== true).length,
+        ...(observations > 0 ? { observations } : {}),
       },
       issues: [...this.issues],
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
@@ -783,6 +928,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerTokens: this.providerTokens,
+      sandboxCost: this.sandboxCostRecord,
       cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,
       review: this.reviewText,
@@ -908,6 +1054,80 @@ export function isTestOnlyTypecheckFailure(command: string, stdout?: string, std
   return paths.every(isTestFilePath);                               // excuse ONLY if every one is a test file
 }
 
+/**
+ * Codes for an intermediate failure the agent USUALLY RECOVERS FROM — a failed tool call, a "no build"
+ * nudge, an empty-build retry, or a sandbox command that exited non-zero. On a build that ULTIMATELY
+ * SUCCEEDED these are resolved by definition, so they must not be counted as unresolved or chosen as the
+ * root cause. Single source of truth shared by the finish() back-fill, the serialization normalization,
+ * and deriveRootCause — so all three agree. Pure.
+ */
+const RECOVERABLE_ON_SUCCESS: ReadonlySet<string> = new Set([
+  'TOOL_ERROR', 'NO_BUILD_NUDGE', 'EMPTY_BUILD_RETRY', 'SANDBOX_CMD_FAILED',
+]);
+export function isRecoverableOnSuccess(code: string): boolean {
+  return RECOVERABLE_ON_SUCCESS.has(code);
+}
+
+/**
+ * The model label the report should LEAD with: what actually delivered, not what was planned.
+ *
+ * ROOT CAUSE (autopsy 2026-07-27, buildId d1623410): the report's `model` came from the router's
+ * intent at build start and was never reconciled with reality, so a weak-tier build that ran entirely
+ * on kimi-k2.5 (`noClaude: true`, `builtBy: "KIMI"`, 8/8 KIMI turns) reported `claude-sonnet-4-6`.
+ * An admin diagnostic that names a model which never executed is worse than no label at all — it
+ * misdirects exactly the person debugging routing.
+ *
+ * Uses the LAST successful call's model (the one that actually produced the delivered result). Falls
+ * back to the planned label when nothing ran, so a build that died before its first call still reports
+ * something meaningful rather than blank. PURE + tested.
+ */
+export function honestModelLabel(
+  plannedModel: string | undefined,
+  llmCalls: ReadonlyArray<{ model?: string; ok?: boolean }>,
+): string | undefined {
+  for (let i = llmCalls.length - 1; i >= 0; i--) {
+    const c = llmCalls[i];
+    if (c?.ok !== false && typeof c?.model === 'string' && c.model) return c.model;
+  }
+  return plannedModel;
+}
+
+/**
+ * PRE-EXISTING-CODE OBSERVATIONS on an IMPORT/SURVEY turn — advisory, never "our unresolved defect".
+ *
+ * ROOT CAUSE (mitrify import autopsy 2026-07-27, buildId 321f4f6c): a survey-only turn ("Import this app
+ * … Do not change any files yet") finished `ok: true` yet reported **14 unresolved problems**, and named
+ * `"@hookform/resolvers" is declared … but no project file imports it` as the build's **rootCause**. Both
+ * claims were false, for two independent reasons:
+ *
+ *  1. WE DID NOT CAUSE THEM. Every one was an observation about the user's OWN pre-existing repository.
+ *     A build's `unresolved`/`rootCause` must describe what OUR engine failed to do, not tidiness hints
+ *     about code we were asked only to read.
+ *  2. THEY WERE COMPUTED FROM A KNOWINGLY PARTIAL FILE SET. The import itself reported 316 files in the
+ *     repo, of which 165 source files landed (binaries/oversize dropped by design). "No project file
+ *     imports it" is unprovable when half the project was never in the map — and indeed `date-fns`,
+ *     `next-themes` and `framer-motion` are standard shadcn/ui dependencies that a complete scan would
+ *     have found used. The analyzer asserted certainty its input could not support.
+ *
+ * So on an import turn these findings are recorded as ADVISORY (autoResolved) with wording that states
+ * both caveats honestly. They still appear in the report — we hide nothing — they simply stop being
+ * counted as our unresolved failures or promoted to rootCause. On a real build/edit turn (where the map
+ * IS the app we just wrote) nothing changes. PURE + tested.
+ */
+export function importTurnObservation(
+  isImportTurn: boolean,
+  message: string,
+): { autoResolved: boolean; observation?: boolean; message: string } {
+  if (!isImportTurn) return { autoResolved: false, message };
+  return {
+    // `autoResolved: true` keeps it out of the "problems we still owe" bucket; `observation: true` keeps
+    // it out of the SELF-HEAL bucket too, so neither count lies about what v5.0 actually did.
+    autoResolved: true,
+    observation: true,
+    message: `[observation about your existing code — nothing was changed] ${message} (Noted from the files that were imported; if part of the repo was too large to import, this may not be accurate.)`,
+  };
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];
@@ -922,11 +1142,33 @@ export function deriveRootCause(input: {
     if (m) return `Critical issue found by review: ${m[1].trim()}`;
   }
   if (errors && errors.length > 0) return `Error: ${errors[0].message.split('\n')[0].slice(0, 300)}`;
-  const problem = issues.find((i) => i.severity !== 'info' && !i.autoResolved)
-    ?? issues.find((i) => i.severity === 'error')
-    ?? issues.find((i) => i.severity !== 'info');
+  // Sandbox-unavailability is INFRA, never the app's fault — exclude it from the app-problem pick so a
+  // dead sandbox can't masquerade as "tsc failed" (ShopSphere autopsy). It is surfaced honestly below.
+  const isInfra = (i: BuildIssue): boolean => i.code === 'SANDBOX_UNAVAILABLE';
+  // On a SUCCESSFUL build a recovered-transient (TOOL_ERROR / retry / non-zero sandbox probe) is NOT the
+  // root cause — the build recovered from it (PaisaTrack "fix all error" autopsy 2026-07-21: an ok:true
+  // build reported "Unterminated string in JSON" as its rootCause). Exclude those on ok:true.
+  const excluded = (i: BuildIssue): boolean => isInfra(i) || (ok === true && isRecoverableOnSuccess(i.code));
+  // Pick the TERMINAL cause, not merely the FIRST noisy one. An unresolved ERROR outranks an unresolved
+  // WARNING even when the warning appears earlier in the timeline (EstateNest autopsy 2026-07-20: two
+  // benign architect `read_file`-not-found WARNINGS — reading a file before it was written, build
+  // continued fine — appeared before the real DB_UNREACHABLE ERROR that actually killed the build, and the
+  // old first-match order blamed "useAuth.ts does not exist" instead of the database. Severity now leads
+  // the pick so the report names the real killer.)
+  const problem =
+    issues.find((i) => i.severity === 'error' && !i.autoResolved && !excluded(i))
+    ?? issues.find((i) => i.severity !== 'info' && !i.autoResolved && !excluded(i))
+    // The autoResolved-INCLUSIVE fallbacks exist only to surface SOMETHING on a build that did NOT
+    // succeed; a successful build must never report a recovered/auto-resolved item as its root cause.
+    ?? (ok === true ? undefined : (issues.find((i) => i.severity === 'error' && !excluded(i))
+      ?? issues.find((i) => i.severity !== 'info' && !excluded(i))));
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';
+  // No app-level problem was captured, but the sandbox went away mid-build → name the infra honestly
+  // instead of the generic "no specific error" (which reads like the app silently failed).
+  if (issues.some(isInfra)) {
+    return 'The build sandbox became unavailable mid-build (reaped/expired/unreachable), so the app could not be finished or verified. This is an infrastructure condition, not a defect in the generated app.';
+  }
   if (ok === false) return 'Build did not succeed, but no specific error was captured.';
   return undefined; // still running / nothing to report yet
 }
@@ -967,8 +1209,16 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   if (r.manifest) lines.push(`Manifest : ${manifestSummaryLine(r.manifest)}`); // U-1 signed determinism-audit manifest
   // Which provider(s) actually drove the build turns — the real "kaun sa reply kis provider se aaya".
   const deliveredBy = formatProviderDelivery(r.providerDelivery);
+  // Infrastructure cost sits beside the model cost, because "why is the E2B bill this size?" had no
+  // answer in the product before. The idle split is the actionable part: a VM that outlived its build
+  // is a reaper/idle problem, not a model problem.
+  const sandboxLine = describeSandboxCost(
+    r.sandboxCost ?? null,
+    r.endedAt && r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : undefined, // epoch ms, not ISO
+  );
   if (r.builtBy) lines.push(`Built by : ${r.builtBy}${deliveredBy ? ` — full split: ${deliveredBy}` : ''}`);
   else if (deliveredBy) lines.push(`Built by : ${deliveredBy}`);
+  lines.push(sandboxLine);
   lines.push(`Outcome  : ${r.ok === undefined ? '(n/a)' : r.ok ? 'SUCCESS' : 'FAILED'}`);
   // PROVIDER USAGE + BILLING (admin 2026-07-11 / expanded 2026-07-12: "kitne token API call me
   // provider ne use kiya + user se kitna charge kiya") — the report answers, per provider: how many
@@ -1006,6 +1256,10 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }
     if (r.billing.zeroBillReason) lines.push(`Why free : ${r.billing.zeroBillReason}`);
+    // Cap-4 cost-alerting: surface an unusually expensive build (admin-only, env-gated, default off).
+    // Additive — never changes the charged amount above, only flags it when it crosses the threshold.
+    const costAlert = costAlertAdvisory(r.billing.billedUsd, costAlertThresholdUsd());
+    if (costAlert) lines.push(costAlert);
   }
   if (r.providerFailures && Object.keys(r.providerFailures).length > 0) {
     const failures = Object.entries(r.providerFailures)
@@ -1017,7 +1271,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   if (typeof r.startedAt === 'number' && typeof r.endedAt === 'number') {
     lines.push(`Duration : ${Math.max(0, Math.round((r.endedAt - r.startedAt) / 1000))}s`);
   }
-  lines.push(`Issues   : ${r.counts.total} total — ${r.counts.errors} error(s), ${r.counts.warnings} warning(s), ${r.counts.autoResolved} auto-resolved, ${r.counts.unresolved} unresolved`);
+  lines.push(`Issues   : ${r.counts.total} total — ${r.counts.errors} error(s), ${r.counts.warnings} warning(s), ${r.counts.autoResolved} auto-resolved, ${r.counts.unresolved} unresolved${r.counts.observations ? `, ${r.counts.observations} observation(s) about your existing code` : ''}`);
   lines.push('');
   // ROOT CAUSE first — the single most important line, so nobody has to read the whole timeline
   // to find out WHY the build struggled.
@@ -1167,4 +1421,65 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
     return `${banner}\n${promptLine}\n\n${renderDiagnosticsText(r)}`;
   });
   return head.join('\n') + '\n' + bodies.join('\n') + '\n';
+}
+
+/**
+ * Fix 68 (White-Label Law §3, CLAUDE.md) — the ADMIN-ONLY build diagnostics report names the real providers
+ * ("Provider GLM failed", providerTokens, llmCalls provider/model, builtBy, manifest routing). A NORMAL end
+ * user must NEVER see which backend AI/infra did the work. This returns a provider-ANONYMOUS view of the report
+ * for non-admin users, built by ALLOW-LIST (any field not explicitly copied is simply absent — safe by
+ * construction, so a new provider-bearing field added later cannot silently leak). The forensic/provider-only
+ * sections are OMITTED entirely; the remaining free text (summary, root cause, reviewer notes, issue messages,
+ * captured errors) is scrubbed through the shared redactor so a vendor/model name embedded in prose is gone too.
+ * The user's OWN content — their prompt and their generated app files — is kept verbatim (echoing the user's own
+ * words is not a provider leak, and scrubbing their source would corrupt it).
+ */
+export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(s));
+  const scrubIssue = (i: BuildIssue): BuildIssue => ({
+    ts: i.ts,
+    phase: i.phase,
+    severity: i.severity,
+    code: i.code, // a machine code like PROVIDER_FALLBACK is a generic category, not a vendor name
+    message: redactProvidersText(i.message),
+    autoResolved: i.autoResolved,
+    ...(i.detail !== undefined ? { detail: redactProvidersText(i.detail) } : {}),
+    ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
+  });
+  const out: BuildDiagnosticsReport = {
+    schema: report.schema,
+    startedAt: report.startedAt,
+    counts: report.counts,
+    issues: report.issues.map(scrubIssue),
+    problems: report.problems.map(scrubIssue),
+    // Optional, user-relevant, provider-free fields — kept verbatim.
+    ...(report.buildId !== undefined ? { buildId: report.buildId } : {}),
+    ...(report.promptHash !== undefined ? { promptHash: report.promptHash } : {}),
+    ...(report.sessionId !== undefined ? { sessionId: report.sessionId } : {}),
+    ...(report.workspaceId !== undefined ? { workspaceId: report.workspaceId } : {}),
+    ...(report.prompt !== undefined ? { prompt: report.prompt } : {}),         // the user's own words
+    ...(report.framework !== undefined ? { framework: report.framework } : {}),
+    ...(report.endedAt !== undefined ? { endedAt: report.endedAt } : {}),
+    ...(report.ok !== undefined ? { ok: report.ok } : {}),
+    ...(report.priorFailedBuilds !== undefined ? { priorFailedBuilds: report.priorFailedBuilds } : {}),
+    ...(report.generatedFiles !== undefined ? { generatedFiles: report.generatedFiles } : {}), // the user's own code
+    // Free text that we author — scrubbed of any provider/model name.
+    ...(report.summary !== undefined ? { summary: scrub(report.summary) } : {}),
+    ...(report.rootCause !== undefined ? { rootCause: scrub(report.rootCause) } : {}),
+    ...(report.review !== undefined ? { review: scrub(report.review) } : {}),
+    ...(report.errors !== undefined
+      ? { errors: report.errors.map((e) => ({ ts: e.ts, phase: e.phase, message: redactProvidersText(e.message), ...(e.stack !== undefined ? { stack: redactProvidersText(e.stack) } : {}) })) }
+      : {}),
+    ...(report.previewErrors !== undefined
+      ? { previewErrors: report.previewErrors.map((p) => ({ ts: p.ts, source: p.source, message: redactProvidersText(p.message) })) }
+      : {}),
+    ...(report.dataLossEvents !== undefined
+      ? { dataLossEvents: report.dataLossEvents.map((d) => ({ ts: d.ts, cause: redactProvidersText(d.cause), detail: redactProvidersText(d.detail) })) }
+      : {}),
+  };
+  // Explicitly OMITTED (admin-only / provider-identifying): model, providerDelivery, builtBy, providerFailures,
+  // providerTokens, cacheReadInputTokens, llmCalls, commands, billing, manifest, sandboxCost (our own
+  // infrastructure spend — never any part of what the user is charged). Because `out` is built by
+  // allow-list, they are absent by construction — the user-facing billing surface is userCostBreakdown, not this.
+  return out;
 }

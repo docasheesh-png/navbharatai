@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Smartphone,
   Check,
@@ -11,13 +11,28 @@ import {
   Cpu,
   FileText,
   AlertCircle,
+  Rocket,
+  Upload,
+  Clipboard,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
+import { AppTargetPicker, useUserApps, useAppFiles } from './AppTargetPicker';
+import { StoreBuildPanel } from './StoreBuildPanel';
+import { readIconFile, readIconFromClipboard } from '../../lib/appIcon';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface APKBuilderProps {
   generatedCode?: string;
   appName?: string;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
+  /** The connected GitHub token — the build runs on the user's own account. */
+  githubToken?: string;
+  onConnectGitHub?: () => void;
+  /** Send the user to AI Image Gen to create an icon. */
+  onMakeIcon?: () => void;
 }
 
 interface AppInfo {
@@ -217,18 +232,18 @@ implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
 \`\`\`
 
 ### 3. Replace AndroidManifest.xml
-Provided \`AndroidManifest.xml\` ko \`app/src/main/AndroidManifest.xml\` mein copy karein.
+Copy the provided \`AndroidManifest.xml\` to \`app/src/main/AndroidManifest.xml\`.
 
 ### 4. Configure your URL
-Apni deployed app URL set karein:
+Set your deployed app URL:
 - URL: ${twaUrl || 'https://your-app.example.com'}
-- Digital Asset Links verify karein: https://digitalassetlinks.googleapis.com/v1/statements
+- Verify Digital Asset Links: https://digitalassetlinks.googleapis.com/v1/statements
 
 ### 5. Build APK
 \`\`\`
 ./gradlew assembleRelease
 \`\`\`
-APK milega: \`app/build/outputs/apk/release/app-release.apk\`
+The APK will be at: \`app/build/outputs/apk/release/app-release.apk\`
 
 ### 6. Sign APK
 \`\`\`
@@ -236,7 +251,7 @@ keytool -genkey -v -keystore my-release-key.jks -keyalg RSA -keysize 2048 -valid
 \`\`\`
 
 ## Notes
-- App require karta hai: Android 5.0+ (API 21)
+- Requires: Android 5.0+ (API 21)
 - Target SDK: Android ${info.targetSdk === '33' ? '13' : '14'} (API ${info.targetSdk})
 - Package: ${info.packageName}
 - Version: ${info.version}
@@ -270,7 +285,7 @@ npx cap add android
 \`\`\`
 
 ### 4. Copy config files
-- \`capacitor.config.json\` root mein rakhe (already done)
+- Place \`capacitor.config.json\` in the root (already done)
 - \`AndroidManifest.xml\` → \`android/app/src/main/AndroidManifest.xml\`
 - \`build.gradle\` → \`android/app/build.gradle\`
 
@@ -281,7 +296,7 @@ npx cap open android
 \`\`\`
 
 ### 6. Build APK
-Android Studio mein: **Build > Build Bundle(s) / APK(s) > Build APK(s)**
+In Android Studio: **Build > Build Bundle(s) / APK(s) > Build APK(s)**
 
 ### 7. Sign for release
 \`\`\`bash
@@ -389,7 +404,7 @@ function FileCard({ file }: { file: GeneratedFile }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
+export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, onConnectGitHub, onMakeIcon }) => {
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
 
@@ -404,6 +419,46 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
     orientation: 'portrait',
     targetSdk: '34',
   });
+
+  // WHICH app is being packaged (admin 2026-07-27). The builder used to have no idea — it packaged
+  // whatever preview happened to be open, under a hardcoded "NavBharatAI App" name.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading } = useAppFiles(targetSession);
+
+  // A REAL icon, not an emoji. Play needs a 512x512 PNG; an emoji rendered by whatever font the build
+  // machine happens to have is not one.
+  const [iconDataUrl, setIconDataUrl] = useState('');
+  const [iconNote, setIconNote] = useState('');
+  const [iconFailed, setIconFailed] = useState(false);
+  const [iconBusy, setIconBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const acceptIcon = useCallback(async (run: () => Promise<{ ok: boolean; dataUrl?: string; error?: string; warning?: string }>) => {
+    setIconBusy(true);
+    setIconNote('');
+    setIconFailed(false);
+    try {
+      const r = await run();
+      if (!r.ok || !r.dataUrl) {
+        setIconFailed(true);
+        setIconNote(r.error || 'That image could not be used.');
+        return;
+      }
+      setIconDataUrl(r.dataUrl);
+      setIconNote(r.warning || 'Icon set.');
+      setIconFailed(!!r.warning);
+    } finally {
+      setIconBusy(false);
+    }
+  }, []);
+
+  // Keep the app name in step with the app the user picked, unless they have typed their own.
+  const nameTouched = useRef(false);
+  useEffect(() => {
+    if (nameTouched.current || !targetSession) return;
+    const picked = apps.find((a) => a.sessionId === targetSession);
+    if (picked) setInfo((prev) => ({ ...prev, packageName: prev.packageName }));
+  }, [targetSession, apps]);
 
   // Step 2
   const [perms, setPerms] = useState<PermissionState>({
@@ -461,9 +516,10 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
 
   const startBuild = useCallback(() => {
     if (!validate()) return;
-    setBuildState('building');
-    setBuildStepIdx(0);
-
+    // Generate the Android project CONFIG FILES synchronously (admin autopsy 2026-07-21). The old
+    // code ran a 650ms fake "build" timer even though nothing is compiled here — a browser cannot
+    // build or sign an APK/AAB. The real signed .aab is produced by the repo's CI workflow (see the
+    // honest note in the 'done' panel). No fake progress theatre.
     const files: GeneratedFile[] = [
       { name: 'AndroidManifest.xml', content: generateManifest(info, perms) },
       { name: 'build.gradle', content: generateBuildGradle(info) },
@@ -472,28 +528,93 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
         : []),
       { name: 'README.md', content: generateReadme(info, buildConfig.method, buildConfig.twaUrl) },
     ];
-
-    let idx = 0;
-    const interval = setInterval(() => {
-      idx += 1;
-      if (idx >= BUILD_STEPS.length) {
-        clearInterval(interval);
-        setBuildStepIdx(BUILD_STEPS.length - 1);
-        setBuildState('done');
-        setGeneratedFiles(files);
-      } else {
-        setBuildStepIdx(idx);
-      }
-    }, 650);
+    setGeneratedFiles(files);
+    setBuildStepIdx(BUILD_STEPS.length - 1);
+    setBuildState('done');
   }, [info, perms, buildConfig, validate]);
 
+  // SHIP KIT (admin 2026-07-26) — the config files above describe the app but cannot become an
+  // installable one on their own. This fetches the REAL build pipeline (GitHub Actions workflows that
+  // produce a signed .aab and an .ipa uploaded to TestFlight, plus the fastlane lane and a setup guide)
+  // and downloads every file. The binaries are built by GitHub's own Linux + macOS runners, because a
+  // browser cannot compile or sign one — and iOS legally requires macOS.
+  const [shipBusy, setShipBusy] = useState(false);
+  const [shipErr, setShipErr] = useState('');
+  const [shipDone, setShipDone] = useState(false);
+
+  // Step-by-step publishing walkthrough, fetched from the ONE structured source that also feeds the
+  // AIs and the generated SHIPPING.md — so the three can never drift.
+  const [guide, setGuide] = useState<null | Array<{ platform: string; title: string; upfront: string; steps: Array<{ id: string; title: string; detail: string; youShouldSee?: string; cost?: string; takes?: string; youMustDoThis?: boolean; navbharatDoesThis?: boolean; link?: string }> }>>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guidePlatform, setGuidePlatform] = useState<'android' | 'ios'>('android');
+  const [guideErr, setGuideErr] = useState('');
+  const [doneSteps, setDoneSteps] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('navbharat_publish_steps') || '{}'); } catch { return {}; }
+  });
+
+  const toggleStep = useCallback((id: string) => {
+    setDoneSteps((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem('navbharat_publish_steps', JSON.stringify(next)); } catch { /* progress is a nicety, never blocks */ }
+      return next;
+    });
+  }, []);
+
+  const openGuide = useCallback(async () => {
+    setGuideOpen(true);
+    if (guide) return;
+    setGuideErr('');
+    try {
+      const r = await fetch('/api/mobile-ship/guide');
+      if (!r.ok) throw new Error(`Server returned ${r.status}`);
+      const d = await r.json();
+      setGuide(d.guides || null);
+    } catch (e) {
+      setGuideErr((e as { message?: string })?.message || 'Could not load the guide.');
+    }
+  }, [guide]);
+
+  const downloadShipKit = useCallback(async () => {
+    setShipBusy(true);
+    setShipErr('');
+    setShipDone(false);
+    try {
+      const r = await fetch('/api/mobile-ship/kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appName: info.appName, appId: info.packageName }),
+      });
+      if (!r.ok) throw new Error(`Server returned ${r.status}`);
+      const kit = await r.json();
+      const files = (kit?.files || {}) as Record<string, string>;
+      if (!Object.keys(files).length) throw new Error('The server returned an empty kit');
+      // One download per file, keeping the real paths in the filename so they are easy to place.
+      for (const [path, content] of Object.entries(files)) {
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = path.replace(/\//g, '__');
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      setShipDone(true);
+    } catch (e) {
+      // Honest failure — never pretend a kit was produced.
+      setShipErr((e as { message?: string })?.message || 'Could not build the ship kit. Please try again.');
+    } finally {
+      setShipBusy(false);
+    }
+  }, [info.appName, info.packageName]);
+
   const downloadAll = useCallback(() => {
+    // Honest filename: this is a plain-text bundle of the config files, not a real .zip / .apk.
     const combined = generatedFiles.map((f) => `\n\n===== ${f.name} =====\n\n${f.content}`).join('');
     const blob = new Blob([combined], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${info.packageName}-android-package.zip.txt`;
+    a.download = `${info.packageName}-android-config.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }, [generatedFiles, info.packageName]);
@@ -501,7 +622,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
   // ── Renders ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen p-6 font-sans" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="h-full overflow-y-auto overscroll-contain p-4 sm:p-6 font-sans" style={{ background: '#0d1117', color: '#e6edf3', WebkitOverflowScrolling: 'touch' }}>
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
@@ -510,8 +631,21 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-white">Android APK Builder</h1>
-            <p className="text-sm text-white/50">Web app ko Android package mein convert karein</p>
+            <p className="text-sm text-white/50">Convert your web app into an Android package</p>
           </div>
+        </div>
+
+        {/* WHICH app is being packaged. Without this the builder had no idea — it used whatever
+            preview was open, under a hardcoded name. */}
+        <div className="rounded-xl border border-white/10 mb-6" style={{ background: '#161b22' }}>
+          <AppTargetPicker
+            apps={apps}
+            appsLoading={appsLoading}
+            files={appFiles}
+            filesLoading={filesLoading}
+            sessionId={targetSession}
+            onSessionChange={setTargetSession}
+          />
         </div>
 
         <StepIndicator current={step} total={4} />
@@ -587,25 +721,87 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
               {/* Icon picker */}
               <div>
                 <label className="block text-xs text-white/50 mb-2">App Icon</label>
-                <div className="flex items-center gap-3">
+
+                {/* A REAL icon (admin 2026-07-27). The emoji row below is still handy as a quick
+                    placeholder, but Play needs a 512x512 image — an emoji drawn with whatever font
+                    the build machine has is not an app icon. */}
+                <div className="flex items-center gap-3 mb-3">
                   <div
-                    className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl border border-white/10 flex-shrink-0"
+                    className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl border border-white/10 flex-shrink-0 overflow-hidden"
                     style={{ background: info.primaryColor + '33' }}
                   >
-                    {info.icon}
+                    {iconDataUrl
+                      ? <img src={iconDataUrl} alt="App icon" className="w-full h-full object-cover" />
+                      : info.icon}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {EMOJI_OPTIONS.map((e) => (
+                  <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (f) void acceptIcon(() => readIconFile(f));
+                      }}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={iconBusy}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-white/15 hover:bg-white/5 disabled:opacity-40 transition-colors"
+                    >
+                      <Upload size={13} /> Upload
+                    </button>
+                    <button
+                      onClick={() => void acceptIcon(() => readIconFromClipboard())}
+                      disabled={iconBusy}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-white/15 hover:bg-white/5 disabled:opacity-40 transition-colors"
+                    >
+                      {iconBusy ? <Loader2 size={13} className="animate-spin" /> : <Clipboard size={13} />} Paste
+                    </button>
+                    {onMakeIcon && (
                       <button
-                        key={e}
-                        onClick={() => updateInfo({ icon: e })}
-                        className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center border transition-all
-                          ${info.icon === e ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 hover:border-white/30'}`}
+                        onClick={onMakeIcon}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
                       >
-                        {e}
+                        <Sparkles size={13} /> Make icon
                       </button>
-                    ))}
+                    )}
+                    {iconDataUrl && (
+                      <button
+                        onClick={() => { setIconDataUrl(''); setIconNote(''); setIconFailed(false); }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/15 hover:bg-white/5 text-white/60 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
+                </div>
+
+                <p className="text-[11px] text-white/40 leading-relaxed mb-2">
+                  Use a square picture, at least 512×512. "Make icon" opens AI Image Gen — copy the
+                  image it creates, then come back and press Paste.
+                </p>
+
+                {iconNote && (
+                  <p className={`text-xs leading-relaxed mb-3 px-3 py-2 rounded-lg ${iconFailed ? 'text-amber-300' : 'text-green-300'}`}
+                     style={{ background: iconFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)' }}>
+                    {iconNote}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {EMOJI_OPTIONS.map((e) => (
+                    <button
+                      key={e}
+                      onClick={() => updateInfo({ icon: e })}
+                      className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center border transition-all
+                        ${info.icon === e && !iconDataUrl ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 hover:border-white/30'}`}
+                    >
+                      {e}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -710,7 +906,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                       <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">Recommended</span>
                     </div>
                     <p className="text-sm text-white/60 mt-1">
-                      Web app ko Chrome ke andar native feel ke saath wrap karta hai
+                      Wraps your web app with a native feel inside Chrome
                     </p>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/40">
                       <span>✓ HTTPS URL required</span>
@@ -768,8 +964,8 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     <div className="flex items-start gap-2 text-xs text-yellow-400">
                       <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                       <span>
-                        Capacitor build ke liye apke machine par Node.js 16+ aur Android Studio install hona
-                        chahiye. README mein poori instructions milegi.
+                        A Capacitor build needs Node.js 16+ and Android Studio installed on your machine
+                        . Full instructions are in the README.
                       </span>
                     </div>
                   </div>
@@ -814,7 +1010,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-colors text-white font-semibold text-base"
                   >
                     <Package size={18} />
-                    Generate Package
+                    Generate config files
                   </button>
                 </div>
               )}
@@ -858,9 +1054,119 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
               {buildState === 'done' && (
                 <div className="space-y-4">
                   <div className="text-center py-3">
-                    <div className="text-4xl mb-1">🎉</div>
-                    <p className="text-green-400 font-semibold">Package ready! Neeche files download karein.</p>
+                    <div className="text-4xl mb-1">📄</div>
+                    <p className="text-green-400 font-semibold">Config files ready — download below.</p>
                   </div>
+
+                  {/* Honest note (admin autopsy 2026-07-21): this generates the Android project config
+                      files; it does NOT compile or sign an APK/AAB (a browser can't). The real signed
+                      .aab comes from CI. */}
+                  <div className="rounded-xl p-3 border border-indigo-500/20 bg-indigo-500/5 text-[11px] text-white/60 leading-relaxed">
+                    <span className="text-indigo-300 font-semibold">These are config files, not an installable app. </span>
+                    A browser cannot compile or sign an <code className="text-white/80">.apk</code>/<code className="text-white/80">.aab</code>,
+                    and iOS builds legally require macOS. Get the build kit below — it runs on GitHub&apos;s own
+                    Linux and macOS runners and produces the genuine signed app.
+                  </div>
+
+                  {/* REAL ship pipeline (admin 2026-07-26). Generates the GitHub Actions workflows that
+                      build a signed .aab and an .ipa uploaded to TestFlight, plus the fastlane lane and
+                      an honest setup guide naming the secrets only the user can provide. */}
+                  <div className="rounded-xl p-3 border border-green-500/25 bg-green-500/5 space-y-2">
+                    <p className="text-[11px] text-white/70 leading-relaxed">
+                      <span className="text-green-300 font-semibold">Store-ready build kit: </span>
+                      GitHub Actions workflows that produce a signed <code className="text-white/80">.aab</code> for
+                      Play Store and an <code className="text-white/80">.ipa</code> uploaded straight to
+                      <span className="text-white/80"> TestFlight</span> — no Mac needed. Add the files to a GitHub
+                      repo, set your signing secrets (listed in the included SHIPPING.md), then run it from the
+                      Actions tab.
+                    </p>
+                    <button
+                      onClick={downloadShipKit}
+                      disabled={shipBusy}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-white font-semibold"
+                    >
+                      <Rocket size={18} />
+                      {shipBusy ? 'Preparing the build kit…' : 'Get store-ready build kit'}
+                    </button>
+                    {shipDone && (
+                      <p className="text-[11px] text-green-400">
+                        Downloaded. Each file is named with its real path (<code className="text-white/70">__</code> stands
+                        for a folder separator) — recreate those folders in your repo, then open SHIPPING.md.
+                        The Android build gives you a <code className="text-white/70">.aab</code> for Play Store
+                        and a <code className="text-white/70">.apk</code> you can install straight onto your phone.
+                      </p>
+                    )}
+                    {shipErr && <p className="text-[11px] text-red-400">{shipErr}</p>}
+
+                    <button
+                      onClick={openGuide}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-white/80 text-xs font-semibold"
+                    >
+                      <FileText size={15} />
+                      Show me how to publish, step by step
+                    </button>
+                  </div>
+
+                  {/* Step-by-step walkthrough for a first-time, non-technical publisher. */}
+                  {guideOpen && (
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-3">
+                      <div className="flex gap-2">
+                        {(['android', 'ios'] as const).map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setGuidePlatform(p)}
+                            className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                              guidePlatform === p ? 'bg-indigo-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'
+                            }`}
+                          >
+                            {p === 'android' ? 'Play Store' : 'App Store'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {guideErr && <p className="text-[11px] text-red-400">{guideErr}</p>}
+                      {!guide && !guideErr && <p className="text-[11px] text-white/50">Loading the guide…</p>}
+
+                      {guide?.filter((g) => g.platform === guidePlatform).map((g) => (
+                        <div key={g.platform} className="space-y-3">
+                          <p className="text-[11px] text-amber-300/90 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                            <span className="font-bold">Before you start: </span>{g.upfront}
+                          </p>
+                          {g.steps.map((s, i) => (
+                            <div key={s.id} className="flex gap-2.5">
+                              <button
+                                onClick={() => toggleStep(s.id)}
+                                aria-label={doneSteps[s.id] ? `Mark step ${i + 1} as not done` : `Mark step ${i + 1} as done`}
+                                className={`mt-0.5 shrink-0 w-5 h-5 rounded-md border text-[10px] font-bold transition-colors ${
+                                  doneSteps[s.id] ? 'bg-green-600 border-green-500 text-white' : 'border-white/25 text-transparent hover:border-white/50'
+                                }`}
+                              >
+                                ✓
+                              </button>
+                              <div className={`flex-1 min-w-0 ${doneSteps[s.id] ? 'opacity-50' : ''}`}>
+                                <p className="text-[12px] font-semibold text-white/90">{i + 1}. {s.title}</p>
+                                <p className="text-[11px] text-white/60 leading-relaxed mt-0.5">{s.detail}</p>
+                                {s.youShouldSee && (
+                                  <p className="text-[11px] text-green-400/80 mt-1">You should see: {s.youShouldSee}</p>
+                                )}
+                                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                  {s.cost && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{s.cost}</span>}
+                                  {s.takes && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">{s.takes}</span>}
+                                  {s.navbharatDoesThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">NavBharatAI does this</span>}
+                                  {s.youMustDoThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">Only you can do this</span>}
+                                </div>
+                                {s.link && (
+                                  <a href={s.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block">
+                                    Open the page →
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {generatedFiles.map((f) => (
                     <FileCard key={f.name} file={f} />
@@ -871,7 +1177,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-700 hover:bg-green-600 transition-colors text-white font-semibold"
                   >
                     <Download size={18} />
-                    Download All as ZIP
+                    Download config files (.txt)
                   </button>
                 </div>
               )}
@@ -909,6 +1215,20 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
               )}
             </div>
           )}
+        </div>
+
+        {/* THE BUTTON THIS SCREEN IS FOR — a real Android app, built on real machines, downloaded
+            here. Kept at the very bottom so it reads as the last step after decorating the app. */}
+        <div className="mt-6 mb-2">
+          <StoreBuildPanel
+            sessionId={targetSession}
+            appName={info.appName}
+            appId={info.packageName}
+            iconDataUrl={iconDataUrl || undefined}
+            githubToken={githubToken}
+            onConnectGitHub={onConnectGitHub}
+            onOpenGuide={() => void openGuide()}
+          />
         </div>
       </div>
     </div>

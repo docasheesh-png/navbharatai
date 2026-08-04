@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { TirangaLoader } from '../ui/TirangaLoader';
+import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
+import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
+import { auth } from '../../lib/firebase';
 
-interface GeneratedImage {
-  id: string;
-  url: string;
-  prompt: string;
-  style: string;
-  size: string;
-  timestamp: number;
-}
+type GeneratedImage = ImageHistoryItem;
 
 interface Props {
   onImageGenerated?: (imageUrl: string, prompt: string) => void;
@@ -30,7 +28,9 @@ const SIZES = [
   { id: 'icon', label: 'App Icon', w: 192, h: 192, desc: '192×192' },
 ];
 
-const QUICK_PROMPTS = [
+// Image types — a compulsory selector (exactly one is always active). The chosen type is
+// combined into the real generation request, so it genuinely shapes the output.
+const IMAGE_TYPES = [
   'Modern app logo',
   'Website banner',
   'App icon',
@@ -61,58 +61,83 @@ const STYLE_ENHANCERS: Record<string, string> = {
 
 export function AIImageGenerator({ onImageGenerated }: Props) {
   const [prompt, setPrompt] = useState('');
+  const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
   const [style, setStyle] = useState('minimal');
   const [size, setSize] = useState('square');
   const [isLoading, setIsLoading] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState('');
   const [imageError, setImageError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [copied, setCopied] = useState(false);
+  const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
 
+  // REAL generation (admin autopsy 2026-07-20): images come from NavBharatAI's own server route
+  // (/api/image/generate) on our configured image engine — the old code hot-linked a third-party
+  // free image site from the browser (no server side at all; unreliable and outside our control).
+  // History is PERSISTED in IndexedDB (admin 2026-07-24: "history save honi chahiye") — a generated
+  // image is a multi-MB data URL that overflows localStorage, so IndexedDB holds up to 50 recents that
+  // survive reload / tab close / app restart (per-device). Loaded on mount below.
+  // The compulsory image type is always folded into what actually gets generated, so a selected
+  // type shapes the output even when the free-text prompt is empty (type alone is a valid request).
+
+  // Load the saved history once, on mount, so the user's past images are there after a reload.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('navbharat_image_history');
-      if (saved) setHistory(JSON.parse(saved));
-    } catch {}
+    let alive = true;
+    imageHistoryStore.getAll().then((items) => { if (alive) setHistory(items); }).catch(() => { /* store unavailable → empty */ });
+    return () => { alive = false; };
   }, []);
 
-  const saveHistory = (items: GeneratedImage[]) => {
-    setHistory(items);
-    try { localStorage.setItem('navbharat_image_history', JSON.stringify(items)); } catch {}
-  };
+  const buildEffectivePrompt = () =>
+    `${imageType}${prompt.trim() ? ` — ${prompt.trim()}` : ''}`;
 
-  const handleGenerate = () => {
-    if (!prompt.trim()) return;
-    const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
-    const enhancer = STYLE_ENHANCERS[style] || '';
-    const fullPrompt = enhancer + prompt.trim();
-    const seed = Math.floor(Math.random() * 999999);
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=${selectedSize.w}&height=${selectedSize.h}&nologo=true&seed=${seed}`;
+  const handleGenerate = async () => {
+    const effectivePrompt = buildEffectivePrompt();
+    if (!effectivePrompt.trim() || isLoading) return;
     setGeneratedUrl('');
     setImageError(false);
+    setErrorMsg('');
     setIsLoading(true);
-
-    const img = new window.Image();
-    img.onload = () => {
-      setIsLoading(false);
-      setGeneratedUrl(url);
+    try {
+      // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
+      // so WITHOUT this header the server saw an anonymous caller and asked the (already logged-in) user
+      // to sign in. Root-caused 2026-07-31: the fetch previously sent no Authorization header.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const tok = await auth.currentUser?.getIdToken();
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+      } catch { /* token optional here — the server still returns an honest sign-in prompt if truly anon */ }
+      const res = await fetch('/api/image/generate', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ prompt: effectivePrompt, style, size }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || typeof data.image !== 'string') {
+        throw new Error((data && typeof data.error === 'string' && data.error)
+          || 'Image generation failed — please try again.');
+      }
+      setGeneratedUrl(data.image);
       const newItem: GeneratedImage = {
-        id: Date.now().toString(),
-        url,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        url: data.image,
         prompt: prompt.trim(),
+        type: imageType,
         style,
         size,
         timestamp: Date.now(),
       };
-      const updated = [newItem, ...history].slice(0, 6);
-      saveHistory(updated);
-      if (onImageGenerated) onImageGenerated(url, prompt.trim());
-    };
-    img.onerror = () => {
-      setIsLoading(false);
+      // Persist to IndexedDB so it survives reloads, then reflect it in the UI (newest-first, bounded).
+      setHistory((h) => pruneHistory([newItem, ...h]));
+      void imageHistoryStore.save(newItem).catch(() => { /* persistence is best-effort — never blocks generation */ });
+      if (onImageGenerated) onImageGenerated(data.image, effectivePrompt);
+    } catch (e) {
+      // Honest failure — the real reason from the server, never a placeholder image.
       setImageError(true);
-    };
-    img.src = url;
+      setErrorMsg(e instanceof Error ? e.message : 'Image generation failed — please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleEnhance = () => {
@@ -122,25 +147,156 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     }
   };
 
-  const handleCopyUrl = () => {
+  // Resolve the generated image to a real Blob. It is almost always a data: URL (the server returns
+  // `data:<mime>;base64,<...>`), but fall back to fetch for any http(s) URL so both cases work.
+  const resolveBlob = async (url: string): Promise<Blob> => {
+    if (url.startsWith('data:')) return dataUrlToBlob(url);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Could not fetch the image');
+    return res.blob();
+  };
+
+  // The clipboard image API only accepts PNG in most browsers — convert anything else via a canvas.
+  const toPngBlob = async (blob: Blob): Promise<Blob> => {
+    if (blob.type === 'image/png') return blob;
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new window.Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('image decode failed'));
+        el.src = url;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 512;
+      canvas.height = img.naturalHeight || 512;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return blob;
+      ctx.drawImage(img, 0, 0);
+      return await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b || blob), 'image/png'));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const flashNote = (msg: string) => {
+    setActionNote(msg);
+    setTimeout(() => setActionNote(''), 3500);
+  };
+
+  // COPY THE ACTUAL IMAGE (not the URL). Puts a real PNG on the clipboard so it pastes as a picture
+  // into any app. Falls back to copying the link only if the browser can't do image clipboard.
+  const handleCopyImage = async () => {
     if (!generatedUrl) return;
-    navigator.clipboard.writeText(generatedUrl).then(() => {
+    setActionNote('');
+    try {
+      const hasClipboardImage = typeof navigator !== 'undefined' && !!navigator.clipboard
+        && typeof (window as unknown as { ClipboardItem?: unknown }).ClipboardItem !== 'undefined';
+      if (!hasClipboardImage) throw new Error('no image clipboard');
+      // Pass a Promise<Blob> into ClipboardItem (not an already-awaited Blob): Safari/iOS WebView keeps
+      // the user-gesture alive across the async decode this way, so image copy works there too.
+      const pngPromise = (async () => toPngBlob(await resolveBlob(generatedUrl)))();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Honest fallback — tell the user we copied the link (not the image) so they know what they got.
+      try { await navigator.clipboard.writeText(generatedUrl); } catch { /* clipboard fully blocked */ }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      flashNote('This device can’t copy the image itself — the image link was copied instead. Use Download to save the picture.');
+    }
+  };
+
+  // Raw base64 for a native file write: prefer the data URL's own payload, else read the Blob.
+  const toBase64 = async (url: string, blob: Blob): Promise<string> => {
+    if (url.startsWith('data:')) {
+      try { return dataUrlToBase64(url); } catch { /* fall through to FileReader */ }
+    }
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const s = String(reader.result || '');
+        resolve(s.slice(s.indexOf(',') + 1));
+      };
+      reader.onerror = () => reject(new Error('read failed'));
+      reader.readAsDataURL(blob);
     });
   };
 
+  // ONE-TAP Save to Photos on the native app: write a temp file (Filesystem), then hand its file URI to
+  // the media plugin (savePhoto → the device Photo gallery). Plugins are dynamically imported so the web
+  // bundle never loads native code. Throws on any failure so the caller falls back to the share sheet.
+  const saveToPhotosNative = async (base64: string, filename: string): Promise<void> => {
+    const [{ Filesystem, Directory }, { Media }] = await Promise.all([
+      import('@capacitor/filesystem'),
+      import('@capacitor-community/media'),
+    ]);
+    const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
+    try {
+      await Media.savePhoto({ path: written.uri });
+    } finally {
+      try { await Filesystem.deleteFile({ path: filename, directory: Directory.Cache }); } catch { /* best-effort cleanup */ }
+    }
+  };
+
+  // DOWNLOAD / SAVE the image. Native: ONE-TAP Save to Photos (media plugin) → OS share sheet fallback.
+  // Web: a blob-URL download (far more reliable than a data: href, which just opens a tab).
+  const handleDownload = async () => {
+    if (!generatedUrl) return;
+    setActionNote('');
+    try {
+      const blob = await resolveBlob(generatedUrl);
+      const filename = imageFilename(prompt, blob.type);
+
+      if (Capacitor.isNativePlatform()) {
+        // 1) Primary: save straight to the Photos gallery, one tap.
+        try {
+          const base64 = await toBase64(generatedUrl, blob);
+          await saveToPhotosNative(base64, filename);
+          flashNote('Saved to your Photos ✓');
+          return;
+        } catch { /* permission denied / plugin error → fall through to the share sheet */ }
+        // 2) Fallback: OS share sheet (Save Image / Save to Files).
+        try {
+          const file = new File([blob], filename, { type: blob.type });
+          const nav = navigator as Navigator & { canShare?: (d?: unknown) => boolean };
+          if (nav.canShare && nav.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: filename });
+            return;
+          }
+        } catch (e) {
+          if ((e as { name?: string })?.name === 'AbortError') return; // user cancelled the share sheet
+          // else fall through to the blob-URL download
+        }
+      }
+
+      // Web (and native final fallback): trigger a real file download from a blob URL.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch {
+      flashNote('Could not save the image automatically — long-press the image to save it.');
+    }
+  };
+
   const handleClearHistory = () => {
-    saveHistory([]);
+    setHistory([]);
     setGeneratedUrl('');
+    void imageHistoryStore.clear().catch(() => { /* best-effort — the UI is already cleared */ });
   };
 
   const relativeTime = (ts: number) => {
     const diff = Date.now() - ts;
-    if (diff < 60000) return 'Abhi';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m pehle`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h pehle`;
-    return `${Math.floor(diff / 86400000)}d pehle`;
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
   };
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
@@ -154,10 +310,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">AI Image Generator</h2>
-          <p className="text-xs text-white/40">Prompt likhkar images generate karo — logos, banners, icons</p>
+          <p className="text-xs text-white/40">Write a prompt to generate images — logos, banners, icons</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">Pollinations AI</span>
+          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
           <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-full border border-emerald-500/30">Free</span>
         </div>
       </div>
@@ -165,28 +321,38 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel */}
         <div className="w-[60%] flex flex-col gap-4 p-5 overflow-y-auto border-r border-white/5">
+          {/* Image Type — compulsory: exactly one is always selected (comes first, above the prompt) */}
+          <div>
+            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Image Type</label>
+            <div className="flex flex-wrap gap-1.5">
+              {IMAGE_TYPES.map(t => (
+                <button
+                  key={t}
+                  onClick={() => setImageType(t)}
+                  aria-pressed={imageType === t}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                    imageType === t
+                      ? 'border-violet-500/60 bg-violet-500/20 text-violet-200 font-medium'
+                      : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10 hover:text-white/70'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Prompt */}
           <div>
             <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Prompt</label>
             <textarea
               className="w-full bg-[#161b22] border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
               rows={4}
-              placeholder="Describe karo kya banana hai... e.g. 'Modern fintech app logo with blue gradient and rupee symbol'"
+              placeholder="Add details for your Modern app logo, banner, icon... e.g. 'with blue gradient and rupee symbol'"
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
             />
-            <div className="flex items-center justify-between mt-2">
-              <div className="flex flex-wrap gap-1.5">
-                {QUICK_PROMPTS.map(q => (
-                  <button
-                    key={q}
-                    onClick={() => setPrompt(q)}
-                    className="text-[10px] px-2 py-0.5 bg-white/5 hover:bg-violet-500/20 rounded-full text-white/50 hover:text-violet-300 transition-colors border border-white/5"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
+            <div className="flex items-center justify-end mt-2">
               <button
                 onClick={handleEnhance}
                 className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 shrink-0"
@@ -263,14 +429,14 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             </div>
           </div>
 
-          {/* Generate Button */}
+          {/* Generate Button — pinned at the very bottom of the left column */}
           <button
             onClick={handleGenerate}
-            disabled={!prompt.trim() || isLoading}
+            disabled={isLoading}
             className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors mt-2"
           >
             {isLoading ? (
-              <><RefreshCw className="w-4 h-4 animate-spin" /> Generating...</>
+              <><TirangaLoader className="w-4 h-4" /> Generating...</>
             ) : (
               <><Wand2 className="w-4 h-4" /> Generate Image</>
             )}
@@ -285,22 +451,22 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             <div className="relative bg-[#161b22] border border-white/5 rounded-xl overflow-hidden" style={{ minHeight: '240px' }}>
               {isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                  <div className="w-12 h-12 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs text-white/40">AI image generate ho raha hai...</p>
+                  <TirangaLoader className="w-12 h-12" />
+                  <p className="text-xs text-white/40">Generating AI image...</p>
                   <p className="text-[10px] text-white/20">Size: {selectedSize.w}×{selectedSize.h}</p>
                 </div>
               )}
               {!isLoading && imageError && (
-                <div className="flex flex-col items-center justify-center h-60 gap-2">
+                <div className="flex flex-col items-center justify-center h-60 gap-2 px-4 text-center">
                   <ImageIcon className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-red-400">Image load nahi hui. Retry karo ya prompt change karo.</p>
+                  <p className="text-xs text-red-400">{errorMsg || 'Image could not be generated. Retry or change the prompt.'}</p>
                   <button onClick={handleGenerate} className="text-xs text-violet-400 hover:underline">Retry</button>
                 </div>
               )}
               {!isLoading && !imageError && !generatedUrl && (
                 <div className="flex flex-col items-center justify-center h-60 gap-2">
                   <Wand2 className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-white/30">Prompt likhkar Generate dabao</p>
+                  <p className="text-xs text-white/30">Pick a type, add details, then press Generate</p>
                 </div>
               )}
               {!isLoading && !imageError && generatedUrl && (
@@ -313,26 +479,27 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   />
                   <div className="absolute bottom-2 right-2 flex gap-1.5">
                     <button
-                      onClick={handleCopyUrl}
+                      onClick={handleCopyImage}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"
-                      title="Copy URL"
+                      title="Copy image"
                     >
                       {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-white/70" />}
                     </button>
-                    <a
-                      href={generatedUrl}
-                      download="navbharat-ai-image.jpg"
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={handleDownload}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"
-                      title="Download"
+                      title="Download image"
                     >
                       <Download className="w-3.5 h-3.5 text-white/70" />
-                    </a>
+                    </button>
                   </div>
                 </>
               )}
             </div>
+            {/* Honest fallback note (e.g. device can't copy the raw image, or save needs a long-press). */}
+            {actionNote && (
+              <p className="mt-2 text-[11px] text-amber-300/80 leading-relaxed">{actionNote}</p>
+            )}
           </div>
 
           {/* Recent History */}
@@ -350,7 +517,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 {history.map(item => (
                   <button
                     key={item.id}
-                    onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setStyle(item.style); setSize(item.size); }}
+                    onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setImageType(item.type || IMAGE_TYPES[0]); setStyle(item.style); setSize(item.size); }}
                     className="group relative rounded-lg overflow-hidden border border-white/5 hover:border-violet-500/40 transition-all aspect-square bg-[#161b22]"
                   >
                     <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" loading="lazy" />
@@ -373,7 +540,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
               <li>• Specific prompts = better results ("blue gradient tech logo" not just "logo")</li>
               <li>• Style + Color hints add extra quality</li>
               <li>• "Enhance" button adds style-specific keywords automatically</li>
-              <li>• Image URL directly use kar sakte ho img tag mein</li>
+              <li>• You can use the image URL directly in an img tag</li>
             </ul>
           </div>
         </div>

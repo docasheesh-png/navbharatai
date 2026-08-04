@@ -31,6 +31,12 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   clsx: '^2',
   classnames: '^2',
   'tailwind-merge': '^2',
+  // Tailwind pinned to v3 (LedgerLoop autopsy 2026-07-20). A bare `npm install tailwindcss` pulls v4,
+  // which REMOVED the `tailwindcss init -p` CLI and the `node_modules/.bin/tailwindcss` binary, and
+  // switched to CSS-first config (`@import "tailwindcss"`) — so the v3 conventions every LLM emits
+  // (`tailwindcss init -p`, `tailwind.config.js`, `@tailwind base/components/utilities`) all fail. The
+  // builder burned 5 failed commands on this. v3 is the stable major the scaffold + generated code use.
+  tailwindcss: '^3',
   'class-variance-authority': '^0.7.0',
   dayjs: '^1',
   'date-fns': '^3',
@@ -89,6 +95,13 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   pinia: '^2',
   '@vueuse/core': '^11',
   'vue-i18n': '^10',
+  // Map ecosystem (CargoPilot autopsy 2026-07-19): a Next.js 14 app (react@18) ran
+  // `npm install react-leaflet` → npm pulled the LATEST (5.x), whose peer REQUIRES react@^19 →
+  // ERESOLVE, and the --legacy-peer-deps recovery corrupted node_modules until the `next` binary
+  // itself was pruned → dev server dead. react-leaflet@4 is the react-18-compatible major; leaflet
+  // is stable at 1.x. Pinning the bare install here resolves the tree cleanly on the react-18 scaffolds.
+  'react-leaflet': '^4',
+  leaflet: '^1',
 };
 
 // Matches an npm/pnpm/yarn INSTALL sub-command (not `npx prisma generate`, not `npm run`, not a bare
@@ -178,6 +191,74 @@ export function pinKnownDepsInPackageJson(content: string): { content: string; c
   if (changed.length === 0) return { content, changed: [] };
   const trailingNl = content.endsWith('\n') ? '\n' : '';
   return { content: JSON.stringify(pkg, null, 2) + trailingNl, changed };
+}
+
+/**
+ * The core RUNTIME deps a framework's dev server / build binary needs to exist. If the LLM rewrites
+ * package.json and DROPS one of these (or a peer-conflict `npm install` prunes it), the framework
+ * binary (`next`, `vite`) vanishes from node_modules and the dev server / build dies.
+ *
+ * ROOT CAUSE this closes (CargoPilot autopsy 2026-07-19): a Next.js build installed react-leaflet@5
+ * (peer react@^19) → ERESOLVE → the `--legacy-peer-deps` recovery churned node_modules until a bare
+ * `npm install` PRUNED the `next` package (`sh: 1: next: not found`, `ls node_modules/.bin/next` →
+ * absent) → `next build`/dev dead → preview failed. Keys mirror the framework ids the scaffold uses.
+ * Conservative majors matching the scaffolds (Next 14 / react 18 / Vue 3). ADD-ONLY — never downgrades
+ * an existing pin, only re-adds a core dep that is entirely absent from BOTH deps and devDeps.
+ */
+export const FRAMEWORK_CORE_DEPS: Record<string, Record<string, string>> = {
+  nextjs: { next: '^14', react: '^18', 'react-dom': '^18' },
+  next: { next: '^14', react: '^18', 'react-dom': '^18' },
+  'vite-react': { react: '^18', 'react-dom': '^18' },
+  vite: { react: '^18', 'react-dom': '^18' },
+  react: { react: '^18', 'react-dom': '^18' },
+  vue: { vue: '^3' },
+};
+
+/**
+ * Guarantee a written package.json keeps its framework's core runtime deps. ADD-ONLY: a core dep that
+ * is present in EITHER `dependencies` or `devDependencies` (at any version) is left untouched; only a
+ * fully-absent one is re-added (to `dependencies`) with the scaffold-matching major. Values-only,
+ * preserves key order (missing keys appended). Non-JSON / non-object / unknown-framework → unchanged.
+ * PURE + deterministic + unit-testable.
+ */
+export function ensureFrameworkCoreDeps(content: string, framework: string | undefined): { content: string; added: string[] } {
+  const core = FRAMEWORK_CORE_DEPS[(framework ?? '').trim()];
+  if (!core) return { content, added: [] };
+  let pkg: unknown;
+  try { pkg = JSON.parse(content); } catch { return { content, added: [] }; }
+  if (!pkg || typeof pkg !== 'object') return { content, added: [] };
+  const obj = pkg as Record<string, unknown>;
+  const dev = obj.devDependencies && typeof obj.devDependencies === 'object' ? (obj.devDependencies as Record<string, unknown>) : {};
+  const existingDeps = obj.dependencies && typeof obj.dependencies === 'object' ? (obj.dependencies as Record<string, unknown>) : null;
+  const added: string[] = [];
+  const toAdd: Array<[string, string]> = [];
+  for (const [name, ver] of Object.entries(core)) {
+    const inDeps = existingDeps ? Object.prototype.hasOwnProperty.call(existingDeps, name) : false;
+    const inDev = Object.prototype.hasOwnProperty.call(dev, name);
+    if (!inDeps && !inDev) { toAdd.push([name, ver]); added.push(`${name}@${ver}`); }
+  }
+  if (toAdd.length === 0) return { content, added: [] };
+  const deps = existingDeps ?? {};
+  for (const [name, ver] of toAdd) deps[name] = ver;
+  obj.dependencies = deps;
+  const trailingNl = content.endsWith('\n') ? '\n' : '';
+  return { content: JSON.stringify(obj, null, 2) + trailingNl, added };
+}
+
+/** Any install sub-command whose real exit code the shell will MASK because it is piped to tail/head. */
+const PIPED_INSTALL_RE = /(?:npm|pnpm|yarn)\s+(?:install|i|add|ci)\b[^\n]*\|\s*(?:tail|head)\b/;
+/** npm/pnpm/yarn failure signatures that appear in stdout even when the pipe reports exit 0. */
+const NPM_FAILURE_RE = /npm error|npm ERR!|ERESOLVE|unable to resolve dependency tree|code E[A-Z]+\b/i;
+
+/**
+ * True when an install command was PIPED to tail/head (so the shell reports the pipe's exit 0, not
+ * npm's real failure) AND the captured output shows an npm failure. Root cause (CargoPilot autopsy):
+ * `npm install … 2>&1 | tail -30` returned "exit 0" while stdout said "npm error code ERESOLVE" — the
+ * build proceeded on a broken tree and only discovered the damage later (missing `next` binary). PURE.
+ */
+export function npmInstallMaskedFailure(command: string, output: string): boolean {
+  if (typeof command !== 'string' || typeof output !== 'string') return false;
+  return PIPED_INSTALL_RE.test(command) && NPM_FAILURE_RE.test(output);
 }
 
 export interface DependencyAutoFixPlan {

@@ -2,11 +2,15 @@ import React, { useState, useCallback } from 'react';
 import {
   Bug, Wand2, Copy, Check, ChevronDown, ChevronRight,
   Loader2, Clock, X, History, Shield,
-  Lightbulb, Search, Code2, CheckCircle2
+  Lightbulb, Search, Code2, CheckCircle2, FileSearch
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
+import { AppScanPanel } from './AppScanPanel';
 
 interface AIDebuggerProps {
   files?: Record<string, string>;
+  /** Auto-fix handoff to the Pro v5 page for the scanned app (admin 2026-07-24). */
+  onAutoFixInV5?: (workspaceId: string, text: string) => void;
 }
 
 type ErrorTab = 'JS/TS Error' | 'CSS Issue' | 'Network Error' | 'Build Error' | 'React Error';
@@ -52,179 +56,9 @@ function detectErrorType(error: string): string {
   return 'Unknown Error';
 }
 
-function generateMockResponse(error: string, code: string): DebugResult {
-  const lower = error.toLowerCase();
-
-  if (lower.includes('undefined') || lower.includes('cannot read')) {
-    return {
-      rootCause:
-        "Aap ek aisi property access kar rahe ho jo `undefined` ya `null` object pe hai. Yeh tab hota hai jab variable initialize nahi hua ya async data abhi load nahi hua.",
-      fix: `// Option 1: Optional chaining use karo
-const value = obj?.property?.nestedProp;
-
-// Option 2: Default value with nullish coalescing
-const name = user?.name ?? 'Anonymous';
-
-// Option 3: Guard clause
-if (!data || !data.items) {
-  return; // ya loading state show karo
-}
-const first = data.items[0];`,
-      explanation: [
-        "JavaScript mein `undefined.property` access karne pe TypeError throw hota hai.",
-        "Yeh aksar async operations mein hota hai jab data fetch hone se pehle render ho jata hai.",
-        "Optional chaining (`?.`) operator safely `undefined` return karta hai instead of throwing.",
-        "Nullish coalescing (`??`) fallback value provide karta hai jab value null/undefined ho.",
-      ],
-      prevention: [
-        "Hamesha optional chaining (`?.`) use karo nested objects ke liye.",
-        "API responses ke liye loading/error states rakho.",
-        "TypeScript strict mode enable karo — yeh compile time pe hi pakad lega.",
-        "Default prop values aur default state values define karo.",
-      ],
-    };
-  }
-
-  if (lower.includes('module') || lower.includes('cannot find module') || lower.includes('import')) {
-    return {
-      rootCause:
-        "Module resolve nahi ho pa raha — ya toh package install nahi hai, path galat hai, ya export/import mismatch hai.",
-      fix: `# Step 1: Package install karo (agar missing hai)
-npm install <package-name>
-
-# Step 2: Relative path check karo
-// Galat:
-import { Foo } from './components/Foo'
-// Sahi (file extension check karo):
-import { Foo } from './components/Foo.tsx'
-
-# Step 3: Named vs default export match karo
-// Export:
-export const MyComponent = () => ...
-// Import:
-import { MyComponent } from './MyComponent'`,
-      explanation: [
-        "Node.js aur bundlers (Vite/webpack) modules ko file system pe dhundhte hain.",
-        "Agar package.json mein dependency nahi hai toh `npm install` se add karo.",
-        "Relative paths case-sensitive hote hain Linux pe — check karo capitalization.",
-        "Named exports `{}` se import hote hain, default exports bina `{}` ke.",
-      ],
-      prevention: [
-        "TypeScript `moduleResolution: bundler` ya `node16` use karo.",
-        "Import paths ke liye VS Code auto-complete use karo typos avoid karne ke liye.",
-        "Path aliases configure karo (e.g., `@/components/...`) clean imports ke liye.",
-        "Baad mein `npm ci` run karo ensure karne ke liye sab dependencies install hain.",
-      ],
-    };
-  }
-
-  if (lower.includes('cors') || lower.includes('cross-origin')) {
-    return {
-      rootCause:
-        "Browser ne request block ki kyunki server ne proper CORS headers nahi bheje. Yeh browser security feature hai jo cross-origin requests restrict karta hai.",
-      fix: `// Backend (Express.js example) pe CORS headers add karo:
-import cors from 'cors';
-
-app.use(cors({
-  origin: ['http://localhost:5173', 'https://yourdomain.com'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true,
-}));
-
-// Ya specific route pe:
-app.get('/api/data', cors(), (req, res) => {
-  res.json({ data: 'ok' });
-});`,
-      explanation: [
-        "CORS (Cross-Origin Resource Sharing) browser ki security policy hai.",
-        "Jab frontend aur backend alag origins pe hote hain (different domain/port), browser preflight OPTIONS request bhejta hai.",
-        "Server ko `Access-Control-Allow-Origin` header return karna hota hai.",
-        "Development mein localhost ports alag hone se bhi CORS trigger hota hai.",
-      ],
-      prevention: [
-        "Development ke liye Vite proxy use karo (`vite.config.ts` mein `server.proxy`).",
-        "Production mein allowed origins whitelist karo, `*` use mat karo credentials ke saath.",
-        "HTTPS ensure karo production mein — mixed content bhi block hota hai.",
-        "API gateway (like nginx) use karo reverse proxy ke liye.",
-      ],
-    };
-  }
-
-  if (lower.includes('usestate') || lower.includes('useffect') || lower.includes('hook') || lower.includes('react')) {
-    return {
-      rootCause:
-        "React Hook rules violate ho rahi hain — ya toh hook conditionally call ho rahi hai, ya non-component function mein, ya component render ke bahar.",
-      fix: `// Galat — conditional hook call:
-function MyComponent({ show }) {
-  if (show) {
-    const [val, setVal] = useState(0); // ERROR!
-  }
-}
-
-// Sahi — hooks hamesha top level pe:
-function MyComponent({ show }) {
-  const [val, setVal] = useState(0); // Always called
-  if (!show) return null;
-  return <div>{val}</div>;
-}
-
-// Agar useState import bhool gaye:
-import React, { useState, useEffect } from 'react';`,
-      explanation: [
-        "React hooks sirf function components ya custom hooks ke andar call ho sakte hain.",
-        "Hooks hamesha same order mein call hone chahiye — loops/conditions ke andar nahi.",
-        "Yeh rule React ke internal hook state array ke order par depend karta hai.",
-        "Custom hooks ka naam `use` se start hona chahiye.",
-      ],
-      prevention: [
-        "ESLint plugin `eslint-plugin-react-hooks` install karo — yeh automatically detect karta hai.",
-        "Hooks ko component ke top pe define karo, kisi bhi early return se pehle.",
-        "Conditional logic hook ke andar rakho, hook ko condition ke andar nahi.",
-      ],
-    };
-  }
-
-  return {
-    rootCause:
-      "Stack trace se lag raha hai ek runtime error hai. Code execution ek unexpected state mein pahunch gaya jiske liye handle nahi tha.",
-    fix: `// General debugging approach:
-
-// 1. Error boundary add karo React apps mein
-class ErrorBoundary extends React.Component {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  render() {
-    if (this.state.hasError) return <h2>Kuch galat hua. Reload karo.</h2>;
-    return this.props.children;
-  }
-}
-
-// 2. Try-catch with meaningful messages
-try {
-  const result = riskyOperation();
-} catch (error) {
-  console.error('Operation failed:', error);
-  // User-friendly error handle karo
-}
-
-// 3. Type narrowing
-if (typeof value === 'string') {
-  value.toUpperCase(); // safe
-}`,
-    explanation: [
-      "Error stack trace upar se neeche padho — pehli line actual error hai, baaki call stack hai.",
-      "Apni files ki lines dhundho stack trace mein (node_modules wali ignore karo).",
-      "Browser DevTools mein breakpoints lagao reproduce karne ke liye.",
-      "Console.log se values check karo problematic line ke aas paas.",
-    ],
-    prevention: [
-      "TypeScript strict mode enable karo (`strict: true` in tsconfig.json).",
-      "Error boundaries use karo React component trees mein.",
-      "Input validation karo app boundaries pe (API responses, user input).",
-      "Unit tests likho edge cases cover karne ke liye.",
-    ],
-  };
-}
+// generateMockResponse REMOVED (admin autopsy 2026-07-20): it rendered a canned, fake "AI
+// analysis" whenever the real API failed — including the years the /api/debug route did not even
+// exist — presenting fabricated output as real (rule-2 violation). Failures are now shown honestly.
 
 function loadHistory(): HistoryEntry[] {
   try {
@@ -245,7 +79,7 @@ function saveHistory(entry: HistoryEntry): void {
   }
 }
 
-export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
+export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) => {
   const [activeTab, setActiveTab] = useState<ErrorTab>('JS/TS Error');
   const [errorText, setErrorText] = useState('');
   const [codeContext, setCodeContext] = useState('');
@@ -253,9 +87,12 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [result, setResult] = useState<DebugResult | null>(null);
+  const [analyzeError, setAnalyzeError] = useState('');
   const [copiedFix, setCopiedFix] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
+  // Two modes: paste a single error, or scan a whole app (a Pro v5 app / GitHub repo / open project).
+  const [mode, setMode] = useState<'single' | 'app'>('single');
   const detectedType = errorText.trim() ? detectErrorType(errorText) : null;
 
   const loadingStepLabels = [
@@ -278,6 +115,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
       setLoadingStep((s) => (s < 2 ? s + 1 : s));
     }, 900);
 
+    setAnalyzeError('');
     try {
       const res = await fetch('/api/debug', {
         method: 'POST',
@@ -286,38 +124,38 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           error: errorText,
           code: codeContext,
           errorType: activeTab,
-          files: files ?? {},
         }),
       });
-      if (!res.ok) throw new Error('API error');
-      const data: DebugResult = await res.json();
-      setResult(data);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        throw new Error((data && typeof data.error === 'string' && data.error)
+          || 'The analysis service could not be reached — please try again.');
+      }
+      const parsed: DebugResult = {
+        rootCause: typeof data.rootCause === 'string' ? data.rootCause : '',
+        fix: typeof data.fix === 'string' ? data.fix : '',
+        explanation: Array.isArray(data.explanation) ? data.explanation.filter((x: unknown) => typeof x === 'string') : [],
+        prevention: Array.isArray(data.prevention) ? data.prevention.filter((x: unknown) => typeof x === 'string') : [],
+      };
+      setResult(parsed);
       const entry: HistoryEntry = {
         id: Date.now().toString(),
         errorType: detectedType ?? activeTab,
         errorSnippet: errorText.slice(0, 100),
         timestamp: new Date().toISOString(),
-        fix: data.fix.slice(0, 200),
+        fix: parsed.fix.slice(0, 200),
       };
       saveHistory(entry);
       refreshHistory();
-    } catch {
-      const mock = generateMockResponse(errorText, codeContext);
-      setResult(mock);
-      const entry: HistoryEntry = {
-        id: Date.now().toString(),
-        errorType: detectedType ?? activeTab,
-        errorSnippet: errorText.slice(0, 100),
-        timestamp: new Date().toISOString(),
-        fix: mock.fix.slice(0, 200),
-      };
-      saveHistory(entry);
-      refreshHistory();
+    } catch (e) {
+      // HONEST failure — no canned fake analysis, ever. The user sees the real reason and can retry.
+      setResult(null);
+      setAnalyzeError(e instanceof Error ? e.message : 'The analysis failed — please try again.');
     } finally {
       clearInterval(stepInterval);
       setIsLoading(false);
     }
-  }, [errorText, codeContext, activeTab, files, detectedType, refreshHistory]);
+  }, [errorText, codeContext, activeTab, detectedType, refreshHistory]);
 
   const handleCopyFix = useCallback(() => {
     if (!result) return;
@@ -331,6 +169,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
     setErrorText('');
     setCodeContext('');
     setResult(null);
+    setAnalyzeError('');
   };
 
   const handleTemplate = (template: string) => {
@@ -355,11 +194,33 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
     return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const modeBtn = (m: 'single' | 'app') => ({
+    background: mode === m ? 'rgba(129,140,248,0.15)' : 'rgba(255,255,255,0.04)',
+    color: mode === m ? '#818cf8' : '#8b949e',
+    border: `1px solid ${mode === m ? 'rgba(129,140,248,0.4)' : 'rgba(255,255,255,0.08)'}`,
+  });
+
   return (
     <div
-      className="flex h-full w-full overflow-hidden"
+      className="flex flex-col h-full w-full overflow-hidden"
       style={{ background: '#0d1117', color: '#e6edf3' }}
     >
+      {/* Mode toggle: paste a single error, or scan a whole app */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+        <button onClick={() => setMode('single')} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={modeBtn('single')}>
+          <Wand2 className="w-3.5 h-3.5" /> Single Error
+        </button>
+        <button onClick={() => setMode('app')} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={modeBtn('app')}>
+          <FileSearch className="w-3.5 h-3.5" /> Full App Scan
+        </button>
+      </div>
+
+      {mode === 'app' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AppScanPanel files={files} onAutoFixInV5={onAutoFixInV5} />
+        </div>
+      ) : (
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Main column */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* ── TOP SECTION (40%) ── */}
@@ -397,7 +258,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
             <textarea
               value={errorText}
               onChange={(e) => setErrorText(e.target.value)}
-              placeholder="Error ya stack trace yahan paste karo..."
+              placeholder="Paste your error or stack trace here..."
               className="flex-1 min-h-0 resize-none text-xs font-mono rounded p-3 outline-none"
               style={{
                 background: '#1a0a0a',
@@ -428,7 +289,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
                 <textarea
                   value={codeContext}
                   onChange={(e) => setCodeContext(e.target.value)}
-                  placeholder="Relevant code snippet paste karo..."
+                  placeholder="Paste the relevant code snippet..."
                   rows={3}
                   className="w-full resize-none text-xs font-mono rounded p-2 outline-none"
                   style={{
@@ -507,7 +368,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
             <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
               <Bug className="w-12 h-12" style={{ color: '#8b949e' }} />
               <p className="text-sm" style={{ color: '#8b949e' }}>
-                Error paste karo, AI instant fix dega
+                Paste an error and AI will instantly suggest a fix
               </p>
             </div>
           )}
@@ -516,10 +377,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           {isLoading && (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <div className="flex items-center gap-2">
-                <Loader2
-                  className="w-5 h-5 animate-spin"
-                  style={{ color: '#818cf8' }}
-                />
+                <TirangaLoader className="w-5 h-5" />
                 <span className="text-sm font-medium" style={{ color: '#818cf8' }}>
                   Analyzing error...
                 </span>
@@ -558,6 +416,14 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Honest failure banner — the real reason, never a canned fake analysis */}
+          {!isLoading && analyzeError && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 flex items-start gap-2">
+              <X className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{analyzeError}</span>
             </div>
           )}
 
@@ -693,7 +559,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
                 <div className="flex items-center gap-2 mb-2">
                   <Shield className="w-4 h-4" style={{ color: '#f59e0b' }} />
                   <span className="text-sm font-semibold" style={{ color: '#fcd34d' }}>
-                    Aage se kaise bachein
+                    How to avoid this in future
                   </span>
                 </div>
                 <ul className="flex flex-col gap-1.5">
@@ -742,7 +608,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           >
             {history.length === 0 && (
               <p className="text-xs text-center mt-4" style={{ color: '#8b949e' }}>
-                Abhi koi history nahi
+                No history yet
               </p>
             )}
             {history.map((entry) => (
@@ -785,6 +651,8 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           </div>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 };

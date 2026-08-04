@@ -6,11 +6,15 @@ import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding } from './devServerHost';
 import { scanPackageJson, formatPackageScanReport } from '../../AgentV3/PackageSafetyScanner';
 import { toWorkspaceRelPath } from '../../lib/workspacePath';
+import { idleLimitMs } from '../../AgentV3/sandboxReaper';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
 // idle sweep fires before E2B kills the sandbox on its own.
-const IDLE_LIMIT_MS = 45 * 60 * 1000;
+//
+// The limit lives in AgentV3/sandboxReaper.ts (15 minutes, env-tunable) so Engineer AI and the v5
+// builder cannot drift apart on it — it was 45 minutes in both, which billed roughly nine times more
+// idle VM than working VM on a typical five-minute session.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
@@ -183,10 +187,32 @@ export class E2BActuator implements IEngineerActuator {
    * the top execution tier), it overrides the global E2B_API_KEY so the sandbox
    * is billed to the user, not NavBharatAI. Falls back to the env key when empty.
    */
-  constructor(private apiKey?: string) {
-    // Phase 12E — periodic idle sweep. unref() so it never keeps the process alive.
+  constructor(private apiKey?: string) { /* the idle sweep starts with the first sandbox — see below */ }
+
+  private _sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Start the idle sweep, once, when this actuator actually has a sandbox to watch.
+   *
+   * It used to start in the constructor, and ProEngineRunner builds a NEW actuator for every Engineer
+   * AI run — so every run left behind an interval that captured `this` forever. unref() stops a timer
+   * keeping the process alive; it does not stop it retaining the object. On a long-lived Cloud Run
+   * instance that is an unbounded pile of timers and dead actuators, each still sweeping every two
+   * minutes. Starting on the first sandbox and stopping when the last one goes leaves at most one
+   * timer per actuator that genuinely has work.
+   */
+  private _ensureSweepTimer(): void {
+    if (this._sweepTimer) return;
     const timer = setInterval(() => { void this._sweepIdleSandboxes(); }, IDLE_SWEEP_INTERVAL_MS);
     if (typeof timer.unref === 'function') timer.unref();
+    this._sweepTimer = timer;
+  }
+
+  private _stopSweepTimerIfIdle(): void {
+    if (this._sweepTimer && this.sandboxes.size === 0) {
+      clearInterval(this._sweepTimer);
+      this._sweepTimer = null;
+    }
   }
 
   /** Build the e2b SDK options, injecting the per-user key when set. */
@@ -253,16 +279,18 @@ export class E2BActuator implements IEngineerActuator {
     return { success: false, log: installLog };
   }
 
-  /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
+  /** Pause sandboxes with no activity for the idle limit (abandoned sessions). */
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
+    const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
       const last = this._lastActivity.get(workspaceId) ?? now;
-      if (now - last > IDLE_LIMIT_MS) {
+      if (now - last > limit) {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
       }
     }
+    this._stopSweepTimerIfIdle();
   }
 
   private async getSandbox(workspaceId: string, resumeSandboxId?: string): Promise<Sandbox> {
@@ -294,6 +322,7 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    this._ensureSweepTimer(); // there is now something to auto-pause
     return sandbox;
   }
 
@@ -791,18 +820,28 @@ const {chromium}=require('playwright');
     if (features.includes('db')) {
       // Install PostgreSQL if missing, then start it and create the app database.
       // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
+      // SIBLING of the AgentV3 provisioner (last-5-reports gap analysis 2026-07-20): poll pg_isready
+      // instead of a flat `sleep 2`, so a slow start is waited for and the DB_URL marker is emitted only
+      // when the server genuinely accepts connections — a failed start is not masked as ready.
       const pgResult = await sandbox.commands.run(
-        `set -e
-if ! which psql > /dev/null 2>&1; then
+        `if ! which psql > /dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq 2>&1 | tail -2
   apt-get install -y -qq postgresql 2>&1 | tail -5
 fi
 PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main status 2>/dev/null || pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3
-sleep 2
-su postgres -c "createdb myapp 2>/dev/null || true"
-echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
+pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
+for i in $(seq 1 20); do
+  if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
+  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
+  sleep 1
+done
+if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+  su postgres -c "createdb myapp 2>/dev/null || true"
+  echo "DB_URL:postgresql://postgres@localhost:5432/myapp"
+else
+  echo "DB_NOT_READY"
+fi`,
         { timeoutMs: 120_000 },
       ).catch(() => null);
 

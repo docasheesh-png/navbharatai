@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ToolDispatcher, applyEdit, boundedWholeFileDiff, nearestEditRegion, type ActuatorPort } from './ToolDispatcher';
+import { ToolDispatcher, applyEdit, boundedWholeFileDiff, nearestEditRegion, type ActuatorPort, ALWAYS_WRITE_SECRETS } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -77,10 +77,46 @@ describe('ToolDispatcher', () => {
     expect(res.content).toMatch(/do NOT hand-count/i);       // steers away from the tag-counting flail
   });
   it('typecheck reports frontend clean when every file parses', async () => {
+    act.files.set('tsconfig.json', '{}');
     act.files.set('src/App.tsx', 'export default function App(){ return null }');
+    act.commandResult = { exitCode: 0, stdout: '', stderr: '' }; // tsc --noEmit clean
     const res = await d.dispatch(call('typecheck', {}), 'architect');
     expect(res.content).not.toMatch(/SYNTAX ERROR/);
-    expect(res.content).toMatch(/parses clean|OK|nothing beyond/i);
+    expect(res.content).not.toMatch(/TYPE ERROR/);
+    // Honest: it says it ran the REAL type-checker, not just the esbuild parse.
+    expect(res.content).toMatch(/type-checks clean \(tsc --noEmit\)/);
+  });
+
+  // Deep-test autopsy 2026-08-01 (real report: a SaaS dashboard on kimi-k2.5). esbuild's parse-only
+  // typecheck stayed GREEN for 30 min while the real `tsc && vite build` failed on SEMANTIC errors
+  // (TS2300 duplicate 'Team', TS1361 import-type, TS2339 ErrorBoundary state/props). The typecheck tool
+  // must now run REAL `tsc --noEmit` and surface those per file — the class of bug that caused the flail.
+  it('typecheck runs REAL tsc --noEmit and surfaces SEMANTIC errors esbuild is blind to', async () => {
+    act.files.set('tsconfig.json', '{"compilerOptions":{"strict":true}}');
+    // Parses clean (so no syntax header) — the error is SEMANTIC, exactly what esbuild misses.
+    act.files.set('src/App.tsx', 'export default function App(){ return null; }');
+    act.commandResult = {
+      exitCode: 2,
+      stdout: "src/App.tsx(7,8): error TS2300: Duplicate identifier 'Team'.\n"
+        + "src/ErrorBoundary.tsx(10,10): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.\n",
+      stderr: '',
+    };
+    const res = await d.dispatch(call('typecheck', {}), 'architect');
+    expect(res.content).toMatch(/TYPE ERROR/);
+    expect(res.content).toContain('TS2300');
+    expect(res.content).toContain("Duplicate identifier 'Team'");
+    expect(res.content).toContain('TS2339');
+    expect(res.content).toMatch(/tsc && vite build.*will FAIL/);
+    // It actually invoked the real type-checker.
+    expect(act.commands.some((c) => c.includes('--noEmit'))).toBe(true);
+  });
+
+  it('typecheck skips the tsc pass for a non-TS project (never fakes a pass)', async () => {
+    act.files.set('index.html', '<!doctype html><html></html>'); // no tsconfig, no .tsx
+    act.commandResult = { exitCode: 0, stdout: '', stderr: '' };
+    const res = await d.dispatch(call('typecheck', {}), 'architect');
+    expect(res.content).not.toMatch(/type-checks clean \(tsc/); // must NOT claim tsc ran
+    expect(act.commands.some((c) => c.includes('--noEmit'))).toBe(false); // no tsc for a non-TS app
   });
 
   // Deep-test 2026-07-18 (root fix): a write/edit that introduces a DUPLICATE declaration (or any syntax
@@ -529,6 +565,22 @@ describe('ToolDispatcher', () => {
     const res = await d.dispatch(call('read_file', { path: 'nope.ts' }));
     expect(res.is_error).toBe(true);
     expect(res.content).toContain('Error:');
+  });
+
+  it('read_file miss on a path-drifted file names the REAL location (ui/ drift self-correct)', async () => {
+    // The real build report: component created at src/components/ui/button.tsx, read from src/components/.
+    act.files.set('src/components/ui/button.tsx', 'export const Button = () => null;');
+    const res = await d.dispatch(call('read_file', { path: 'src/components/button.tsx' }));
+    expect(res.is_error).toBe(true); // still an honest error…
+    expect(res.content).toContain('src/components/ui/button.tsx'); // …but it hands back the real path
+    expect(res.content.toLowerCase()).toContain('did you mean');
+  });
+
+  it('read_file miss with no plausible sibling stays a bare honest error (no misleading hint)', async () => {
+    act.files.set('src/App.tsx', 'x');
+    const res = await d.dispatch(call('read_file', { path: 'src/Totally/Unrelated.tsx' }));
+    expect(res.is_error).toBe(true);
+    expect(res.content).not.toContain('did you mean');
   });
 
   it('edit_file replaces a unique string and emits a diff', async () => {
@@ -1285,6 +1337,28 @@ describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () 
     expect(() => applyEdit('dup\ndup', 'dup', 'x')).toThrow(/not unique/);
   });
 
+  // Connectly Edit #1 autopsy 2026-07-21: the model called edit_file with an EMPTY old_string to ADD
+  // styles to Navbar.css. An empty string matches at every position → the old code threw
+  // "not unique (1377 matches)" and the model flailed read→append for turns. Empty = append.
+  it('APPENDS when old_string is empty (adds new_string to the end, with a separating newline)', () => {
+    const r = applyEdit('.navbar { color: red; }', '', '\n.avatar { width: 32px; }');
+    expect(r.updated).toBe('.navbar { color: red; }\n\n.avatar { width: 32px; }');
+    expect(r.matchedOld).toBe('');
+    expect(r.note).toMatch(/append/i);
+  });
+
+  it('empty old_string never throws "not unique" (the exact Connectly failure)', () => {
+    expect(() => applyEdit('a'.repeat(1377), '', 'X')).not.toThrow();
+  });
+
+  it('append on a file already ending in newline does not double the newline', () => {
+    expect(applyEdit('body {}\n', '', 'h1 {}').updated).toBe('body {}\nh1 {}');
+  });
+
+  it('append on an empty file is just the new content', () => {
+    expect(applyEdit('', '', 'first content').updated).toBe('first content');
+  });
+
   it('falls back to a whitespace-flexible match when exact fails', () => {
     // File has single-space indent; supplied old_string has different spacing.
     const file = 'if (a) {\n  doThing();\n}';
@@ -1544,6 +1618,23 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).not.toContain('broken import');
     expect(out).not.toContain('never imported/defined');
   });
+
+  it('framework-gates the React analyzers — a Nuxt app is NOT falsely blocked (ShopSphere autopsy)', async () => {
+    // ShopSphere (App #12, Nuxt): a Nuxt `useProducts()` AUTO-IMPORTED composable was flagged "hook called
+    // but never imported" and its `useX` composables as "Rules-of-Hooks violations" → the readiness gate
+    // FAILED an otherwise-correct build. These analyzers are React-only; a Nuxt dispatcher must not raise them.
+    // (act, ws, state, stream, then 7 undefined ctor args, then framework='nuxt'.)
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    const dd = new ToolDispatcher(a, 'ws-eval-nuxt', new WorkspaceState(s), s, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'nuxt');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { nuxt: '^3' } }));
+    // Same shapes that trip the React analyzers: an unimported `useX()` call + a bare component tag.
+    await write(dd, 'pages/index.vue', '<script setup>\nconst products = useProducts();\nif (products) { const x = useState(0); }\n</script>');
+    const out = await evalText(dd);
+    expect(out).not.toContain('Rules-of-Hooks violation');
+    expect(out).not.toContain('never imported/defined');
+    expect(out).not.toContain('undefined JSX component');
+  });
 });
 
 // Slice 4 (2026-07-17) — endgameIo.runTsc uses INCREMENTAL tsc (cache in /tmp, never the workspace)
@@ -1608,6 +1699,56 @@ error: Error validating field \`user\` in model \`Order\`: The relation field \`
   });
 });
 
+// SaaS-dashboard autopsy 2026-07-22: a weak build's login/useAuth debug-logged the password
+// (`console.log('login', email, password)`). That single pii-in-logs line is the readiness gate's ONLY
+// high-severity privacy/compliance HARD block, so a complete, rendering app was marked NOT READY / failed.
+// The dispatcher now redacts credential-logging console statements BEFORE the gate scans (heal-then-judge),
+// so the leak is gone AND the block is cleared — a real security fix, not a cosmetic patch.
+describe('healCredentialLogs — heal-then-judge credential-in-logs before the readiness gate', () => {
+  function healDispatcher() {
+    const act = new FakeActuator();
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const d = new ToolDispatcher(act, 'ws-cred-heal', state, stream);
+    return { act, d };
+  }
+
+  it('redacts the leaked password log and persists it, leaving real logic intact', async () => {
+    const { act, d } = healDispatcher();
+    act.files.set(
+      'src/hooks/useAuth.ts',
+      `export function useAuth() {\n  const login = (email, password) => {\n    console.log('login', email, password);\n    return api.login(email, password);\n  };\n  return { login };\n}`,
+    );
+    const note = await d.healCredentialLogs();
+    expect(note).toContain('Redacted');
+    const healed = act.files.get('src/hooks/useAuth.ts')!;
+    expect(healed).toContain('console.log();');          // leak stripped
+    expect(healed).not.toMatch(/console\.log\([^)]*password/); // no credential arg left
+    expect(healed).toContain('return api.login(email, password);'); // real logic untouched
+  });
+
+  it('is a no-op (empty note, no write) on a clean project', async () => {
+    const { act, d } = healDispatcher();
+    act.files.set('src/App.tsx', `export default function App() { console.log('mounted'); return null; }`);
+    const before = act.files.get('src/App.tsx');
+    expect(await d.healCredentialLogs()).toBe('');
+    expect(act.files.get('src/App.tsx')).toBe(before);
+  });
+
+  it('honours the AGENTV3_CRED_LOG_GUARD=off kill switch', async () => {
+    const { act, d } = healDispatcher();
+    act.files.set('src/a.ts', `console.log('secret', s);`);
+    const prev = process.env.AGENTV3_CRED_LOG_GUARD;
+    process.env.AGENTV3_CRED_LOG_GUARD = 'off';
+    try {
+      expect(await d.healCredentialLogs()).toBe('');
+      expect(act.files.get('src/a.ts')).toBe(`console.log('secret', s);`);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTV3_CRED_LOG_GUARD; else process.env.AGENTV3_CRED_LOG_GUARD = prev;
+    }
+  });
+});
+
 // TaskForge fresh-build autopsy 2026-07-18: a seed step (`prisma db seed` / `tsx prisma/seed.ts`) that
 // runs BEFORE `prisma generate` fails with "@prisma/client did not initialize yet — run `prisma generate`".
 // TaskForge looped this and burned wall-clock budget. The dispatcher now runs `prisma generate` once and
@@ -1657,5 +1798,170 @@ describe('bash — prisma client-not-generated self-heal (generate + one retry)'
     const out = await d.dispatch(call('bash', { command: 'cd backend && npx tsx prisma/seed.ts' }), 'backend');
     expect(String(out.content)).toContain('exit=1');
     expect(act.commands.filter((c) => c.includes('prisma generate'))).toHaveLength(0);
+  });
+});
+
+describe('user vault secrets reach the app (mitrify autopsy 2026-08-04)', () => {
+  // The admin's question: "agar user keys daal bhi de, to kya app un keys ko padh payega?"
+  // The keys were stored correctly and the dev server sources .env correctly — but on a managed-preview
+  // path the .env was never written, so the two were never introduced.
+  let act: FakeActuator;
+  let dd: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    dd = new ToolDispatcher(act, 'ws-1', new WorkspaceState(), new AgentEventStream());
+  });
+
+  it('writes the saved keys into .env when explicitly driven — no run_command needed', async () => {
+    dd.setUserSecrets({ RAZORPAY_KEY_ID: 'rzp_live_x', SMTP_HOST: 'smtp.gmail.com' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    const env = act.files.get('.env') ?? '';
+    expect(env).toContain('RAZORPAY_KEY_ID=rzp_live_x');
+    expect(env).toContain('SMTP_HOST=smtp.gmail.com');
+  });
+
+  it('keeps .env out of git, so the user keys can never reach their repo', async () => {
+    dd.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_x' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.gitignore') ?? '').toMatch(/(^|\n)\.env/);
+  });
+
+  it('preserves the app\'s existing .env lines and lets the vault win on a conflict', async () => {
+    act.files.set('.env', 'PORT=3000\nRAZORPAY_KEY_ID=placeholder\n');
+    dd.setUserSecrets({ RAZORPAY_KEY_ID: 'rzp_live_real' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    const env = act.files.get('.env') ?? '';
+    expect(env).toContain('PORT=3000');               // untouched
+    expect(env).toContain('RAZORPAY_KEY_ID=rzp_live_real');
+    expect(env).not.toContain('placeholder');
+  });
+
+  it('an empty vault writes nothing at all (no stray .env on a keyless app)', async () => {
+    dd.setUserSecrets({});
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.has('.env')).toBe(false);
+  });
+
+  it('still ignores a command that is not an app command (the lazy gate is intact)', async () => {
+    dd.setUserSecrets({ API_TOKEN: 't' });
+    await dd.ensureUserSecretsEnvFile('ls -la');
+    expect(act.files.has('.env')).toBe(false);
+    await dd.ensureUserSecretsEnvFile('npm run dev');
+    expect(act.files.get('.env') ?? '').toContain('API_TOKEN=t');
+  });
+
+  it('a NEW secret set can still reach disk after an earlier write', async () => {
+    dd.setUserSecrets({ A_KEY: '1' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    dd.setUserSecrets({ A_KEY: '1', B_KEY: '2' });
+    await dd.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.env') ?? '').toContain('B_KEY=2');
+  });
+});
+
+/**
+ * USER KEYS, END TO END (admin 2026-08-04: "user keys dal bhi de, to kya v5 ki banayi app un keys ko
+ * padh payegi?").
+ *
+ * Every piece of this pipeline was unit-tested in isolation — mergeDotEnv here, loadUserVaultSecrets
+ * there — but NOTHING walked the whole path, which is where this kind of feature actually breaks: each
+ * part works and the seam between two of them does not. These tests walk it: vault secrets go in, and a
+ * real `.env` must land in the sandbox the app runs from, with the right values, before the app starts.
+ *
+ * The invariant that matters most is the LAST one: NavBharatAI's own platform keys must never reach a
+ * user's app, even when the user names their secret exactly like ours.
+ */
+describe('user vault keys reach the app the build produces', () => {
+  let act: FakeActuator;
+  let d: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    const stream = new AgentEventStream();
+    d = new ToolDispatcher(act, 'ws-keys', new WorkspaceState(stream), stream);
+  });
+
+  it('writes the user\'s keys into the app\'s .env before it runs', async () => {
+    d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue', DATABASE_URL: 'postgres://u:p@host/db' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+
+    const env = act.files.get('.env');
+    expect(env).toBeTruthy();
+    expect(env).toContain('STRIPE_SECRET_KEY=sk_live_realvalue');
+    expect(env).toContain('DATABASE_URL=postgres://u:p@host/db');
+  });
+
+  it('OVERRIDES the placeholder the builder generated, and keeps unrelated lines', async () => {
+    // The generated scaffold writes its own .env with dummy values. If the vault did not win here, the
+    // app would boot with "your-key-here" and fail against the real service — with the user staring at
+    // a key they DID save, in a Settings screen that said it was saved.
+    act.files.set('.env', 'STRIPE_SECRET_KEY=your-key-here\nAPP_NAME=Chaiwala\n');
+    d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+
+    const env = act.files.get('.env')!;
+    expect(env).toContain('STRIPE_SECRET_KEY=sk_live_realvalue');
+    expect(env).not.toContain('your-key-here');
+    expect(env).toContain('APP_NAME=Chaiwala');       // the app's own settings survive
+  });
+
+  it('hardens .gitignore so the user\'s real keys can never reach their git repo', async () => {
+    d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.gitignore')).toContain('.env');
+  });
+
+  it('fires on a real app command, not on an unrelated one', async () => {
+    d.setUserSecrets({ API_KEY: 'v' });
+    await d.ensureUserSecretsEnvFile('ls -la');           // not an install/build/run
+    expect(act.files.get('.env')).toBeUndefined();
+    await d.ensureUserSecretsEnvFile('npm install');      // now the app is about to exist
+    expect(act.files.get('.env')).toContain('API_KEY=v');
+  });
+
+  it('writes ONCE per build, but a NEW secret set can still reach disk', async () => {
+    d.setUserSecrets({ A: '1' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);   // repeat — must not rewrite
+    expect(act.files.get('.env')).toContain('A=1');
+
+    // The user adds a key mid-session and the composition root re-loads the vault: that must not be
+    // swallowed by the once-per-build guard, or the newly-saved key silently never arrives.
+    d.setUserSecrets({ A: '1', B: '2' });
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.env')).toContain('B=2');
+  });
+
+  it('does nothing at all when the user has saved no keys', async () => {
+    d.setUserSecrets({});
+    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    expect(act.files.get('.env')).toBeUndefined();   // no empty/placeholder file invented
+  });
+
+  it('never throws when the sandbox write fails — the build continues without the keys', async () => {
+    // Honest degradation: the app runs without injected keys rather than the whole build dying.
+    vi.spyOn(act, 'writeFile').mockRejectedValue(new Error('sandbox gone'));
+    d.setUserSecrets({ API_KEY: 'v' });
+    await expect(d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS)).resolves.toBeUndefined();
+  });
+
+  it('carries only what the caller passed — a platform key is never injected on its own', async () => {
+    // THE ONE THAT MUST NEVER REGRESS. loadUserVaultSecrets deliberately never falls back to
+    // process.env, because process.env holds NavBharatAI's OWN keys. This locks the dispatcher end of
+    // that contract: a user secret NAMED like a platform key carries the USER's value, and a platform
+    // key the user never saved does not appear at all.
+    process.env.GEMINI_API_KEY = 'PLATFORM-KEY-MUST-NOT-LEAK';
+    try {
+      d.setUserSecrets({ GEMINI_API_KEY: 'user-own-gemini-key' });
+      await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+      const env = act.files.get('.env')!;
+      expect(env).toContain('GEMINI_API_KEY=user-own-gemini-key');
+      expect(env).not.toContain('PLATFORM-KEY-MUST-NOT-LEAK');
+      expect(env).not.toContain('E2B_API_KEY');
+      expect(env).not.toContain('ANTHROPIC_API_KEY');
+    } finally {
+      delete process.env.GEMINI_API_KEY;
+    }
   });
 });

@@ -107,22 +107,6 @@ declare module 'react-dom/client' {
   export function createRoot(container: Element | DocumentFragment, opts?: any): { render(el: any): void; unmount(): void };
 }
 
-declare module 'react-router-dom' {
-  export function useNavigate(): (path: string, opts?: any) => void;
-  export function useLocation(): { pathname: string; search: string; hash: string; state: any };
-  export function useParams<T = Record<string, string>>(): T;
-  export function useSearchParams(): [URLSearchParams, (p: any) => void];
-  export const Link: any;
-  export const NavLink: any;
-  export const Navigate: any;
-  export const Route: any;
-  export const Routes: any;
-  export const BrowserRouter: any;
-  export const Outlet: any;
-  export const RouterProvider: any;
-  export function createBrowserRouter(routes: any[], opts?: any): any;
-}
-
 declare module 'react-markdown';
 declare module 'motion/react';
 declare module 'axios';
@@ -635,3 +619,4 @@ declare module 'cheerio';
 declare module 'openai';
 declare module 'vite';
 declare module 'multer';
+declare module '@babel/standalone';

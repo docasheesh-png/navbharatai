@@ -9,10 +9,12 @@ import {
   Play, Server, Trash2, Cpu, FileText, Download, 
   Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock, Unlock, ArrowUpRight
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
-import { deployCapability, sanitizeZipName, unavailableDeployMessage } from '../../lib/deployCapability';
+import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5DeployProvider } from '../../lib/deployCapability';
+import { isBackendDeployHost, buildBackendConfigInjection } from '../../lib/backendDeployWiring';
 
 interface GitPanelProps {
   token: string | null;
@@ -37,6 +39,8 @@ interface GitPanelProps {
   onToggleView?: (view: any) => void;
   onActivatePreview?: () => void;
   onActivateWorkspace?: (agent: string) => void;
+  /** Hand a real deploy off to NavBharatAI Pro v5.0's build+deploy pipeline for the given provider. */
+  onDeployViaV5?: (provider: string) => void;
 }
 
 interface PlatformOption {
@@ -89,7 +93,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   onAgentChange,
   onToggleView,
   onActivatePreview,
-  onActivateWorkspace
+  onActivateWorkspace,
+  onDeployViaV5
 }) => {
   const [activeTab, setActiveTab2] = useState<'sync' | 'deploy'>('deploy');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -268,6 +273,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       addLogLine(isRealGithubRepo ? `✅ Imported into Code Studio.` : `✅ Template loaded into Code Studio.`);
       setSyncProgressStage('Done');
       setSuccessfullySyncedProject(product);
+      // Surface the imported files IMMEDIATELY: switch the sidebar from this Git panel to the File
+      // Explorer so the user actually SEES them. Previously the files loaded into the workspace but the
+      // view stayed on the Git panel, so a repo click looked like "nothing happened". CodeStudio then
+      // opens the first imported file in the editor (its file-set-change effect).
+      onToggleView?.('files');
     } else {
       addLogLine(`Nothing was imported.`);
       setSyncProgressStage('Failed');
@@ -694,9 +704,28 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     setDeployLogs(unavailableDeployMessage(name).map(line => '[' + now() + '] ' + line));
   };
 
+  // SEPARATE BACKEND (admin 2026-07-31): for a backend host (Cloud Run / Render / Railway) we don't fake a
+  // deploy — we make the backend deploy-READY by adding the real host config (Dockerfile / render.yaml /
+  // railway.json) to the project, then show the honest BYO-account steps. The user pushes to GitHub and
+  // connects their OWN host account (per CLAUDE.md: user apps never deploy on NavBharatAI's account).
+  const injectBackendDeployConfig = () => {
+    clearAllPipelineTimeouts();
+    setValidationErrors([]);
+    setDeployedUrl('');
+    setActiveStep(1);
+    const inj = buildBackendConfigInjection(selectedPlatform, files);
+    if (!inj) { showDeployUnavailable(); return; }
+    if (onFilesChange) onFilesChange(inj.nextFiles); // add the config files to the project (real, no fake deploy)
+    setDeployStatus('unavailable'); // honest: config added, but the deploy itself is the user's next step
+    const now = () => new Date().toLocaleTimeString();
+    setDeployLogs(inj.logLines.map((line) => '[' + now() + '] ' + line));
+  };
+
   // Run the real deploy action for the selected target, or honestly report it isn't available.
   const triggerPushAndDeploy = () => {
     clearAllPipelineTimeouts();
+    // A separate-backend host: generate + inject its real deploy config (never a faked deploy).
+    if (isBackendDeployHost(selectedPlatform)) { injectBackendDeployConfig(); return; }
     switch (deployCapability(selectedPlatform)) {
       case 'github-push':
         executeRealGitHubPush();
@@ -705,6 +734,16 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         void exportStaticZip();
         return;
       default:
+        // Real one-click deploy for the providers v5.0's engine actually supports (Firebase, Vercel,
+        // Netlify, Cloudflare): hand off to v5's real build+deploy pipeline. Everything else stays
+        // honestly "not available yet" until its real provider ships.
+        if (isV5DeployProvider(selectedPlatform) && onDeployViaV5) {
+          const name = DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform;
+          setDeployStatus('idle');
+          setDeployLogs([`[${new Date().toLocaleTimeString()}] 🚀 Handing off to NavBharatAI Pro v5.0 to build and deploy to ${name} — watch the live progress there.`]);
+          onDeployViaV5(selectedPlatform);
+          return;
+        }
         showDeployUnavailable();
         return;
     }
@@ -758,7 +797,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         </button>
       </div>
 
-      <div className={cn("flex-1 flex flex-col min-h-0", activeTab === 'deploy' ? "overflow-y-auto no-scrollbar" : "overflow-hidden")}>
+      {/* Mobile-friendly: BOTH tabs scroll as one natural column (the Sync tab used to be overflow-hidden
+          → its content was clipped and unreachable on a short mobile screen). A visible scrollbar signals
+          scrollability; the inner lists below are bounded (max-h) instead of flex-1 so they never trap the
+          page scroll on mobile. */}
+      <div className={cn("flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain")}>
         {activeTab === 'deploy' ? (
           <div className="p-4 space-y-4 flex flex-col flex-1">
             {/* Header / Intro */}
@@ -874,7 +917,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 </span>
               </div>
 
-              <div className="flex-1 overflow-y-auto no-scrollbar pr-0.5 space-y-3 text-xs">
+              <div className="pr-0.5 space-y-3 text-xs">
                 {/* 1. GITHUB CONFIG */}
                 {selectedPlatform === 'github' && (
                   <div className="space-y-4">
@@ -1486,7 +1529,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               >
                 {deployStatus === 'validating' || deployStatus === 'building' ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <TirangaLoader className="w-4 h-4 text-white" />
                     Executing Push Pipeline...
                   </>
                 ) : (
@@ -1833,10 +1876,10 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             </div>
 
             {/* Searchable Projects List Container */}
-            <div className="flex-1 flex flex-col min-h-0 border border-white/5 rounded-xl p-2.5 space-y-2 bg-black/10 select-none overflow-hidden">
+            <div className="flex flex-col border border-white/5 rounded-xl p-2.5 space-y-2 bg-black/10 select-none">
               <div className="flex items-center justify-between shrink-0">
                 <span className="text-[8.5px] font-black text-[#8b949e] uppercase tracking-wider px-1">Available Apps / Projects</span>
-                {isFetchingProjects && <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />}
+                {isFetchingProjects && <TirangaLoader className="w-3 h-3 text-indigo-400" />}
               </div>
 
               {/* Project Search Bar */}
@@ -1852,7 +1895,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
 
               {/* List grid */}
-              <div className="flex-1 overflow-y-auto no-scrollbar space-y-1.5 pr-0.5 min-h-0">
+              <div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-1.5 pr-0.5">
                 {fetchedProjects
                   .filter((p) => p.displayName?.toLowerCase().includes(syncQuery.toLowerCase()) || p.name?.toLowerCase().includes(syncQuery.toLowerCase()))
                   .map((project) => (

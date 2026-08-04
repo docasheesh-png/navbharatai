@@ -8,6 +8,7 @@ import {
   getCustomHostname,
   fallbackOrigin,
 } from '../lib/cloudflare';
+import { sendSafeError } from '../lib/httpError';
 
 /**
  * Custom-domain routes (Cloudflare for SaaS).
@@ -64,7 +65,7 @@ export function registerDomainsRoutes(app: Express): void {
       } catch { /* mapping is best-effort; provisioning already succeeded */ }
       res.json({ ...ch, fallbackOrigin: fallbackOrigin() });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to start domain connection.' });
+      sendSafeError(res, 500, 'Failed to start domain connection. Please try again.', err, 'domain connect');
     }
   });
 
@@ -86,7 +87,7 @@ export function registerDomainsRoutes(app: Express): void {
       }
       res.json({ ...ch, fallbackOrigin: fallbackOrigin() });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to check domain status.' });
+      sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'domain status');
     }
   });
 }

@@ -26,8 +26,16 @@ export interface BuildManifestV1 {
   buildId: string;
   /** FNV/hash of the exact prompt that drove the build (same value the diagnostics report records). */
   promptHash: string;
-  /** The model id actually routed to (or the lead model of the ladder). */
+  /**
+   * The model id that ACTUALLY delivered the build (the real model that produced the most output),
+   * when known — falling back to the nominal routed/ladder-lead model id otherwise. Kept honest so a
+   * cheap-floor build shows the cheap model that built it, NOT the nominal Claude fallback identity
+   * (ShopSphere autopsy 2026-07-19: a weak GLM-built app recorded `claude-sonnet-4-6` here, which read
+   * like a no-Claude-on-weak violation even though only GLM ran). `deliveredVia` carries the provider.
+   */
   model: string;
+  /** The provider that drove the most build turns (e.g. 'GLM'/'KIMI'/'CLAUDE') — the real builder. */
+  deliveredVia?: string;
   /** Reasoning effort, when a power tier pinned one. */
   effort?: string;
   /** Resolved power level for the build (off/mini/medium/max/weak…). */
@@ -49,6 +57,7 @@ export interface BuildManifestInput {
   buildId: string;
   promptHash: string;
   model: string;
+  deliveredVia?: string;
   effort?: string;
   powerLevel?: string;
   providerLadder?: string[];
@@ -69,12 +78,42 @@ export function buildBuildManifest(input: BuildManifestInput): BuildManifestV1 {
     createdAt: input.createdAt,
     fileHashes: manifestOf(input.files || {}),
   };
+  if (input.deliveredVia) m.deliveredVia = input.deliveredVia;
   if (input.effort) m.effort = input.effort;
   if (input.powerLevel) m.powerLevel = input.powerLevel;
   if (input.providerLadder && input.providerLadder.length) m.providerLadder = input.providerLadder;
   if (input.framework) m.framework = input.framework;
   if (input.gates) m.gates = input.gates;
   return m;
+}
+
+/**
+ * The model id that actually DELIVERED the build — the model with the most output tokens across the
+ * per-(provider, model) usage slices, preferring the dominant provider's slices when one is given.
+ * Returns undefined when no slice carries a model id (nothing to attribute → keep the nominal model).
+ * This is what makes the manifest honest: a cheap-floor build reports the cheap model that built it,
+ * not the nominal Claude fallback identity. PURE.
+ */
+export function deliveredModelId(
+  entries: ReadonlyArray<{ provider?: string; model?: string; usage?: { outputTokens?: number } }>,
+  dominantProvider?: string,
+): string | undefined {
+  const withModel = (Array.isArray(entries) ? entries : []).filter(
+    (e) => e && typeof e.model === 'string' && e.model.trim(),
+  );
+  if (withModel.length === 0) return undefined;
+  const out = (e: { usage?: { outputTokens?: number } }): number =>
+    Number.isFinite(e.usage?.outputTokens) && (e.usage?.outputTokens ?? 0) > 0 ? (e.usage!.outputTokens as number) : 0;
+  const pickMax = (list: typeof withModel): string | undefined =>
+    list.length ? list.reduce((best, e) => (out(e) > out(best) ? e : best)).model : undefined;
+  // Prefer the dominant provider's models; fall back to the global max if it delivered none with an id.
+  if (dominantProvider && dominantProvider.trim()) {
+    const dp = dominantProvider.trim().toLowerCase();
+    const dpEntries = withModel.filter((e) => (e.provider || '').trim().toLowerCase() === dp);
+    const picked = pickMax(dpEntries);
+    if (picked) return picked;
+  }
+  return pickMax(withModel);
 }
 
 /**

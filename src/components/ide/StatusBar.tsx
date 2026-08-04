@@ -4,6 +4,7 @@ import {
   AlertCircle, ChevronUp, Bell, Bot,
   Cpu, Activity
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 
 interface StatusBarProps {
@@ -65,7 +66,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
         <button className="flex items-center gap-2 hover:bg-white/10 h-full px-3 transition-colors group">
            {aiStatus === 'thinking' ? (
-              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <TirangaLoader className="w-3 h-3" />
            ) : (
               <Bot className="w-3 h-3 group-hover:scale-110 transition-transform" />
            )}

@@ -21,7 +21,7 @@ const APIS: APIItem[] = [
 <iframe
   src="https://maps.google.com/maps?q=New+Delhi,India&output=embed"
   width="100%" height="400" style="border:0;" allowfullscreen loading="lazy">
-</iframe>`, steps: ['iframe src mein location naam change karo', 'Width/height adjust karo', 'Ready!'] },
+</iframe>`, steps: ['Change the location name in the iframe src', 'Adjust the width/height', 'Ready!'] },
   { id: 'openstreet', name: 'OpenStreetMap (Leaflet)', category: 'Maps', categoryEmoji: '🗺️', description: 'Free open-source map library — no API key required', free: true, popular: true, difficulty: 'Easy', snippet: `<!-- Leaflet.js — Free Map -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <div id="map" style="height:400px;"></div>
@@ -30,12 +30,12 @@ const APIS: APIItem[] = [
   const map = L.map('map').setView([28.6, 77.2], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
   L.marker([28.6, 77.2]).addTo(map).bindPopup('Meri location').openPopup();
-</script>`, steps: ['HTML mein paste karo', 'setView coordinates change karo', 'Marker add karo'] },
+</script>`, steps: ['Paste into your HTML', 'Change the setView coordinates', 'Add a marker'] },
   { id: 'ipgeo', name: 'IP Geolocation', category: 'Maps', categoryEmoji: '🗺️', description: 'Get user location from their IP address — completely free', free: true, popular: false, difficulty: 'Easy', envKey: '', snippet: `// IP Geolocation — Free, no API key
 const res = await fetch('https://ipapi.co/json/');
 const data = await res.json();
 console.log(data.city, data.country_name, data.latitude, data.longitude);
-// Output: Mumbai, India, 19.07, 72.87`, steps: ['Bas fetch karo', 'city, country data milega', 'User location auto-detect!'] },
+// Output: Mumbai, India, 19.07, 72.87`, steps: ['Just fetch', 'You get city, country data', 'User location auto-detect!'] },
   { id: 'mapbox', name: 'Mapbox', category: 'Maps', categoryEmoji: '🗺️', description: 'Professional maps with custom styling and geocoding', free: false, popular: true, difficulty: 'Medium', envKey: 'MAPBOX_TOKEN', snippet: `// Mapbox GL JS
 import mapboxgl from 'mapbox-gl';
 mapboxgl.accessToken = process.env.MAPBOX_TOKEN;
@@ -44,7 +44,7 @@ const map = new mapboxgl.Map({
   style: 'mapbox://styles/mapbox/dark-v11',
   center: [77.2, 28.6],
   zoom: 12
-});`, steps: ['mapbox.com pe account banao', 'Token copy karo .env mein', 'npm install mapbox-gl'] },
+});`, steps: ['Create an account at mapbox.com', 'Copy the token into .env', 'npm install mapbox-gl'] },
 
   // Weather
   { id: 'openmeteo', name: 'Open-Meteo', category: 'Weather', categoryEmoji: '🌤️', description: '100% free weather API — no registration, no API key needed', free: true, popular: true, difficulty: 'Easy', snippet: `// Open-Meteo — Free, no API key!
@@ -53,26 +53,26 @@ const res = await fetch(
 );
 const data = await res.json();
 const { temperature, windspeed, weathercode } = data.current_weather;
-console.log(\`Temp: \${temperature}°C, Wind: \${windspeed} km/h\`);`, steps: ['Bas fetch karo — no key needed!', 'latitude/longitude change karo', 'current_weather mein data milega'] },
+console.log(\`Temp: \${temperature}°C, Wind: \${windspeed} km/h\`);`, steps: ['Just fetch — no key needed!', 'Change latitude/longitude', 'Data comes back in current_weather'] },
   { id: 'openweather', name: 'OpenWeatherMap', category: 'Weather', categoryEmoji: '🌤️', description: 'Detailed weather data with icons, forecasts and alerts', free: false, popular: true, difficulty: 'Easy', envKey: 'OPENWEATHER_API_KEY', snippet: `// OpenWeatherMap
 const API_KEY = process.env.OPENWEATHER_API_KEY;
 const res = await fetch(
   \`https://api.openweathermap.org/data/2.5/weather?q=Mumbai,IN&appid=\${API_KEY}&units=metric\`
 );
 const data = await res.json();
-console.log(data.main.temp, data.weather[0].description);`, steps: ['openweathermap.org pe free account banao', 'API key .env mein save karo', 'q= mein city name change karo'] },
+console.log(data.main.temp, data.weather[0].description);`, steps: ['Create a free account at openweathermap.org', 'Save the API key in .env', 'Change the city name in q='] },
   { id: 'weatherapi', name: 'WeatherAPI', category: 'Weather', categoryEmoji: '🌤️', description: 'Real-time and forecast weather with air quality data', free: false, popular: false, difficulty: 'Easy', envKey: 'WEATHERAPI_KEY', snippet: `// WeatherAPI.com
 const res = await fetch(
   \`https://api.weatherapi.com/v1/current.json?key=\${process.env.WEATHERAPI_KEY}&q=Delhi&aqi=yes\`
 );
 const { location, current } = await res.json();
-console.log(location.name, current.temp_c, current.air_quality.pm2_5);`, steps: ['weatherapi.com pe signup', 'Free plan mein 1M calls/month', 'q= mein city ya lat,lon'] },
+console.log(location.name, current.temp_c, current.air_quality.pm2_5);`, steps: ['Sign up at weatherapi.com', 'Free plan includes 1M calls/month', 'Use q= with city or lat,lon'] },
   { id: 'tomorrow', name: 'Tomorrow.io', category: 'Weather', categoryEmoji: '🌤️', description: 'Hyper-accurate weather with climate insights', free: false, popular: false, difficulty: 'Medium', envKey: 'TOMORROW_API_KEY', snippet: `// Tomorrow.io
 const res = await fetch(
   \`https://api.tomorrow.io/v4/weather/realtime?location=mumbai&apikey=\${process.env.TOMORROW_API_KEY}\`
 );
 const { data } = await res.json();
-console.log(data.values.temperature, data.values.humidity);`, steps: ['tomorrow.io pe account', 'Free 25 calls/hour', 'location mein city/coordinates'] },
+console.log(data.values.temperature, data.values.humidity);`, steps: ['Create an account at tomorrow.io', 'Free plan includes 25 calls/hour', 'Use location with city/coordinates'] },
 
   // Payments
   { id: 'razorpay', name: 'Razorpay', category: 'Payments', categoryEmoji: '💳', description: 'India ka #1 payment gateway — UPI, cards, netbanking', free: false, popular: true, difficulty: 'Medium', envKey: 'RAZORPAY_KEY_ID', snippet: `// Razorpay Payment
@@ -84,22 +84,22 @@ const options = {
   description: 'Purchase',
   handler: function(response) {
     console.log('Payment success:', response.razorpay_payment_id);
-    verifyPayment(response); // Server-side verify karna zaroori hai
+    verifyPayment(response); // Server-side verification is required
   },
   prefill: { name: 'User Name', email: 'user@email.com' },
   theme: { color: '#6366f1' }
 };
 const rzp = new window.Razorpay(options);
-rzp.open();`, steps: ['razorpay.com pe signup', 'Test keys copy karo dashboard se', 'Script tag add karo: src="https://checkout.razorpay.com/v1/checkout.js"'] },
+rzp.open();`, steps: ['Sign up at razorpay.com', 'Copy the test keys from the dashboard', 'Add the script tag: src="https://checkout.razorpay.com/v1/checkout.js"'] },
   { id: 'cashfree', name: 'Cashfree', category: 'Payments', categoryEmoji: '💳', description: 'Low-cost payment gateway with instant settlements', free: false, popular: true, difficulty: 'Medium', envKey: 'CASHFREE_APP_ID', snippet: `// Cashfree Payment
 const cashfree = await load({ mode: 'sandbox' }); // 'production' for live
 const checkoutOptions = {
-  paymentSessionId: 'SESSION_ID_FROM_SERVER', // Server se generate karo
+  paymentSessionId: 'SESSION_ID_FROM_SERVER', // Generate on the server
   redirectTarget: '_modal',
 };
 const result = await cashfree.checkout(checkoutOptions);
 if (result.error) console.error(result.error.message);
-if (result.paymentDetails) console.log('Paid!', result.paymentDetails);`, steps: ['cashfree.com pe signup', 'npm install @cashfreepayments/cashfree-js', 'Backend mein session create karo pehle'] },
+if (result.paymentDetails) console.log('Paid!', result.paymentDetails);`, steps: ['Sign up at cashfree.com', 'npm install @cashfreepayments/cashfree-js', 'Create a session on the backend first'] },
   { id: 'stripe', name: 'Stripe', category: 'Payments', categoryEmoji: '💳', description: 'Global payments — ideal for international customers', free: false, popular: true, difficulty: 'Advanced', envKey: 'STRIPE_PUBLISHABLE_KEY', snippet: `// Stripe Elements
 import { loadStripe } from '@stripe/stripe-js';
 const stripe = await loadStripe(process.env.STRIPE_PUBLISHABLE_KEY);
@@ -112,7 +112,7 @@ const { error, paymentMethod } = await stripe.createPaymentMethod({
   type: 'card',
   card: card,
 });
-// Send paymentMethod.id to server`, steps: ['stripe.com pe account', 'npm install @stripe/stripe-js @stripe/react-stripe-js', 'Backend mein PaymentIntent banana padega'] },
+// Send paymentMethod.id to server`, steps: ['Create an account at stripe.com', 'npm install @stripe/stripe-js @stripe/react-stripe-js', 'Create a PaymentIntent on the backend'] },
   { id: 'payu', name: 'PayU', category: 'Payments', categoryEmoji: '💳', description: 'Popular Indian payment gateway with EMI support', free: false, popular: false, difficulty: 'Medium', envKey: 'PAYU_MERCHANT_KEY', snippet: `// PayU Payment Form
 const payuData = {
   key: process.env.PAYU_MERCHANT_KEY,
@@ -124,12 +124,12 @@ const payuData = {
   phone: '9876543210',
   surl: 'https://yourapp.com/success',
   furl: 'https://yourapp.com/failure',
-  hash: '' // SHA-512 hash — server pe calculate karo
+  hash: '' // SHA-512 hash — calculate on the server
 };
-// POST to https://secure.payu.in/_payment`, steps: ['payu.in pe merchant account', 'Hash server-side calculate karna padega', 'Test mode mein pehle try karo'] },
+// POST to https://secure.payu.in/_payment`, steps: ['Create a merchant account at payu.in', 'The hash must be calculated server-side', 'Try in test mode first'] },
 
   // Communication
-  { id: 'emailjs', name: 'EmailJS', category: 'Communication', categoryEmoji: '📨', description: 'Send emails directly from frontend — no backend needed!', free: true, popular: true, difficulty: 'Easy', envKey: 'EMAILJS_PUBLIC_KEY', snippet: `// EmailJS — Frontend se email bhejo
+  { id: 'emailjs', name: 'EmailJS', category: 'Communication', categoryEmoji: '📨', description: 'Send emails directly from frontend — no backend needed!', free: true, popular: true, difficulty: 'Easy', envKey: 'EMAILJS_PUBLIC_KEY', snippet: `// EmailJS — send email from the frontend
 import emailjs from '@emailjs/browser';
 
 emailjs.init(process.env.EMAILJS_PUBLIC_KEY);
@@ -140,7 +140,7 @@ await emailjs.send('SERVICE_ID', 'TEMPLATE_ID', {
   message: 'Hello from NavBharatAI!',
   reply_to: 'sender@email.com'
 });
-console.log('Email sent successfully!');`, steps: ['emailjs.com pe signup', 'npm install @emailjs/browser', 'Service & Template ID dashboard se lao'] },
+console.log('Email sent successfully!');`, steps: ['emailjs.com pe signup', 'npm install @emailjs/browser', 'Get the Service & Template ID from the dashboard'] },
   { id: 'sendgrid', name: 'SendGrid Email', category: 'Communication', categoryEmoji: '📨', description: 'Transactional emails — OTP, welcome, notifications', free: false, popular: true, difficulty: 'Medium', envKey: 'SENDGRID_API_KEY', snippet: `// SendGrid (Node.js backend)
 const sgMail = require('@sendgrid/mail');
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
@@ -148,18 +148,18 @@ await sgMail.send({
   to: 'user@example.com',
   from: 'noreply@yourapp.com', // Verified sender
   subject: 'Welcome to NavBharatAI!',
-  html: '<h1>Swagat hai!</h1><p>App ready hai.</p>',
-});`, steps: ['sendgrid.com pe free account', 'npm install @sendgrid/mail', 'Sender email verify karo'] },
+  html: '<h1>Welcome!</h1><p>The app is ready.</p>',
+});`, steps: ['Create a free account at sendgrid.com', 'npm install @sendgrid/mail', 'Verify the sender email'] },
   { id: 'twilio', name: 'Twilio SMS', category: 'Communication', categoryEmoji: '📨', description: 'Send OTP and SMS messages to any phone number', free: false, popular: true, difficulty: 'Medium', envKey: 'TWILIO_ACCOUNT_SID', snippet: `// Twilio SMS (Node.js)
 const client = require('twilio')(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
 await client.messages.create({
-  body: 'Aapka OTP: 123456',
+  body: 'Your OTP: 123456',
   from: '+1234567890', // Twilio number
   to: '+919876543210'
-});`, steps: ['twilio.com pe trial account', 'npm install twilio', 'Account SID + Auth Token copy karo'] },
+});`, steps: ['Create a trial account at twilio.com', 'npm install twilio', 'Copy the Account SID + Auth Token'] },
   { id: 'msg91', name: 'MSG91 SMS', category: 'Communication', categoryEmoji: '📨', description: 'Indian SMS gateway — OTP, transactional, promotional', free: false, popular: true, difficulty: 'Easy', envKey: 'MSG91_AUTH_KEY', snippet: `// MSG91 OTP Send
 const res = await fetch('https://api.msg91.com/api/v5/otp', {
   method: 'POST',
@@ -172,7 +172,7 @@ const res = await fetch('https://api.msg91.com/api/v5/otp', {
     template_id: 'YOUR_TEMPLATE_ID',
     otp: Math.floor(100000 + Math.random() * 900000)
   })
-});`, steps: ['msg91.com pe account', 'Template banao DLT ke saath', 'authkey API section se lao'] },
+});`, steps: ['Create an account at msg91.com', 'Create a template with DLT', 'Get the authkey from the API section'] },
 
   // Auth
   { id: 'firebase-auth', name: 'Firebase Auth', category: 'Authentication', categoryEmoji: '🔐', description: 'Email, Google, Phone OTP — easy auth in minutes', free: true, popular: true, difficulty: 'Easy', envKey: 'FIREBASE_API_KEY', snippet: `// Firebase Auth
@@ -185,7 +185,7 @@ const user = await signInWithEmailAndPassword(auth, email, password);
 // Google login
 const provider = new GoogleAuthProvider();
 const result = await signInWithPopup(auth, provider);
-console.log(result.user.displayName);`, steps: ['firebase.google.com pe project', 'npm install firebase', 'Authentication enable karo console mein'] },
+console.log(result.user.displayName);`, steps: ['Create a project at firebase.google.com', 'npm install firebase', 'Enable Authentication in the console'] },
   { id: 'supabase-auth', name: 'Supabase Auth', category: 'Authentication', categoryEmoji: '🔐', description: 'Open-source Firebase alternative with magic links', free: true, popular: true, difficulty: 'Easy', envKey: 'SUPABASE_URL', snippet: `// Supabase Auth
 import { createClient } from '@supabase/supabase-js';
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -197,18 +197,18 @@ const { data, error } = await supabase.auth.signUp({ email, password });
 await supabase.auth.signInWithOtp({ email: 'user@example.com' });
 
 // Get user
-const { data: { user } } = await supabase.auth.getUser();`, steps: ['supabase.com pe project', 'npm install @supabase/supabase-js', 'URL + anon key dashboard se'] },
+const { data: { user } } = await supabase.auth.getUser();`, steps: ['Create a project at supabase.com', 'npm install @supabase/supabase-js', 'URL + anon key dashboard se'] },
   { id: 'auth0', name: 'Auth0', category: 'Authentication', categoryEmoji: '🔐', description: 'Enterprise-grade auth with social logins and SSO', free: false, popular: true, difficulty: 'Medium', envKey: 'AUTH0_DOMAIN', snippet: `// Auth0 React SDK
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 
-// App wrap karo:
+// Wrap your app:
 <Auth0Provider domain={process.env.AUTH0_DOMAIN} clientId={AUTH0_CLIENT_ID} authorizationParams={{ redirect_uri: window.location.origin }}>
   <App />
 </Auth0Provider>
 
 // Component mein:
 const { loginWithRedirect, user, logout } = useAuth0();
-<button onClick={loginWithRedirect}>Login</button>`, steps: ['auth0.com pe free account', 'npm install @auth0/auth0-react', 'Domain + Client ID copy karo'] },
+<button onClick={loginWithRedirect}>Login</button>`, steps: ['Create a free account at auth0.com', 'npm install @auth0/auth0-react', 'Copy the Domain + Client ID'] },
   { id: 'google-oauth', name: 'Google OAuth', category: 'Authentication', categoryEmoji: '🔐', description: 'Sign in with Google — the most trusted auth flow', free: true, popular: true, difficulty: 'Easy', snippet: `// Google One Tap / OAuth
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <div id="g_id_onload"
@@ -222,7 +222,7 @@ function handleCredentialResponse(response) {
   console.log('Token:', response.credential);
   // Send to backend for verification
 }
-</script>`, envKey: 'GOOGLE_CLIENT_ID', steps: ['Google Cloud Console pe OAuth2 credentials', 'Client ID copy karo', 'Authorized origins add karo'] },
+</script>`, envKey: 'GOOGLE_CLIENT_ID', steps: ['Create OAuth2 credentials in Google Cloud Console', 'Copy the Client ID', 'Add authorized origins'] },
 
   // AI
   { id: 'gemini', name: 'Google Gemini', category: 'AI & ML', categoryEmoji: '🤖', description: 'Google ka most powerful AI — text, vision, code generation', free: true, popular: true, difficulty: 'Easy', envKey: 'GEMINI_API_KEY', snippet: `// Google Gemini API
@@ -230,17 +230,17 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-const result = await model.generateContent('React app ka code banao login ke liye');
-console.log(result.response.text());`, steps: ['aistudio.google.com pe free API key', 'npm install @google/generative-ai', 'gemini-2.0-flash fast aur free hai'] },
+const result = await model.generateContent('Generate React app code for login');
+console.log(result.response.text());`, steps: ['Get a free API key at aistudio.google.com', 'npm install @google/generative-ai', 'gemini-2.0-flash is fast and free'] },
   { id: 'openai', name: 'OpenAI GPT', category: 'AI & ML', categoryEmoji: '🤖', description: 'GPT-4 for text generation, code, analysis', free: false, popular: true, difficulty: 'Easy', envKey: 'OPENAI_API_KEY', snippet: `// OpenAI GPT
 import OpenAI from 'openai';
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const response = await client.chat.completions.create({
   model: 'gpt-4o-mini', // Affordable model
-  messages: [{ role: 'user', content: 'React component banao counter ke liye' }],
+  messages: [{ role: 'user', content: 'Build a React component for a counter' }],
 });
-console.log(response.choices[0].message.content);`, steps: ['platform.openai.com pe account', 'npm install openai', 'API key safely backend mein rakho'] },
+console.log(response.choices[0].message.content);`, steps: ['platform.openai.com pe account', 'npm install openai', 'Keep the API key safely on the backend'] },
   { id: 'huggingface', name: 'HuggingFace', category: 'AI & ML', categoryEmoji: '🤖', description: 'Thousands of free AI models — text, image, audio', free: true, popular: true, difficulty: 'Easy', envKey: 'HF_TOKEN', snippet: `// HuggingFace Inference API
 const response = await fetch(
   'https://api-inference.huggingface.co/models/facebook/bart-large-cnn',
@@ -251,7 +251,7 @@ const response = await fetch(
   }
 );
 const result = await response.json();
-console.log(result[0].summary_text);`, steps: ['huggingface.co pe free account', 'Settings > Tokens se token banao', 'Model choose karo task ke hisaab se'] },
+console.log(result[0].summary_text);`, steps: ['Create a free account at huggingface.co', 'Create a token from Settings > Tokens', 'Choose a model based on your task'] },
   { id: 'anthropic', name: 'Anthropic Claude', category: 'AI & ML', categoryEmoji: '🤖', description: 'Claude — safe and helpful AI for complex reasoning', free: false, popular: true, difficulty: 'Easy', envKey: 'ANTHROPIC_API_KEY', snippet: `// Anthropic Claude
 import Anthropic from '@anthropic-ai/sdk';
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -261,7 +261,7 @@ const message = await client.messages.create({
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Explain this code: ...' }],
 });
-console.log(message.content[0].text);`, steps: ['console.anthropic.com pe account', 'npm install @anthropic-ai/sdk', 'API key safely server pe rakho'] },
+console.log(message.content[0].text);`, steps: ['console.anthropic.com pe account', 'npm install @anthropic-ai/sdk', 'Keep the API key safely on the server'] },
 
   // Database
   { id: 'firestore', name: 'Firebase Firestore', category: 'Database', categoryEmoji: '🗄️', description: 'Real-time NoSQL database — perfect for live apps', free: true, popular: true, difficulty: 'Easy', envKey: 'FIREBASE_API_KEY', snippet: `// Firebase Firestore
@@ -277,7 +277,7 @@ if (docSnap.exists()) console.log(docSnap.data());
 
 // Get collection
 const querySnapshot = await getDocs(collection(db, 'users'));
-querySnapshot.forEach(doc => console.log(doc.data()));`, steps: ['firebase.google.com pe project', 'npm install firebase', 'Security rules configure karo'] },
+querySnapshot.forEach(doc => console.log(doc.data()));`, steps: ['Create a project at firebase.google.com', 'npm install firebase', 'Configure the security rules'] },
   { id: 'supabase-db', name: 'Supabase DB', category: 'Database', categoryEmoji: '🗄️', description: 'PostgreSQL database with REST API and realtime', free: true, popular: true, difficulty: 'Easy', envKey: 'SUPABASE_URL', snippet: `// Supabase Database
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -288,7 +288,7 @@ const { data, error } = await supabase.from('posts').insert([{ title: 'Hello', b
 const { data: posts } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
 
 // Update
-await supabase.from('posts').update({ title: 'Updated' }).eq('id', postId);`, steps: ['supabase.com pe project', 'npm install @supabase/supabase-js', 'Table banao dashboard mein'] },
+await supabase.from('posts').update({ title: 'Updated' }).eq('id', postId);`, steps: ['Create a project at supabase.com', 'npm install @supabase/supabase-js', 'Create a table in the dashboard'] },
   { id: 'mongodb', name: 'MongoDB Atlas', category: 'Database', categoryEmoji: '🗄️', description: 'Document database — flexible schema, free tier', free: true, popular: true, difficulty: 'Medium', envKey: 'MONGODB_URI', snippet: `// MongoDB (Node.js)
 const { MongoClient } = require('mongodb');
 const client = new MongoClient(process.env.MONGODB_URI);
@@ -302,7 +302,7 @@ await users.insertOne({ name: 'Ravi', email: 'ravi@example.com' });
 
 // Find
 const allUsers = await users.find({}).toArray();
-console.log(allUsers);`, steps: ['mongodb.com pe free M0 cluster', 'npm install mongodb', 'Connection string .env mein'] },
+console.log(allUsers);`, steps: ['Create a free M0 cluster at mongodb.com', 'npm install mongodb', 'Store the connection string in .env'] },
   { id: 'planetscale', name: 'PlanetScale (MySQL)', category: 'Database', categoryEmoji: '🗄️', description: 'Serverless MySQL with branching like Git', free: true, popular: false, difficulty: 'Medium', envKey: 'DATABASE_URL', snippet: `// PlanetScale with Prisma
 // schema.prisma:
 // datasource db { provider = "mysql"; url = env("DATABASE_URL") }
@@ -329,7 +329,7 @@ function openWidget() {
     }
   });
 }
-</script>`, steps: ['cloudinary.com pe free account', 'Upload preset create karo (unsigned)', 'Cloud name copy karo'] },
+</script>`, steps: ['Create a free account at cloudinary.com', 'Create an upload preset (unsigned)', 'Copy the cloud name'] },
   { id: 'youtube', name: 'YouTube Data API', category: 'Media', categoryEmoji: '🎨', description: 'Search videos, get channel data, embed player', free: false, popular: true, difficulty: 'Easy', envKey: 'YOUTUBE_API_KEY', snippet: `// YouTube Search
 const res = await fetch(
   \`https://www.googleapis.com/youtube/v3/search?part=snippet&q=React+tutorial&type=video&maxResults=5&key=\${process.env.YOUTUBE_API_KEY}\`
@@ -338,7 +338,7 @@ const { items } = await res.json();
 items.forEach(item => {
   console.log(item.snippet.title, item.id.videoId);
   // Embed: https://www.youtube.com/embed/VIDEO_ID
-});`, steps: ['Google Cloud Console pe YouTube API enable', 'API key copy karo', 'Free quota: 10,000 units/day'] },
+});`, steps: ['Enable the YouTube API in Google Cloud Console', 'Copy the API key', 'Free quota: 10,000 units/day'] },
   { id: 'unsplash', name: 'Unsplash Photos', category: 'Media', categoryEmoji: '🎨', description: 'Millions of free high-quality photos via API', free: true, popular: true, difficulty: 'Easy', envKey: 'UNSPLASH_ACCESS_KEY', snippet: `// Unsplash Random Photo
 const res = await fetch(
   \`https://api.unsplash.com/photos/random?query=nature&client_id=\${process.env.UNSPLASH_ACCESS_KEY}\`
@@ -348,7 +348,7 @@ console.log(photo.urls.regular); // Image URL
 console.log(photo.user.name);   // Photographer name
 
 // Search photos:
-// https://api.unsplash.com/search/photos?query=city&client_id=KEY`, steps: ['unsplash.com/developers pe app create', 'Access Key copy karo', 'Free: 50 requests/hour'] },
+// https://api.unsplash.com/search/photos?query=city&client_id=KEY`, steps: ['Create an app at unsplash.com/developers', 'Copy the Access Key', 'Free: 50 requests/hour'] },
   { id: 'imgur', name: 'Imgur Upload', category: 'Media', categoryEmoji: '🎨', description: 'Anonymous image hosting — no auth required', free: true, popular: false, difficulty: 'Easy', envKey: 'IMGUR_CLIENT_ID', snippet: `// Imgur Anonymous Upload
 const formData = new FormData();
 formData.append('image', file); // File input se
@@ -359,7 +359,7 @@ const res = await fetch('https://api.imgur.com/3/image', {
   body: formData,
 });
 const { data } = await res.json();
-console.log('Hosted URL:', data.link);`, steps: ['imgur.com/oauth2/addclient pe app register', 'Client ID copy karo', 'File directly upload ho jaati hai'] },
+console.log('Hosted URL:', data.link);`, steps: ['Register an app at imgur.com/oauth2/addclient', 'Copy the Client ID', 'The file uploads directly'] },
 ];
 
 const CATEGORIES = ['All', 'Maps', 'Weather', 'Payments', 'Communication', 'Authentication', 'AI & ML', 'Database', 'Media'];
@@ -413,7 +413,7 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">API Marketplace</h2>
-          <p className="text-xs text-white/40">One-click integrations — Maps, Weather, Payments, AI aur zyada</p>
+          <p className="text-xs text-white/40">One-click integrations — Maps, Weather, Payments, AI and more</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-white/40">{APIS.length} APIs</span>
@@ -458,7 +458,7 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Package className="w-10 h-10 text-white/10" />
-              <p className="text-sm text-white/30">{showFavorites ? 'Koi favorite nahi' : 'Koi API nahi mili'}</p>
+              <p className="text-sm text-white/30">{showFavorites ? 'No favorites yet' : 'No APIs found'}</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -505,8 +505,8 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
           {!selectedApi ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
               <Code className="w-12 h-12 text-white/5" />
-              <p className="text-sm text-white/20">Koi API card click karo</p>
-              <p className="text-xs text-white/10">Code snippet aur setup guide milega</p>
+              <p className="text-sm text-white/20">Click an API card</p>
+              <p className="text-xs text-white/10">Code snippet and setup guide will appear here</p>
             </div>
           ) : (
             <>
@@ -553,7 +553,7 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
                         <Copy className="w-3 h-3 text-white/30 hover:text-white/60" />
                       </button>
                     </div>
-                    <p className="text-[9px] text-white/20 mt-1">⚠️ Key ko server-side .env mein rakho — frontend mein mat likhna</p>
+                    <p className="text-[9px] text-white/20 mt-1">⚠️ Keep the key in server-side .env — never write it in the frontend</p>
                   </div>
                 )}
 

@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, deleteDoc, getServerDb as getDb } from '../lib/ser
 import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
 import { mergeWorkspaceState, type WorkspacePayload } from '../project/SyncMerge';
 import { requireUserMatch } from '../lib/authMiddleware';
+import { sendSafeError } from '../lib/httpError';
 
 /**
  * Cross-device cloud sync routes (chat sessions + last generated app), stored in
@@ -58,7 +59,7 @@ export function registerSyncRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error('[API SYNC GET ERROR]:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Sync load failed' });
+      return sendSafeError(res, 500, 'Sync load failed. Please try again.', err, 'sync get');
     }
   });
 
@@ -134,7 +135,7 @@ export function registerSyncRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error('[API SYNC POST ERROR]:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Sync save failed' });
+      return sendSafeError(res, 500, 'Sync save failed. Please try again.', err, 'sync save');
     }
   });
 }

@@ -9,7 +9,12 @@ android {
 
 apply from: "../capacitor-cordova-android-plugins/cordova.variables.gradle"
 dependencies {
-
+    implementation project(':capacitor-community-in-app-review')
+    implementation project(':capacitor-community-media')
+    implementation project(':capacitor-firebase-authentication')
+    implementation project(':capacitor-firebase-messaging')
+    implementation project(':capacitor-filesystem')
+    implementation project(':capawesome-capacitor-app-update')
 
 }
 

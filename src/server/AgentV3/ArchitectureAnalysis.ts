@@ -82,10 +82,30 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
       ...CODE_EXTS.map((e) => base + e),
       ...CODE_EXTS.map((e) => path.posix.join(base, 'index' + e)),
     ];
+    // NodeNext/ESM TypeScript (SvelteKit, `"type":"module"`, `moduleResolution: NodeNext`): a relative
+    // import carries the OUTPUT extension `.js`/`.jsx`/`.mjs`/`.cjs` but resolves to the `.ts`/`.tsx`/
+    // `.mts`/`.cts` SOURCE — e.g. `import { Card } from './types.js'` resolves to `./types.ts`. Without
+    // this, every such import was falsely "unresolved" → CollabDesk (SvelteKit) reported 19 unresolved
+    // imports and 0/100 NOT READY even though every target `.ts` file existed. Swap the JS output
+    // extension for its TS source extension(s) and also try the plain stem against CODE_EXTS.
+    const jsExt = /\.(js|jsx|mjs|cjs)$/i.exec(base);
+    if (jsExt) {
+      const stem = base.slice(0, -jsExt[0].length);
+      const tsExts = TS_SOURCE_FOR_JS[jsExt[1].toLowerCase()] ?? [];
+      candidates.push(...tsExts.map((e) => stem + e), ...CODE_EXTS.map((e) => stem + e));
+    }
     for (const c of candidates) if (files.has(c)) return c;
   }
   return null;
 }
+
+/** The TypeScript SOURCE extensions a given JS OUTPUT extension resolves to under NodeNext/ESM. */
+const TS_SOURCE_FOR_JS: Record<string, string[]> = {
+  js: ['.ts', '.tsx'],
+  jsx: ['.tsx'],
+  mjs: ['.mts'],
+  cjs: ['.cts'],
+};
 
 /**
  * A component that was CREATED (a PascalCase component symbol exists in some .tsx/.jsx file) but is

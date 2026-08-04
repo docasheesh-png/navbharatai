@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { AgentV3Panel } from './AgentV3Panel';
 import type { FilesPanelProps } from '../panels/FilesPanel';
 import type { V3FooterApi } from './v3FooterApi';
@@ -15,7 +16,7 @@ type V3Resume = { sessionId: string; messages: Array<{ role: 'user' | 'agent'; t
  *  • not yet  → an honest "rolling out" message (NEVER a broken/empty builder, so the app never
  *    looks broken for a user who isn't on the v5.0 batch yet).
  */
-export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: V3Resume; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: V3Resume; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const [state, setState] = useState<'loading' | 'enabled' | 'disabled'>('loading');
 
   useEffect(() => {
@@ -34,13 +35,13 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSyn
   if (state === 'loading') {
     return (
       <div className="h-full flex items-center justify-center text-zinc-500">
-        <Loader2 className="w-5 h-5 animate-spin" />
+        <TirangaLoader className="w-5 h-5" />
       </div>
     );
   }
 
   if (state === 'enabled') {
-    return <AgentV3Panel userId={userId} email={email} resume={resume} freshOpenNonce={freshOpenNonce} onFilesSync={onFilesSync} onBeforeBuild={onBeforeBuild} onOpenInIDE={onOpenInIDE} onPreviewState={onPreviewState} pendingFix={pendingFix} filesPanel={filesPanel} focusMode={focusMode} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />;
+    return <AgentV3Panel userId={userId} email={email} resume={resume} freshOpenNonce={freshOpenNonce} onFilesSync={onFilesSync} onBeforeBuild={onBeforeBuild} onOpenInIDE={onOpenInIDE} onPreviewState={onPreviewState} pendingFix={pendingFix} pendingDeploy={pendingDeploy} filesPanel={filesPanel} focusMode={focusMode} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />;
   }
 
   return (

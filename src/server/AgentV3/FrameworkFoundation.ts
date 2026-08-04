@@ -231,3 +231,99 @@ export function ensureViteReactFoundation(files: Record<string, string>, opts?: 
   }
   return result;
 }
+
+export interface TsconfigExtendsFix {
+  file: string;
+  removed: string[];
+}
+export interface TsconfigSanitizeResult {
+  patch: Record<string, string>;
+  fixes: TsconfigExtendsFix[];
+}
+
+const TSCONFIG_BASENAME_RE = /(?:^|\/)tsconfig(?:\.[\w-]+)?\.json$/i;
+
+/** Tolerant JSONC parse (tsconfig allows // and block comments + trailing commas). Returns null on failure
+ *  so the caller leaves the file untouched. */
+function parseJsonc(text: string): Record<string, unknown> | null {
+  const attempt = (s: string): Record<string, unknown> | null => {
+    try {
+      const v = JSON.parse(s);
+      return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  };
+  const direct = attempt(text);
+  if (direct) return direct;
+  const stripped = text
+    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+    .replace(/(^|[^:"'])\/\/[^\n\r]*/g, '$1') // line comments (leave http:// etc.)
+    .replace(/,(\s*[}\]])/g, '$1'); // trailing commas
+  return attempt(stripped);
+}
+
+/** The package name of a BARE module specifier (null for a relative/absolute path, which is always kept). */
+function tsconfigExtendsPackage(spec: unknown): string | null {
+  if (typeof spec !== 'string' || !spec || spec.startsWith('.') || spec.startsWith('/')) return null;
+  const parts = spec.split('/');
+  if (spec.startsWith('@')) return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : null;
+  return parts[0] || null;
+}
+
+function tsconfigDeclaredPackages(files: Record<string, string>): Set<string> {
+  const set = new Set<string>();
+  const raw = files['package.json'];
+  if (typeof raw !== 'string') return set;
+  const pkg = parseJsonc(raw);
+  if (pkg) {
+    const deps = { ...(pkg.dependencies as Record<string, unknown> | undefined), ...(pkg.devDependencies as Record<string, unknown> | undefined) };
+    for (const k of Object.keys(deps)) set.add(k);
+  }
+  return set;
+}
+
+/**
+ * Strip a tsconfig `extends` that points at a BARE package which is NOT an installed dependency — an
+ * unresolvable base that hard-breaks the build. Autopsy buildId 9245f090: a generated `tsconfig.app.json`
+ * did `"extends": "@tsconfig/react/tsconfig.json"`, but `@tsconfig/react` does NOT exist on npm (E404), so
+ * Vite died at startup with `TSConfckParseError: failed to resolve "extends"` and the dev server never
+ * came up — then the agent burned time trying to `npm install` the phantom package. A Vite-React tsconfig
+ * is self-contained, so removing the dangling extends restores a working config.
+ *
+ * SAFE by construction: only ever removes a BARE-package extends whose package is absent from package.json
+ * (a relative `./base.json` extends, or an extends whose package IS a declared dependency, is always kept),
+ * and only touches tsconfig files that parse. Returns a patch of just the changed files. Pure — never
+ * mutates its input. Unit-tested.
+ */
+export function sanitizeTsconfigExtends(files: Record<string, string>): TsconfigSanitizeResult {
+  const patch: Record<string, string> = {};
+  const fixes: TsconfigExtendsFix[] = [];
+  if (!files || typeof files !== 'object') return { patch, fixes };
+  const declared = tsconfigDeclaredPackages(files);
+  for (const [path, content] of Object.entries(files)) {
+    if (!TSCONFIG_BASENAME_RE.test(path) || typeof content !== 'string') continue;
+    const json = parseJsonc(content);
+    if (!json || json.extends == null) continue;
+    const removed: string[] = [];
+    const isResolvable = (entry: unknown): boolean => {
+      const pkg = tsconfigExtendsPackage(entry);
+      if (pkg === null) return true; // relative/absolute extends → keep
+      if (declared.has(pkg)) return true; // an installed dependency → keep
+      removed.push(String(entry));
+      return false; // bare package NOT in package.json → unresolvable → drop
+    };
+    if (Array.isArray(json.extends)) {
+      const kept = (json.extends as unknown[]).filter(isResolvable);
+      if (removed.length === 0) continue;
+      if (kept.length === 0) delete json.extends;
+      else json.extends = kept.length === 1 ? kept[0] : kept;
+    } else {
+      if (isResolvable(json.extends)) continue;
+      delete json.extends;
+    }
+    patch[path] = `${JSON.stringify(json, null, 2)}\n`;
+    fixes.push({ file: path, removed });
+  }
+  return { patch, fixes };
+}

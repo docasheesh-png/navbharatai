@@ -206,6 +206,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'proposed_steps':
       return { ...state, proposedSteps: { role: event.role, steps: event.steps } };
 
+    case 'clarify':
+      // Non-blocking: just record the questions for the panel to surface. The build keeps streaming.
+      return { ...state, pendingClarify: { domain: event.domain, questions: event.questions } };
+
     case 'permission_request':
       return {
         ...state,
@@ -219,7 +223,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'result':
       // T1-health-card: the successful build terminates with `result` (not `done`), so surface the
       // build-health verdict from here too — otherwise <BuildHealthCard/> only ever showed on failure.
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, costBreakdown: event.costBreakdown, budgetReached: event.budgetReached === true, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.buildId ? { buildId: event.buildId } : {}), ...(event.promptHash ? { promptHash: event.promptHash } : {}), ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, costBreakdown: event.costBreakdown, budgetReached: event.budgetReached === true, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, filesWritten: typeof event.filesWritten === 'number' ? event.filesWritten : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.buildId ? { buildId: event.buildId } : {}), ...(event.promptHash ? { promptHash: event.promptHash } : {}), ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'error':
       // A crashed build now carries its diagnostics report (server attaches it) — keep it so the

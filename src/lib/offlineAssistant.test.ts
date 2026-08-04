@@ -92,6 +92,17 @@ describe('offlineAssistant — grounded 100% in the app knowledge base', () => {
     expect(scoreFeature(f, 'deploy')).toBeGreaterThan(scoreFeature(f, 'deploi'));
   });
 
+  it('a single-word keyword matches on a WORD BOUNDARY, never as a substring (regression: "ist" ⊄ "minister")', () => {
+    // Root cause of a real CI break: the 3-char keyword "ist" (IST timezone) substring-matched "min-IST-er",
+    // surfacing a misleading feature card for "who is the prime minister". A single-word keyword must only
+    // score on a whole-token hit; a multi-word phrase keeps its (intentional) substring signal.
+    const single: any = { id: 'x', name: 'X', path: '', description: '', howToUse: '', relatedFeatures: [], keywords: ['ist'] };
+    expect(scoreFeature(single, 'who is the prime minister')).toBe(0); // no graze inside "minister"
+    expect(scoreFeature(single, 'show me the ist time')).toBe(2);      // whole-token hit still scores
+    const phrase: any = { id: 'y', name: 'Y', path: '', description: '', howToUse: '', relatedFeatures: [], keywords: ['ist timezone'] };
+    expect(scoreFeature(phrase, 'set the ist timezone please')).toBe(3); // phrase substring still counts
+  });
+
   it('still returns an honest "none" for true gibberish — fuzzy does not over-match', () => {
     const a = answerOffline('qqzzxx wwvvbb pplkjhh');
     expect(a.kind).toBe('none');

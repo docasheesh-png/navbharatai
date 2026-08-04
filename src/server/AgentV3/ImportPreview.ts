@@ -43,6 +43,105 @@ export function detectNeedsDatabase(files: Record<string, string>): boolean {
   return Object.values(files).some((c) => typeof c === 'string' && c.includes('DATABASE_URL'));
 }
 
+/** Friendly DB-provider label → package/env signals. Ordered most-specific first; the FIRST match wins.
+ *  Broader than detectNeedsDatabase (which only knows SQL/ORM drivers): this also recognises the BaaS
+ *  providers (Supabase / Firebase) an imported app commonly uses. These are the USER'S OWN database
+ *  vendors — naming them is correct and helpful (the white-label rule covers NavBharatAI's AI vendors,
+ *  not the user's chosen database). */
+const DB_PROVIDER_SIGNALS: Array<{ label: string; deps: string[]; envRe?: RegExp }> = [
+  { label: 'Supabase', deps: ['@supabase/supabase-js', '@supabase/ssr'], envRe: /\bSUPABASE_URL\b|\bSUPABASE_ANON_KEY\b|\bVITE_SUPABASE_/ },
+  { label: 'Firebase', deps: ['firebase', 'firebase-admin'], envRe: /\bFIREBASE_|\bVITE_FIREBASE_/ },
+  { label: 'Neon', deps: ['@neondatabase/serverless'] },
+  { label: 'PlanetScale', deps: ['@planetscale/database'] },
+  { label: 'MongoDB', deps: ['mongoose', 'mongodb'], envRe: /\bMONGO(DB)?_URI\b|\bMONGODB_URL\b/ },
+  { label: 'Prisma', deps: ['@prisma/client', 'prisma'] },
+  { label: 'Drizzle', deps: ['drizzle-orm'] },
+  { label: 'PostgreSQL', deps: ['pg', 'postgres', 'pg-promise', 'slonik'] },
+  { label: 'MySQL', deps: ['mysql', 'mysql2'] },
+  { label: 'a SQL database', deps: ['sequelize', 'typeorm', 'knex', 'kysely'] },
+];
+
+/**
+ * The DATABASE provider an imported app uses (for a specific, honest advisory), or null if none is
+ * detected. Reads package.json deps first (most reliable), then falls back to env/source signals
+ * (SUPABASE_URL, MONGODB_URI, DATABASE_URL). PURE.
+ */
+export function detectDatabaseProvider(files: Record<string, string>): string | null {
+  let deps: Record<string, unknown> = {};
+  const pkgRaw = files['package.json'];
+  if (typeof pkgRaw === 'string') {
+    try {
+      const p = JSON.parse(pkgRaw) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+      deps = { ...(p.dependencies ?? {}), ...(p.devDependencies ?? {}) };
+    } catch { /* not valid JSON — fall through to the source/env scan */ }
+  }
+  const has = (d: string) => Object.prototype.hasOwnProperty.call(deps, d);
+  for (const sig of DB_PROVIDER_SIGNALS) {
+    if (sig.deps.some(has)) return sig.label;
+  }
+  // No recognised driver dep — fall back to env/source signals.
+  const allText = Object.values(files).filter((c): c is string => typeof c === 'string').join('\n');
+  for (const sig of DB_PROVIDER_SIGNALS) {
+    if (sig.envRe && sig.envRe.test(allText)) return sig.label;
+  }
+  if (/\bDATABASE_URL\b/.test(allText)) return 'a database';
+  return null;
+}
+
+/**
+ * The deterministic, USER-FACING "problem → solution" advisory for a freshly-imported app that uses a
+ * database (admin 2026-07-23 — big imported apps must be told clearly what's wrong and how to fix it,
+ * instead of DB guidance living only in the model's hidden system prompt). When the user has NOT
+ * connected their own persistent database, it names the provider and points them at the real fix
+ * (Settings → App Settings → Database — the existing bring-your-own flow the engine auto-wires). Returns
+ * '' when a database is already connected (no problem) or none is used. PURE.
+ */
+export function persistentDatabaseAdvisory(opts: { provider: string | null; connected: boolean }): string {
+  if (opts.connected || !opts.provider) return '';
+  const uses = opts.provider === 'a database' || opts.provider === 'a SQL database' ? opts.provider : `**${opts.provider}**`;
+  return (
+    `🗄️ Heads up: this app uses ${uses}, but you haven't connected a database yet — so its data won't ` +
+    `persist. To run your app for real, connect your own database in **Settings → App Settings → Database** ` +
+    `(Supabase, Neon, Firebase, MongoDB, or a connection string) and I'll wire it in on the next build. ` +
+    `Any preview until then runs on temporary data only.`
+  );
+}
+
+/**
+ * The HONEST advisory shown when a DB-backed imported app's live preview FAILED to boot (admin 2026-07-24:
+ * "honest DB state"). The old failure line was generic ("did not boot automatically — use In-browser /
+ * Diagnose"), so a user whose Express+Postgres app crashed on a missing `DATABASE_URL` had no idea WHY.
+ * This names the real, likely cause and the exact fix. Returns '' for an app that needs no database and
+ * has no external secrets (then the generic line is fine). PURE.
+ */
+export function previewBootFailureAdvisory(opts: {
+  needsDb: boolean;
+  provider: string | null;
+  externalVars: string[];
+  dbProvisioned: boolean;
+}): string {
+  const parts: string[] = [];
+  if (opts.needsDb) {
+    const prov = opts.provider && opts.provider !== 'a database' && opts.provider !== 'a SQL database'
+      ? `**${opts.provider}**` : 'a database';
+    parts.push(
+      opts.dbProvisioned
+        ? `This app uses ${prov}. I provisioned a temporary local one so it could boot — if it still didn't start, it likely needs your REAL database (its own tables/data) to run. Connect it in **Settings → App Settings → Database**, then press **Diagnose** to boot it.`
+        : `This app needs ${prov} to start its server, and I couldn't provision one automatically. Connect your own in **Settings → App Settings → Database**, then press **Diagnose** to boot it.`,
+    );
+  }
+  if (opts.externalVars.length > 0) {
+    const shown = opts.externalVars.slice(0, 8);
+    const more = opts.externalVars.length - shown.length;
+    parts.push(
+      `It also expects real values for ${opts.externalVars.length} external service${opts.externalVars.length === 1 ? '' : 's'} ` +
+      `(${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}) — a server that hard-requires one of these on startup won't boot until you add them in **Settings → Secrets & Keys**.`,
+    );
+  }
+  if (parts.length === 0) return '';
+  return `⚠️ The live preview didn't boot. ${parts.join(' ')} Meanwhile the **In-browser preview** renders your frontend from the imported files.`;
+}
+
 /** The env-var NAMES the app documents in its committed .env template (never the values). PURE. */
 export function envVarNames(files: Record<string, string>): string[] {
   const raw = files['.env.example'] ?? files['.env.sample'] ?? files['.env.template'] ?? '';
@@ -118,4 +217,29 @@ export function externalServiceNote(varNames: string[]): string {
   const shown = ext.slice(0, 10);
   const more = ext.length - shown.length;
   return `🔌 The app boots with a local database + dev config, but ${ext.length} value${ext.length === 1 ? '' : 's'} it expects can't be provisioned in the sandbox (${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}) — set to empty placeholders for now, so features that use them (payments, third-party APIs, external auth) stay inactive until you add real values in Settings → Secrets.`;
+}
+
+/**
+ * EARN the "live preview is up" verdict (admin 2026-08-03, "Cannot GET /customer/home"): a port being
+ * up is NOT the app serving. The boot must actually VISIT the home route and read the rendered HTML;
+ * this turns that (already-classified) result into the honest user-facing narration.
+ *
+ * @param rendered  from analyzePreviewHtml — did the home route serve a real app page?
+ * @param problems  the specific problems it found (e.g. "Cannot GET", build-error overlay) — the WHY.
+ * @param port      the bound port, for the success line.
+ * @param needsDb   full-stack apps: point at the most common real cause + the honest partial state.
+ * PURE.
+ */
+export function previewServeNarration(opts: { rendered: boolean; problems: string[]; port: number; needsDb: boolean }): { ok: boolean; text: string } {
+  if (opts.rendered) {
+    return { ok: true, text: `✅ Live preview is up on port ${opts.port} — open the Preview tab (Live server).` };
+  }
+  const why = opts.problems[0] || 'the server started but is not serving its pages yet';
+  // A full-stack app that serves its API but 404s its client routes is the classic Express-serves-SPA
+  // gap — name it honestly and point at the fix, instead of the old fake "✅ up".
+  const cannotGet = opts.problems.some((p) => /cannot get|404|not serving/i.test(p));
+  const tail = cannotGet && opts.needsDb
+    ? ' Your server started, but it isn\'t serving the app\'s pages (only its API). Tap reload (↻) — a dev server can take a moment — or press Diagnose for the full boot log.'
+    : ' Tap reload (↻) in the Preview tab, or press Diagnose to see the exact boot log.';
+  return { ok: false, text: `⚠️ ${why}.${tail}` };
 }

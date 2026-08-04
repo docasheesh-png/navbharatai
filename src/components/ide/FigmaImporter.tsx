@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { escapeHtml } from '../../lib/escapeHtml';
 import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 import {
   Link,
@@ -17,11 +18,19 @@ import {
   FileCode,
   RefreshCw,
   Check,
-  Clock,
+  Clock, Save, History, AlertTriangle
 } from 'lucide-react';
+import { insertSnippet } from '../../lib/htmlInsert';
+import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface FigmaImporterProps {
   onCodeGenerated?: (code: string) => void;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
+  /** Hand the imported design + a refine instruction to the REAL engine (Pro v5.0). Replaces the old
+   *  "Refine with AI" call to /api/generate, which never existed (admin autopsy 2026-07-21). */
+  onBuildViaV5?: (prompt: string) => void;
 }
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -64,7 +73,7 @@ interface ExtractedAssets {
   fonts: Array<{ family: string; size: number; weight: number }>;
 }
 
-const FIGMA_API = 'https://api.figma.com/v1';
+// (Figma is now reached through the server proxy /api/figma/proxy — no direct browser call.)
 const HISTORY_KEY = 'navbharatai_figma_history';
 
 const extractFileKey = (url: string): string | null => {
@@ -194,7 +203,7 @@ const saveHistory = (fileKey: string) => {
   localStorage.setItem(HISTORY_KEY, JSON.stringify([fileKey, ...prev].slice(0, 3)));
 };
 
-export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated }) => {
+export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, onBuildViaV5, sessionId }) => {
   const [figmaUrl, setFigmaUrl] = useState('');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -218,6 +227,16 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
 
   const [isImporting, setIsImporting] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
+
+  // Saving the imported design into the user's REAL app (admin 2026-07-27). The Figma fetch was
+  // always genuine, but the generated HTML only ever reached the on-screen preview — there was no
+  // way to keep it, and no way to say which app it belonged to.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [targetPath, setTargetPath] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
   const [extractedAssets, setExtractedAssets] = useState<ExtractedAssets>({ colors: [], fonts: [] });
   const [copied, setCopied] = useState(false);
   const [aiRefineOpen, setAiRefineOpen] = useState(false);
@@ -233,7 +252,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
   const validateUrl = (url: string) => {
     if (!url) { setUrlError(''); return; }
     if (!url.includes('figma.com')) {
-      setUrlError('Valid Figma URL paste karo');
+      setUrlError('Paste a valid Figma URL');
     } else {
       setUrlError('');
     }
@@ -242,7 +261,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
   const handleConnect = useCallback(async () => {
     if (!figmaUrl || !token) return;
     const fileKey = extractFileKey(figmaUrl);
-    if (!fileKey) { setUrlError('Valid Figma URL paste karo'); return; }
+    if (!fileKey) { setUrlError('Paste a valid Figma URL'); return; }
 
     setConnectionStatus('connecting');
     setConnectionError('');
@@ -250,14 +269,21 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
     setGeneratedCode('');
 
     try {
-      const res = await fetch(`${FIGMA_API}/files/${fileKey}`, {
-        headers: { 'X-Figma-Token': token },
+      // Route through NavBharatAI's server-side Figma proxy (admin autopsy 2026-07-21): a direct
+      // browser call to api.figma.com is CORS-blocked, so the import never worked. The proxy fetches
+      // server-side with your token and returns the file JSON (with Figma's status for 403/404).
+      const res = await fetch('/api/figma/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileKey, token }),
       });
-      if (res.status === 403) throw new Error('Token invalid hai — Figma settings mein check karo');
-      if (res.status === 404) throw new Error('File nahi mili — URL dobara check karo');
-      if (!res.ok) throw new Error(`Figma API error: ${res.status}`);
+      const payload = await res.json().catch(() => null);
+      const figmaStatus = payload?.status ?? res.status;
+      if (figmaStatus === 403) throw new Error('Token is invalid — check it in your Figma settings');
+      if (figmaStatus === 404) throw new Error('File not found — check the URL again');
+      if (!res.ok || !payload?.data) throw new Error((payload && payload.error) || `Figma API error: ${figmaStatus}`);
 
-      const data = await res.json() as any;
+      const data = payload.data as any;
       const pages: FigmaPage[] = (data.document?.children || []).map((page: any) => ({
         id: page.id,
         name: page.name,
@@ -275,12 +301,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
       saveHistory(fileKey);
       setHistory(loadHistory());
     } catch (err: any) {
-      const msg = err?.message || '';
-      if (msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network')) {
-        setConnectionError('Figma API reach nahi ho pa rahi. CORS issue? Token check karo. Proxy endpoint /api/figma-proxy try karo.');
-      } else {
-        setConnectionError(msg || 'Connection fail ho gayi');
-      }
+      setConnectionError(err?.message || 'Connection failed — please try again in a moment.');
       setConnectionStatus('error');
     }
   }, [figmaUrl, token]);
@@ -323,41 +344,103 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
     }
   }, [selectedFrameNode, selectedFrame, importOptions, onCodeGenerated]);
 
+  /** A safe file name for the imported frame, e.g. "Hero Section" → "pages/hero-section.html". */
+  const suggestedPath = useMemo(() => {
+    const slug = (selectedFrame?.name || 'figma-import')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'figma-import';
+    return `pages/${slug}.html`;
+  }, [selectedFrame]);
+
+  useEffect(() => {
+    if (!targetPath) setTargetPath(suggestedPath);
+  }, [suggestedPath, targetPath]);
+
+  /**
+   * Save the imported design into the user's app.
+   *
+   * A NEW file becomes a complete standalone page — the import is a fragment, and a fragment written
+   * to disk on its own is not something a browser can open. Adding to an EXISTING page appends the
+   * markup to its body instead, so the page it already has is not thrown away.
+   */
+  const saveDesignToApp = useCallback(async () => {
+    if (!targetSession || !targetPath || saving || !generatedCode) return;
+    setSaving(true);
+    setSaveNote('');
+    setSaveFailed(false);
+    try {
+      const current = await readAppFile(targetSession, targetPath);
+      let content: string;
+      let verb: string;
+      if (current === null) {
+        content = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(selectedFrame?.name || 'Imported design')}</title>
+</head>
+<body>
+${generatedCode}
+</body>
+</html>
+`;
+        verb = 'Created';
+      } else {
+        const merged = insertSnippet(targetPath, current, generatedCode);
+        if (!merged.ok) {
+          setSaveFailed(true);
+          setSaveNote(merged.error || 'That file cannot take this design.');
+          return;
+        }
+        content = merged.code;
+        verb = 'Added the design to';
+      }
+
+      const outcome = await saveFilesToApp(
+        targetSession,
+        { [targetPath]: content },
+        `Before importing "${selectedFrame?.name || 'a design'}" from Figma into ${targetPath}`,
+      );
+      if (!outcome.ok) {
+        setSaveFailed(true);
+        setSaveNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      if (outcome.unchanged) {
+        setSaveNote('Your app already has exactly this — nothing needed changing.');
+        return;
+      }
+      setSaveNote(`${verb} ${targetPath}. ${outcome.undoHint || ''}`.trim());
+      void reloadFiles(targetSession);
+    } catch {
+      setSaveFailed(true);
+      setSaveNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setSaving(false);
+    }
+  }, [targetSession, targetPath, saving, generatedCode, selectedFrame, reloadFiles]);
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(generatedCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleAiRefine = async () => {
+  const handleAiRefine = () => {
     if (!aiPrompt.trim() || !generatedCode) return;
-    setIsRefining(true);
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Refine this HTML/CSS code as per instruction:\n\nInstruction: ${aiPrompt}\n\nCode:\n${generatedCode}`,
-        }),
-      });
-      if (!res.ok) throw new Error('AI refinement failed');
-      const data = await res.json() as any;
-      const refined = data.code || data.result || data.output || generatedCode;
-      setGeneratedCode(refined);
-      onCodeGenerated?.(refined);
-      setAiPrompt('');
-      setAiRefineOpen(false);
-    } catch {
-      // keep existing code on failure
-    } finally {
-      setIsRefining(false);
-    }
+    // Hand the imported design + instruction to the REAL engine (Pro v5.0) — the old /api/generate
+    // call never existed, so refine silently did nothing. Send there builds/refines the real app.
+    onBuildViaV5?.(
+      `Build a working app from this Figma-imported design, applying this instruction: ${aiPrompt.trim()}\n\nDESIGN (HTML/CSS):\n${generatedCode}`,
+    );
+    setAiPrompt('');
+    setAiRefineOpen(false);
   };
 
   const statusBadge = () => {
     const cfg: Record<ConnectionStatus, { label: string; icon: React.ReactNode; color: string }> = {
       disconnected: { label: 'Disconnected', icon: <X size={12} />, color: 'text-gray-400 bg-gray-800' },
-      connecting: { label: 'Connecting...', icon: <Loader2 size={12} className="animate-spin" />, color: 'text-yellow-400 bg-yellow-900/30' },
+      connecting: { label: 'Connecting...', icon: <TirangaLoader size={12} />, color: 'text-yellow-400 bg-yellow-900/30' },
       connected: { label: 'Connected ✓', icon: <CheckCircle2 size={12} />, color: 'text-green-400 bg-green-900/30' },
       error: { label: 'Error', icon: <X size={12} />, color: 'text-red-400 bg-red-900/30' },
     };
@@ -386,7 +469,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
               <div className="w-7 h-7 rounded-md bg-[#1e1333] flex items-center justify-center">
                 <span className="text-[#a259ff] font-black text-sm leading-none">F</span>
               </div>
-              <h2 className="text-sm font-semibold text-gray-100">Figma se Design Import Karo</h2>
+              <h2 className="text-sm font-semibold text-gray-100">Import Design from Figma</h2>
             </div>
             {statusBadge()}
           </div>
@@ -400,7 +483,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                 <div className="relative group">
                   <Info size={12} className="text-gray-500 cursor-pointer" />
                   <div className="absolute left-0 top-5 z-20 hidden group-hover:block w-56 bg-[#1c2128] border border-white/10 rounded-lg p-2 text-xs text-gray-300 shadow-xl">
-                    Figma me file kholo → Share → Copy link
+                    Open the file in Figma → Share → Copy link
                   </div>
                 </div>
               </div>
@@ -431,7 +514,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                   onClick={() => setShowTokenHelp((v) => !v)}
                   className="text-xs text-indigo-400 hover:text-indigo-300 ml-1 underline"
                 >
-                  Token kahan milega?
+                  Where do I find the token?
                 </button>
               </div>
               <div className="relative">
@@ -456,13 +539,13 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
           {/* Token help card */}
           {showTokenHelp && (
             <div className="mb-3 bg-[#1c2128] border border-indigo-500/30 rounded-lg p-3 text-xs text-gray-300">
-              <p className="font-medium text-indigo-300 mb-1">Token kaise banayein:</p>
+              <p className="font-medium text-indigo-300 mb-1">How to create a token:</p>
               <ol className="list-decimal list-inside space-y-0.5">
-                <li>Figma kholo → top-left avatar click karo</li>
-                <li>"Account Settings" chuno</li>
-                <li>"Personal access tokens" section mein jao</li>
-                <li>"Generate new token" click karo</li>
-                <li>Token copy karo aur yahan paste karo</li>
+                <li>Open Figma → click the top-left avatar</li>
+                <li>Choose "Account Settings"</li>
+                <li>Go to the "Personal access tokens" section</li>
+                <li>Click "Generate new token"</li>
+                <li>Copy the token and paste it here</li>
               </ol>
             </div>
           )}
@@ -474,7 +557,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
               disabled={!figmaUrl || !token || connectionStatus === 'connecting'}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-[#a259ff] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors"
             >
-              {connectionStatus === 'connecting' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {connectionStatus === 'connecting' ? <TirangaLoader size={14} /> : <RefreshCw size={14} />}
               Connect &amp; Fetch
             </button>
             {history.length > 0 && (
@@ -509,10 +592,10 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
       </div>
 
       {/* Sections 2 & 3 */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
         {/* Section 2: Design Tree */}
         {fileInfo && (
-          <div className="w-[280px] flex-shrink-0 border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
+          <div className="w-full md:w-[280px] flex-shrink-0 max-h-[38vh] md:max-h-none border-b md:border-b-0 md:border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
             {/* File info card */}
             <div className="p-3 border-b border-white/10 flex-shrink-0">
               <div className="bg-[#161b22] border border-white/10 rounded-lg p-3">
@@ -596,7 +679,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                   disabled={!selectedFrame || isImporting}
                   className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium py-2 rounded-lg transition-colors"
                 >
-                  {isImporting ? <Loader2 size={13} className="animate-spin" /> : <FileCode size={13} />}
+                  {isImporting ? <TirangaLoader size={13} /> : <FileCode size={13} />}
                   Import Selected Frame
                 </button>
               </div>
@@ -613,10 +696,10 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-300">
-                  {fileInfo ? 'Frame select karo import karne ke liye' : 'Figma file connect karo shuruaat karne ke liye'}
+                  {fileInfo ? 'Select a frame to import' : 'Connect a Figma file to get started'}
                 </p>
                 <p className="text-xs text-gray-600 mt-1">
-                  {fileInfo ? 'Left panel se page expand karo aur frame chunein' : 'URL aur token enter karke Connect & Fetch dabao'}
+                  {fileInfo ? 'Expand a page in the left panel and choose a frame' : 'Enter the URL and token, then press Connect & Fetch'}
                 </p>
               </div>
             </div>
@@ -662,6 +745,57 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                     Open in Preview
                   </button>
                 </div>
+              </div>
+
+              {/* Save into the user's real app. Until now the imported design could only be copied
+                  by hand — the Figma fetch was real, but nothing it produced could be kept. */}
+              <div className="flex-shrink-0 border-b border-white/10" style={{ background: '#161b22' }}>
+                <div className="px-4 pt-3 text-sm font-semibold text-gray-200 flex items-center gap-2">
+                  <Save size={14} className="text-[#a259ff]" /> Save this design into your app
+                </div>
+                <AppTargetPicker
+                  apps={apps}
+                  appsLoading={appsLoading}
+                  files={appFiles}
+                  filesLoading={filesLoading}
+                  sessionId={targetSession}
+                  onSessionChange={(sid) => { setTargetSession(sid); setSaveNote(''); }}
+                  selectedPath={targetPath}
+                  onPathChange={(pth) => { setTargetPath(pth); setSaveNote(''); }}
+                  fileFilter={(f) => /\.html?$/i.test(f.path)}
+                  newPathOptions={[suggestedPath]}
+                  fileLabel="Save as"
+                />
+                {apps.length > 0 && (
+                  <div className="px-3 pb-3">
+                    <button
+                      onClick={() => void saveDesignToApp()}
+                      disabled={!targetSession || !targetPath || saving}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ background: '#a259ff' }}
+                    >
+                      {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                      {saving ? 'Saving into your app…' : 'Save into my app'}
+                    </button>
+                    <p className="mt-2 text-[11px] text-gray-500 leading-snug flex gap-1.5">
+                      <History size={11} className="mt-0.5 flex-shrink-0" />
+                      A new file becomes a complete page; an existing page keeps what it has and gains
+                      this design. A restore point is saved first, so you can undo it from Versioning.
+                    </p>
+                    {saveNote && (
+                      <p
+                        className="mt-2 px-3 py-2 rounded-lg text-xs leading-relaxed flex gap-2"
+                        style={{
+                          color: saveFailed ? '#fcd34d' : '#86efac',
+                          background: saveFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)',
+                        }}
+                      >
+                        {saveFailed && <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />}
+                        <span>{saveNote}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Code block */}
@@ -724,7 +858,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                       disabled={isRefining || !aiPrompt.trim()}
                       className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs px-4 py-2 rounded-lg transition-colors"
                     >
-                      {isRefining ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                      {isRefining ? <TirangaLoader size={13} /> : <Sparkles size={13} />}
                       Refine
                     </button>
                     <button

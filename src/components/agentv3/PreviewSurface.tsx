@@ -7,13 +7,16 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
+import { shouldFailoverToLive, liveFailoverNotice } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
+import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -103,6 +106,22 @@ function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; ch
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
+// Visual-editor toolbar helpers (pure — read the selected element's reported styles into control state).
+export function veIsBold(styles: Record<string, string>): boolean {
+  const w = styles.fontWeight || '';
+  return w === 'bold' || parseInt(w, 10) >= 600;
+}
+export function veFontPx(styles: Record<string, string>): number {
+  const n = parseFloat(styles.fontSize || '');
+  return Number.isFinite(n) && n > 0 ? n : 16;
+}
+export function veRgbToHex(color: string): string {
+  const m = (color || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!m) return '#000000';
+  const h = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+  return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
+}
+
 export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
@@ -135,6 +154,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // a boot — show a thin working strip until the iframe actually finishes loading.
   const [liveLoading, setLiveLoading] = useState(false);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
+  // LIVE FAILOVER (admin report 858f6d7b) — a broken in-browser preview must never be a dead end while
+  // the real app is running on the sandbox. Both refs are once-per-workspace guards; `failoverNote`
+  // keeps the switch honest instead of letting the view jump for no visible reason.
+  const failedOverToLive = useRef(false);
+  const userPickedInBrowser = useRef(false);
+  const [failoverNote, setFailoverNote] = useState('');
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
   // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
@@ -155,7 +180,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // this, "+New chat" reset state.workspaceId to '' but the old app kept rendering in the iframe.
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
-  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); }, [workspaceId]);
+  useEffect(() => {
+    setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
+    failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
+  }, [workspaceId]);
 
   const runDiagnose = useCallback(async () => {
     if (!workspaceId) return;
@@ -205,6 +234,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {
         setFoundUrl(data.previewUrl);
         setMode('live');
+        // A genuinely successful boot resets the watchdog's failure STREAK (the total backstop and
+        // the cooldown still apply) — so the next sandbox death hours later can heal again.
+        healRef.current.streak = 0;
       }
     } catch (e) {
       setDiagResult({ ok: false, reason: e instanceof Error ? e.message : 'Network error — could not reach the server.', detail: '' });
@@ -252,15 +284,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // idle/pause kills the process): a reopened session rendered E2B's "Closed Port Error" page inside
   // the iframe and nothing auto-healed (admin report 2026-07-07). URL presence is NOT liveness — probe
   // the server's REAL preview health and, when it is sleeping/crashed, run the SAME rehydrate-and-
-  // reboot as the Diagnose button. Decision logic is pure + tested (shouldAutoRebootPreview); gated
-  // once per workspace, idle-only, and never on a failed probe.
-  const autoRebootedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!autoResume || mode !== 'live' || !workspaceId || diagnosing) return;
+  // reboot as the Diagnose button.
+  //
+  // V2 — a CONTINUOUS watchdog, not a one-shot (admin 2026-08-03, "preview chal jane ke baad gayab na
+  // ho"): the old once-per-workspace latch healed the FIRST death only; a tab left open past the next
+  // sandbox idle-pause stayed dead forever. Now the health probe re-runs every WATCH_INTERVAL while
+  // the Live tab is visible AND when the window regains focus (the "back from lunch" moment), and the
+  // heal decision is the pure cooldown+bounded-attempts policy (previewAutoReboot.ts) — repeat deaths
+  // self-heal; a boot-crash-boot hammer stays impossible (cooldown, streak cap, absolute total cap).
+  const healRef = useRef<{ ws: string | null; streak: number; total: number; lastAt: number | null }>({ ws: null, streak: 0, total: 0, lastAt: null });
+  const probeInFlight = useRef(false);
+  const probeAndMaybeHeal = useCallback(async () => {
+    if (!autoResume || mode !== 'live' || !workspaceId || diagnosing || probeInFlight.current) return;
     const hasUrl = !!(url || foundUrl);
-    if (!hasUrl || sandbox?.livePreviewAvailable !== true || autoRebootedFor.current === workspaceId) return;
-    let cancelled = false;
-    void (async () => {
+    if (!hasUrl || sandbox?.livePreviewAvailable !== true) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // never boot behind a hidden tab
+    if (healRef.current.ws !== workspaceId) healRef.current = { ws: workspaceId, streak: 0, total: 0, lastAt: null };
+    probeInFlight.current = true;
+    try {
       let status: string | null = null;
       try {
         const res = await fetch('/api/agentv3/preview-health', {
@@ -271,20 +312,39 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const health = await res.json().catch(() => null) as { status?: unknown } | null;
         if (res.ok && health && typeof health.status === 'string') status = health.status;
       } catch { /* probe failed → status stays null → never reboot on a guess */ }
-      if (cancelled) return;
+      const h = healRef.current;
       const decide = shouldAutoRebootPreview({
         autoResume: !!autoResume, liveTabShown: mode === 'live', hasUrl,
         liveBackend: sandbox?.livePreviewAvailable === true, diagnosing,
-        alreadyRebooted: autoRebootedFor.current === workspaceId, healthStatus: status,
+        streak: h.streak, total: h.total,
+        msSinceLastAttempt: h.lastAt === null ? Infinity : Date.now() - h.lastAt,
+        healthStatus: status,
       });
       if (decide) {
-        autoRebootedFor.current = workspaceId; // once per workspace — never a boot loop
-        void runDiagnose();
+        h.streak += 1; h.total += 1; h.lastAt = Date.now();
+        await runDiagnose(); // a SUCCESSFUL diagnose resets the streak (see runDiagnose)
       }
-    })();
-    return () => { cancelled = true; };
+    } finally {
+      probeInFlight.current = false;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox]);
+  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, userId, email, framework, runDiagnose]);
+  /** How often the open Live tab re-checks that its preview is still actually alive. */
+  const WATCH_INTERVAL_MS = 150_000;
+  useEffect(() => {
+    if (!autoResume || mode !== 'live' || !workspaceId) return;
+    void probeAndMaybeHeal(); // immediate check on mount / url / workspace change (the old C1b moment)
+    const timer = setInterval(() => { void probeAndMaybeHeal(); }, WATCH_INTERVAL_MS);
+    const onWake = () => { if (document.visibilityState === 'visible') void probeAndMaybeHeal(); };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoResume, mode, workspaceId, url, foundUrl, sandbox, probeAndMaybeHeal]);
 
   // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
   // while the first is still in flight — the slower response could otherwise clobber the newer one).
@@ -293,6 +353,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // uses this to decide whether the app recovered (skip the AI) or still needs a fix. `fresh:true`
   // asks the server to BYPASS its render cache so a stale cached render can't mask a recovery.
   const loadInBrowser = useCallback(async (opts?: { fresh?: boolean }): Promise<boolean> => {
+    // SSR / meta framework (Next.js, Nuxt, …) or a backend has no browser SPA entry, so the in-browser
+    // bundler would fail with a misleading "No React entry module found" (CrewHub 2026-07-20). Don't
+    // attempt it — the framework-aware panel below tells the user honestly to use the Live server.
+    if (!frameworkRunsInBrowser(framework)) { setErr(''); setLoading(false); return false; }
     if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return false; }
     if (inFlight.current) return false;
     inFlight.current = true;
@@ -322,7 +386,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       setLoading(false);
       inFlight.current = false;
     }
-  }, [workspaceId, userId, email]);
+  }, [workspaceId, userId, email, framework]);
 
   // "Fix with AI" on a broken preview — try a FREE deep refresh BEFORE spending an AI turn. A blank/
   // failed preview is frequently just a stale cached render or a transient cold-start miss (admin
@@ -375,11 +439,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // it can never loop forever).
   const emptyRetries = useRef(0);
   useEffect(() => {
-    if (mode !== 'inbrowser' || !workspaceId || html || loading || err) { emptyRetries.current = 0; return; }
+    // An SSR/backend framework never renders in-browser — the honest panel handles it, so don't retry.
+    if (mode !== 'inbrowser' || !workspaceId || html || loading || err || !frameworkRunsInBrowser(framework)) { emptyRetries.current = 0; return; }
     if (emptyRetries.current >= 3) return;
     const t = setTimeout(() => { emptyRetries.current += 1; void loadInBrowser(); }, 1_200);
     return () => clearTimeout(t);
-  }, [mode, workspaceId, html, loading, err, loadInBrowser]);
+  }, [mode, workspaceId, html, loading, err, loadInBrowser, framework]);
 
   // U1 — AUTO-REFRESH the preview as the build writes files. The parent bumps `reloadSignal` on every
   // file_changed/diff event; we DEBOUNCE so a burst of writes (a 20-file batch) triggers ONE reload
@@ -408,16 +473,31 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     const onMessage = (e: MessageEvent) => {
       const d = e.data as { __nbaiPreviewError?: boolean; source?: string; message?: string } | null;
       if (!d || d.__nbaiPreviewError !== true || !workspaceId || typeof d.message !== 'string') return;
+      // RESCUE FIRST, then record. Before this, a broken in-browser preview was only ever WRITTEN DOWN
+      // (into the report the user never opens) while a working live server sat one unclicked button
+      // away — so a build that genuinely succeeded read as "the app didn't build". Reporting the
+      // failure honestly is necessary; leaving the user staring at it when we can fix it is not.
+      const source: 'in-browser' | 'live' = d.source === 'live' ? 'live' : 'in-browser';
+      if (shouldFailoverToLive({
+        mode, hasLiveUrl: !!effectiveUrl, errorSource: source,
+        alreadyFailedOver: failedOverToLive.current, userPickedInBrowser: userPickedInBrowser.current,
+      })) {
+        failedOverToLive.current = true;
+        setFailoverNote(liveFailoverNotice());
+        setMode('live');
+      }
       fetch('/api/agentv3/preview-error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, userId, email, source: d.source === 'live' ? 'live' : 'in-browser', message: d.message.slice(0, 4000) }),
+        body: JSON.stringify({ workspaceId, userId, email, source, message: d.message.slice(0, 4000) }),
         keepalive: true,
       }).catch(() => { /* best-effort — capturing the error must never disrupt the preview */ });
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [workspaceId, userId, email]);
+    // `mode` + `effectiveUrl` are read by the failover decision, so the listener must be re-bound when
+    // they change — a stale closure would judge the failover against a previous render's state.
+  }, [workspaceId, userId, email, mode, effectiveUrl]);
 
   // VISUAL EDITOR (v1, in-browser mode only — see ReactPreview.ts's injected inspector script).
   // Clicking an element in edit mode reports back {file, line, column, newText}; this applies it via
@@ -442,13 +522,63 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [editMode, setEditMode] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
-  const setIframeEditMode = useCallback((on: boolean) => {
-    try { inBrowserIframeRef.current?.contentWindow?.postMessage({ __nbaiSetEditMode: on }, '*'); } catch { /* best-effort */ }
+  // Phase 2 (admin 2026-07-29): the element picked in edit mode + its current styles, so the toolbar (font
+  // size / color / bold / align) opens showing real values and edits the RIGHT element.
+  type VisualSelection = { file: string; line: number; column: number; tag: string; styles: Record<string, string> };
+  const [selection, setSelection] = useState<VisualSelection | null>(null);
+  const postToIframe = useCallback((msg: Record<string, unknown>) => {
+    try { inBrowserIframeRef.current?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
   }, []);
+  const setIframeEditMode = useCallback((on: boolean) => {
+    postToIframe({ __nbaiSetEditMode: on });
+    if (!on) setSelection(null);
+  }, [postToIframe]);
+  // Apply an inline-style change to the selected element: LIVE in the iframe (instant), then PERSIST to the
+  // real source via the visual-edit endpoint (styleUpdates → applyVisualStyleEdit). No reload — the live DOM
+  // already reflects it and the source is saved, so rapid tweaks (bold, size±) stay smooth. On a server
+  // error the message shows honestly.
+  // Persist a style change to the real source (no live re-apply — the iframe already reflects it, either
+  // from applyStyle's postMessage or from a resize/move drag the iframe applied itself).
+  const persistStyle = useCallback((loc: { file: string; line: number; column: number }, styleUpdates: Record<string, string>) => {
+    if (!workspaceId || !loc.file) return;
+    setSavingEdit(true); setEditError('');
+    void (async () => {
+      try {
+        const res = await fetch('/api/agentv3/visual-edit', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId, userId, email, file: loc.file, line: loc.line, column: loc.column, styleUpdates }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+        onFileEdited?.(loc.file, typeof data.content === 'string' ? data.content : '');
+      } catch (err) {
+        setEditError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingEdit(false);
+      }
+    })();
+  }, [workspaceId, userId, email, onFileEdited]);
+  // Toolbar edit: live-apply in the iframe (instant), then persist. No reload → rapid tweaks stay smooth.
+  const applyStyle = useCallback((sel: VisualSelection, styleUpdates: Record<string, string>) => {
+    postToIframe({ __nbaiApplyStyle: styleUpdates });
+    persistStyle(sel, styleUpdates);
+  }, [postToIframe, persistStyle]);
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      const d = e.data as { __nbaiVisualEditCommit?: boolean; file?: string; line?: number; column?: number; newText?: string } | null;
-      if (!d || d.__nbaiVisualEditCommit !== true || !workspaceId || typeof d.file !== 'string') return;
+      const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; __nbaiStyleCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string>; styleUpdates?: Record<string, string> } | null;
+      if (!d || typeof d !== 'object') return;
+      // The iframe reports which element the user picked (+ its current styles) → show the toolbar.
+      if (d.__nbaiSelect === true && typeof d.file === 'string') {
+        setSelection({ file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0, tag: typeof d.tag === 'string' ? d.tag : '', styles: d.styles && typeof d.styles === 'object' ? d.styles : {} });
+        return;
+      }
+      // A resize/move drag finished in the iframe → persist the final width/height/transform (no re-apply).
+      if (d.__nbaiStyleCommit === true && workspaceId && typeof d.file === 'string' && d.styleUpdates && typeof d.styleUpdates === 'object') {
+        persistStyle({ file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0 }, d.styleUpdates);
+        return;
+      }
+      if (d.__nbaiVisualEditCommit !== true || !workspaceId || typeof d.file !== 'string') return;
       setSavingEdit(true);
       setEditError('');
       void (async () => {
@@ -461,6 +591,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
           onFileEdited?.(d.file as string, typeof data.content === 'string' ? data.content : '');
+          setSelection(null); // the reload builds a new document — drop the stale selection
           await loadInBrowser(); // reload from the freshly-saved source so the preview reflects the real edit
         } catch (err) {
           setEditError(err instanceof Error ? err.message : String(err));
@@ -472,7 +603,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, userId, email, onFileEdited]);
+  }, [workspaceId, userId, email, onFileEdited, persistStyle]);
   // Turn edit mode off whenever we leave in-browser mode or the preview reloads with fresh content —
   // the iframe itself is a NEW document after a reload, so any prior postMessage toggle is gone anyway;
   // this just keeps the button's own displayed state honest.
@@ -483,7 +614,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // full-fidelity view is discoverable even though we no longer auto-switch to it.
   const switcher = (
     <div className="flex items-center gap-1">
-      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
+      <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
       <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity — real npm/runtime)">{effectiveUrl ? '● ' : ''}Live server</button>
     </div>
   );
@@ -521,6 +652,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
+        {failoverNote && (
+          <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
+            <span className="flex-1">{failoverNote}</span>
+            <button onClick={() => setFailoverNote('')} className="shrink-0 text-sky-400 hover:text-sky-200" title="Dismiss">✕</button>
+          </div>
+        )}
         {liveLoading && (
           <div className="h-0.5 bg-zinc-800 overflow-hidden">
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
@@ -565,7 +702,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
                       title="Check the real state of the dev server inside your sandbox — installs, starts, and reports the exact cause if it still doesn't come up"
                     >
-                      {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Stethoscope className="w-3.5 h-3.5" />}
+                      {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
                       {diagnosing ? 'Starting the live server…' : 'Diagnose'}
                     </button>
                   </div>
@@ -608,22 +745,48 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         {switcher}
         {viewportSwitcher}
         <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
-        {savingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />}
+        {savingEdit && <TirangaLoader className="w-3.5 h-3.5 text-indigo-400" />}
         {!!html && !err && (
           <button
             onClick={() => { const next = !editMode; setEditMode(next); setIframeEditMode(next); }}
             disabled={savingEdit}
             className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
-            title={editMode ? 'Exit visual editing — click a text element to edit it directly' : 'Visual Editor — click text in the preview to edit it directly (v1: simple text content)'}
+            title={editMode ? 'Exit visual editing' : 'Visual Editor — click any element to select it (toolbar: text size, colour, bold, align); double-click to edit its text'}
           >
             {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
             {editMode ? 'Editing…' : 'Edit'}
           </button>
         )}
         <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+          {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
+      {editMode && selection && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
+          <span className="font-mono text-zinc-500">&lt;{selection.tag || 'el'}&gt;</span>
+          <button onClick={() => applyStyle(selection, { fontWeight: veIsBold(selection.styles) ? 'normal' : 'bold' })}
+            className={`w-6 h-6 rounded border font-bold ${veIsBold(selection.styles) ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title="Bold">B</button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => applyStyle(selection, { fontSize: `${Math.max(8, Math.round(veFontPx(selection.styles)) - 2)}px` })} className="w-6 h-6 rounded border border-zinc-700 hover:text-white" title="Smaller text">A−</button>
+            <span className="w-9 text-center tabular-nums text-zinc-400">{Math.round(veFontPx(selection.styles))}px</span>
+            <button onClick={() => applyStyle(selection, { fontSize: `${Math.min(200, Math.round(veFontPx(selection.styles)) + 2)}px` })} className="w-6 h-6 rounded border border-zinc-700 hover:text-white" title="Bigger text">A+</button>
+          </div>
+          <label className="flex items-center gap-1 cursor-pointer" title="Text color">
+            <span className="text-zinc-500">Color</span>
+            <input type="color" value={veRgbToHex(selection.styles.color)} onChange={(e) => applyStyle(selection, { color: e.target.value })} className="w-6 h-6 rounded border border-zinc-700 bg-transparent cursor-pointer p-0" />
+          </label>
+          <div className="flex items-center gap-0.5">
+            {(['left', 'center', 'right'] as const).map((a) => (
+              <button key={a} onClick={() => applyStyle(selection, { textAlign: a })}
+                className={`w-6 h-6 rounded border text-[10px] font-semibold uppercase ${selection.styles.textAlign === a ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title={`Align ${a}`}>{a[0]}</button>
+            ))}
+          </div>
+          <span className="text-zinc-600 hidden sm:inline">drag = move · corner = resize</span>
+          <div className="flex-1" />
+          <button onClick={() => postToIframe({ __nbaiEditText: true })} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Edit this element's text (or double-click it)">Edit text</button>
+          <button onClick={() => { setSelection(null); postToIframe({ __nbaiDeselect: true }); }} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Deselect">Done</button>
+        </div>
+      )}
       {editError && (
         <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
       )}
@@ -647,7 +810,23 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
         </div>
       )}
-      {loading ? (
+      {mode === 'inbrowser' && !frameworkRunsInBrowser(framework) ? (
+        // SSR / meta framework (Next.js, Nuxt, …) or a backend — no browser SPA entry, so the in-browser
+        // bundler can't run it (it used to show a misleading "No React entry module found" as if the app
+        // were broken). Say so honestly and send the user to the Live server, which boots the real app.
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <div className="w-12 h-12" dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
+          <p className="text-zinc-200 font-medium">{serverFrameworkLabel(framework)} runs on the Live server</p>
+          <p className="text-[12px] text-zinc-500 max-w-sm">
+            This is a {serverFrameworkLabel(framework)} app — it renders on a real Node/SSR server (pages,
+            API routes, server components), so the lightweight in-browser preview can&apos;t run it. Your app
+            isn&apos;t broken — switch to the Live server to see it fully.
+          </p>
+          <button onClick={() => setMode('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
+            {effectiveUrl ? '● ' : ''}Open Live server
+          </button>
+        </div>
+      ) : loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
           {/* Ashok Chakra loader (admin 2026-07-07) — same spinner the in-iframe boot overlay uses. */}
           <div className="w-12 h-12 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
@@ -671,7 +850,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
               title="First deep-refreshes the preview (it may just start working); only if it still fails does it send the error to the AI"
             >
-              {deepRefreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+              {deepRefreshing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Wand2 className="w-3.5 h-3.5" />}
               {deepRefreshing ? 'Deep-refreshing preview…' : 'Fix with AI'}
             </button>
           )}

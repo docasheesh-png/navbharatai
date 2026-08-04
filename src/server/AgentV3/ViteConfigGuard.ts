@@ -73,3 +73,44 @@ export function ensureViteResolveAlias(path: string, content: string): string {
   if (defaultObj.test(src)) return src.replace(defaultObj, `$1 ${inject}`);
   return src; // no safe anchor (function-form config etc.) — leave untouched
 }
+
+const VITE_CONFIG_ANY = /^vite\.config\.(c|m)?[jt]s$/i; // root vite.config.{ts,js,mts,mjs,cts,cjs}
+
+/**
+ * FIRST-BUILD-CORRECT (missing-config autopsy 2026-07-31): a build FAILED (ok:false) because the app had
+ * `vite` in its dependencies but NO vite config file at all ("Missing vite.config.ts — the build will
+ * fail"). A Vite app without a Vite config is broken by definition. Given the workspace file map, return
+ * the config to ADD ({path, content}) — or null when the app is not a Vite app or a config already exists.
+ * Picks `.ts` for a TypeScript app (else `.js`), and imports the React plugin ONLY when it is actually a
+ * dependency (react / react-swc), mirroring the scaffold's known-good server block. NEVER overwrites an
+ * existing config. Pure; never throws.
+ */
+export function ensureViteConfig(files: Record<string, string>): { path: string; content: string } | null {
+  if (!files || typeof files !== 'object') return null;
+  const pkgRaw = files['package.json'];
+  if (typeof pkgRaw !== 'string' || pkgRaw.trim() === '') return null;
+  let deps: Record<string, unknown>;
+  try {
+    const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+    if (!pkg || typeof pkg !== 'object') return null;
+    deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  } catch {
+    return null; // unparseable package.json — never guess
+  }
+  if (deps.vite === undefined) return null; // not a Vite app → nothing to ensure
+  if (Object.keys(files).some((p) => VITE_CONFIG_ANY.test(p.replace(/^\.\//, '')))) return null; // already present
+
+  const useTs = files['tsconfig.json'] !== undefined || Object.keys(files).some((p) => /\.tsx?$/.test(p));
+  const swc = deps['@vitejs/plugin-react-swc'] !== undefined;
+  const react = deps['@vitejs/plugin-react'] !== undefined || swc;
+  const path = useTs ? 'vite.config.ts' : 'vite.config.js';
+  const importLine = react ? `import react from '${swc ? '@vitejs/plugin-react-swc' : '@vitejs/plugin-react'}';\n` : '';
+  const content =
+    `import { defineConfig } from 'vite';\n` + importLine +
+    `\nexport default defineConfig({\n` +
+    `  plugins: [${react ? 'react()' : ''}],\n` +
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`;
+  return { path, content };
+}

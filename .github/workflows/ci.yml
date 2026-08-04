@@ -20,6 +20,17 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # npm's legacy `/v1/security/audits/quick` endpoint (used by `npm audit`) is being retired and now
+      # returns a 400 "Invalid package tree" error on EVERY request — confirmed 2026-07-26 against main's
+      # own committed lockfile, not caused by any specific PR. The bundled npm on Node 20 runners (10.8.x)
+      # still calls that legacy endpoint. Confirmed (2026-07-26, via `npx npm@11.18.0 audit --json`) that
+      # npm 11.x DOES call the correct new `/v1/security/advisories/bulk` endpoint instead — npm 12.x would
+      # too but requires Node 22+, which this job doesn't run (npm 11.18.0 supports Node ^20.17.0). Pinned
+      # (not @latest) for reproducibility. Remove this step (or note if it turned out not to help) once
+      # confirmed either way — see PROGRESS.md 2026-07-26 for the full investigation.
+      - name: Upgrade npm (root-cause attempt for the audit-gate false-block, see PROGRESS.md 2026-07-26)
+        run: npm install -g npm@11.18.0
+
       - name: Install dependencies
         run: npm ci
 

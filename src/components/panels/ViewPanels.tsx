@@ -8,6 +8,8 @@ import type { AgentMode } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
+import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
+import { hasConflictMarkers } from '../../lib/merge3';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 // ── Lazy-loaded view components ─────────────────────────────────────────────
@@ -18,7 +20,6 @@ const ProjectInsightsPanel = _lz(() => import('./ProjectInsightsPanel'), 'Projec
 const CodeStudio        = _lz(() => import('../ide/CodeStudio'),         'CodeStudio');
 const TestPanel         = _lz(() => import('../ide/TestPanel'),          'TestPanel');
 const DiffViewer        = _lz(() => import('../ide/DiffViewer'),         'DiffViewer');
-const DatabaseUI        = _lz(() => import('../ide/DatabaseUI'),         'DatabaseUI');
 const VoiceToApp        = _lz(() => import('../ide/VoiceToApp'),         'VoiceToApp');
 const BotBuilder        = _lz(() => import('../ide/BotBuilder'),         'BotBuilder');
 const CostEstimator     = _lz(() => import('../ide/CostEstimator'),      'CostEstimator');
@@ -31,7 +32,9 @@ const ComponentLibrary  = _lz(() => import('../ide/ComponentLibrary'),   'Compon
 const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOptimizer');
 const APKBuilder        = _lz(() => import('../ide/APKBuilder'),         'APKBuilder');
 const FigmaImporter     = _lz(() => import('../ide/FigmaImporter'),      'FigmaImporter');
-const CustomDomain      = _lz(() => import('../ide/CustomDomain'),       'CustomDomain');
+// Custom Domain now uses the REAL, workspace-scoped Firebase-native connect flow (root-cause fix
+// 2026-07-27) — both this entry and Sidebar → "Connect my website" share ONE real implementation.
+const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
 const TeamCollaboration = _lz(() => import('../ide/TeamCollaboration'),  'TeamCollaboration');
 const PWANotifications  = _lz(() => import('../ide/PWANotifications'),   'PWANotifications');
 const CodeMinifier      = _lz(() => import('../ide/CodeMinifier'),       'CodeMinifier');
@@ -40,7 +43,7 @@ const MonetizationWizard= _lz(() => import('../ide/MonetizationWizard'), 'Moneti
 const AIImageGenerator  = _lz(() => import('../ide/AIImageGenerator'),   'AIImageGenerator');
 const CodeVersioning    = _lz(() => import('../ide/CodeVersioning'),     'CodeVersioning');
 const APIMarketplace    = _lz(() => import('../ide/APIMarketplace'),     'APIMarketplace');
-const AppStorePublisher = _lz(() => import('../ide/AppStorePublisher'),  'AppStorePublisher');
+const NavAppStore       = _lz(() => import('../ide/NavAppStore'),        'NavAppStore');
 const LiveCollaboration = _lz(() => import('../ide/LiveCollaboration'),  'LiveCollaboration');
 const AITestingSuite    = _lz(() => import('../ide/AITestingSuite'),     'AITestingSuite');
 const LocalizationManager = _lz(() => import('../ide/LocalizationManager'), 'LocalizationManager');
@@ -119,8 +122,18 @@ export interface ViewPanelsProps {
    *  `framework` + `running` (2026-07-01) let the sidebar PreviewSurface reach feature parity with
    *  the in-panel one (auto-resume + framework-aware Diagnose). */
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
+  /** Snapshot of the files taken before the last v5.0 build — the Diff Viewer's "previous version". */
+  previousFiles?: Record<string, string>;
   /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
+  /** Hand a build prompt to the REAL engine: prefills the Pro v5.0 composer and switches to that
+   *  view, where Send starts a genuine live build. Used by tools like Voice to App whose old
+   *  "generate" path called a non-existent endpoint (display-only, admin autopsy 2026-07-20). */
+  onBuildViaV5Prompt?: (prompt: string) => void;
+  /** Auto-fix: open the SCANNED Pro v5 app in the v5 page with a fix prompt prefilled (admin 2026-07-24). */
+  onAutoFixInV5?: (workspaceId: string, text: string) => void;
+  /** Time Machine: switch the workspace to another of the user's apps by its v5 sessionId. */
+  onSwitchApp?: (sessionId: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
 }
@@ -137,7 +150,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, onV3FixError, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -181,6 +194,9 @@ export function ViewPanels({
             onModeChange={setMode}
             isAppBuilt={isAppBuilt}
             onPreviewClick={() => toggleTab('preview')}
+            // IDE top-bar "AI" button → open the FULL NavBharatAI Pro v5.0 (same session/workspace/memory,
+            // so it is 100% in sync with what's open in the IDE), not the in-IDE mini chat (admin 2026-07-31).
+            onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}
             theme={theme}
             onThemeChange={setTheme}
             pendingGHEdit={pendingGHEdit}
@@ -232,6 +248,31 @@ export function ViewPanels({
       )}
 
       {activeView === 'files' && (
+        <div className="flex flex-col h-full overflow-hidden">
+          {(() => {
+            // The standalone Diff Viewer tile was removed (redundant with v5's inline diffs + Diff tab),
+            // but its merge-CONFLICT resolver is kept: whenever a workspace file carries conflict markers
+            // (e.g. a GitHub import of a repo with unresolved conflicts), surface a Resolve entry that opens
+            // the conflict resolver. Fires only when real markers exist — never dead UI. (admin 2026-07-24)
+            const conflicted = Object.entries(files as Record<string, string>)
+              .filter(([, c]) => typeof c === 'string' && hasConflictMarkers(c))
+              .map(([p]) => p);
+            if (conflicted.length === 0) return null;
+            return (
+              <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b text-xs"
+                style={{ background: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.3)', color: '#fcd34d' }}>
+                <span className="flex-1 min-w-0">
+                  ⚠ {conflicted.length} file{conflicted.length > 1 ? 's have' : ' has'} unresolved merge conflicts
+                  {' '}(<span className="font-mono">{conflicted.slice(0, 2).join(', ')}{conflicted.length > 2 ? `, +${conflicted.length - 2}` : ''}</span>).
+                </span>
+                <button onClick={() => toggleTab('diff')}
+                  className="shrink-0 px-2.5 py-1 rounded font-semibold"
+                  style={{ background: 'rgba(245,158,11,0.25)', color: '#fde68a' }}>
+                  Resolve
+                </button>
+              </div>
+            );
+          })()}
         <FilesPanel
           files={files}
           hasGeneratedCode={hasGeneratedCode}
@@ -275,6 +316,7 @@ export function ViewPanels({
             toggleTab('studio');
           }}
         />
+        </div>
       )}
 
       {/* Phase 3 — Testing System */}
@@ -296,6 +338,7 @@ export function ViewPanels({
         <div className="flex-1 h-full overflow-hidden">
           <DiffViewer
             files={files}
+            previousFiles={previousFiles}
             onResolveConflicts={(fileName: string, resolved: string) => {
               // P-DEV.4 — write the marker-free resolved content back to the workspace + refresh preview.
               const next = { ...(files as Record<string, string>), [fileName]: resolved };
@@ -307,24 +350,21 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 3 — Database UI */}
-      {activeView === 'database' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <DatabaseUI userId={user?.uid} userTier={activeAgent} />
-        </div>
-      )}
+      {/* The 'database' view was REMOVED (admin 2026-07-27): its only real content was a link to
+          Settings → App Settings → Database, so it read as a second, different database to set up.
+          The real screen (DatabaseSettings) is unchanged and still lives in Settings. */}
 
-      {/* Phase 4 — Voice to App */}
+      {/* Voice to App — REAL path (admin 2026-07-20): the spoken prompt is handed to the Pro v5.0
+          engine (composer prefill + view switch); Send there starts a genuine live build. The old
+          onAppGenerated flow rendered nothing real (its /api/generate endpoint never existed). */}
       {activeView === 'voice' && (
         <div className="flex-1 h-full overflow-hidden">
-          <VoiceToApp onAppGenerated={(code: string, _prompt: string) => {
-            setGeneratedCode(code);
-            toggleTab('preview');
-          }} />
+          <VoiceToApp onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)} />
         </div>
       )}
 
-      {/* Phase 4 — Bot Builder */}
+      {/* Bot Builder — the designed flow can now be BUILT for real via the Pro v5.0 handoff
+          (admin 2026-07-20); previously the designer ended at a JSON export and built nothing. */}
       {activeView === 'botbuilder' && (
         <div className="flex-1 h-full overflow-hidden">
           <BotBuilder />
@@ -341,10 +381,7 @@ export function ViewPanels({
       {/* Phase 5 — Screenshot to Code */}
       {activeView === 'screenshot' && (
         <div className="flex-1 h-full overflow-hidden">
-          <ScreenshotToCode onCodeGenerated={(code: string) => {
-            setGeneratedCode(code);
-            toggleTab('preview');
-          }} />
+          <ScreenshotToCode onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)} />
         </div>
       )}
 
@@ -353,10 +390,15 @@ export function ViewPanels({
         <div className="flex-1 h-full overflow-hidden">
           <MultiPageBuilder
             initialCode={generatedCode}
+            sessionId={currentProSessionId}
             onExport={(pages: any) => {
-              const firstPage = Object.values(pages)[0];
-              if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
+              // EVERY page is now written into the user's real app by the tool itself. This handler
+              // only mirrors the home page into the preview so the result is visible straight away —
+              // it used to be the ONLY thing that happened, which silently discarded every other page.
+              const home = pages['index.html'] ?? Object.values(pages)[0];
+              if (home) { setGeneratedCode(home as string); toggleTab('preview'); }
             }}
+            onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)}
           />
         </div>
       )}
@@ -378,23 +420,35 @@ export function ViewPanels({
       {/* Phase 6 — AI Debugger */}
       {activeView === 'debugger' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AIDebugger files={files} />
+          <AIDebugger files={files} onAutoFixInV5={onAutoFixInV5} />
         </div>
       )}
 
       {/* Phase 6 — Performance Analyzer */}
       {activeView === 'performance' && (
         <div className="flex-1 h-full overflow-hidden">
-          <PerformanceAnalyzer generatedCode={generatedCode} />
+          <PerformanceAnalyzer generatedCode={generatedCode} files={files as Record<string, string>} liveUrl={v3Preview?.previewUrl} />
         </div>
       )}
 
       {/* Phase 6 — Component Library */}
       {activeView === 'components' && (
         <div className="flex-1 h-full overflow-hidden">
-          <ComponentLibrary onInsert={(html: string) => {
-            setGeneratedCode(generatedCode ? generatedCode.replace('</body>', html + '\n</body>') : html);
-            toggleTab('preview');
+          {/* The component is written into the user's chosen app file by the tool itself (admin
+              2026-07-27) — this handler only mirrors the change into the on-screen preview, so what
+              was just saved is visible immediately as well. */}
+          <ComponentLibrary sessionId={currentProSessionId} onInsert={(html: string) => {
+            const src = resolveAppSource(generatedCode, files as Record<string, string>);
+            if (!hasAnalysableApp(src)) return;
+            const merged = src.html.includes('</body>')
+              ? src.html.replace('</body>', html + '\n</body>')
+              : src.html + '\n' + html;
+            if (src.kind === 'files') {
+              const next = { ...(files as Record<string, string>), 'index.html': merged };
+              setFiles(next as any); updatePreview(next as any);
+            } else {
+              setGeneratedCode(merged);
+            }
           }} />
         </div>
       )}
@@ -402,31 +456,40 @@ export function ViewPanels({
       {/* Phase 6 — SEO Optimizer */}
       {activeView === 'seo' && (
         <div className="flex-1 h-full overflow-hidden">
-          <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
       {/* Phase 7 — APK Builder */}
       {activeView === 'apk' && (
         <div className="flex-1 h-full overflow-hidden">
-          <APKBuilder generatedCode={generatedCode} appName="NavBharatAI App" />
+          <APKBuilder
+            generatedCode={generatedCode}
+            appName="NavBharatAI App"
+            sessionId={currentProSessionId}
+            githubToken={githubToken}
+            onConnectGitHub={connectGitHub}
+            onMakeIcon={() => toggleTab('imagegen')}
+          />
         </div>
       )}
 
       {/* Phase 7 — Figma Importer */}
       {activeView === 'figma' && (
         <div className="flex-1 h-full overflow-hidden">
-          <FigmaImporter onCodeGenerated={(code: string) => {
-            setGeneratedCode(code);
-            toggleTab('preview');
-          }} />
+          <FigmaImporter
+            sessionId={currentProSessionId}
+            onCodeGenerated={(code: string) => { setGeneratedCode(code); toggleTab('preview'); }}
+            onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)}
+          />
         </div>
       )}
 
-      {/* Phase 7 — Custom Domain */}
+      {/* Custom Domain — the REAL, workspace-scoped Firebase-native connect flow (honest
+          pending/active/not-configured states), same implementation as Sidebar → "Connect my website". */}
       {activeView === 'domain' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <CustomDomain />
+        <div className="flex-1 h-full overflow-y-auto">
+          <ConnectMyWebsitePanel onBack={() => toggleTab('studio')} uid={user?.uid} />
         </div>
       )}
 
@@ -447,21 +510,26 @@ export function ViewPanels({
       {/* Phase 8 — Code Minifier */}
       {activeView === 'minifier' && (
         <div className="flex-1 h-full overflow-hidden">
-          <CodeMinifier generatedCode={generatedCode} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
+          <CodeMinifier generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
         </div>
       )}
 
       {/* Phase 8 — Dark Mode Generator */}
       {activeView === 'darkmode' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DarkModeGenerator generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DarkModeGenerator generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
       {/* Phase 8 — Monetization Wizard */}
       {activeView === 'monetize' && (
         <div className="flex-1 h-full overflow-hidden">
-          <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <MonetizationWizard
+            sessionId={currentProSessionId}
+            userId={user?.uid}
+            githubToken={githubToken}
+            onConnectGitHub={connectGitHub}
+          />
         </div>
       )}
 
@@ -479,8 +547,11 @@ export function ViewPanels({
         <div className="flex-1 h-full overflow-hidden">
           <CodeVersioning
             generatedCode={generatedCode}
+            files={files as Record<string, string>}
+            sessionId={currentProSessionId}
             onRestore={(c: string) => setGeneratedCode(c)}
             onRestoreFiles={(f: any) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
+            onSwitchApp={onSwitchApp}
           />
         </div>
       )}
@@ -492,10 +563,13 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 9 — App Store Publisher */}
+      {/* Nav App Store (admin 2026-07-27) — replaces the old App Store Publisher, which was a
+          metadata checklist that never published anything. The Play/App Store listing guidance it
+          offered now lives, step by step, inside the APK Builder's publishing guide; this screen is
+          the real thing: upload an .apk, and install apps other people have published. */}
       {activeView === 'appstore' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AppStorePublisher generatedCode={generatedCode} />
+          <NavAppStore />
         </div>
       )}
 
@@ -507,6 +581,7 @@ export function ViewPanels({
             onCodeUpdate={(c: string) => setGeneratedCode(c)}
             userId={user?.uid}
             userName={user?.displayName || user?.email?.split('@')[0]}
+            userEmail={user?.email || undefined}
           />
         </div>
       )}
@@ -528,7 +603,7 @@ export function ViewPanels({
       {/* Phase 10 — AI Code Review */}
       {activeView === 'codereview' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} sessions={sessions} githubToken={githubToken} />
         </div>
       )}
 
@@ -540,7 +615,7 @@ export function ViewPanels({
 
       {activeView === 'cicd' && (
         <div className="flex-1 h-full overflow-hidden">
-          <CICDPipeline />
+          <CICDPipeline githubToken={githubToken} onConnectGitHub={connectGitHub} />
         </div>
       )}
 
@@ -570,7 +645,7 @@ export function ViewPanels({
 
       {activeView === 'designsys' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DesignSystem generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DesignSystem generatedCode={generatedCode} files={files as Record<string, string>} sessionId={currentProSessionId} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { analyzeHooksRules, hookViolationWriteNote, hooksRepairInstruction } from './HooksRulesAnalysis';
 
 const wrap = (body: string) => ({ 'src/App.tsx': body });
 
@@ -164,5 +164,90 @@ describe('analyzeHooksRules — robustness', () => {
   it('does not throw on unparseable content', async () => {
     const r = await analyzeHooksRules({ 'src/broken.tsx': 'export function A( { const useState( <<<' });
     expect(Array.isArray(r.violations)).toBe(true);
+  });
+});
+
+// M1-S1.1 — the WRITE-TIME steering note (prevent-not-heal): when a just-written React file has a
+// Rules-of-Hooks violation, the write result carries a clear, model-actionable fix instruction so the
+// bug is corrected the same turn, not shipped and caught post-build.
+describe('hookViolationWriteNote — write-time steering note', () => {
+  it('returns a fix note for a conditional hook (the crashing class)', async () => {
+    const r = await analyzeHooksRules({ 'src/Comp.tsx': `
+      import { useState } from 'react';
+      export function Comp({ on }: { on: boolean }) {
+        if (on) { const [x] = useState(0); return <div>{x}</div>; }
+        return null;
+      }
+    ` });
+    expect(r.ok).toBe(false); // sanity: analyzer flags it
+    const note = hookViolationWriteNote(r);
+    expect(note).toContain('RULES OF HOOKS');
+    expect(note).toContain('useState');
+    expect(note).toMatch(/:\d+:/); // file:line label
+  });
+
+  it('labels each violation with its FILE (multi-file batch clarity, M1-S1.2)', async () => {
+    const r = await analyzeHooksRules({
+      'src/Good.tsx': `import { useState } from 'react';\nexport function Good(){ const [x]=useState(0); return <div>{x}</div>; }`,
+      'src/Bad.tsx': `import { useState } from 'react';\nexport function Bad({on}:{on:boolean}){ if(on){ const [x]=useState(0); return <div>{x}</div>; } return null; }`,
+    });
+    const note = hookViolationWriteNote(r);
+    expect(note).toContain('src/Bad.tsx'); // names the offending file
+    expect(note).not.toContain('src/Good.tsx'); // the clean file is not flagged
+  });
+
+  it('returns a note for a hook after an early return', async () => {
+    const r = await analyzeHooksRules({ 'src/Comp.tsx': `
+      import { useEffect } from 'react';
+      export function Comp({ ready }: { ready: boolean }) {
+        if (!ready) return null;
+        useEffect(() => {}, []);
+        return <div/>;
+      }
+    ` });
+    const note = hookViolationWriteNote(r);
+    expect(note).toContain('useEffect');
+    expect(note.toLowerCase()).toContain('early return');
+  });
+
+  it('returns EMPTY for a clean file (hooks at the top level) — never nags a correct file', async () => {
+    const r = await analyzeHooksRules({ 'src/Comp.tsx': `
+      import { useState, useEffect } from 'react';
+      export function Comp() {
+        const [x, setX] = useState(0);
+        useEffect(() => { setX(1); }, []);
+        return <div>{x}</div>;
+      }
+    ` });
+    expect(r.ok).toBe(true);
+    expect(hookViolationWriteNote(r)).toBe('');
+  });
+
+  it('is empty for a report with no violations, junk, or missing fields', () => {
+    expect(hookViolationWriteNote({ violations: [], filesScanned: 1, counts: { 'conditional-hook': 0, 'hook-after-return': 0, 'hook-in-loop': 0, 'hook-in-callback': 0 }, ok: true })).toBe('');
+    expect(hookViolationWriteNote(undefined as never)).toBe('');
+  });
+});
+
+describe('hooksRepairInstruction — focused post-build heal prompt (autopsy 2026-08-02, buildId 84902e18)', () => {
+  it('carries the EXACT file:line/hook so even a weak coder can make the focused fix', async () => {
+    const r = await analyzeHooksRules({ 'src/hooks/useDashboardStats.ts': `
+      import { useMemo } from 'react';
+      export function useDashboardStats(rows: number[]) {
+        if (!rows.length) return { total: 0 };
+        const total = useMemo(() => rows.reduce((a, b) => a + b, 0), [rows]);
+        return { total };
+      }
+    ` });
+    expect(r.ok).toBe(false); // the useMemo is after an early return
+    const instr = hooksRepairInstruction(r);
+    expect(instr).toMatch(/useDashboardStats\.ts/);
+    expect(instr).toMatch(/useMemo/);
+    expect(instr).toMatch(/above any early return|top level/i);
+  });
+
+  it('is EMPTY for a clean report / junk — never nags a correct build', () => {
+    expect(hooksRepairInstruction({ violations: [], filesScanned: 1, counts: { 'conditional-hook': 0, 'hook-after-return': 0, 'hook-in-loop': 0, 'hook-in-callback': 0 }, ok: true })).toBe('');
+    expect(hooksRepairInstruction(undefined as never)).toBe('');
   });
 });

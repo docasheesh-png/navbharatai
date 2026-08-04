@@ -1,11 +1,14 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { AttachMenu } from '../AttachMenu';
-import axios from 'axios';
+import { saveSecret } from '../../lib/secretsApi';
+import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { AgentProgress, BuildStep } from './AgentProgress';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
@@ -113,16 +116,13 @@ export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, us
 
     setStatus('saving');
     try {
-      await axios.post(`/api/secrets/${userId}`, {
-        secret_name: secretName,
-        secret_value: secretValue
-      });
+      await saveSecret(userId, secretName, secretValue);
       setStatus('success');
       setSecretValue('');
     } catch (err: any) {
       console.error('Failed to save API Key:', err);
       setStatus('error');
-      setErrorMessage(err.response?.data?.error || 'Failed to save secret key. Please try again.');
+      setErrorMessage(err?.message || 'Failed to save secret key. Please try again.');
     }
   };
 
@@ -216,7 +216,7 @@ export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, us
         >
           {status === 'saving' ? (
             <>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <TirangaLoader className="w-3.5 h-3.5" />
               Saving to secure panel...
             </>
           ) : (
@@ -406,12 +406,16 @@ export const AIChat: React.FC<AIChatProps> = ({
   };
 
   // ── Voice Input ──────────────────────────────────────────────────────────
+  // The mic button only renders where the Web Speech API actually exists (desktop Chrome/Edge). On
+  // iOS/iPadOS WKWebView (the Capacitor app) it's absent — never a dead/"unresponsive" button (Apple
+  // App Review 2.1(a), iPad, 2026-08-02). See src/lib/voiceInput.ts.
   const recognitionRef = useRef<any>(null);
   const [isListening, setIsListening] = useState(false);
+  const [voiceSupported] = useState(speechRecognitionSupported);
 
   const startVoice = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { alert('Voice input works on Chrome only. Please use Chrome browser.'); return; }
+    if (!SR) return; // unsupported platforms never render the button; this is a defensive no-op
     const rec = new SR();
     rec.lang = 'en-IN';
     rec.interimResults = true;
@@ -775,7 +779,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
               >
                 <span>🚀</span>
-                Haan, Build Karo
+                Yes, Build
               </button>
             </div>
           </div>
@@ -1014,6 +1018,12 @@ export const AIChat: React.FC<AIChatProps> = ({
       )}
 
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
+        {/* App-update notice — first message once the user has chatted, in their language (native app,
+            update available). See AppUpdateChatNotice; renders nothing otherwise. */}
+        {(() => {
+          const lastUser = [...messages].reverse().find((m: any) => m?.sender === 'user');
+          return lastUser ? <AppUpdateChatNotice userText={String(lastUser.text ?? '')} /> : null;
+        })()}
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
         {restoredMessages && restoredMessages.length > 0 && (
           <div className="mb-6 bg-indigo-950/10 border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl transition-all">
@@ -1369,7 +1379,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               disabled={isPushing}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              {isPushing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              {isPushing ? <TirangaLoader className="w-3 h-3" /> : <Send className="w-3 h-3" />}
               {isPushing ? 'Pushing...' : 'Confirm & Push to GitHub'}
             </button>
           </motion.div>
@@ -1505,7 +1515,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 {/* Stage */}
                 {buildProgress.stage && (
                   <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
-                    <div className="w-3 h-3 rounded-full border border-amber-400/40 border-t-amber-400 animate-spin flex-shrink-0" />
+                    <TirangaLoader className="w-3 h-3 flex-shrink-0" />
                     <span className="text-[11px] text-amber-300 font-medium">{buildProgress.stage}</span>
                   </div>
                 )}
@@ -1730,15 +1740,17 @@ export const AIChat: React.FC<AIChatProps> = ({
                       title="Attach (photo, gallery, or file)"
                       buttonClassName="p-2.5 text-gray-500 hover:text-indigo-400 transition-colors"
                     />
-                    <button
-                      type="button"
-                      onClick={isListening ? stopVoice : startVoice}
-                      title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
-                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
-                      className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
-                    >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                    </button>
+                    {voiceSupported && (
+                      <button
+                        type="button"
+                        onClick={isListening ? stopVoice : startVoice}
+                        title={isListening ? 'Stop voice input' : 'Voice input'}
+                        aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                        className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
+                      >
+                        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
+                    )}
                     {isLoading && onStop ? (
                       <button
                         onClick={() => {

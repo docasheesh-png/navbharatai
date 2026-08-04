@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
 import { fetchPassStatus, buyProfessionalPass, type PassStatus } from './professionalPass';
+import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -63,6 +66,10 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login'>(null);
   const [buying, setBuying] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
+  // snaps back to 1 line when send() clears the input.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
 
   const refreshPass = React.useCallback(() => { fetchPassStatus().then((p) => setPass(p)).catch(() => {}); }, []);
   // Load pass/quota state on mount and whenever the signed-in user changes (also picks up a pass that
@@ -92,10 +99,19 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, storeKey]);
 
+  // ROOT-CAUSE FIX (sibling of the same bug in AgentV3Panel.tsx, admin 2026-07-26): a file over the
+  // limit used to vanish here with no feedback at all — the same silent-drop bug class. Now the user
+  // is told exactly which file was rejected and why, instead of wondering where their attachment went.
   const addFiles = (list: FileList | File[] | null) => {
     if (!list) return;
-    const incoming = Array.from(list).filter((f) => f.size <= MAX_FILE_BYTES);
-    setFiles((prev) => [...prev, ...incoming].slice(0, MAX_FILES));
+    const incoming = Array.from(list);
+    const tooBig = incoming.filter((f) => f.size > MAX_FILE_BYTES);
+    const allowed = incoming.filter((f) => f.size <= MAX_FILE_BYTES);
+    if (tooBig.length > 0) {
+      const names = tooBig.map((f) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+      setMessages((m) => [...m, { role: 'assistant', content: `⚠️ File too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB): ${names}` }]);
+    }
+    if (allowed.length > 0) setFiles((prev) => [...prev, ...allowed].slice(0, MAX_FILES));
   };
 
   const send = async (text?: string) => {
@@ -171,6 +187,10 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+        {(() => {
+          const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+          return lastUser ? <AppUpdateChatNotice userText={lastUser.content} /> : null;
+        })()}
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>
@@ -179,7 +199,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           </div>
         ))}
         {loading && (
-          <div className="flex justify-start"><div className="bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2.5"><Loader2 className="w-4 h-4 animate-spin text-indigo-400" /></div></div>
+          <div className="flex justify-start"><div className="bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2.5"><TirangaLoader className="w-4 h-4 text-indigo-400" /></div></div>
         )}
         {showQuick && (
           <div className="flex flex-wrap gap-2 pt-2">
@@ -213,8 +233,9 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           buttonClassName="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-[#c9d1d9] flex items-center justify-center"
         />
         <textarea
+          ref={composerRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 128); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           onPaste={(e) => {
             const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
@@ -233,7 +254,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
             .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
         />
         <button onClick={() => send()} disabled={(!input.trim() && files.length === 0) || loading} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          {loading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
         </button>
       </div>
 
@@ -260,7 +281,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
                   disabled={buying}
                   className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-60 text-black font-bold flex items-center justify-center gap-2"
                 >
-                  {buying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Crown className="w-4 h-4" />}
+                  {buying ? <TirangaLoader className="w-4 h-4" /> : <Crown className="w-4 h-4" />}
                   {buying ? 'Opening checkout…' : `Get Pass — ₹${pass?.priceInr ?? 99}/month`}
                 </button>
                 <p className="text-[11px] text-[#586069] mt-2">Cancel anytime · secure payment</p>

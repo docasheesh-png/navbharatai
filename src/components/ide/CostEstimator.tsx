@@ -369,7 +369,7 @@ export const CostEstimator: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="text-xl">💰</span>
           <span className="font-semibold text-base text-white/90">Cloud Cost Estimator</span>
-          <span className="text-xs text-white/40 ml-2">Apne app ki hosting cost jaano</span>
+          <span className="text-xs text-white/40 ml-2">Know your app's hosting cost</span>
         </div>
         <div className="flex items-center gap-3">
           {/* Annual toggle */}
@@ -390,7 +390,7 @@ export const CostEstimator: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-xs text-white/80 transition-colors"
           >
             <Download size={13} />
-            Report Download karo
+            Download Report
           </button>
         </div>
       </div>
@@ -560,7 +560,7 @@ export const CostEstimator: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Star size={15} className="text-green-400 shrink-0" />
                 <span className="text-sm text-green-300">
-                  Tumhare app ke liye{' '}
+                  For your app{' '}
                   <span className="font-semibold text-white">{cheapest.name}</span>{' '}
                   sabse sasta rahega:{' '}
                   <span className="font-mono font-bold text-green-300">

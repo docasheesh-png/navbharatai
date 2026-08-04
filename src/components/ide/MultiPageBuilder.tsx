@@ -3,8 +3,10 @@ import { escapeHtml } from '../../lib/escapeHtml';
 import {
   Plus, FileCode, GripVertical, MoreVertical, Pencil, Copy, Trash2,
   Download, FolderOpen, FileText, Globe, Layout, Eye, X, ChevronRight,
-  Palette, AlignLeft, Menu, Layers, Check, Monitor, RefreshCw
+  Palette, AlignLeft, Menu, Layers, Check, Monitor, RefreshCw, Loader2, History, AlertTriangle
 } from 'lucide-react';
+import { AppTargetPicker, useUserApps, useAppFiles, saveFilesToApp } from './AppTargetPicker';
+import { useIsNarrow } from '../../hooks/useIsNarrow';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,7 +38,13 @@ interface NavConfig {
 
 interface MultiPageBuilderProps {
   initialCode?: string;
+  /** Preview handoff — the pages are saved into the real app by this tool itself. */
   onExport?: (pages: Record<string, string>) => void;
+  /** The app the user is currently working on, pre-selected in the picker. */
+  sessionId?: string;
+  /** Hand a page's spec to the REAL engine (Pro v5.0). Replaces the dead /api/generate "AI Generate"
+   *  call (admin autopsy 2026-07-21). */
+  onBuildViaV5?: (prompt: string) => void;
 }
 
 // ─── Default HTML templates ───────────────────────────────────────────────────
@@ -310,7 +318,7 @@ function MenuItem({ icon, label, onClick, danger = false }: { icon: React.ReactN
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode, onExport }) => {
+export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode, onExport, onBuildViaV5, sessionId }) => {
   const MAX_PAGES = 10;
 
   const defaultPages: Page[] = [
@@ -343,6 +351,19 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
   const [showExportStructure, setShowExportStructure] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Saving into the user's REAL app (admin 2026-07-27) — see handleExportToWorkspace for the two
+  // bugs this replaces. Only the app is chosen here; the file NAMES come from the page names.
+  const { apps, loading: appsLoading, selected: targetSession, setSelected: setTargetSession } = useUserApps(sessionId);
+  const { files: appFiles, loading: filesLoading, reload: reloadFiles } = useAppFiles(targetSession);
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  // Three fixed-width panels side by side do not fit a phone, so on a narrow screen they become one
+  // panel at a time with a switcher.
+  const narrow = useIsNarrow();
+  const [mobilePanel, setMobilePanel] = useState<'pages' | 'editor' | 'export'>('editor');
 
   const activePage = pages.find((p) => p.id === activePageId) ?? pages[0];
 
@@ -423,25 +444,13 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
 
   // ── AI Generate ──────────────────────────────────────────────────────────────
 
-  async function handleAIGenerate() {
-    setGenerating(true);
-    try {
-      const prompt = `Generate HTML for a ${activePage.name} page that matches this site: ${siteDescription}`;
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-      const data = await res.json();
-      const generated: string = data.code || data.html || data.content || data.result || '';
-      if (generated) {
-        updatePage(activePageId, { code: generated });
-      }
-    } catch {
-      // Silently fail — user can try again
-    } finally {
-      setGenerating(false);
-    }
+  function handleAIGenerate() {
+    // Hand this page's spec to the REAL engine (Pro v5.0) — the old /api/generate call never existed,
+    // so this button used to spin and silently do nothing (admin autopsy 2026-07-21). The manual
+    // multi-page editor + export below stay fully local and real.
+    onBuildViaV5?.(
+      `Build a "${activePage.name}" page for this website: ${siteDescription}. Match the style of the site's other pages.`,
+    );
   }
 
   // ── Nav preview ──────────────────────────────────────────────────────────────
@@ -454,11 +463,50 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
 
   // ── Export ───────────────────────────────────────────────────────────────────
 
-  function handleExportToWorkspace() {
-    const exportPages = buildExportPages(pages, navConfig);
-    onExport?.(exportPages);
-    setExportSuccess(true);
-    setTimeout(() => setExportSuccess(false), 2500);
+  /**
+   * Save EVERY page into the user's real app, as real files, under ONE restore point.
+   *
+   * Two bugs are fixed here at once (admin 2026-07-27). The old handler passed the whole page map to
+   * `onExport`, whose only caller took `Object.values(pages)[0]` and pushed that single page into the
+   * in-memory preview — so building a five-page site produced one page on screen and silently threw
+   * the other four away. Now all of them, plus the shared stylesheet, are written to storage in a
+   * single batch, so the site is either fully saved or not saved at all.
+   */
+  async function handleExportToWorkspace() {
+    if (!targetSession || saving) return;
+    setSaving(true);
+    setSaveNote('');
+    setSaveFailed(false);
+    try {
+      const exportPages = buildExportPages(pages, navConfig);
+      const outcome = await saveFilesToApp(
+        targetSession,
+        exportPages,
+        `Before saving ${Object.keys(exportPages).length} page(s) from the Multi-Page Builder`,
+      );
+      if (!outcome.ok) {
+        setSaveFailed(true);
+        setSaveNote(outcome.error || 'Could not save. Your app is unchanged.');
+        return;
+      }
+      if (outcome.unchanged) {
+        setSaveNote('Your app already has exactly these pages — nothing needed changing.');
+        return;
+      }
+      setSaveNote(
+        `Saved ${outcome.written.length} file${outcome.written.length === 1 ? '' : 's'} into your app: ` +
+        `${outcome.written.join(', ')}. ${outcome.undoHint || ''}`.trim(),
+      );
+      void reloadFiles(targetSession);
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 2500);
+      onExport?.(exportPages);
+    } catch {
+      setSaveFailed(true);
+      setSaveNote('Could not reach the server. Your app is unchanged.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -467,8 +515,9 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
     <div
       style={{
         display: 'flex',
+        flexDirection: narrow ? 'column' : 'row',
         height: '100%',
-        minHeight: 600,
+        minHeight: narrow ? 0 : 600,
         background: '#0d1117',
         color: '#e2e8f0',
         fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -476,14 +525,42 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
         borderRadius: 8,
       }}
     >
+      {/* On a phone the three panels cannot sit side by side — 220 + 280 leaves nothing for the
+          editor — so they become one at a time behind this switcher. */}
+      {narrow && (
+        <div
+          style={{
+            display: 'flex', flexShrink: 0, background: '#161b22',
+            borderBottom: '1px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          {([['pages', `Pages (${pages.length})`], ['editor', 'Editor'], ['export', 'Save & Nav']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setMobilePanel(id)}
+              style={{
+                flex: 1, padding: '11px 4px', border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 600,
+                background: mobilePanel === id ? 'rgba(99,102,241,0.2)' : 'transparent',
+                color: mobilePanel === id ? '#818cf8' : 'rgba(255,255,255,0.5)',
+                borderBottom: mobilePanel === id ? '2px solid #6366f1' : '2px solid transparent',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Panel 1: Page Manager ─────────────────────────────────────────────── */}
       <div
         style={{
-          width: 220,
+          display: narrow && mobilePanel !== 'pages' ? 'none' : 'flex',
+          width: narrow ? '100%' : 220,
+          flex: narrow ? 1 : undefined,
           flexShrink: 0,
           background: '#161b22',
-          borderRight: '1px solid rgba(255,255,255,0.1)',
-          display: 'flex',
+          borderRight: narrow ? 'none' : '1px solid rgba(255,255,255,0.1)',
           flexDirection: 'column',
           overflow: 'hidden',
         }}
@@ -540,7 +617,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
       </div>
 
       {/* ── Panel 2: Page Editor ──────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+      <div style={{ flex: 1, display: narrow && mobilePanel !== 'editor' ? 'none' : 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         {/* Tabs */}
         <div
           style={{
@@ -598,11 +675,12 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
       {/* ── Panel 3: Export & Navigation ─────────────────────────────────────── */}
       <div
         style={{
-          width: 280,
+          width: narrow ? '100%' : 280,
+          flex: narrow ? 1 : undefined,
           flexShrink: 0,
           background: '#161b22',
-          borderLeft: '1px solid rgba(255,255,255,0.1)',
-          display: 'flex',
+          borderLeft: narrow ? 'none' : '1px solid rgba(255,255,255,0.1)',
+          display: narrow && mobilePanel !== 'export' ? 'none' : 'flex',
           flexDirection: 'column',
           overflowY: 'auto',
         }}
@@ -670,13 +748,51 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
             </div>
           )}
 
-          <button
-            onClick={handleExportToWorkspace}
-            style={{ ...primaryBtnStyle, marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            {exportSuccess ? <Check size={13} /> : <Globe size={13} />}
-            {exportSuccess ? 'Exported!' : 'Export to Workspace'}
-          </button>
+          {/* Which app receives these pages. Without this the tool had no idea where to put them
+              and quietly used whatever preview happened to be open. */}
+          <div style={{ marginTop: 10, marginLeft: -12, marginRight: -12 }}>
+            <AppTargetPicker
+              apps={apps}
+              appsLoading={appsLoading}
+              files={appFiles}
+              filesLoading={filesLoading}
+              sessionId={targetSession}
+              onSessionChange={(sid) => { setTargetSession(sid); setSaveNote(''); }}
+            />
+          </div>
+
+          {apps.length > 0 && (
+            <>
+              <button
+                onClick={() => void handleExportToWorkspace()}
+                disabled={!targetSession || saving}
+                style={{
+                  ...primaryBtnStyle, marginTop: 4, padding: '13px 0', fontSize: 15, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  cursor: !targetSession || saving ? 'not-allowed' : 'pointer',
+                  opacity: !targetSession || saving ? 0.4 : 1,
+                }}
+              >
+                {saving ? <Loader2 size={15} className="animate-spin" /> : exportSuccess ? <Check size={15} /> : <Globe size={15} />}
+                {saving ? 'Saving into your app…' : `Save ${pages.length} page${pages.length === 1 ? '' : 's'} into my app`}
+              </button>
+              <p style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.5, display: 'flex', gap: 5 }}>
+                <History size={11} style={{ marginTop: 2, flexShrink: 0 }} />
+                Every page is saved together, under one restore point you can undo from Versioning.
+              </p>
+              {saveNote && (
+                <p style={{
+                  marginTop: 8, fontSize: 12, lineHeight: 1.5, padding: '8px 10px', borderRadius: 8,
+                  color: saveFailed ? '#fcd34d' : '#86efac',
+                  background: saveFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)',
+                  display: 'flex', gap: 6, wordBreak: 'break-word',
+                }}>
+                  {saveFailed && <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />}
+                  <span>{saveNote}</span>
+                </p>
+              )}
+            </>
+          )}
         </Card>
 
         {/* Site Info */}
@@ -769,8 +885,8 @@ function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, generatin
             cursor: generating ? 'not-allowed' : 'pointer',
           }}
         >
-          {generating ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <ChevronRight size={12} />}
-          {generating ? 'Generating…' : 'AI Generate'}
+          <ChevronRight size={12} />
+          Build in Pro v5.0
         </button>
 
         <button

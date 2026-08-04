@@ -28,18 +28,25 @@ const isAppSession = (session: any) =>
 export const HistoryView = ({
   user,
   onRestoreSession,
-  onDeleteSession
+  onDeleteSession,
+  initialFilter,
 }: {
   user: any;
   onRestoreSession?: (uci: string) => void;
   onDeleteSession?: (id: string) => void;
+  /** Pre-select a filter when History is opened from a scoped entry point (e.g. the
+   *  NavBharatAI Free footer opens it filtered to 'free'). The user can still switch. */
+  initialFilter?: FilterMode;
 }) => {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [filterMode, setFilterMode] = useState<FilterMode>(initialFilter ?? 'all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Re-apply the scoped filter whenever the caller changes it (e.g. opened from the Free footer).
+  useEffect(() => { if (initialFilter) setFilterMode(initialFilter); }, [initialFilter]);
 
   useEffect(() => {
     if (!user) return;

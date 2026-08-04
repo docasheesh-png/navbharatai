@@ -120,8 +120,14 @@ export function analyzeRequirementCoverage(
     return empty;
   }
 
-  // Searchable surface of what was built — names only, never file contents.
-  const surface = [...components, ...routes, ...files.map((f) => f.split('/').pop() || f)].join('\n');
+  // Searchable surface of what was built — PATHS + names, never file contents. Full relative paths are
+  // included (not just basenames) because folder-routing frameworks encode the feature in the DIRECTORY,
+  // not the filename: Nuxt/Next put the admin panel at `pages/admin/…` and admin widgets at
+  // `components/admin/…`, so a basename-only surface dropped the `admin/` segment and reported
+  // "admin panel not found" on a build that clearly had one (ShopSphere autopsy 2026-07-19:
+  // components/admin/VendorApprovalModal.vue + RBACGuard.vue + server/middleware/rbac.ts all present).
+  // The basename is a substring of the full path, so nothing that matched before stops matching.
+  const surface = [...components, ...routes, ...files, ...files.map((f) => f.split('/').pop() || f)].join('\n');
 
   const requested: string[] = [];
   const covered: string[] = [];

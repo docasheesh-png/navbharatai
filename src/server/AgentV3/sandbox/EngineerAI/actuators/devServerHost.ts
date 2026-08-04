@@ -67,6 +67,40 @@ export function redirectDevServerOutput(command: string, logPath: string = DEV_S
  */
 export type DevFramework = 'vite' | 'next' | 'astro' | 'nuxt' | 'angular' | 'cra' | undefined;
 
+/**
+ * True when a dev command LAUNCHES A NODE SERVER directly — `tsx`/`ts-node`/`nodemon`/`node` on a server
+ * entry (server/app/index/main/backend/api), e.g. `tsx server/index.ts`. Such a command runs an
+ * Express/Fastify/Koa server on a NODE port (3000), NOT Vite's 5173, and carries no framework keyword the
+ * other detectors recognise — so the port/host helpers must treat it explicitly. Mirrors ProjectImport's
+ * `devScriptRunsNodeServer` (one source of truth for "this is a node server"). A bundler invocation
+ * (`vite`, `next`, …) is NOT matched (those are handled by the framework branches). PURE + unit-testable.
+ *
+ * ROOT CAUSE this enables the fix for (Mitrify import, 2026-07-24): `tsx server/index.ts` fell through
+ * every framework check, so the preview assumed Vite's 5173, pinned nothing, forced no host — and the
+ * health-check waited on 5173 while the Express server bound its own port → "did not come up on port 5173".
+ */
+/**
+ * True when a command pipes or chains into ANOTHER command (`|`, `||`, `&&`, `;`). Appending a
+ * `--host`/`--port` flag to such a command lands it on the WRONG program — the real bug from report
+ * 7773b4b0: a model ran `npm run dev 2>&1 | head -50`, and the flag helpers appended
+ * `-- --host 0.0.0.0 --port 3000 --strictPort` onto the END, so `head` received them and errored
+ * ("head: cannot open '--host' for reading"), and the dev server never came up. The flag helpers skip
+ * injection when this is true (the managed preview always launches a CLEAN, unpiped dev command, so only
+ * a model's ad-hoc piped/chained invocation is skipped — correct, since that isn't the managed preview).
+ * PURE + unit-testable. (`2>&1` alone is NOT a chain — it contains no `|`/`&&`/`;`.)
+ */
+export function pipesOrChainsToAnotherCommand(command: string): boolean {
+  if (!command) return false;
+  return /\||&&|;/.test(command);
+}
+
+export function isNodeServerCommand(command: string): boolean {
+  if (!command) return false;
+  // A real bundler/dev-CLI invocation is not a bare node server — let the framework branches own it.
+  if (/\b(?:vite(?:\.js)?|next|astro|nux(?:t|i)|ng|react-scripts)\b/i.test(command)) return false;
+  return /\b(?:tsx|ts-node|nodemon|node)\b[^;|&]*\b(?:server|app|index|main|backend|api)\b/i.test(command);
+}
+
 /** Identify the dev-server framework from a CONCRETE command string (e.g. a resolved package.json
  *  script body like `vite` or `astro dev`). Returns `undefined` for anything unrecognized so the
  *  flag helpers fall back to today's Vite assumption. PURE + unit-testable. */
@@ -112,6 +146,14 @@ export function ensureHostBinding(command: string, framework?: DevFramework): st
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
+  // Piped/chained (`| head`, `&& …`) — appending a flag would land it on the WRONG program (report
+  // 7773b4b0: `npm run dev | head` got `--host` appended onto `head`). Leave such a command untouched.
+  if (pipesOrChainsToAnotherCommand(command)) return command;
+  // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
+  // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
+  // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
+  // that ignores HOST is unchanged. (Mitrify node-express import fix, 2026-07-24.)
+  if (isNodeServerCommand(command)) return `HOST=0.0.0.0 ${command}`;
   // Next.js dev server.
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
@@ -351,6 +393,15 @@ export function buildPreKillPortCommand(port: number): string {
 export function pinDevServerPort(command: string, port: number, framework?: DevFramework): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
+  // Piped/chained (`| head`, `&& …`) — appending a `--port` would land it on the WRONG program (report
+  // 7773b4b0: `npm run dev | head` got `--port 3000 --strictPort` appended onto `head`). Skip injection.
+  if (pipesOrChainsToAnotherCommand(command)) return command;
+  // A direct Node server (`tsx server/index.ts`, …) takes no `--port` flag; nearly every Express/Fastify
+  // app reads its port from `process.env.PORT`. Inject `PORT=<port>` so the server binds the exact port
+  // the health-check watches — the fix for the Mitrify "did not come up on port 5173" import (its
+  // `tsx server/index.ts` had no framework signal, so the preview assumed Vite 5173 and pinned nothing).
+  // If the server ignores PORT and binds its own, detectDevPort re-points the preview to the real port.
+  if (isNodeServerCommand(command) && !/\bPORT=/.test(command)) return `PORT=${port} ${command}`;
   if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run
@@ -384,20 +435,71 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
  */
 export function detectDevPort(output: string, fallback: number): number {
   if (!output) return fallback;
-  const patterns = [
-    /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{2,5})/i,   // Local: http://localhost:5174/
-    /running on port (\d{2,5})/i,
-    /listening on\b[^\n]*?:(\d{2,5})/i,
+
+  // ROOT CAUSE this rewrite kills (mitrify autopsy 2026-08-04, buildId ca5a4ca8). The old version ran
+  // four regexes over the WHOLE log and returned the first hit anywhere. The app printed
+  //   `[express] serving on port 5000`
+  // and then, because no Postgres was provisioned, dumped a connection error containing
+  //   `Error: connect ECONNREFUSED 127.0.0.1:5432` … `port: 5432`
+  // The very first pattern (`localhost|127.0.0.1…:(\d+)`) matched the ERROR's REMOTE address, so the
+  // health check probed 5432, found nothing, and declared "the dev server did not come up on port
+  // 5432" — while the app was serving perfectly on 5000. A WORKING app was reported dead, and the
+  // reported port was a database port the dev server never had anything to do with.
+  //
+  // Two independent defects, both fixed here:
+  //   1. An error / stack-trace line was allowed to answer "which port is the server listening on?".
+  //      A connection error's address is a DESTINATION the app failed to reach — the opposite of a
+  //      listening announcement. Such lines are now excluded outright.
+  //   2. `serving on port N` — Express's single most common phrasing — was not a recognised
+  //      announcement (only `running on port N` was), so the correct answer was never even a
+  //      candidate at strong-signal level.
+  //
+  // The scan is now line-based and TIERED: a real listening announcement always beats the loose
+  // `port: N` fallback, no matter where each appears in the log.
+
+  /** A line that reports a FAILURE, not a listening socket — its addresses must never be trusted. */
+  const isErrorLine = (line: string): boolean =>
+    /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOTFOUND|ETIMEDOUT|ECONNABORTED/i.test(line)
+    || /\bError\b\s*[:[]/.test(line)          // "Error: connect …", "AggregateError [ECONNREFUSED]:"
+    || /^\s*at\s/.test(line)                   // stack frame
+    || /\b(?:errno|syscall|address)\s*:/i.test(line) // the error object's own dump
+    || /UNHANDLED REJECTION|unhandledRejection|\bwarn(?:ing)?\b/i.test(line)
+    || /failed to (?:connect|reach)|could not connect|connection refused/i.test(line);
+
+  /** Ports owned by datastores/infra — a dev server essentially never binds one. */
+  const INFRA_PORTS = new Set([5432, 3306, 27017, 6379, 5672, 9200, 11211, 1433, 9092, 2379]);
+
+  // Tier 1 — an explicit "I am listening" announcement. High confidence.
+  const STRONG: RegExp[] = [
+    /(?:^|\s)(?:Local|Network):\s*https?:\/\/[^\s]*?:(\d{2,5})/i,        // Vite: "  ➜  Local: http://localhost:5173/"
+    /\b(?:listening|running|serving|started|ready)\b[^\n]{0,40}?\bon\b[^\n]{0,20}?\bport\b[:\s]+(\d{2,5})\b/i,
+    /\b(?:listening|running|serving|started|ready)\b[^\n]{0,40}?\b(?:on|at)\b[^\n]{0,20}?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|https?:\/\/[^\s:]+):(\d{2,5})/i,
+    /\blistening on\b[^\n]*?:(\d{2,5})/i,
+  ];
+  // Tier 2 — a bare address or a loose "port: N". Only consulted when no announcement was found.
+  const WEAK: RegExp[] = [
+    /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{2,5})/i,
     /port[:\s]+(\d{2,5})\b/i,
   ];
-  for (const re of patterns) {
-    const m = output.match(re);
-    if (m) {
-      const p = parseInt(m[1], 10);
-      if (p >= 1 && p <= 65535) return p;
+
+  const lines = output.split('\n').filter((l) => !isErrorLine(l));
+  const pick = (patterns: RegExp[], rejectInfra: boolean): number | null => {
+    for (const line of lines) {
+      for (const re of patterns) {
+        const m = re.exec(line);
+        if (!m) continue;
+        const p = parseInt(m[1], 10);
+        if (!(p >= 1 && p <= 65535)) continue;
+        // A datastore port from a weak signal is almost certainly a connection string, not our server.
+        // It is still honoured when it IS the port we asked for (the caller knows better than we do).
+        if (rejectInfra && INFRA_PORTS.has(p) && p !== fallback) continue;
+        return p;
+      }
     }
-  }
-  return fallback;
+    return null;
+  };
+
+  return pick(STRONG, false) ?? pick(WEAK, true) ?? fallback;
 }
 
 /**

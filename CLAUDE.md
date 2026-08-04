@@ -183,6 +183,63 @@ it in `PROGRESS.md` as an open root cause (rule 6) — never ship a cosmetic pat
 the fix. Time and credit pressure never shrink this autopsy; a skipped autopsy is a guaranteed
 repeat failure on the one absolute rule.
 
+**Step 5 — THE 50/50 LAW: fixing the root cause is only HALF the work; the other half is "why did
+the problem arise AT ALL?" (admin-mandated 2026-07-22).** DNA-level root-causing the reported failure
+is 50%. The other 50% is going one level DEEPER and killing the CONDITION that let the problem exist —
+so the app is built RIGHT the first time and the failure can never recur. Apply this to every bucket,
+especially the ones that look "harmless":
+- **✅ Self-heal is NOT a success — it is a RED FLAG.** For every self-healed item ask: *why did the
+  builder not produce this correctly in the FIRST attempt? Why did a heal need to run at all?* The
+  goal is **100% correct in ONE pass, with ZERO heals needed.** Fix the upstream cause (the prompt/
+  contract/scaffold/plan that let the bug be generated) so the heal becomes DEAD CODE that never fires.
+  A heal that keeps firing is an unfixed root cause wearing a green checkmark.
+- **THEN, and only as the last line of defence:** IF a problem still somehow slips through, the
+  self-heal must be **100% reliable** (a real, deterministic fix that always works — never a partial or
+  best-effort patch). Two layers: (1) prevent it upstream so it never happens; (2) if it still happens,
+  heal it completely.
+- **🔀 workaround / ⏭️ skip must be ARCHITECTURALLY IMPOSSIBLE.** These are not acceptable outcomes to
+  record and move on from — they are design failures. The engine must be built so that routing around a
+  problem or skipping it CANNOT happen: the correct path is the only path. When a report shows a
+  workaround or a skip, the fix is not "handle it better" — it is "re-architect so this branch cannot
+  exist." Until that architecture exists, it stays an OPEN root cause (rule 6), never a closed item.
+
+An autopsy that only patches the reported symptom (the first 50%) and leaves the "why did it arise / why
+was a heal needed / why was a workaround possible" half undone is an INCOMPLETE autopsy — it guarantees
+the sibling failure returns. Both halves, every time.
+
+**Step 6 — THE WORLD-BEST PROACTIVE LAYER: every report ALSO gets Claude's own forward-looking suggestions,
+not only the reactive fix (admin-mandated 2026-07-31).** Steps 1–5 are REACTIVE — they mine what already
+broke. That is necessary hygiene, but ALONE it is a treadmill (mopping the floor while the tap runs) that
+never reaches THE AIM (the world's best AI app builder). So with EVERY build report — ON TOP of the full
+5-bucket autopsy — Claude must ALSO step back and give the admin its OWN proactive, senior-engineer
+suggestions toward world-best, in simple language (the admin is non-technical and wants Claude's judgement,
+not a checklist). Every report reply carries BOTH: the OLD autopsy tally AND this proactive layer. Every time:
+
+- **PREVENT, don't heal — the single biggest lever.** For every ❌ / 🥵 AND every ✅ self-heal, ask the
+  harder question: *how do we make the FIRST build correct so this never needs fixing?* Propose the UPSTREAM
+  change (prompt / scaffold / shared contract / plan) that stops the whole class from being generated at
+  all. A build that never creates the bug beats a build that heals it — this is where world-best is actually
+  won (most "continue / fix the error" builds are the engine cleaning up its OWN mistakes; kill them at the
+  source).
+- **Name the big systemic ceiling HONESTLY (rule 3, no sycophancy).** If a recurring pattern is capping the
+  DEFAULT quality — e.g. the GLM / cheap-tier 429 storm and weak-model flailing — say it plainly to the
+  admin even though it "self-heals", instead of hiding a ceiling behind a green checkmark. A self-heal that
+  fires on every build IS the ceiling. Propose the real fix, or record it as a STRATEGIC open item (rule 6).
+- **Guard the EXPERIENCE the user actually feels.** Flag anything a world-best builder would never ship —
+  an unreliable preview, a slow build, a first-try app that looks or works poorly — and propose the
+  improvement. Trust is the product; the user judges by what they SEE, not by our internal metrics.
+- **Lean into the real MOAT, don't clone.** Where relevant, suggest deepening what the competitors
+  (Lovable / Bolt / v0 / Cursor / Replit) do NOT do — NavBharatAI's India-first edge (Hindi, Cashfree,
+  domain recipes, the App Store, mobile-first). Copying makes a follower; the moat makes a leader.
+- **DRIVE it — decide, don't wait.** The admin is non-technical and explicitly wants Claude to CHOOSE what
+  matters most. So Claude PROPOSES and PRIORITIZES these proactively (best-for-the-app default + the
+  60-second rule), announces the ONE highest-value lever, and pursues it — it does not wait to be asked.
+  Reserve real questions for the genuinely consequential fork.
+
+An autopsy that ends at "fixed the reported bug" WITHOUT this forward-looking layer is INCOMPLETE toward THE
+AIM. The reactive five steps keep the app from breaking; this sixth, proactive step is how it becomes the
+best. Both layers — reactive autopsy AND proactive world-best suggestions — with every single report.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every
@@ -296,13 +353,40 @@ the code (it is actually read somewhere) on 2026-07-11.
   (⚡ KEY POOL, 2026-07-13: `GLM_API_KEY` and `KIMI_API_KEY` now accept a COMMA-separated LIST of keys —
   `GLM_API_KEY=key1,key2,key3` — for 429-rotation. A 429 on one key fails over to the same model on the
   next key before dropping quality. A single key = today's behaviour. Buy the extra keys, then just set the
-  comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".)
+  comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".
+  ✅ **LIVE 2026-07-21: the admin SET the GLM comma-pool in Cloud Run** (multiple Z.ai keys) as part of the
+  GLM-429-storm response — key rotation is now genuinely active in prod.)
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
+  (⚠️ CORRECTION 2026-08-02: the admin verified in the live Cloud Run console that `E2B_PREVIEW_DOMAIN`
+  is **NOT set** — so v5.0 previews use the raw `*.e2b.app` host by code default (`PreviewDomain.ts`
+  `DEFAULT_PREVIEW_DOMAIN = 'e2b.app'`), which always resolves. The `mitrify.xyz` branded-preview proxy
+  VM `e2b-custom-domain-proxy` (Compute Engine, us-west1-a) was **DELETED for cost** the same day
+  (~₹1,350/mo saved). To re-enable branded previews later, set `E2B_PREVIEW_DOMAIN=<wildcard-domain>`
+  AND re-provision an E2B custom-domain route for it — do NOT just set the env with no proxy, or preview
+  URLs will point at an unresolvable host. This key's earlier listing meant only "the code reads it",
+  not "it is set in Cloud Run".)
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
   `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both)
-- **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`
+- **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`,
+  `RENDER_API_KEY` (admin SET in Cloud Run 2026-08-02 — the separate-BACKEND deploy: NavBharatAI triggers a
+  real deploy of the user's Node/Express backend to Render via the Render API, `rnd_…` key. Read by
+  `src/server/AgentV3/renderDeploy.ts`. BYO-account model: deploys to the account that owns this key; without
+  it the backend-deploy path honestly reports "set RENDER_API_KEY", never a fake deploy.)
+- **User-account provisioning (ROADMAP #1 Phase 1 — zero-setup DB/Auth):** `SUPABASE_OAUTH_CLIENT_ID`,
+  `SUPABASE_OAUTH_CLIENT_SECRET` (admin SET in Cloud Run 2026-08-04. A **published Supabase OAuth app**
+  — `docasheesh-png's Org` → Settings → OAuth Apps → "Publish OAuth app". This is NOT a database
+  credential: it is NavBharatAI's platform identity, used ONCE per user to ask *their* Supabase account
+  for permission, so we can create a project **inside the user's own account**. That keeps the standing
+  rule intact — user apps run on the USER's account and bill, never NavBharatAI's. Callback:
+  `https://navbharatai.com/api/integrations/supabase/callback`. Granted scopes: Projects (read+write —
+  creates the project), Organizations (read — needs `org_id` to create in), Secrets (read — reads the new
+  project's anon key to wire the app), Auth (read+write — Phase 1.3 one-click login), Database (read+write
+  — migrations + schema types). Everything else deliberately left at **No access** (smaller consent screen
+  = more user trust); Storage can be added when Phase 1.4 needs it. ⚠️ Supabase FREE plan allows only
+  **2 projects per org** — a user already at the cap must get an honest "no room in your Supabase account"
+  message, never a silent failure.)
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
@@ -310,7 +394,31 @@ the code (it is actually read somewhere) on 2026-07-11.
   warnings/formatting never block. Set to `off`/unset to disable if it ever over-blocks a working app.),
   `AGENTV3_COST_ROUTING` + `AGENTV3_COST_ROUTING_USERS` (set `on`, canary → `aashishcpmt09@gmail.com`, by the
   admin 2026-07-12 — the free-tier cheap-routing master switch, live for the admin's account only for now),
-  `AGENTV3_INTEGRITY_GATE` (`on`, canary — see the values section below)
+  `AGENTV3_INTEGRITY_GATE` (`on`, canary — see the values section below),
+  `AGENTV3_AUTOFIX` (set `on` by the admin 2026-07-19 — turns on the post-build **runtime-error auto-fix
+  loop**: after a build that renders, captured browser console errors feed a bounded repair pass (default
+  **1** attempt, `AGENTV3_AUTOFIX_ATTEMPTS` caps at 3). It runs an EXTRA LLM pass, so it only fires when
+  runtime errors are actually detected — a clean build costs nothing extra. Model follows the routing
+  policy: free/weak = GLM/Kimi cheap coders, **no Sonnet/Opus**; paid = Claude-first (Sonnet); Opus tiers
+  = Opus. Paid builds bill the extra pass to the user. Never blocks a build; records an honest
+  RUNTIME_VERIFIED / RUNTIME_UNCHECKED / RUNTIME_ERRORS_REMAIN verdict (#1596). Set `off`/unset to disable.),
+  `AGENTV3_REQUIREMENT_AWARE` (set `on` by the admin 2026-07-20 — turns on **requirement-aware building**:
+  on a FRESH build of an ambiguous DOMAIN prompt, the engine proactively INCLUDES the features that domain
+  almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital, menu/KOT/GST for a
+  restaurant, …), so a rich request never yields a shallow app. FRICTION-FREE — NO clarifying round-trip
+  (honours the "text reply > build app" rule). Only fires for a new build (never an edit) of a detected
+  domain with genuine gaps; the analyzer covers healthcare/ecommerce/social/saas/booking/education/logistics/
+  restaurant. The same analysis is also recorded in the admin build report (code `REQUIREMENT_GAPS`, #1692).
+  Flag off ⇒ build prompt byte-identical to today. Pure decision in `RequirementGapAnalyzer.ts`; PRs #1692/
+  #1695/#1697. Set `off`/unset to disable.),
+  `AGENTV3_RATE_PACER` (set `on` by the admin 2026-07-21, GLM-429-storm response — wakes the PROACTIVE
+  per-provider token-bucket + AIMD adaptive-concurrency pacer (`RateLimitPacer.ts`, built 2026-07-18 but
+  default-OFF until now): calls are paced UNDER each provider's rate so most 429s never happen, and a
+  429/timeout HALVES concurrency (recovers, then ramps back). Tunables: `AGENTV3_PACER_RATE_PER_SEC` (8),
+  `AGENTV3_PACER_BURST` (8), `AGENTV3_PACER_MIN_CONCURRENCY` (2), `AGENTV3_PACER_MAX_CONCURRENCY` (8).
+  Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
+  GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
+  (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is
@@ -318,6 +426,24 @@ the code (it is actually read somewhere) on 2026-07-11.
   in `src/server/sonic/` + `src/components/sonic/` + a `/sonic` branch in `src/main.tsx`; deleting those
   removes it entirely. NOTE: the AWS keys belong to a dedicated IAM user (`navbharatai-sonic`, Bedrock
   scope) and are NOT the AWS Activate/Free-tier billing account — this is a separate, revocable credential.
+- **Nav App Store (user-published Android apps, admin 2026-07-27):** `NAV_STORE_BUCKET`
+  (= `navbharatai-appstore-1`, a Cloud Storage bucket in `gen-lang-client-0866594388` — the APK BYTES
+  live here because an app is 5–50 MB and a Firestore doc caps at 1 MB; the store also falls back to
+  `FIREBASE_STORAGE_BUCKET` if this is unset), `VIRUSTOTAL_API_KEY` (malware scanning, ~70 engines),
+  `NAV_STORE_ADMINS` (= `aashishcpmt09@gmail.com`; comma-separated. Falls back to `AGENTV3_FREE_LIST`
+  when unset, so the admin was already a reviewer before this was set). All three set in Cloud Run
+  2026-07-27.
+  ⚠️ **THE STORE'S SAFETY MODEL IS CODE, NOT CONFIG — do not weaken it without admin sign-off.** Every
+  upload is inspected (must be a genuinely SIGNED apk), scanned, and lands as `pending`. NOTHING in
+  the codebase can reach `approved` except an admin explicitly approving it, because malware built for
+  one campaign is routinely unknown to every engine on the day it ships. **No scan ⇒ no publication**:
+  a missing key, a rate limit, an oversized file or a timeout all BLOCK, and must never fall back to
+  publishing unscanned. Rejecting or removing an app DELETES its bytes, so a takedown is real.
+  ⚠️ **OPEN LICENSING ITEM (raised with the admin 2026-07-27):** VirusTotal's FREE/public API is, by
+  their terms, not for use in a commercial product — and NavBharatAI is one. The free tier is also
+  capped (~4 req/min, 500/day). Fine for testing and the first users; before the store carries real
+  traffic this needs either a VirusTotal paid plan or another scanner (e.g. MetaDefender). Recorded
+  here as an open item rather than left silent.
 
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
@@ -341,7 +467,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   is SAFE** — `parseModelLadder` falls back to the code default. Confirmed exact ids (admin screenshots 2026-07-12):
   - **GLM_MODEL** default `glm-5.2,glm-4.7` (flagship coder → 1-step-back). GLM ids: `glm-5.2` (flagship),
     `glm-4.7` (cheap coder), `glm-4.7-flash` (cheapest, free-tier only).
-  - **KIMI_MODEL** default `kimi-k2.7-code,kimi-k2.6`. Kimi ids (from platform.kimi.ai/docs/models):
+  - **KIMI_MODEL** default `kimi-k3,kimi-k2.7-code,kimi-k2.6` (admin 2026-07-28: K3 PREPENDED, never a
+    replacement — if `kimi-k3` is not a live id the call errors and the ladder falls through to k2.7-code
+    exactly as before, so adopting it cannot break a build even if the model does not exist. The FREE
+    ladder was deliberately left UNCHANGED — it is cheapest-first with the flagship LAST, so a newer
+    flagship in front would invert the free tier's cost model). ⚠️ **Set `RATE_KIMI3_IN`/`_OUT`/`_CACHE`
+    to K3's real published price** — `providerRates.ts` defaults them to the k2.7 rate because K3's price
+    is not verifiable here, which UNDER-states our real cost if K3 is pricier (margin risk, never a user
+    over-charge). Kimi ids (from platform.kimi.ai/docs/models):
     `kimi-k2.7-code` (strongest coder, 256k), `kimi-k2.7-code-highspeed`, `kimi-k2.6`, `kimi-k2.5` (older/cheaper).
   - Per the Model Routing Policy above, this is the flagship-first PAID/default ladder; the FREE-tier flash-first
     ladder is a SEPARATE (Slice-3) env, not `GLM_MODEL`/`KIMI_MODEL`. (Supersedes the old "flagship stays OUT of
@@ -425,8 +558,32 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
   **admin** downloads `app-release.aab` and uploads it to Play Console (Play App Signing handles
   the final signing). Automating the Play upload (a Play service-account + `r0adz0/upload-google-play`
   step) is a future infra item — until it exists, the upload is the admin's manual step.
-- The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa`); the same
-  discipline applies when an Apple release channel is set up.
+- The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa` → TestFlight); the same
+  discipline applies. Trigger it via the GitHub MCP `actions_run_trigger` on `ios-ipa.yml`, ref `main`,
+  with input `upload: true` to ship straight to TestFlight (leave it off for a signing dry-run artifact).
+
+### iOS release — durable facts (admin-verified 2026-07-21, so no session re-litigates them)
+- **The persistent distribution cert IS set up and ACTIVE.** The admin has configured the repo secrets
+  `IOS_DIST_CERT_P12_BASE64` + `IOS_DIST_CERT_PASSWORD` (verified 2026-07-21). So the Fastfile takes the
+  `import_certificate` path (reuses ONE cert every run) — NOT `cert()` per run. **Apple's 2-distribution-
+  cert cap is permanently solved; do NOT tell the admin to "activate the p12" or revoke certs before a
+  build — it's already done.** (Confirm from a build log: the fastlane summary shows `import_certificate`,
+  not `cert`.) The cert inside that p12 must never be revoked on the Apple portal or the p12 breaks.
+- **Build number auto-increments** = `CFBundleVersion` stamped with `GITHUB_RUN_NUMBER` (Apple rejects a
+  re-used build number). **Export compliance** is pre-answered (`ITSAppUsesNonExemptEncryption=false` in
+  Info.plist) so no per-upload popup. Both are in the workflow — don't re-add them.
+- **"Uploaded" ≠ "available in TestFlight".** The upload now WAITS for Apple to finish processing
+  (`skip_waiting_for_build_processing: false`), so a green run means the build genuinely reached
+  TestFlight (a processing failure now fails loudly instead of a silent green). **INTERNAL testers**
+  (App Store Connect users, incl. the account owner) get every processed build automatically — no group
+  or review. **EXTERNAL testers** need the build assigned to a group + Beta App Review: set the repo
+  secret `IOS_TESTFLIGHT_GROUPS` (comma-separated external group names) and the Fastfile auto-submits +
+  notifies them. The `changelog` workflow input sets the "What to Test" note (defaults to the build #).
+  Root cause of a past "build succeeded but no update showed" report: the old `skip_waiting:true`
+  reported success before processing, hiding failures.
+- Claude CANNOT see App Store Connect. If a build uploaded green but a tester sees no update, the real
+  diagnostic is the build's status in App Store Connect → TestFlight (Processing / Ready to Test /
+  Missing Compliance / errored) — that check is the admin's (rule 6).
 
 ## The autonomous phase cycle (mandatory — how every roadmap phase ships)
 
@@ -451,6 +608,13 @@ completes the NEXT task, with one eye on CI in the background.** Push → start 
 a background timer/notification brings you back to merge each PR the moment its check is green. You are
 never idle-waiting on a progress bar — your attention is on the next unit of work, CI just pings you when
 it's ready.
+**THE FULL LOOP (admin verbatim, 2026-07-19): CI background me chalti hai — green ka wait NAHI karna hai.
+CI run hote hi turant naya (next) kaam shuru karo, cycle me. Aur jab CI GREEN ho jaaye, tab ek checkpoint
+par ruk kar us PR ko merge karo, phir wapas apne purane checkpoint (jahaan next-kaam paused tha) se kaam
+continue karo.** In plain terms: the green-notification is a brief, cheap interrupt — you pause the task
+in flight ONLY long enough to land that one merge at its checkpoint, then immediately resume the paused
+task from exactly where you left it. You never stop the conveyor to watch a run go green, and you never
+abandon the in-flight task after merging — merge, then straight back to the paused checkpoint.
 When the work is large or spans many PRs, MANY CI runs will queue up — that is expected and fine.
 Do NOT sit and watch any single CI run. The rule, every time you push:
 - **Push → then IMMEDIATELY move to the next unit of work** (investigate, design, or start the next
@@ -684,7 +848,7 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 | **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
 | Plan phase | Grok | Grok/Sonnet | **Opus** |
 | Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
-| Heal gates (integrity / preview / C9 / runtime) | **`glm-4.7`/`kimi-k2.5` — NEVER Claude/flash/flagship** | Claude/Sonnet | Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02: "weak me last me GLM/Kimi ke top module"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` reverts to the old cheap-coder heal.** | Claude/Sonnet | Opus |
 
 ### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
 - Free ladder (LIVE, Slice 3): flash-first — `AGENTV3_FREE_GLM_MODEL` (default `glm-4.7-flash,glm-4.7,glm-5.2`),
@@ -803,11 +967,16 @@ Two admin-mandated additions to the billing surface (both verified live: a real 
   carries ONLY tokens + the real bill + the user's selected tier, branded `NavBharatAI Pro v3.0` — never a
   provider/model name (GLM/Kimi/Claude/Sonnet/Opus/Gemini/Grok/…), never our internal real cost or markup
   (those stay ADMIN-only in the diagnostics report). This also fixed a real crash: Fix 65's per-tier
-  breakdown objects had mismatched shapes that made the client do `undefined.toFixed()`. ⚠️ OPEN ITEM
-  (Fix 68, not yet done): the downloadable **Build report** still shows provider names for everyone
-  (`PROVIDER_FALLBACK "Provider GLM failed"`, `providerDelivery`, `providerTokens`, `llmCalls` provider/
-  model). That report must be gated so regular users see a provider-anonymous view while the ADMIN keeps
-  the full detail. Do NOT surface provider names on any user-facing screen.
+  breakdown objects had mismatched shapes that made the client do `undefined.toFixed()`. ✅ **Fix 68 —
+  DONE (verified against live code 2026-08-04; this line previously read "not yet done" and was STALE).**
+  The build report is now gated: `GET /api/agentv3/diagnostics` resolves `showProviderDetail =
+  isReportAdmin(<VERIFIED email>)` and **fails CLOSED** (no email / lookup failure ⇒ anonymized), then a
+  non-admin gets `userFacingReport()` (`BuildDiagnostics.ts`) for the latest/session/by-id report and
+  `redactProviderError()` (`lib/providerRedaction.ts`) over the history list's `summary`/`rootCause`.
+  Test-locked in `providerRedaction.test.ts`, `BuildDiagnostics.test.ts` and `agentv3.test.ts`. Separately,
+  the user no longer downloads a report at all (admin 2026-07-29): "Report" submits it server-side to the
+  admin inbox and the user receives only `{ ok }`. The standing rule is unchanged and permanent: **do NOT
+  surface provider names on any user-facing screen.**
 
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 

@@ -172,6 +172,8 @@ export interface EndgameVerdict {
   deterministicFixes: string[];
   llmFilesWritten: number;
   clean: boolean;
+  /** True when the batch LLM repair INCREASED the error count and was rolled back (CrewHub 59→67). */
+  llmReverted?: boolean;
 }
 
 const NO_ATTEMPT: EndgameVerdict = {
@@ -196,21 +198,42 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     const out2 = det.changedPaths.length > 0 ? await io.runTsc() : out1;
     const errors2 = parseTscErrors(out2);
     let llmFilesWritten = 0;
+    let llmReverted = false;
     let finalErrors = errors2;
     if (errors2.length > 0 && io.llmRepair) {
       io.log?.(`🔧 ${errors2.length} error(s) need real fixes — one batch repair pass…`);
       const subset = offendingFileSubset(files, errors2);
       const fixed = (await io.llmRepair(out2, subset).catch(() => [])) || [];
+      // CONVERGENCE GUARD (CrewHub autopsy 2026-07-20: repair went 59 → 67 and the WORSE files stayed):
+      // snapshot every file BEFORE the repair overwrites it, so a repair that increases the error count
+      // can be rolled back. The pass is then monotone by construction — it helps or does nothing, never harms.
+      const preRepair = new Map<string, string | undefined>();
       for (const f of fixed) {
         if (!f?.path || typeof f.content !== 'string') continue;
         // Blank-overwrite guard: a repair that returns an empty/husk file must not destroy real work.
         const existing = files[f.path];
         if (typeof existing === 'string' && existing.trim().length > 80 && f.content.trim().length < 10) continue;
+        if (!preRepair.has(f.path)) preRepair.set(f.path, existing);
         await io.writeFile(f.path, f.content).catch(() => {});
         files[f.path] = f.content;
         llmFilesWritten++;
       }
-      if (llmFilesWritten > 0) finalErrors = parseTscErrors(await io.runTsc());
+      if (llmFilesWritten > 0) {
+        finalErrors = parseTscErrors(await io.runTsc());
+        if (finalErrors.length > errors2.length) {
+          // The repair made it WORSE — restore every touched file to its pre-repair content and keep the
+          // better (pre-repair) state as the honest outcome.
+          for (const [p, prev] of preRepair) {
+            if (typeof prev !== 'string') continue;
+            await io.writeFile(p, prev).catch(() => {});
+            files[p] = prev;
+          }
+          io.log?.(`↩️ The batch repair increased the error count (${errors2.length} → ${finalErrors.length}) — reverted those files and kept the better state.`);
+          finalErrors = errors2;
+          llmFilesWritten = 0; // honest: the repair delivered net-zero files
+          llmReverted = true;
+        }
+      }
     }
     return {
       attempted: true,
@@ -220,6 +243,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       deterministicFixes: det.fixes,
       llmFilesWritten,
       clean: finalErrors.length === 0,
+      ...(llmReverted ? { llmReverted } : {}),
     };
   } catch {
     return NO_ATTEMPT; // endgame is best-effort — it must never worsen or hang a build

@@ -6,6 +6,17 @@
 // identifier back, so every file-drop / conflict-resolve caller is unchanged.
 
 import { saveAllFiles } from '../lib/storage';
+import { importDropSummary, type DropCounts } from '../lib/importDropReport';
+import { uploadFileChunked } from '../lib/zipProjectUpload';
+import { authJsonHeaders } from '../lib/authHeaders';
+
+/**
+ * The largest zip a SINGLE request can safely carry: the platform caps any one HTTP request at ~32 MB,
+ * so beyond this the file must travel through the chunked uploader instead. This threshold is what
+ * killed the old flow's honesty — the UI used to wave through anything under 50 MB and the request then
+ * died mid-air between 32 and 50 with no explanation (the dead zone found in the 2026-08-04 audit).
+ */
+export const SINGLE_REQUEST_ZIP_BYTES = 25 * 1024 * 1024;
 
 export interface ZipImportDeps {
   setFiles: (v: any) => void;
@@ -38,20 +49,47 @@ export function useZipImport(deps: ZipImportDeps) {
     setProBuildProgress({ active: true, stage: `📦 Streaming ${zipFile.name}...`, steps: [], percent: 5, generatedFiles: {} });
 
     const loadedFiles: Record<string, string> = {};
+    // Refusals reported by the server's stream, tallied so the import summary can state them.
+    const droppedCounts: DropCounts = {};
     let fileCount = 0;
     let appName = zipFile.name.replace(/\.zip$/i, '');
     const fileList: string[] = [];
 
     try {
-      // Send raw binary — no base64 encoding, browser streams directly to server
-      const response = await fetch('/api/extract-zip', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-File-Name': encodeURIComponent(zipFile.name),
-        },
-        body: zipFile,
-      });
+      // TWO TRANSPORTS, one extraction. Small zips go as one raw-binary request (fast, works signed
+      // out). Anything bigger rides the chunked uploader first — every request clears the platform's
+      // ~32 MB cap, up to 5 GB — and the extract route then claims the assembled file by upload id.
+      // The SSE extraction stream that follows is IDENTICAL either way.
+      let response: Response;
+      if (zipFile.size > SINGLE_REQUEST_ZIP_BYTES) {
+        const { uploadId } = await uploadFileChunked(zipFile, (p) => {
+          if (p.phase === 'uploading') {
+            setProBuildProgress({
+              active: true,
+              stage: `📦 Uploading ${zipFile.name} — ${Math.round(p.fraction * 100)}%…`,
+              steps: [], percent: Math.max(5, Math.round(p.fraction * 60)), generatedFiles: {},
+            });
+          }
+        });
+        const auth = await authJsonHeaders();
+        response = await fetch('/api/extract-zip', {
+          method: 'POST',
+          headers: {
+            'X-Upload-Id': uploadId,
+            'X-File-Name': encodeURIComponent(zipFile.name),
+            ...(auth.Authorization ? { Authorization: auth.Authorization } : {}),
+          },
+        });
+      } else {
+        response = await fetch('/api/extract-zip', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(zipFile.name),
+          },
+          body: zipFile,
+        });
+      }
 
       if (!response.ok || !response.body) {
         const errText = await response.text().catch(() => `HTTP ${response.status}`);
@@ -85,9 +123,15 @@ export function useZipImport(deps: ZipImportDeps) {
               fileList.push(evt.path);
               fileCount++;
 
-              // Throttle React state updates — flushing per-file would mean thousands of
-              // re-renders for a big app (jank/crash). Show first few instantly, then batch.
-              if (fileCount <= 8 || fileCount % 20 === 0) {
+              // BULK, NOT ONE-BY-ONE (admin 2026-07-31: a 2500-file zip appeared file-by-file over ~23 min).
+              // The files ALREADY exist — there is nothing to "rebuild", so they must land in ONE bulk
+              // update, not drip in. Root cause of the slow trickle: this used to spread the ENTIRE growing
+              // map every 20 files — for N files that is O(N²) full re-renders of the file tree/editor (a
+              // 2500-file import ≈ 125 spreads of up-to-2500 keys). We now show ONLY the first few instantly
+              // (so a tiny app still feels live) and let the SINGLE bulk `setFiles(loadedFiles)` at the end
+              // (below) commit everything at once — O(N), a few seconds instead of tens of minutes. The cheap
+              // progress counter (setProBuildProgress, further down) keeps the user informed meanwhile.
+              if (fileCount <= 8) {
                 setFiles({ ...loadedFiles } as any);
               }
 
@@ -107,7 +151,13 @@ export function useZipImport(deps: ZipImportDeps) {
             } else if (evt.type === 'progress') {
               setProBuildProgress(prev => ({ ...prev, stage: evt.stage || evt.message || prev.stage }));
             } else if (evt.type === 'skipped') {
-              // a single file was skipped (binary/too large) — fine, keep going
+              // NOT "fine, keep going" (admin 2026-08-04). These events were received and discarded, so a
+              // media-heavy project reported a clean import while thousands of the user's own files had
+              // been dropped. Count them by the server's own reason and state the total below.
+              if (evt.reason === 'binary') droppedCounts.binary = (droppedCounts.binary ?? 0) + 1;
+              else if (evt.reason === 'too large') droppedCounts.tooLarge = (droppedCounts.tooLarge ?? 0) + 1;
+              else if (evt.reason === 'unsafe path') droppedCounts.unsafe = (droppedCounts.unsafe ?? 0) + 1;
+              else droppedCounts.overCap = (droppedCounts.overCap ?? 0) + 1;
             } else if (evt.type === 'complete') {
               appName = evt.appName || appName;
             } else if (evt.type === 'error') {
@@ -127,7 +177,9 @@ export function useZipImport(deps: ZipImportDeps) {
       // Final state — ensure everything is synced.
       setFiles(loadedFiles as any);
       saveAllFiles(loadedFiles).catch(() => {}); // persist to IndexedDB/Cache API
-      syncFilesToV3(loadedFiles).catch(() => {}); // mirror uploaded files into the v5.0 workspace
+      // source: 'import' marks this a bulk import (not a routine IDE-edit autosave) — required for
+      // the large-import GitHub durability backstop in syncFilesToV3/import-files to ever consider it.
+      syncFilesToV3(loadedFiles, { source: 'import' }).catch(() => {}); // mirror uploaded files into the v5.0 workspace
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 
@@ -161,7 +213,7 @@ export function useZipImport(deps: ZipImportDeps) {
       let importMessage: string;
       if (isFrameworkApp) {
         // Honest: framework apps need npm install + dev server — tell user exactly what to do.
-        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n⚠️ **This app needs a build step** (it uses ${hasBuildTool ? 'Vite/webpack/etc.' : 'npm'}).\nIn-browser preview won't work for it — you need a real dev server.\n\n👉 Type **"run this app"** and I will install dependencies and launch a live preview for you.`;
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n🚀 **Opening the live preview** — installing dependencies & starting the dev server for your EXISTING files (no rebuild). This takes a moment. If it doesn't appear automatically, tap **Diagnose** in the Preview.`;
       } else if (isSimpleReact) {
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n✅ Preview is live in-browser via Babel transpilation. Tell me what you want to change!`;
       } else if (isStaticApp) {
@@ -170,15 +222,24 @@ export function useZipImport(deps: ZipImportDeps) {
         importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\nOpen Code Studio to view and edit the files. Tell me what you want to change!`;
       }
 
+      // HONEST TAIL (admin 2026-08-04): whatever the classification above says about the app, the
+      // message must also say what did NOT come in. '' for a clean import, so a complete project reads
+      // exactly as before — this only ever ADDS truth, never noise.
+      const dropSummary = importDropSummary({ kept: fileCount, dropped: droppedCounts });
       setProMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        text: importMessage,
+        text: dropSummary ? `${importMessage}\n\n⚠️ ${dropSummary}` : importMessage,
         sender: 'ai', timestamp: new Date(),
       }]);
       // Framework apps: open Code Studio so user can see the imported files immediately.
       // Static/simple apps stay in Pro Chat where the inline preview is already showing.
+      // Framework app: land on the PREVIEW (admin 2026-07-31 — "preview chal hi chale"). PreviewSurface's
+      // existing auto-resume (runDiagnose → /api/agentv3/preview-diagnose) then installs deps + starts the
+      // dev server on the EXISTING files — NO LLM, NO regeneration, so the imported app just RUNS. If the
+      // auto-boot's sandbox conditions aren't ready on a fresh import, the "Diagnose" button in the Preview
+      // does the identical one-tap boot. (Static/simple apps already show their in-browser preview inline.)
       if (isFrameworkApp) {
-        setTimeout(() => toggleTab('studio'), 400);
+        setTimeout(() => toggleTab('preview'), 400);
       }
     } catch (err: any) {
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });

@@ -63,6 +63,21 @@ describe('analyzeRequirementCoverage', () => {
     expect(r.findings).toHaveLength(0);
   });
 
+  it('counts a folder-routed feature as covered by its DIRECTORY, not just the basename (ShopSphere/Nuxt autopsy)', () => {
+    // Nuxt/Next encode the admin panel in the DIRECTORY (components/admin/, pages/admin/), not the
+    // filename. A basename-only surface dropped `admin/` → false "admin panel not found". Full paths fix it.
+    const r = analyzeRequirementCoverage(
+      'multi-vendor marketplace with an admin panel to approve vendors',
+      graph({
+        components: ['VendorApprovalModal', 'RBACGuard'],
+        files: ['components/admin/VendorApprovalModal.vue', 'server/middleware/rbac.ts', 'pages/index.vue'],
+      }),
+    );
+    expect(r.requested).toContain('admin panel');
+    expect(r.covered).toContain('admin panel');
+    expect(r.missing).not.toContain('admin panel');
+  });
+
   it('matches synonyms (auth component satisfies a login request)', () => {
     const r = analyzeRequirementCoverage(
       'add login',

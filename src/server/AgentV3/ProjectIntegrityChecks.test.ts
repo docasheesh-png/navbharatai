@@ -177,6 +177,24 @@ describe('findOrphanStylesheets — a stylesheet wired into nothing ships an uns
     };
     expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'src/index.css' }]);
   });
+
+  it('a stylesheet wired in nuxt.config `css: []` is NOT orphan (ShopSphere/Nuxt autopsy 2026-07-19)', () => {
+    const files = {
+      'assets/css/main.css': 'body {}',
+      // Nuxt wires CSS by declaration, not by `import` — the `~/` alias resolves to the same filename key.
+      'nuxt.config.ts': `export default defineNuxtConfig({\n  css: ['~/assets/css/main.css'],\n});`,
+      'app.vue': `<template><NuxtPage /></template>`,
+    };
+    expect(findOrphanStylesheets(files)).toHaveLength(0);
+  });
+
+  it('a commented-out css entry in a config file does NOT count as wired', () => {
+    const files = {
+      'assets/css/main.css': 'body {}',
+      'nuxt.config.ts': `export default defineNuxtConfig({\n  // css: ['~/assets/css/main.css'],\n});`,
+    };
+    expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'assets/css/main.css' }]);
+  });
 });
 
 describe('injectGlobalStylesheetImport — the deterministic fix', () => {
@@ -220,7 +238,7 @@ describe('injectGlobalStylesheetImport — the deterministic fix', () => {
 // ThemeContext was imported as './context/ThemeContext' in one file and 'context/ThemeContext'
 // (baseUrl form) in another — the in-browser bundler instantiated the module TWICE → two React
 // contexts → "useTheme must be used within a ThemeProvider" crash only the user's preview showed.
-import { findMixedImportSpecifiers, normalizeImportSpecifiers, resolveProjectSpecifier, relativeSpecifier } from './ProjectIntegrityChecks';
+import { findMixedImportSpecifiers, normalizeImportSpecifiers, resolveProjectSpecifier, relativeSpecifier, codePositions } from './ProjectIntegrityChecks';
 
 describe('findMixedImportSpecifiers — the duplicate-module-instance crash class', () => {
   const FILES = {
@@ -428,5 +446,92 @@ describe('conventionRootAlternatives / duplicateModuleTarget — write-time dupl
   it('does NOT flag non-source files or files outside a convention root', () => {
     expect(duplicateModuleTarget('app/data/x.json', ['src/data/x.json'])).toBeNull(); // not a source file
     expect(duplicateModuleTarget('lib/util.ts', ['scripts/util.ts'])).toBeNull(); // no convention root
+  });
+});
+
+// ═══ normalizeImportSpecifiers must never CORRUPT a file (autopsy 2026-07-27, buildId d1623410) ═══
+// The blind regex `(['"])SPEC\1` → `'CANONICAL'` matched quoted text ANYWHERE and always emitted
+// SINGLE quotes. On a real build it rewrote a single-quoted *documentation* string in
+// src/server/lib/DbConfigGenerator.ts that contains `import { db } from "@/lib/firebase"`, producing
+//   instructions: 'Copy config. Then import { db } from '../../lib/firebase'. Done.',
+// which terminates the enclosing string → the reported `Expected identifier but found "."`, and the
+// whole build failed to compile. It also silently rewrote test fixtures inside template literals.
+describe('normalizeImportSpecifiers — never corrupts strings/comments/templates', () => {
+  const base = {
+    'src/lib/firebase.ts': 'export const db = {};',
+    'src/components/A.tsx': "import { db } from '../lib/firebase';\n", // makes the module "mixed"
+  };
+  const run = (extra: Record<string, string>) =>
+    normalizeImportSpecifiers({ ...base, 'src/components/B.tsx': "import { db } from '@/lib/firebase';\n", ...extra });
+
+  it('THE EXACT BUG: a single-quoted doc string containing a double-quoted specifier is untouched', () => {
+    const doc = `export const cfg = {\n  instructions: 'Copy config. Then import { db } from "@/lib/firebase". Done.',\n};\n`;
+    const out = run({ 'src/server/lib/DbConfigGenerator.ts': doc });
+    expect(out.files['src/server/lib/DbConfigGenerator.ts']).toBe(doc);
+    // and the result must still parse (the actual failure mode that killed the build)
+    expect(() => new Function(out.files['src/server/lib/DbConfigGenerator.ts'].replace(/export /g, ''))).not.toThrow();
+  });
+
+  it('a code-generator TEMPLATE literal emitting an import is untouched', () => {
+    const gen = 'export const t = `import { db } from "@/lib/firebase";`;\n';
+    expect(run({ 'src/gen/Tmpl.ts': gen }).files['src/gen/Tmpl.ts']).toBe(gen);
+  });
+
+  it('a comment mentioning an import is untouched', () => {
+    const c = "// see: import { db } from '@/lib/firebase'\nexport const x = 1;\n";
+    expect(run({ 'src/notes.ts': c }).files['src/notes.ts']).toBe(c);
+  });
+
+  it('PRESERVES the original quote character (a single-quoted replacement is what broke the string)', () => {
+    const out = run({ 'src/components/C.tsx': 'import { db } from "@/lib/firebase";\n' });
+    expect(out.files['src/components/C.tsx']).toBe('import { db } from "../lib/firebase";\n');
+  });
+
+  it('still rewrites every genuine specifier form (the feature must not be gutted)', () => {
+    const out = run({
+      'src/components/C.tsx': 'import { db } from "@/lib/firebase";\n',
+      'src/components/D.tsx': "const m = await import('@/lib/firebase');\n",
+      'src/components/E.tsx': "import '@/lib/firebase';\n",
+      'src/components/F.tsx': "export { db } from '@/lib/firebase';\n",
+    });
+    expect(out.files['src/components/B.tsx']).toContain("'../lib/firebase'");
+    expect(out.files['src/components/C.tsx']).toContain('"../lib/firebase"');
+    expect(out.files['src/components/D.tsx']).toContain("import('../lib/firebase')");
+    expect(out.files['src/components/E.tsx']).toBe("import '../lib/firebase';\n");
+    expect(out.files['src/components/F.tsx']).toContain("'../lib/firebase'");
+  });
+});
+
+describe('codePositions — conservative code/string/comment mask', () => {
+  const codeStr = (src: string) => {
+    const m = codePositions(src);
+    return Array.from(src, (ch, i) => (m[i] ? ch : ' ')).join('');
+  };
+
+  it('marks ordinary code and blanks string contents', () => {
+    const out = codeStr(`const a = 'hi';`);
+    expect(out).toContain('const a =');  // code kept
+    expect(out).toContain(';');
+    expect(out).not.toContain('hi');     // string contents masked out
+  });
+
+  it('blanks line and block comments', () => {
+    expect(codeStr(`a; // x\nb;`).split('\n')[0].trim()).toBe('a;');
+    expect(codeStr(`a; /* x */ b;`)).toContain('a;');
+    expect(codeStr(`a; /* x */ b;`)).not.toContain('/*');
+  });
+
+  it('treats code inside a template ${…} as code, but the literal text as not-code', () => {
+    const out = codeStr('`text ${ val } more`');
+    expect(out).toContain('val');    // the interpolation is real code
+    expect(out).not.toContain('text'); // the literal part is not
+  });
+
+  it('handles escaped quotes without losing track of the string end', () => {
+    expect(codeStr(`const a = 'it\\'s'; b;`)).toContain('b;');
+  });
+
+  it('does not mistake a division for a regex literal', () => {
+    expect(codeStr('const r = a / b; const s = 1;')).toContain('const s = 1;');
   });
 });

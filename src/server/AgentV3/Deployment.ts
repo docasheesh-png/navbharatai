@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
 import axios, { AxiosError } from 'axios';
+import { ensureSite } from '../lib/firebaseCustomDomain';
 
 const gzip = promisify(zlib.gzip);
 
@@ -32,6 +33,47 @@ export class FirebaseHostingDeployer {
     if (files.size === 0) {
       throw new Error('No files to deploy. Ensure "npm run build" produced a dist/ directory.');
     }
+    const { token, headers } = await this.authHeaders();
+    const site = FIREBASE_PROJECT;
+    const channelId = makeChannelId(workspaceId);
+
+    await this.ensureChannel(site, channelId, headers);
+    const versionName = await this.publishVersion(site, files, token, headers);
+    await axios.post(
+      `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(versionName)}`,
+      {},
+      { headers },
+    );
+    return `https://${site}--${channelId}.web.app`;
+  }
+
+  /**
+   * Deploy the built dist to the workspace's OWN dedicated Firebase Hosting site (multi-site), and
+   * release it to that site's LIVE channel. This is the durable home a Firebase-native custom domain
+   * attaches to (a preview channel cannot carry a custom domain). Idempotent: the site is created if
+   * absent, reused otherwise. Returns the site's public URL (`https://<siteId>.web.app`).
+   *
+   * A dedicated site consumes one of the project's site-quota slots, so this is only ever called for
+   * workspaces that actually connect a custom domain (never one-per-app — see firebaseCustomDomain.ts).
+   */
+  async deployToSite(workspaceId: string, files: Map<string, Buffer>): Promise<string> {
+    if (files.size === 0) {
+      throw new Error('No files to deploy. Ensure "npm run build" produced a dist/ directory.');
+    }
+    const siteId = await ensureSite(workspaceId); // creates-or-reuses `nbai-<hash>`
+    const { token, headers } = await this.authHeaders();
+    const versionName = await this.publishVersion(siteId, files, token, headers);
+    // Release to the site's default LIVE channel (a site release, not a named preview channel).
+    await axios.post(
+      `${HOSTING_API}/sites/${siteId}/releases?versionName=${encodeURIComponent(versionName)}`,
+      {},
+      { headers },
+    );
+    return `https://${siteId}.web.app`;
+  }
+
+  /** Obtain a Google auth token + JSON headers, or throw an honest error (never a fake success). */
+  private async authHeaders(): Promise<{ token: string; headers: Record<string, string> }> {
     const token = await this.auth.getAccessToken();
     if (!token) {
       throw new Error(
@@ -39,12 +81,21 @@ export class FirebaseHostingDeployer {
         'GOOGLE_APPLICATION_CREDENTIALS to a service-account JSON with the Firebase Hosting Admin role.',
       );
     }
-    const site = FIREBASE_PROJECT;
-    const channelId = makeChannelId(workspaceId);
-    const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    return { token, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } };
+  }
 
-    await this.ensureChannel(site, channelId, authHeaders);
-    const versionName = await this.createVersion(site, authHeaders);
+  /**
+   * Create a version on `site`, upload every required file, finalize it, and return the versionName.
+   * Shared by both the channel deploy (deployStatic) and the dedicated-site deploy (deployToSite) so
+   * the upload path lives in ONE place (no drift between the two publish flows).
+   */
+  private async publishVersion(
+    site: string,
+    files: Map<string, Buffer>,
+    token: string,
+    headers: Record<string, string>,
+  ): Promise<string> {
+    const versionName = await this.createVersion(site, headers);
     const versionId = versionName.split('/').pop() ?? '';
 
     const fileHashes: Record<string, string> = {};
@@ -58,7 +109,7 @@ export class FirebaseHostingDeployer {
     const populateResp = await axios.post<{ uploadRequiredHashes?: string[]; uploadUrl?: string }>(
       `${HOSTING_API}/sites/${site}/versions/${versionId}/populateFiles`,
       { files: fileHashes },
-      { headers: authHeaders },
+      { headers },
     );
     const { uploadRequiredHashes = [], uploadUrl } = populateResp.data;
 
@@ -77,14 +128,9 @@ export class FirebaseHostingDeployer {
     await axios.patch(
       `${HOSTING_API}/sites/${site}/versions/${versionId}?update_mask=status`,
       { status: 'FINALIZED' },
-      { headers: authHeaders },
+      { headers },
     );
-    await axios.post(
-      `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(versionName)}`,
-      {},
-      { headers: authHeaders },
-    );
-    return `https://${site}--${channelId}.web.app`;
+    return versionName;
   }
 
   /**

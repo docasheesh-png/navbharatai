@@ -16,6 +16,11 @@ describe('resolveLocalTarget', () => {
   it('returns null when nothing matches', () => {
     expect(resolveLocalTarget('src/App.tsx', './missing', set)).toBeNull();
   });
+  it('resolves a NodeNext/ESM `.js`-extension import to its `.ts` source (SvelteKit — CollabDesk autopsy)', () => {
+    const ts = new Set(['src/lib/types.ts', 'src/lib/cards.ts']);
+    expect(resolveLocalTarget('src/lib/cards.ts', './types.js', ts)).toBe('src/lib/types.ts');
+    expect(resolveLocalTarget('src/lib/cards.ts', './missing.js', ts)).toBeNull();
+  });
 });
 
 describe('analyzeImportExports — clean (no false positives)', () => {
@@ -263,6 +268,25 @@ describe('findUnusedDependencies', () => {
       'src/App.tsx': `export const App = () => <div>hi</div>;`, // JSX, no explicit react import
     };
     expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('Nuxt-provided deps (vue-router) are NOT reported when a nuxt.config is present (ShopSphere autopsy)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { nuxt: '^3', 'vue-router': '^4', lodash: '^4' } }),
+      'nuxt.config.ts': `export default defineNuxtConfig({});`,
+      // Nuxt auto-imports useRouter/<NuxtLink> — no file imports 'vue-router' directly, but it is NOT unused.
+      'pages/index.vue': `<script setup>const r = useRouter();</script>`,
+    };
+    // vue-router is framework-provided → not flagged; lodash is genuinely unused → still flagged.
+    expect(findUnusedDependencies(files)).toEqual([{ name: 'lodash' }]);
+  });
+
+  it('vue-router IS reported when there is no Nuxt (a plain Vue app must import it)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { vue: '^3', 'vue-router': '^4' } }),
+      'src/main.ts': `import { createApp } from 'vue';`, // vue-router declared but never imported, no Nuxt
+    };
+    expect(findUnusedDependencies(files)).toEqual([{ name: 'vue-router' }]);
   });
 
   it('no package.json → empty (no crash)', () => {

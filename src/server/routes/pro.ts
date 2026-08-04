@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenAI } from '@google/genai';
 import type { Express, Request, Response } from 'express';
+import { sendSafeError } from '../lib/httpError';
 import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from '../AppMakerLab/AppEngine';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
@@ -158,7 +159,7 @@ export function registerProRoutes(app: Express): void {
       res.json({ url });
     } catch (err: any) {
       console.error('[PRO/deploy] Error:', err?.message || err);
-      res.status(500).json({ error: err?.message || 'Deployment failed.' });
+      sendSafeError(res, 500, 'Deployment failed. Please try again.', err, 'pro deploy');
     }
   });
 }

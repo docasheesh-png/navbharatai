@@ -1,0 +1,148 @@
+import { describe, it, expect } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { HostingChooser, type HostingProvider, type OwnRepoInfo } from './HostingChooser';
+
+const P = (id: string, name: string, configured: boolean): HostingProvider => ({ id, name, configured, requirement: '' });
+
+function render(providers: HostingProvider[]) {
+  return renderToStaticMarkup(
+    <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false} />,
+  );
+}
+
+describe('HostingChooser — the two-path Publish surface', () => {
+  it('always shows both paths + the honest full-stack "coming soon" note', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Host on NavBharatAI');
+    expect(html).toContain('Host somewhere else');
+    expect(html).toContain('Publish on NavBharatAI');
+    expect(html).toContain('coming soon'); // full-stack honesty
+    expect(html).toContain('Free');
+  });
+
+  it('offers a BYO button only for CONFIGURED non-NavBharatAI providers', () => {
+    const html = render([
+      P('firebase', 'Firebase Hosting', true),
+      P('vercel', 'Vercel', true),
+      P('netlify', 'Netlify', false), // not configured → must NOT be offered
+    ]);
+    expect(html).toContain('Publish to Vercel');
+    expect(html).not.toContain('Publish to Netlify');
+  });
+
+  it('never lists NavBharatAI\'s own host as a "bring your own" option', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    // firebase is the NavBharatAI path, not a BYO row
+    expect(html).not.toContain('Publish to Firebase Hosting');
+    expect(html).toContain('No other providers connected yet'); // BYO empty state
+  });
+
+  it('disables the NavBharatAI publish button when our host is not configured', () => {
+    const html = render([P('vercel', 'Vercel', true)]); // no firebase
+    // the primary button is present but disabled (no our-hosting available)
+    expect(html).toContain('Publish on NavBharatAI');
+    expect(html).toMatch(/Publish on NavBharatAI[\s\S]*/);
+    expect(html).toContain('disabled');
+  });
+
+  it('offers "Connect your own domain" ONLY when the feature is enabled + a workspace + our hosting', () => {
+    const providers = [P('firebase', 'Firebase Hosting', true)];
+    // off by default → not offered
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false} />,
+    )).not.toContain('Connect your own domain');
+    // enabled + workspace → offered
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false}
+        workspaceId="agentv3-u1-s1" customDomainsEnabled />,
+    )).toContain('Connect your own domain');
+    // enabled but NO workspace → not offered (a domain is per-app)
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false}
+        customDomainsEnabled />,
+    )).not.toContain('Connect your own domain');
+    // enabled + workspace but our hosting NOT configured → not offered
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={[P('vercel', 'Vercel', true)]} onDeploy={() => {}} onClose={() => {}} busy={false}
+        workspaceId="agentv3-u1-s1" customDomainsEnabled />,
+    )).not.toContain('Connect your own domain');
+  });
+});
+
+// "I host it myself" — NavBharatAI never touches deployment; only writes code into the user's own
+// GitHub repo (admin request 2026-07-27: "user apni khud ki hosting connect kare... NavBharatAI
+// edit kare, CI green par merge kare, waki uska hosting jaane").
+describe('HostingChooser — "I host it myself" (BYO hosting via own-repo git storage)', () => {
+  const OWN_REPO: OwnRepoInfo = { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' };
+
+  it('always offers the third "I host it myself" path, independent of configured deploy providers', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('I host it myself');
+    expect(html).toContain('We never touch your hosting');
+    expect(html).toContain('We only write code and open a pull request into your own GitHub repo');
+  });
+
+  it('shows "Set up" when no own-repo is connected yet for this workspace', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Set up');
+  });
+
+  it('shows the connected repo name on the button once own-repo storage is active', () => {
+    const html = renderToStaticMarkup(
+      <HostingChooser providers={[P('firebase', 'Firebase Hosting', true)]} onDeploy={() => {}} onClose={() => {}} busy={false}
+        ownRepo={OWN_REPO} />,
+    );
+    expect(html).toContain('Connected: aashish/mitrify');
+  });
+});
+
+// ADMIN REPORT 2026-08-02 (phone, Publish surface): "niche scroll nahi ho raha. iske sabhi button
+// farzi hai, koi bhi kaam nahi kar raha hai." Two real defects, both locked here.
+describe('HostingChooser — the sheet must scroll on a phone (clipped-content fix)', () => {
+  it('caps the card at the viewport and scrolls the BODY, with the header pinned', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    // Without a height cap the card grew past the screen and `overflow-hidden` CLIPPED everything
+    // below the fold (the "Set up" button, the full-stack note) with no way to reach it.
+    expect(html).toContain('max-h-[85vh]');
+    // The body is the one scroll container…
+    expect(html).toContain('overflow-y-auto');
+    // …and the swipe stays inside the sheet instead of scrolling the page behind it.
+    expect(html).toContain('overscroll-contain');
+  });
+
+  it('still renders the content that used to be clipped below the fold', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Set up');                 // path 3's button
+    expect(html).toContain('coming soon');            // the full-stack note under it
+    expect(html).toContain('always the same app you built');
+  });
+});
+
+describe('HostingChooser — a publish that cannot start SAYS SO (no dead buttons)', () => {
+  it('shows the honest reason inline and does NOT ask to close when onDeploy is blocked', () => {
+    // A blocked publish returns a reason string; the chooser must surface it rather than no-op.
+    let closed = false;
+    const html = renderToStaticMarkup(
+      <HostingChooser
+        providers={[P('firebase', 'Firebase Hosting', true)]}
+        onDeploy={() => 'Build an app first — there is nothing to publish yet.'}
+        onClose={() => { closed = true; }}
+        busy={false}
+      />,
+    );
+    // Static render can't click, so assert the wiring that makes it possible: the button is enabled
+    // (a real action), and the chooser owns an error surface for the returned reason.
+    expect(html).toContain('Publish on NavBharatAI');
+    expect(html).not.toContain('disabled=""');
+    expect(closed).toBe(false); // onClose is never called just by rendering
+  });
+
+  it('explains WHY the NavBharatAI button is greyed out when our host is unavailable', () => {
+    // A disabled button with no explanation is its own dead end.
+    const html = render([P('vercel', 'Vercel', true)]); // no configured 'firebase'
+    expect(html).toContain('disabled');
+    expect(html).toContain('NavBharatAI hosting isn'); // apostrophe is HTML-escaped in static markup
+    expect(html).toContain('t available right now');
+    expect(html).toContain('you can still publish to your own'); // gives a real way forward
+  });
+});

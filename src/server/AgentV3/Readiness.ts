@@ -10,6 +10,9 @@
 import type { ArchitectureReport } from './ArchitectureAnalysis';
 import type { SecurityFinding } from './SecurityAnalysis';
 
+/** A human-facing maturity grade derived from the readiness score + gate. */
+export type MaturityTier = 'prototype' | 'hackathon' | 'production' | 'enterprise';
+
 export interface ReadinessReport {
   /** 0–100; 100 = no detected defects. */
   score: number;
@@ -19,6 +22,8 @@ export interface ReadinessReport {
   blockers: string[];
   /** Should-fix items (lower the score but do not block). */
   warnings: string[];
+  /** Maturity tier derived from the score + gate (prototype → hackathon → production → enterprise). */
+  tier: MaturityTier;
 }
 
 /**
@@ -41,6 +46,28 @@ export interface ExtraFinding {
 // 100-point defect budget must remain; a genuinely clean build sits far above it, so this never
 // false-blocks a real, working app.
 export const MIN_READY_SCORE = 50;
+
+/**
+ * Map a readiness result to a maturity tier the user understands. A not-ready build (a hard blocker or a
+ * sub-floor score) is at most a PROTOTYPE; above the floor it climbs hackathon → production → enterprise as
+ * the score approaches pristine. Pure — same inputs, same tier.
+ */
+export function maturityTier(r: { ready: boolean; score: number; blockers: string[] }): MaturityTier {
+  if (!r.ready || r.blockers.length > 0 || r.score < MIN_READY_SCORE) return 'prototype';
+  if (r.score < 70) return 'hackathon';
+  if (r.score < 90) return 'production';
+  return 'enterprise';
+}
+
+/** A short, honest human description for a maturity tier. Pure. */
+export function maturityTierLabel(t: MaturityTier): string {
+  switch (t) {
+    case 'prototype': return 'Prototype — not production-ready; fix the blockers first.';
+    case 'hackathon': return 'Hackathon-grade — works, but has rough edges to polish.';
+    case 'production': return 'Production-ready — solid, safe to ship.';
+    case 'enterprise': return 'Enterprise-grade — pristine, no detected defects.';
+  }
+}
 
 // Per-defect penalties (points off 100).
 const PENALTY = {
@@ -65,7 +92,11 @@ export function assessReadiness(
 
   if (arch.unresolvedImports.length) {
     score -= PENALTY.unresolvedImport * arch.unresolvedImports.length;
-    blockers.push(`${arch.unresolvedImports.length} unresolved import(s) — the build will fail`);
+    // Surface WHICH imports are unresolved (like the sibling node-builtin blocker below), not just the
+    // count — a bare count is undiagnosable (ShopSphere autopsy: "1 unresolved import" with no specifier
+    // could not be diagnosed from the report). arch.unresolvedImports items are "file -> spec" strings.
+    const sample = arch.unresolvedImports.slice(0, 3).join(', ');
+    blockers.push(`${arch.unresolvedImports.length} unresolved import(s) — the build will fail: ${sample}${arch.unresolvedImports.length > 3 ? ', …' : ''}`);
   }
   if (arch.nodeBuiltinsInFrontend.length) {
     // A server-only Node builtin (fs/child_process/net/…) imported by front-end code breaks the
@@ -138,7 +169,7 @@ export function assessReadiness(
     blockers.push(`readiness score ${score}/100 is below the ${MIN_READY_SCORE}/100 bar (too many unresolved quality issues${why})`);
   }
   const ready = blockers.length === 0;
-  return { score, ready, blockers, warnings };
+  return { score, ready, blockers, warnings, tier: maturityTier({ ready, score, blockers }) };
 }
 
 /** A one-line honest verdict for the top of the evaluate report. */

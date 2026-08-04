@@ -11,6 +11,19 @@ describe('SandboxStore (VITEST-safe, best-effort)', () => {
   it('get returns null for an empty workspaceId', async () => {
     expect(await sandboxStore.get('')).toBeNull();
   });
+
+  it('the orphan-reaper operations are best-effort in exactly the same way', async () => {
+    // touch/listStale/markPaused run from a periodic cost sweep, so a Firestore blip, a missing index
+    // or an unconfigured environment must resolve quietly rather than surface as an unhandled
+    // rejection inside a timer.
+    await expect(sandboxStore.touch('agentv3-u1-s1', 'sbx-abc')).resolves.toBeUndefined();
+    await expect(sandboxStore.markPaused('agentv3-u1-s1')).resolves.toBeUndefined();
+    await expect(sandboxStore.listStale(Date.now() - 60_000)).resolves.toEqual([]);
+  });
+
+  it('listStale refuses a nonsense cut-off instead of asking Firestore for one', async () => {
+    expect(await sandboxStore.listStale(NaN)).toEqual([]);
+  });
 });
 
 describe('sandboxResumeEnabled — flag gating (default ON, A3)', () => {

@@ -12,7 +12,10 @@ import { doc, getDoc, setDoc, getServerDb as getDb } from './serverDb';
  */
 
 function dailyLimit(): number {
-  const n = parseInt(process.env.ENGINEER_DAILY_LIMIT || '', 10);
+  // Explicit kill switch: `off` / `0` / `unlimited` → no cap at all (env-authoritative, instant revert).
+  const raw = (process.env.ENGINEER_DAILY_LIMIT || '').trim().toLowerCase();
+  if (raw === 'off' || raw === '0' || raw === 'unlimited') return 0;
+  const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 50;
 }
 
@@ -32,6 +35,10 @@ export interface QuotaResult {
  */
 export async function consumeEngineerQuota(userId: string): Promise<QuotaResult> {
   const limit = dailyLimit();
+  if (limit <= 0) {
+    // Cap disabled (ENGINEER_DAILY_LIMIT=off) → never counts, never blocks.
+    return { allowed: true, used: 0, limit: 0 };
+  }
   const db = getDb() as any;
   if (!db || !userId) {
     // No DB or no identified user → don't block here (IP rate-limiter still applies).

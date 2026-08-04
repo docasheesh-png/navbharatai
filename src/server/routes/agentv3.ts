@@ -7467,11 +7467,24 @@ export function registerAgentV3Routes(app: Express): void {
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
-              // scaffold as ITS OWN finished work to verify — never alien clutter to re-plan or rewrite.
-              buildPrompt =
-                `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
-                `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
-                `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`;
+              // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite.
+              //
+              // TIER-AWARE, and this distinction is load-bearing. A SIMPLE scaffold IS the finished app, so
+              // "polish and finish" is the truth. A PRO scaffold is a compile-proven ARCHITECTURE covering
+              // part of a much larger request ("…activity history, tasks, and a dashboard of pipeline
+              // value") — telling the builder it "fully implements the request" would make it ship a
+              // skeleton and declare success, which is exactly the fake-completion the real-features rule
+              // forbids. So pro gets an EXTEND instruction instead of a FINISH one.
+              buildPrompt = golden.tier === 'pro'
+                ? `[EXTEND THIS WORKING FOUNDATION — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" foundation. ` +
+                  `It already compiles and runs: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
+                  `src/lib/store.ts holds persistent state (useCollection, inr, shortDate), and src/App.tsx has the working screens. ` +
+                  `READ all three FIRST. It is a STARTING POINT, not the finished app — BUILD OUT everything the request below asks for that is not there yet, ` +
+                  `reusing those existing components and the useCollection pattern rather than inventing a second set. Add new screens as their own files under src/. ` +
+                  `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`
+                : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
+                  `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
+                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`;
             }
           }
         } catch { /* pre-seed is best-effort — a failure just builds from scratch */ }

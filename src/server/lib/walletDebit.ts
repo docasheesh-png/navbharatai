@@ -122,6 +122,83 @@ export function computeDebitedWallet(
   return { wallet, tokensDebited: tokens, applied: true };
 }
 
+export interface WalletRollupTx {
+  /** The customer-facing ₹ amount to debit for this one turn. */
+  billedInr: number;
+  /** The bucket this turn belongs to, e.g. `ai_2026-08-02`. Turns sharing a ref share ONE ledger row. */
+  rollupRef: string;
+  /** Ledger text for the bucket, e.g. "AI assistants". No provider names (white-label law). */
+  description: string;
+}
+
+/**
+ * PURE debit for a SMALL, FREQUENT charge — a chat turn, a tool run — that rolls up into one ledger
+ * row per bucket instead of writing its own.
+ *
+ * WHY THIS IS NOT computeDebitedWallet. A build happens a few times a day and deserves its own line.
+ * A chat turn happens dozens of times, and one line each would fill the 500-entry ledger in a couple of
+ * weeks — pushing the user's PURCHASE history off the end. Someone checking "did my ₹250 arrive?"
+ * would find only a wall of ₹0.02 chat charges. So same-bucket turns accumulate into a single row that
+ * shows the running total for the day.
+ *
+ * The other difference follows from that: a matching ref here means ADD to the existing row, whereas
+ * for a build it means "already charged, do nothing". A build ref is an idempotency key; a rollup ref
+ * is a bucket. They must never be confused, which is why this is a separate function rather than a
+ * flag on the other one.
+ *
+ * Balance math, the carried sub-token remainder and the ₹-derived-from-tokens rule are identical to
+ * computeDebitedWallet — the same wallet, the same unit, the same exactness.
+ */
+export function computeRolledUpDebit(
+  current: Record<string, any>,
+  tx: WalletRollupTx,
+  now: string,
+): DebitedWallet {
+  const w = current || {};
+  const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  if (!Number.isFinite(tx.billedInr) || tx.billedInr <= 0 || !tx.rollupRef) {
+    return { wallet: w, tokensDebited: 0, applied: false };
+  }
+
+  const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
+  const owed = inrToDebitTokens(tx.billedInr) + carriedIn;
+  const tokens = Math.floor(owed);
+  const carryOut = Math.round((owed - tokens) * 1e6) / 1e6;
+
+  const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
+  const existingIndex = ledger.findIndex((e) => e && e.rollupRef === tx.rollupRef);
+  const priorTokens = existingIndex >= 0 ? Math.abs(n(ledger[existingIndex]?.amountCoinsOrTokens)) : 0;
+  const bucketTokens = priorTokens + tokens;
+  const bucketInr = Math.round((bucketTokens / TOKENS_PER_RUPEE) * 100) / 100;
+  const chargeInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
+
+  const row = {
+    type: 'usage',
+    amountCoinsOrTokens: -bucketTokens,
+    moneySpent: 0,
+    timestamp: now,
+    description: `${tx.description} — ${bucketTokens.toLocaleString()} tokens (₹${bucketInr.toFixed(2)})`,
+    rollupRef: tx.rollupRef,
+  };
+
+  // The updated row moves to the END so the ledger stays in time order and the ledger cap trims the
+  // genuinely oldest activity — a bucket still being added to is not old.
+  const nextLedger = existingIndex >= 0
+    ? [...ledger.slice(0, existingIndex), ...ledger.slice(existingIndex + 1), row].slice(-MAX_WALLET_LEDGER_ENTRIES)
+    : [...ledger, row].slice(-MAX_WALLET_LEDGER_ENTRIES);
+
+  const wallet: Record<string, any> = {
+    ...w,
+    tokenBalance: n(w.tokenBalance) - tokens,
+    totalTokensUsed: n(w.totalTokensUsed) + tokens,
+    remaining_balance: Math.round((n(w.remaining_balance) - chargeInr) * 100) / 100,
+    [TOKEN_CARRY_FIELD]: carryOut,
+    walletLedger: nextLedger,
+    updatedAt: now,
+  };
+  return { wallet, tokensDebited: tokens, applied: true };
+}
+
 export type WalletDebitResult =
   | { ok: true; tokensDebited: number; tokenBalance: number }
   | { ok: false; error: string };
@@ -160,6 +237,48 @@ export async function debitWalletForBuild(
       const result = computeDebitedWallet(current, tx, new Date().toISOString());
       // `applied`, not `tokensDebited > 0`: a charge under one whole token debits nothing now but
       // moves the carried remainder, and losing that write would quietly forgive the charge.
+      if (result.applied) t.set(walletRef, result.wallet);
+      return result;
+    });
+    return {
+      ok: true,
+      tokensDebited: debited.tokensDebited,
+      tokenBalance: typeof debited.wallet.tokenBalance === 'number' ? debited.wallet.tokenBalance : 0,
+    };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Wallet debit transaction failed' };
+  }
+}
+
+/**
+ * Atomically debit a user's wallet for one SMALL AI turn, rolled up into a per-bucket ledger row.
+ *
+ * The same wallet doc, the same transaction discipline and the same canonical-wallet resolution as
+ * debitWalletForBuild — this is the chat-sized sibling, not a second money path. Never throws.
+ */
+export async function debitWalletForAiUsage(
+  db: any,
+  userId: string,
+  tx: WalletRollupTx,
+): Promise<WalletDebitResult> {
+  if (!db) return { ok: false, error: 'Database not initialized' };
+  if (!userId) return { ok: false, error: 'Missing userId' };
+  if (!Number.isFinite(tx.billedInr) || tx.billedInr <= 0) {
+    return { ok: false, error: `Non-debitable amount: ${tx.billedInr}` };
+  }
+  try {
+    let ownerId = userId;
+    if (walletMergeResolveEnabled()) {
+      ownerId = await resolveCanonicalWalletId(async (u) => {
+        const s = await getDoc(doc(db, 'user_token_wallets', u));
+        return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
+      }, userId).catch(() => userId);
+    }
+    const walletRef = doc(db, 'user_token_wallets', ownerId);
+    const debited = await runTransaction(db, async (t: any) => {
+      const snap = await t.get(walletRef);
+      const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      const result = computeRolledUpDebit(current, tx, new Date().toISOString());
       if (result.applied) t.set(walletRef, result.wallet);
       return result;
     });

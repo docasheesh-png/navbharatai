@@ -1,4 +1,5 @@
-import { callProfessionalAI } from '../lib/professionalRouting';
+import { callProfessionalAIWithUsage, type ProfessionalAnswer } from '../lib/professionalRouting';
+import type { ChatTurnUsage } from '../lib/chatSpend';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
@@ -87,9 +88,9 @@ export type ProfessionalTier = 'free' | 'paid';
 // The resilient chain now lives in the SHARED professionalRouting module, so the Other-AI tools call
 // the exact same engine (admin 2026-07-24) with zero drift. This thin wrapper keeps the callers here
 // unchanged and preserves the professional-specific error message.
-async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<string> {
+async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<ProfessionalAnswer> {
   try {
-    return await callProfessionalAI(systemPrompt, prompt, tier);
+    return await callProfessionalAIWithUsage(systemPrompt, prompt, tier);
   } catch {
     throw new Error('All AI providers failed for this professional.');
   }
@@ -113,6 +114,30 @@ export async function runProfessionalChat(
   verifiedUserId?: string,
   tier: ProfessionalTier = 'paid',
 ): Promise<string> {
+  const { reply } = await runProfessionalChatWithUsage(config, message, history, verifiedUserId, tier);
+  return reply;
+}
+
+/** One professional turn, with what the model call cost — see ProfessionalAnswer / chatSpend.ts. */
+export interface ProfessionalChatResult {
+  reply: string;
+  spend: ChatTurnUsage;
+}
+
+/**
+ * The same turn as runProfessionalChat, keeping the cost instead of discarding it.
+ *
+ * The wallet is one currency now (aiTurnCharge.ts): a professional answer draws from the same balance
+ * a build does, so the route needs to know what the turn cost. The text-only wrapper above keeps every
+ * other caller unchanged.
+ */
+export async function runProfessionalChatWithUsage(
+  config: ProfessionalConfig,
+  message: string,
+  history: ProfessionalTurn[] = [],
+  verifiedUserId?: string,
+  tier: ProfessionalTier = 'paid',
+): Promise<ProfessionalChatResult> {
   // Per-user memory (memory-enabled professionals): load what we remember about this
   // user and inject it + the memory behaviour layer. Anonymous users still get the
   // introduction behaviour, but with an honest "cannot remember you" constraint.
@@ -169,7 +194,7 @@ export async function runProfessionalChat(
     if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
   } catch { /* live search is best-effort */ }
 
-  const raw = await resilientCall(systemPrompt, prompt, tier);
+  const { content: raw, spend } = await resilientCall(systemPrompt, prompt, tier);
 
   // ALWAYS strip any memory block from what the user sees (even for memory-off
   // professionals / anonymous users — a leaked machine block must never reach the
@@ -191,5 +216,5 @@ export async function runProfessionalChat(
 
   // reply is empty only when the model's ENTIRE output was machine blocks — never
   // fall back to raw there (that would leak the block into the chat).
-  return reply || 'Noted! What would you like to learn next?';
+  return { reply: reply || 'Noted! What would you like to learn next?', spend };
 }

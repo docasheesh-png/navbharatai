@@ -11,6 +11,10 @@ import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
+import { chargeForAiTurn } from '../lib/aiTurnCharge';
+import type { ChatTurnUsage } from '../lib/chatSpend';
+import { usdInrRate } from '../lib/UsdInrRate';
+import { getServerDb } from '../lib/serverDb';
 import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 
 /**
@@ -112,6 +116,8 @@ export function registerSdaRoutes(app: Express): void {
       const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, sdaIdentity?.email || null);
       if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
       const sdaTier: ProfessionalTier = sdaGate.tier;
+      // What the answering model reported, filled in by whichever branch below actually answers.
+      let sdaSpend: ChatTurnUsage | null = null;
 
       // IMAGE-GENERATION INTENT (admin 2026-08-02): Doctor AI does not generate images — if the doctor asks
       // it to CREATE a picture (e.g. "draw a diagram of the heart"), point them to the dedicated AI Image
@@ -462,6 +468,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
+            // ONE WALLET: keep what this answer cost so the turn can be charged like any other AI.
+            // SDA's other branches (the Grok/Gemini race above, the Vertex/Claude multimodal fallback
+            // below) do not report usage, so a turn answered by one of those stays UNMEASURED and is
+            // therefore not charged — we never invent a number to bill (see chatSpend.ts).
+            sdaSpend = {
+              provider: response.provider,
+              model: response.model,
+              inputTokens: response.usage?.inputTokens,
+              outputTokens: response.usage?.outputTokens,
+            };
             console.log(`[SDA] Isolated 'professional' universe router succeeded via ${telemetry.provider}`);
           }
         } catch (e: any) { console.warn('[SDA] professional-universe router err:', e.message); }
@@ -598,6 +614,15 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // A genuinely-answered FREE-tier turn burns one of today's free messages (shared across all
       // professionals + Doctor AI). Never on a paywall block or an error. Best-effort.
       if (sdaGate.countsAgainstFree) burnFreeMessage(sdaGate.uid);
+      // ONE WALLET: Doctor AI draws on the same balance as every other assistant and every build.
+      // After the answer, never awaited into the response, inert while AI_WALLET_SPEND is off.
+      void chargeForAiTurn(
+        getServerDb() as any,
+        { userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass },
+        sdaSpend,
+        usdInrRate(),
+        Date.now(),
+      );
       return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {

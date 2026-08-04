@@ -1,7 +1,10 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
-import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
+import { runProfessionalChatWithUsage, type ProfessionalTurn } from '../professionals/engine';
+import { chargeForAiTurn } from '../lib/aiTurnCharge';
+import { usdInrRate } from '../lib/UsdInrRate';
+import { getServerDb } from '../lib/serverDb';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
 import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 import { describeVisionAttachments } from '../lib/visionDescribe';
@@ -128,11 +131,22 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
 
     try {
-      const reply = await runProfessionalChat(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier);
+      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier);
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);
       }
+      // ONE WALLET: charge the same balance a build spends, for what this answer really cost. Deliberately
+      // AFTER the answer exists and never awaited into the response — a money-path problem must not cost
+      // the user their reply, and charging before answering would risk billing a turn that then failed.
+      // Entirely inert while AI_WALLET_SPEND is off (the default), and never charges an unmeasured turn.
+      void chargeForAiTurn(
+        getServerDb() as any,
+        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass },
+        spend,
+        usdInrRate(),
+        Date.now(),
+      );
       res.json({ reply, professionalId: config.id });
     } catch (err: any) {
       sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional chat');

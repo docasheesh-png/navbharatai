@@ -1,4 +1,5 @@
 import { Sandbox } from 'e2b';
+import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
@@ -1305,6 +1306,80 @@ const {chromium}=require('playwright');
   async getSandboxId(workspaceId: string): Promise<string | null> {
     const sandbox = this.sandboxes.get(workspaceId);
     return sandbox ? sandbox.sandboxId : null;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // PtyHost — real, persistent shells for Code Studio (see ShellSessions.ts for the why).
+  //
+  // `runCommand` above runs one command to completion and returns; these four run a genuine TTY that
+  // stays alive between commands, which is what makes `cd`, Ctrl+C, colours and interactive prompts
+  // work at all. The PTY is a process inside the sandbox that is ALREADY running for this workspace,
+  // so a shell costs a process, not a machine.
+  // ---------------------------------------------------------------------------------------------
+
+  /** Live PTY handles by pid, so the shell can be killed and so the process isn't garbage-collected. */
+  private ptys = new Map<number, { handle: CommandHandle; workspaceId: string }>();
+
+  async openPty(
+    workspaceId: string,
+    opts: { cols: number; rows: number; onData: (chunk: string) => void; onExit: (code?: number) => void },
+  ): Promise<{ pid: number }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'command');
+
+    // A STREAMING decoder, not `new TextDecoder().decode(chunk)` per callback. PTY output arrives in
+    // arbitrary byte-sized pieces, so a multi-byte character (₹, an emoji, a box-drawing glyph in a
+    // progress bar) is routinely split across two chunks. Decoding each chunk independently would
+    // turn every such split into a replacement character — the terminal would look subtly corrupted
+    // for exactly the output that matters most to an Indian user.
+    const decoder = new TextDecoder('utf-8');
+
+    const handle = await sandbox.pty.create({
+      cols: opts.cols,
+      rows: opts.rows,
+      cwd: WORKSPACE_ROOT,
+      // Interactive programs read TERM to decide whether they may use colour and cursor movement.
+      // Without it they fall back to dumb output and the shell looks nothing like a real terminal.
+      envs: { TERM: 'xterm-256color' },
+      // The SDK default is 60 SECONDS — a persistent shell needs an hour. ShellSessions reaps idle
+      // shells long before this; this is the sandbox-side backstop against a forgotten process.
+      timeoutMs: 60 * 60 * 1000,
+      onData: (data: Uint8Array) => {
+        try { opts.onData(decoder.decode(data, { stream: true })); } catch { /* never break the stream */ }
+      },
+    });
+
+    this.ptys.set(handle.pid, { handle, workspaceId });
+    // `wait()` rejects with CommandExitError on a non-zero exit — for a shell that is the ORDINARY
+    // case (`exit 1`, or Ctrl+D after a failed command), not an error to log. Either way the shell is
+    // over, and the reader is told honestly.
+    void handle
+      .wait()
+      .then((r) => opts.onExit(typeof r.exitCode === 'number' ? r.exitCode : undefined))
+      .catch((e: unknown) => opts.onExit(typeof (e as { exitCode?: number })?.exitCode === 'number' ? (e as { exitCode: number }).exitCode : undefined))
+      .finally(() => { this.ptys.delete(handle.pid); });
+
+    return { pid: handle.pid };
+  }
+
+  async writePty(workspaceId: string, pid: number, data: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    await sandbox.pty.sendInput(pid, new TextEncoder().encode(data));
+  }
+
+  async resizePty(workspaceId: string, pid: number, cols: number, rows: number): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    await sandbox.pty.resize(pid, { cols, rows });
+  }
+
+  async killPty(workspaceId: string, pid: number): Promise<boolean> {
+    this.ptys.delete(pid);
+    try {
+      const sandbox = await this.getSandbox(workspaceId);
+      return await sandbox.pty.kill(pid);
+    } catch {
+      return false; // sandbox already gone ⇒ the PTY is gone with it
+    }
   }
 
   async searchFiles(workspaceId: string, terms: string[]): Promise<string[]> {

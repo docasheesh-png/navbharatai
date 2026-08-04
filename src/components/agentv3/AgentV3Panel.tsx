@@ -2502,6 +2502,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const planDone = state.todos.filter((t) => t.status === 'done').length;
   const currentTodo = state.todos.find((t) => t.status === 'in_progress')
     ?? state.todos.find((t) => t.status !== 'done');
+  // "Plan complete" = every step is done. Once a build finishes, the whole 9/9 checklist kept sitting
+  // expanded above the composer forever (admin: "jab plan pura ho gaya … bas 'done' likh kar aaye,
+  // hamesha plan show ho aisa zaroori nahi"). So on the transition to complete we collapse it to a compact
+  // "✓ Done" line; on the transition back to incomplete (a new/continued build) we reopen it. The user can
+  // still expand/collapse manually in between — this only drives the two transitions, never every render.
+  const planComplete = state.todos.length > 0 && state.todos.every((t) => t.status === 'done');
+  const prevPlanCompleteRef = useRef(false);
+  useEffect(() => {
+    if (planComplete && !prevPlanCompleteRef.current) setPlanCollapsed(true);
+    else if (!planComplete && prevPlanCompleteRef.current) setPlanCollapsed(false);
+    prevPlanCompleteRef.current = planComplete;
+  }, [planComplete]);
 
   // Shared session-history list — rendered by BOTH the desktop ☰ dropdown and the mobile footer's
   // History sheet, so there is exactly ONE history UI (same data, same live dots, same actions).
@@ -3382,10 +3394,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   title={planCollapsed ? 'Expand plan' : 'Minimize plan'}
                 >
                   {planCollapsed ? <ChevronRight className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
-                  <span>Plan</span>
-                  <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
-                  {planCollapsed && currentTodo && (
-                    <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                  {planComplete ? (
+                    <span className="text-emerald-500 font-semibold flex items-center gap-1">✓ Done</span>
+                  ) : (
+                    <>
+                      <span>Plan</span>
+                      <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
+                      {planCollapsed && currentTodo && (
+                        <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                      )}
+                    </>
                   )}
                 </button>
                 {!planCollapsed && (

@@ -24097,3 +24097,57 @@ AI sends someone the long way round.
 (14 new). One of my own test assumptions was wrong and corrected rather than forced: a plain build
 request DOES legitimately surface other features — what must not happen is unsolicited APK guidance, and
 that is what the test now asserts.
+## 2026-08-04 — Old apps too: retroactive boot-killer sweep + honest dev-server diagnosis (PR #2060)
+
+**Admin:** *"purani apps ka scan bhi karo"* → *"han, karo!!"* — the follow-up to #2055.
+
+The missing-credential contract in #2055 governs NEW builds. Apps built BEFORE it shipped still
+contain boot-killers, and TWO separate gaps kept them broken:
+
+**Gap 1 — the sweep never saw them.** `findBootKillingEnvGuards` ran over `writtenFiles`. On a FRESH
+build that IS the whole app, but on an EDIT it holds only the handful of files that turn touched — and
+an old app's boot-killer almost always sits in a file the edit never opened. So it was invisible and
+shipped again. FIXED: in edit mode the detector now scans the STORED workspace
+(`loadWorkspaceFiles`) with this turn's writes layered on top (newer wins); a store failure falls back
+to `writtenFiles` rather than skipping the check. The post-heal re-detect re-layers the SAME set, so a
+heal that fixed only some files honestly reports the rest as `BOOT_KILLING_ENV_GUARD_UNRESOLVED`
+instead of vanishing along with a stale snapshot. Fresh builds pay no extra read.
+
+**Gap 2 — when it finally bit, we misdiagnosed it.** A boot-time
+`throw new Error('Missing RAZORPAY_KEY_SECRET')` matched only `/\bError:/` in
+`classifyDevServerFailure` → `crash` → `plain_retry`. A restart can NEVER help (the key is still unset
+on the next boot), so BOTH recovery attempts were burned and the health line told the user "the dev
+server crashed on startup" — not the truth. FIXED: new `missing_credential` cause → `code_fix`, placed
+AFTER `db_unreachable` (so `DATABASE_URL` keeps its strictly better recovery: provision Postgres) and
+BEFORE the generic crash branch. Its `detail` carries the exact "Coming soon" contract instruction, so
+the agent knows what to build instead of guessing. `missingCredentialFromLog` is deliberately high
+precision — the name must be UPPER_SNAKE (at least one underscore), so a single all-caps word never
+triggers a false "edit your source" verdict, and `DATABASE_URL` is explicitly excluded so a future
+reorder of the branches cannot silently downgrade the database path.
+
+**Bonus root-cause fix (caught by the new tests, fixed at the CLASS level).** `planDevServerRecovery`
+short-circuited on `cause === 'code_error'`, so on the FINAL attempt `missing_script` and
+`missing_credential` were rewritten to `give_up` — discarding the one thing that would have fixed them,
+their actionable detail. It now short-circuits on `recovery === 'code_fix'`, covering every cause whose
+only cure is a source change. Genuinely restartable causes (OOM, transient crash) still escalate to
+`give_up`; both behaviours are test-locked.
+
+44 new tests. Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest run` → 1020 files /
+10,775 tests passed.
+
+**CLOSES the open item recorded with #2055** ("the contract governs NEW builds; an app built before
+this deploy is only repaired when the user next runs an edit/build on it"). That lazy repair now
+actually works — both because the sweep can finally SEE the untouched files, and because a preview that
+dies on a missing key is diagnosed correctly instead of burning two futile restarts. There is still no
+eager background sweep of every stored workspace, and that is deliberate: mass-rewriting users' code
+without them asking risks the one absolute rule, and a boot-killer only bites when the app is actually
+run — which is exactly when the lazy path now catches it.
+
+### Note for future sessions — CI can go red WITHOUT any code change (2026-08-03)
+GitHub Actions created NO workflow runs repo-wide for ~80 minutes (18:48–20:07 UTC), then every queued
+run failed at step 6, the **security audit gate** — typecheck and test never executed. Cause: two high
+advisories (`fast-uri` GHSA-7p8r-x3mc-p8w7, `ip-address` GHSA-mwp4-54f8-5fhr) were published in that
+window, so the SAME commit that passed at 18:44 failed at 20:07. Fixed for real in #2057 by bumping the
+npm overrides (NOT by allowlisting — `ip-address` is an SSRF-class bug in the IP parser
+`express-rate-limit` depends on). **Lesson: when CI goes red, read WHICH STEP failed before assuming
+the diff broke something** — the audit gate depends on the outside world and can turn red on its own.

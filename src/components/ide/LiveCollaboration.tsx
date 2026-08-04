@@ -3,6 +3,8 @@ import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy
 import { db } from '../../App';
 import { doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
+import { isNativeApp } from '../../lib/mobileNative';
+import { medicalFeaturesHidden } from '../../lib/playCompliance';
 
 /** A shared in-room AI message — every member sees the same AI thread (Phase 1a). */
 interface AiMessage {
@@ -23,7 +25,7 @@ interface AiMessage {
 type RoomTab = 'free' | 'pro' | 'professional' | 'team';
 
 // Professionals the room owner can pick for the Professional tab.
-const ROOM_PROFESSIONALS: { id: string; label: string }[] = [
+const ROOM_PROFESSIONALS_ALL: { id: string; label: string }[] = [
   { id: 'doctor', label: 'Doctor AI' },
   { id: 'teacher', label: 'Teacher AI' },
   { id: 'lawyer', label: 'Lawyer AI' },
@@ -31,6 +33,11 @@ const ROOM_PROFESSIONALS: { id: string; label: string }[] = [
   { id: 'astrologer', label: 'Astrologer AI' },
   { id: 'kisan', label: 'Kisan (Farmer) AI' },
 ];
+// Play compliance (admin 2026-08-04): the native shell must not advertise a medical assistant even in
+// a coming-soon dropdown — the shipped app declares no medical features and copy must match.
+const ROOM_PROFESSIONALS = medicalFeaturesHidden(isNativeApp())
+  ? ROOM_PROFESSIONALS_ALL.filter((p) => p.id !== 'doctor')
+  : ROOM_PROFESSIONALS_ALL;
 
 /** A remote collaborator's live cursor position (which line they're editing). */
 interface RemotePresence {
@@ -114,7 +121,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const [caretLine, setCaretLine] = useState(1);
   // Phase 1a — shared in-room AI thread + mobile tab layout.
   const [roomTab, setRoomTab] = useState<RoomTab>('free');
-  const [selectedProfessional, setSelectedProfessional] = useState('doctor'); // owner picks (Professional tab)
+  const [selectedProfessional, setSelectedProfessional] = useState(ROOM_PROFESSIONALS[0]?.id ?? 'teacher'); // owner picks (Professional tab)
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
   const [aiInput, setAiInput] = useState('');
   const [aiBusy, setAiBusy] = useState(false);

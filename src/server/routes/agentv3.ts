@@ -5,6 +5,9 @@ import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
+import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -15,6 +18,7 @@ import {
   AgentEventStream,
   WorkspaceState,
   ToolDispatcher,
+  ALWAYS_WRITE_SECRETS,
   ClaudeClient,
   sanitizeApiKey,
   AgentRunner,
@@ -108,13 +112,13 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, importAccountingLine, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
 import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFetch';
 import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, materializeRepoViaApi } from '../AgentV3/GithubApiTree';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -127,6 +131,8 @@ import { notifyBuildComplete, notifyLowBalance } from '../lib/PushNotificationSe
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
+import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
+import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -191,13 +197,13 @@ import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptC
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
-import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, formatEta, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
-import { planAppDefaults } from '../AgentV3/appDefaults';
+import { planAppDefaults, defaultAssetPath } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -205,7 +211,7 @@ import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
@@ -228,7 +234,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
-import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
@@ -3150,12 +3156,24 @@ export function registerAgentV3Routes(app: Express): void {
         sendStage('Resolving the public preview URL', 95);
         let previewUrl: string | undefined;
         try { previewUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, boundPort), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
+        // EARN IT (admin 2026-08-03): a bound port is not the app serving. VISIT the home route and only
+        // report "preview restored" when it renders — otherwise Diagnose was greenlighting a server that
+        // returns "Cannot GET" on its own client routes (the exact full-stack bug).
+        let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
+        if (previewUrl) {
+          try { served = analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, previewUrl), 30_000, 'preview-diagnose-verify')).html); }
+          catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
+        }
         finish({
-          ok: true,
+          ok: served.rendered,
           portListening: true,
           port: boundPort,
           previewUrl,
-          reason: previewUrl ? `Dev server is up on port ${boundPort} — preview restored.` : `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`,
+          reason: !previewUrl
+            ? `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
+            : served.rendered
+              ? `Dev server is up on port ${boundPort} — preview restored.`
+              : `Dev server is up on port ${boundPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
           detail: combined.slice(-4000),
         });
         return;
@@ -3164,8 +3182,14 @@ export function registerAgentV3Routes(app: Express): void {
         ok: false,
         portListening: false,
         port: boundPort,
-        reason: `The dev server did not come up on port ${boundPort} after installing dependencies and one restart attempt. The exact cause is in the detail log below (a crash on boot, a missing dependency, or a port conflict).`,
-        detail: combined.slice(-4000),
+        // HONEST, ACTIONABLE HEADLINE (mitrify autopsy 2026-08-04). This used to GUESS — "the exact cause
+        // is in the detail log below (a crash on boot, a missing dependency, or a port conflict)" — while
+        // classifyDevServerFailure already knew the answer deterministically. Worse, a user was made to
+        // read a raw log to learn something we had computed. Now the panel states the real cause in plain
+        // language, and for the two causes the user can genuinely resolve — a missing key of theirs, or a
+        // database — it names the exact screen to go to.
+        reason: userFacingPreviewFailure(classifyDevServerFailure(combined), boundPort, combined),
+        detail: cleanPreviewLogForUser(combined).slice(-4000),
       });
     } catch (err) {
       if (heartbeat) clearInterval(heartbeat);
@@ -4652,7 +4676,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     // Weak-tier welcome notice (admin final spec 2026-07-12): a FREE user on the weak tier is told — in
     // their own language, right at the top of the reply — that they are on the free Weak engine, where the
-    // 🎛️ tier selector lives (the options/sliders button just left of the message box), and that the first
+    // ⚙️ tier selector lives (the Settings-gear "Build options" button in the toolbar just below the message box), and that the first
     // recharge unlocks all tiers.
     // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
     // the phrasing rotates by seed so repeats never read identically.
@@ -5046,9 +5070,31 @@ export function registerAgentV3Routes(app: Express): void {
     // describe the app immediately (like Claude reading a tree, not bulk-cloning). Injected into the
     // architect prompt below; the full file materialization (zipball) still runs for edit/build.
     let importSurvey: { url: string; fileCount: number; structure: string; keyFiles: Record<string, string>; truncated: boolean } | null = null;
+    /**
+     * DURABLE import accounting (admin 2026-08-03, mitrify): record where every archive entry went,
+     * into the BUILD REPORT — not only the chat narration. The gap between "316 files" (the repo
+     * listing) and "166 source files" (what the AI edits) was never explained anywhere the admin
+     * could read it, so the only possible reading was "10% bhi import nahi ho paya". The numbers
+     * exist (`extracted.dropped`); they were simply thrown away. Best-effort by construction —
+     * accounting must never break an import.
+     */
+    const recordImportAccounting = (
+      extracted: Parameters<typeof importAccountingLine>[0],
+      diag?: { record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }) => void },
+    ): void => {
+      try {
+        const line = importAccountingLine(extracted);
+        // Durable: the build report must answer "where did my files go?" on its own.
+        diag?.record({ phase: 'build', severity: 'info', code: 'IMPORT_ACCOUNTING', message: line, autoResolved: true });
+        // …and answer it where the user is actually looking, too.
+        emit({ type: 'narration', agent: 'architect', text: `📊 ${line}`, ts: Date.now() });
+      } catch { /* accounting is best-effort */ }
+    };
+
     const landImportedProject = async (
       importedFiles: Record<string, string>,
-      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string>; sandboxAssets?: Record<string, string>;
+        diag?: { record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean }) => void } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -5060,7 +5106,20 @@ export function registerAgentV3Routes(app: Express): void {
         // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
         // template scaffold files mixed in (mirrors the import-files route).
         try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-        written = (await writeWorkspaceFiles(actuator, workspaceId, importedFiles)).written;
+        const landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        written = landed.written;
+        // HOW the files landed (bulk tar vs per-file) + the count-proof — into the build report, so a
+        // future "files missing after import" report can be diagnosed from evidence instead of guesses
+        // (the #2044→#2046 loss was invisible precisely because this telemetry was thrown away).
+        try {
+          opts.diag?.record({
+            phase: 'build', severity: 'info', code: 'IMPORT_LANDING',
+            message: `Sandbox landing: ${landed.written.length} file(s) via ${landed.landedVia ?? 'per-file'}`
+              + (landed.bulkVerifiedCount !== undefined ? ` (bulk extract count-verified: ${landed.bulkVerifiedCount})` : '')
+              + (landed.skipped.length > 0 ? `; ${landed.skipped.length} skipped` : ''),
+            autoResolved: true,
+          });
+        } catch { /* telemetry is best-effort */ }
         // Sandbox-only extras (big text lockfiles): the live sandbox gets them so `npm install`
         // reproduces the app's exact dependency tree; the durable store skips them by design
         // (over its per-doc cap — the import summary says so honestly). Best-effort.
@@ -5078,6 +5137,13 @@ export function registerAgentV3Routes(app: Express): void {
       if (Object.keys(assets).length > 0) {
         if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
         void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
+      }
+      // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
+      // preview so imported apps aren't full of broken pictures — but do NOT persist them (a cold
+      // restart re-imports, exactly like big lockfiles). admin 2026-08-03.
+      const sandboxAssets = opts.sandboxAssets ?? {};
+      if (opts.writeToSandbox && Object.keys(sandboxAssets).length > 0) {
+        try { await materializeAssets(actuator, workspaceId, sandboxAssets); } catch { /* best-effort — a broken image never blocks the import */ }
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
@@ -5144,8 +5210,26 @@ export function registerAgentV3Routes(app: Express): void {
       // "read/analyze my app" ask with an honest survey of the real files.
       attachmentContext += `\n\n[APP IMPORT — already completed] The user's app from ${opts.source} has ALREADY been imported into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze it, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
       // Background live-preview boot (the actuator handles install + start + health-check).
+      // FORENSIC TRAIL (mitrify autopsy 2026-08-04, "Cannot GET /customer/home" AGAIN): the honest
+      // boot-verify shipped 2026-08-03 — and today's report contained ZERO preview entries, so the #1
+      // user-visible failure could not be autopsied: was the boot skipped? did it finish after the
+      // stream closed (emitLive drops post-end narrations by design)? Nobody could tell. Every branch
+      // now records into buildDiag, which does not depend on the stream — starting with the SKIP case,
+      // whose reason was exactly the entry missing from today's report.
+      if (!(validation.hasPackageJson && sandboxDiag().livePreviewAvailable)) {
+        opts.diag?.record({
+          phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_SKIPPED',
+          message: `Background live-preview boot NOT attempted for this import: ${!validation.hasPackageJson ? 'the project has no package.json (nothing to npm-install/run)' : 'the sandbox live preview is unavailable in this session'}.`,
+          autoResolved: true,
+        });
+      }
       if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
         const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
+        opts.diag?.record({
+          phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_BOOT_STARTED',
+          message: 'Background live-preview boot started (npm install + dev server). Its verdict is recorded here even if it lands after the reply stream closes.',
+          autoResolved: true,
+        });
         // HEAVY-APP PREVIEW (capability ②): a full-stack imported app (Express + Postgres + env-driven
         // config, like Mitrify) crashes on a bare `npm run dev` — no DATABASE_URL, undefined env vars.
         // Provision a local DB + write a dev .env FIRST so the server has a real chance to boot; the
@@ -5185,8 +5269,27 @@ export function registerAgentV3Routes(app: Express): void {
             if (up) {
               const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
               const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
-              if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
-              emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });
+              // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
+              // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
+              // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
+              // problem analyzePreviewHtml found, e.g. a full-stack app serving its API but 404-ing its
+              // client routes). The URL is still exposed either way so the user can retry from the tab.
+              let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
+              if (bootUrl) {
+                try {
+                  const probe = await withTimeout(actuator.browseUrl(workspaceId, bootUrl), 30_000, 'import-preview-verify');
+                  served = analyzePreviewHtml(probe.html);
+                } catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
+                emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
+              }
+              const verdict = previewServeNarration({ rendered: served.rendered, problems: served.problems, port: bootPort, needsDb });
+              emitLive({ type: 'narration', agent: 'architect', text: verdict.text, ts: Date.now() });
+              // The verdict is the fact the next autopsy needs — a served=false here IS the
+              // "Cannot GET /customer/home" class, named with its exact problem.
+              opts.diag?.record({
+                phase: 'preview', severity: verdict.ok ? 'info' : 'warning', code: verdict.ok ? 'IMPORT_PREVIEW_SERVING' : 'IMPORT_PREVIEW_NOT_SERVING',
+                message: verdict.text.slice(0, 400), autoResolved: verdict.ok,
+              });
             } else {
               // HONEST DB-AWARE FAILURE (admin 2026-07-24): a full-stack app that crashed on boot almost
               // always needs a real DB and/or external secrets — say so with the exact fix, instead of a
@@ -5199,6 +5302,10 @@ export function registerAgentV3Routes(app: Express): void {
               });
               emitLive({ type: 'narration', agent: 'architect', text: dbNote
                 || '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
+              opts.diag?.record({
+                phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
+                message: (dbNote || 'Dev server did not come up within the boot window.').slice(0, 400), autoResolved: false,
+              });
             }
           } catch {
             const dbNote = previewBootFailureAdvisory({
@@ -5209,6 +5316,12 @@ export function registerAgentV3Routes(app: Express): void {
             });
             emitLive({ type: 'narration', agent: 'architect', text: dbNote
               || '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
+            // The exception/timeout path must leave the same trail as a clean failure — this branch
+            // going silent is exactly how today's report ended up with zero preview entries.
+            opts.diag?.record({
+              phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
+              message: (dbNote || 'Preview boot timed out or threw before a verdict could be read.').slice(0, 400), autoResolved: false,
+            });
           }
         })();
       }
@@ -5218,6 +5331,7 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
         const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
+        recordImportAccounting(extracted);
         const lockKept = Object.keys(extracted.sandboxOnly);
         await landImportedProject(extracted.files, {
           source: zipImports[0].name || 'your zip',
@@ -5228,6 +5342,7 @@ export function registerAgentV3Routes(app: Express): void {
             droppedDetailNote(extracted),
           ].filter(Boolean).join(' '),
           sandboxOnly: extracted.sandboxOnly,
+          sandboxAssets: extracted.sandboxAssets,
           assets: extracted.assets,
         });
       } catch (err) {
@@ -5566,6 +5681,9 @@ export function registerAgentV3Routes(app: Express): void {
     let etaTotalMs = 0;
     let etaStartMs = 0;
     let etaTick = 0;
+    // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
+    // so each re-baseline step stays proportional to the app's real size, not to the growing budget.
+    let etaBaseMs = 0;
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -5579,11 +5697,12 @@ export function registerAgentV3Routes(app: Express): void {
       if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
           const elapsedMs = Date.now() - etaStartMs;
-          const remainingMs = etaTotalMs - elapsedMs;
-          const inTxt = formatEta(elapsedMs).replace('~', '');
-          const text = remainingMs > 45_000
-            ? `⏱️ Still building… ${inTxt} in · ~${formatEta(remainingMs).replace('~', '')} to go`
-            : `⏱️ Still building… ${inTxt} in · wrapping up (a little longer than estimated)`;
+          // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
+          // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
+          // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs);
+          etaTotalMs = tick.totalMs;
+          const text = tick.text;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
           // this ONE transient line the moment the build finishes (it is live status, not chat history).
@@ -5891,6 +6010,7 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const est = estimateBuildTime(complexityFromPrompt(prompt));
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
+          etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ${est.etaText} — I'll keep you posted as I go.`, ts: Date.now() });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
@@ -6140,6 +6260,7 @@ export function registerAgentV3Routes(app: Express): void {
               const zres = await fetchGithubRepoZip({ url: cleanImportUrl, token: githubToken || undefined });
               if (zres.ok && zres.buf) {
                 const extracted = await extractZipProject(zres.buf);
+                recordImportAccounting(extracted, buildDiag);
                 if (Object.keys(extracted.files).length > 0) {
                   const lockKept = Object.keys(extracted.sandboxOnly);
                   serverSideLanded = await landImportedProject(extracted.files, {
@@ -6151,7 +6272,9 @@ export function registerAgentV3Routes(app: Express): void {
                       droppedDetailNote(extracted),
                     ].filter(Boolean).join(' '),
                     sandboxOnly: extracted.sandboxOnly,
+                    sandboxAssets: extracted.sandboxAssets,
                     assets: extracted.assets,
+                    diag: buildDiag,
                   });
                   if (!serverSideLanded) serverFetchReason = 'validate'; // fetched+extracted but not a runnable project
                 } else {
@@ -6187,6 +6310,7 @@ export function registerAgentV3Routes(app: Express): void {
                     source: cleanImportUrl,
                     writeToSandbox: true,
                     droppedNote: mat.skipped ? `— skipped ${mat.skipped} file(s) (dependency/build folders, binaries, secrets, or over the size cap)` : '',
+                    diag: buildDiag,
                   });
                   serverSideLanded = apiMaterialized;
                 }
@@ -6591,6 +6715,12 @@ export function registerAgentV3Routes(app: Express): void {
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from
+          // inside run_command, so any path that starts a dev server through the ACTUATOR instead — an
+          // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
+          // user saved in Settings. Write them now, before anything can run, so the keys the user entered
+          // are genuinely readable by the app v5.0 built. No-op when the vault is empty; best-effort.
+          await dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {});
         }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
@@ -6637,6 +6767,20 @@ export function registerAgentV3Routes(app: Express): void {
           architectSystem = `${paletteBlock}\n\n---\n\n${architectSystem}`;
         }
       } catch { /* palette preset is best-effort — never blocks a build */ }
+      // MISSING-CREDENTIAL CONTRACT (admin spec 2026-08-03: "jab tak user keys na de, us option ko 'coming
+      // soon' likh kar freeze kar do — puri app band na ho"). AppRequirements tells the user WHICH of their
+      // own keys are missing; that message is worthless if the app is already dead by the time they read it.
+      // Generated apps routinely do `if (!process.env.X) throw` at module scope, so ONE unset payment key
+      // white-screens a 12-screen app — a total failure of the one absolute rule, triggered by the user
+      // having done nothing wrong. PREVENTION beats repair (the 50/50 law), so the contract is injected into
+      // the builder's prompt: a missing credential freezes that ONE control in a visible, disabled "Coming
+      // soon" state naming the exact key + settings path, never crashes at boot, and never fakes a result.
+      // Additive + best-effort; AGENTV3_CREDENTIAL_GUARD=off leaves the prompt byte-identical.
+      try {
+        if (credentialGuardEnabled()) {
+          architectSystem = `${credentialGuardInstruction()}\n\n---\n\n${architectSystem}`;
+        }
+      } catch { /* the guard contract is best-effort — never blocks a build */ }
       // Phase S2 — IDE↔v5.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
       // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
@@ -6763,6 +6907,13 @@ export function registerAgentV3Routes(app: Express): void {
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
           const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework), manifestUserPrompt(prompt, scaffold)));
+          // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
+          // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
+          // more files than it should need" is measurable instead of invisible.
+          try {
+            const overNote = overBudgetNote(manifest.length, fileBudgetForPrompt(prompt));
+            if (overNote) buildDiag.record({ phase: 'plan', severity: 'warning', code: 'FILE_BUDGET_EXCEEDED', message: overNote, autoResolved: true });
+          } catch { /* budget telemetry is best-effort */ }
           if (manifest.length >= 2) {
             const contract = ((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim();
             const block = blueprintAdvisoryBlock(manifest, contract);
@@ -6811,6 +6962,24 @@ export function registerAgentV3Routes(app: Express): void {
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
             await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
           } catch { /* warming is best-effort — never blocks a build */ }
+          // PROJECT CONTRACT CARD (autopsy 2026-08-02) — PREVENT the two import mistakes this edit
+          // build made and then had to self-heal: it imported shared types from `./storage` (the wrong
+          // owner) and used `nanoid` without declaring it in package.json. The builder had the file
+          // TREE and a few file CONTENTS, but never a compact symbol→module map or the declared-package
+          // list, so it guessed. Hand it both BEFORE it writes a line — a heal that keeps firing is an
+          // unfixed root cause. Runs AFTER warmIndexFiles (the graph is warm) so the card reflects the
+          // real project. Pure + bounded (caps in projectContractCard); best-effort — on any failure
+          // the build proceeds exactly as before. Kill switch AGENTV3_CONTRACT_CARD=off.
+          if (process.env.AGENTV3_CONTRACT_CARD !== 'off') {
+            try {
+              const pkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => '');
+              const card = projectContractCard({
+                symbols: getWorkspaceMemory(workspaceId).graph().symbols,
+                declaredPackages: declaredPackagesFromPackageJson(pkgRaw),
+              });
+              if (card) architectSystem = `${card}\n\n---\n\n${architectSystem}`;
+            } catch { /* the contract card is best-effort — never blocks a build */ }
+          }
           // P-AI.2 retrieval v2 (Mitrify autopsy) — intent-aware grounding: content hits (grep) +
           // structural anchors (package.json/README/entry/routes/schema) + import-graph centrality.
           // Replaces path-token-overlap-only selection, whose zero-overlap tie handed a survey
@@ -7304,6 +7473,57 @@ export function registerAgentV3Routes(app: Express): void {
       // its own tsc verify-gate + repair, so the post-agentic tsc gate below skips it (no redundant run).
       let fastLaneGated = false;
 
+      // ── GOLDEN SCAFFOLD PRE-SEED (admin 2026-08-02: "starter-template apps must build instantly & correctly") ──
+      // When a NEW build's prompt is EXACTLY one of the simple starter-template chip prompts, pre-seed the
+      // workspace with NavBharatAI's hand-verified golden scaffold for that app — CI-proven to parse under
+      // esbuild AND compile under the in-browser Babel preview, with zero duplicate imports. The builder then
+      // VERIFIES & CUSTOMIZES instead of writing from scratch: first build correct by construction (the 50/50
+      // law's PREVENT half — the weak tier stops generating the very bug classes we keep healing). Fresh
+      // builds only (never clobbers an existing app); an EDITED chip prompt never matches (no surprise
+      // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
+      // AGENTV3_GOLDEN_SCAFFOLD=off.
+      let goldenPreseeded = false;
+      if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
+        try {
+          const golden = goldenScaffoldForPrompt(prompt);
+          if (golden) {
+            const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+              .filter((p) => p.startsWith('src/'));
+            if (existingSrc.length === 0) {
+              const goldenFiles = goldenScaffoldFiles(golden);
+              for (const [gp, gc] of Object.entries(goldenFiles)) {
+                await actuator.writeFile(workspaceId, gp, gc);
+                writtenFiles.set(gp, gc);
+                try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
+              }
+              await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              goldenPreseeded = true;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
+              emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
+              // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
+              // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite.
+              //
+              // TIER-AWARE, and this distinction is load-bearing. A SIMPLE scaffold IS the finished app, so
+              // "polish and finish" is the truth. A PRO scaffold is a compile-proven ARCHITECTURE covering
+              // part of a much larger request ("…activity history, tasks, and a dashboard of pipeline
+              // value") — telling the builder it "fully implements the request" would make it ship a
+              // skeleton and declare success, which is exactly the fake-completion the real-features rule
+              // forbids. So pro gets an EXTEND instruction instead of a FINISH one.
+              buildPrompt = golden.tier === 'pro'
+                ? `[EXTEND THIS WORKING FOUNDATION — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" foundation. ` +
+                  `It already compiles and runs: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
+                  `src/lib/store.ts holds persistent state (useCollection, inr, shortDate), and src/App.tsx has the working screens. ` +
+                  `READ all three FIRST. It is a STARTING POINT, not the finished app — BUILD OUT everything the request below asks for that is not there yet, ` +
+                  `reusing those existing components and the useCollection pattern rather than inventing a second set. Add new screens as their own files under src/. ` +
+                  `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`
+                : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
+                  `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
+                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`;
+            }
+          }
+        } catch { /* pre-seed is best-effort — a failure just builds from scratch */ }
+      }
+
       // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
       // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no
       // sub-agents, no per-file round-trips, no Opus, no rebuild loop). On success the build is
@@ -7322,7 +7542,9 @@ export function registerAgentV3Routes(app: Express): void {
       // redefinition this was implicit — the analyzer's 'opus' start tier failed classifyForSimpleLane;
       // 'mini' now resolves to the 'sonnet' start tier, which the lane WOULD accept, so the guard is
       // explicit.)
-      if (oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // `!goldenPreseeded`: a pre-seeded golden app skips the fast lane — regenerating from scratch would
+      // discard the verified template; the agentic loop verifies & customizes the seeded files instead.
+      if (!goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -8522,6 +8744,78 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* hooks heal is best-effort — never blocks or fails a build */ }
       }
 
+      // BOOT-KILLER HEAL — the second half of the missing-credential contract (admin 2026-08-03: "us option
+      // ko 'coming soon' likh kar freeze kar do, puri app band na ho"). The contract is injected into the
+      // builder's prompt so the FIRST build is already correct; injecting a rule is NOT proof it was
+      // followed, and the 50/50 law is explicit that if a problem still slips through, the heal must be
+      // REAL, not best-effort cosmetics. So: detect the exact fatal pattern the contract forbids — a
+      // top-level `throw`/`process.exit` gated on a missing env var — and, when found, run ONE bounded,
+      // FOCUSED repair pass with the exact file:line, then RE-DETECT and report the truth either way.
+      //
+      // Deliberately NOT gated on `!result.ok`: this defect ships on a build that looks perfectly
+      // successful — every gate passes because the key is only missing at the USER'S runtime, not ours.
+      // That is precisely why it reached production before. The verdict is never flipped by this heal (a
+      // build that failed stays failed); it only removes the landmine. Weak-tier routed (no Sonnet/Opus on
+      // a free build). Costs an extra pass ONLY when a real boot-killer exists — a clean build pays nothing.
+      // Best-effort + time-budgeted + abortable. Kill switch AGENTV3_CREDENTIAL_GUARD=off.
+      if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted) {
+        try {
+          // RETROACTIVE SWEEP (admin 2026-08-03, "han karo"): on a FRESH build `writtenFiles` IS the whole
+          // app, but on an EDIT of an app built BEFORE the contract shipped, it holds only the handful of
+          // files this turn touched — so a boot-killer sitting in an untouched file (the common case for an
+          // OLD app) was invisible and shipped again. Scan the STORED workspace too, with this turn's
+          // writes layered on top (newer wins), so every pre-existing boot-killer is found the next time
+          // that app is built. Bounded to edit mode (a fresh build needs no extra read) and best-effort —
+          // a store failure falls back to writtenFiles alone rather than skipping the check.
+          let scanFiles: Map<string, string> | Record<string, string> = writtenFiles;
+          if (isEditMode) {
+            const stored = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+            if (Object.keys(stored).length > 0) {
+              const merged = new Map<string, string>(Object.entries(stored));
+              for (const [p, c] of writtenFiles) merged.set(p, c); // this turn's writes are the newer truth
+              scanFiles = merged;
+            }
+          }
+          const killers = findBootKillingEnvGuards(scanFiles);
+          if (killers.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD', autoResolved: false,
+              message: bootKillingGuardSummary(killers).slice(0, 400),
+            });
+            const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+            if (autoFixEnabled() && timeLeft) {
+              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Making sure a missing key freezes just that one feature instead of stopping the whole app…', ts: Date.now() });
+              const guardHealRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                model: resolveModel(powerLevelReqEffective),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await guardHealRunner.run(bootKillerRepairInstruction(killers));
+              // Re-detect over the SAME file set, with the heal's writes layered on (they land in
+              // writtenFiles via onFileWrite), so the report states what is actually true now — never
+              // "healed" on the healer's own say-so. Re-layering matters for the retroactive sweep: the
+              // untouched old files are still in `scanFiles`, so a heal that fixed only some of them
+              // honestly reports the rest as UNRESOLVED instead of vanishing with the stale snapshot.
+              const afterFiles = new Map<string, string>(scanFiles instanceof Map ? scanFiles : Object.entries(scanFiles));
+              for (const [p, c] of writtenFiles) afterFiles.set(p, c);
+              const after = findBootKillingEnvGuards(afterFiles);
+              if (healed.ok && after.length === 0) {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'BOOT_KILLING_ENV_GUARD_HEALED', autoResolved: true,
+                  message: `Removed ${killers.length} boot-killing env guard(s) — a missing key now freezes only that feature ("Coming soon") instead of taking the whole app down.`,
+                });
+              } else {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'BOOT_KILLING_ENV_GUARD_UNRESOLVED', autoResolved: false,
+                  message: `Heal pass did not clear every boot-killing env guard — ${after.length} remain. ${bootKillingGuardSummary(after)}`.slice(0, 400),
+                });
+              }
+            }
+          }
+        } catch { /* the guard heal is best-effort — never blocks or fails a build */ }
+      }
+
       // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v5.0 used to
       // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it
       // actually OPENS the running app in a real browser, READS the rendered DOM + console, and
@@ -8985,7 +9279,7 @@ export function registerAgentV3Routes(app: Express): void {
           // writtenFiles counts only dispatcher writes (AI edits), NOT imported files, so a read-only
           // import+survey gets "I analyzed your project — no files were changed" instead of the false
           // "Here's what I built". An edit run says "I changed N file(s)"; a fresh build keeps "built".
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode, changedPaths: [...writtenFiles.keys()] });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
@@ -9110,32 +9404,52 @@ export function registerAgentV3Routes(app: Express): void {
               ? `${criticals.length} critical + ${warningFixes.length} functional issue(s)`
               : `${criticals.length} critical issue(s)`;
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${label} — fixing them now…`, ts: Date.now() });
-            const critFixRunner = new AgentRunner({
-              ...baseRunnerOpts,
-              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-              model: resolveModel(powerLevelReqEffective),
-              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
-            });
-            try {
-              const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), 120_000, 'reviewer-autofix');
-              // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
-              // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
-              // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
-              // future slice could re-review to confirm the criticals are actually gone.)
-              if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
-              // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
-              // TURN's writes (on an edit turn that's a handful of files), and the old
-              // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
-              // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
-              if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
-              // HONEST outcome (deep-test 2026-07-18): only claim "Auto-fixed" when the repair actually
-              // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
-              // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
-              try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
-            } catch (e) {
-              console.log(`[AGENTV3] reviewer auto-fix failed: ${e instanceof Error ? e.message : String(e)}`);
-              // A THROWN failure (timeout / abort) also leaves the criticals in place — report it honestly.
-              try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(false, label) }); } catch { /* best-effort */ }
+            // C9-RETRY (admin dashboard autopsy 2026-08-02 — "Reviewer critical not resolved" was the TOP
+            // failure pattern, 29% of failed user reports): the single flat-120s attempt died on timeouts
+            // and one-shot provider flakes, and the criticals shipped unresolved. Two class fixes, both
+            // pure + tested in AutoFix.ts:
+            //  - reviewerFixBudgetMs: the budget scales with how many findings must be fixed and clamps
+            //    to the wall-clock headroom (up to 5 min when the build has it — kills the timeout class);
+            //  - reviewerFixShouldRetry: ONE bounded retry after a COMPLETED-but-failed or non-timeout
+            //    thrown pass, never after a timeout (the raced-out runner may still be editing — two
+            //    concurrent runners on one workspace is a corruption risk), max 2 attempts total.
+            const fixHeadroomMs = () => effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
+            for (let fixAttempt = 1; ; fixAttempt++) {
+              // A FRESH runner per attempt — never re-run a runner whose previous run was abandoned.
+              const critFixRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                model: resolveModel(powerLevelReqEffective),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              let timedOut = false;
+              let fixOk = false;
+              try {
+                const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), reviewerFixBudgetMs(autoFixItems.length, fixHeadroomMs()), 'reviewer-autofix');
+                fixOk = !!fix.ok;
+                // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
+                // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
+                // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
+                // future slice could re-review to confirm the criticals are actually gone.)
+                if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
+                // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
+                // TURN's writes (on an edit turn that's a handful of files), and the old
+                // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
+                // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
+                if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                // HONEST outcome (deep-test 2026-07-18): only claim "Auto-fixed" when the repair actually
+                // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
+                // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
+                try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
+              } catch (e) {
+                timedOut = e instanceof Error && /timed out/i.test(e.message);
+                console.log(`[AGENTV3] reviewer auto-fix failed (attempt ${fixAttempt}): ${e instanceof Error ? e.message : String(e)}`);
+                // A THROWN failure (timeout / abort) also leaves the criticals in place — report it honestly.
+                try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(false, label) }); } catch { /* best-effort */ }
+              }
+              if (fixOk || abort.signal.aborted || !reviewerFixShouldRetry(fixAttempt, fixHeadroomMs(), timedOut)) break;
+              // WHITE-LABEL narration — the retry is invisible plumbing; the user only sees us still working.
+              events.emit({ type: 'narration', agent: 'architect', text: `🔧 Still resolving ${label} — taking another pass…`, ts: Date.now() });
             }
           }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
@@ -9770,16 +10084,22 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* one write failing must not block the rest */ }
           }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
+          // FRAMEWORK-AWARE PATH (deploy-report autopsy 2026-08-03): a Vite app ships ONLY what's under
+          // public/, so these must land in public/ or `npm run build` drops them from dist/ and the deploy
+          // 404s them (which made a real build grind 7 rebuilds copying them by hand). defaultAssetPath →
+          // public/<file> for a Vite framework, root otherwise. Kill switch AGENTV3_VITE_PUBLIC_ASSETS=off.
+          const publicAssets = (process.env.AGENTV3_VITE_PUBLIC_ASSETS ?? '').trim().toLowerCase() !== 'off';
           for (const [rel, content] of Object.entries(defaults.files)) {
-            if (writtenFiles.has(rel)) continue;
+            const target = publicAssets ? defaultAssetPath(rel, framework) : rel;
+            if (writtenFiles.has(target)) continue;
             let exists = false;
-            try { await actuator.readFile(workspaceId, rel); exists = true; } catch { exists = false; }
+            try { await actuator.readFile(workspaceId, target); exists = true; } catch { exists = false; }
             if (exists) continue;
             try {
-              await actuator.writeFile(workspaceId, rel, content);
-              writtenFiles.set(rel, content);
-              try { getWorkspaceMemory(workspaceId).indexFile(rel, content); } catch { /* index best-effort */ }
-              savedDefaults[rel] = content;
+              await actuator.writeFile(workspaceId, target, content);
+              writtenFiles.set(target, content);
+              try { getWorkspaceMemory(workspaceId).indexFile(target, content); } catch { /* index best-effort */ }
+              savedDefaults[target] = content;
             } catch { /* best-effort per file */ }
           }
           if (Object.keys(savedDefaults).length > 0) {
@@ -9851,7 +10171,7 @@ export function registerAgentV3Routes(app: Express): void {
         : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate());
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
       // tier (the free engine, or a paid user who picked Weak), tell the user — in their OWN language —
-      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the 🎛️ options
+      // the honest, actionable reason: a complex app needs a stronger tier, switchable via the ⚙️ options
       // button. Gated to `!result.ok && noClaudeBuild && expectsArtifacts` so it only fires on a genuine
       // failed build on the weak tier — infra/sandbox failures short-circuit earlier and never reach here,
       // so the tier is never blamed for a platform outage. White-label safe (names tiers, never a model).
@@ -9859,6 +10179,32 @@ export function registerAgentV3Routes(app: Express): void {
       if (!result.ok && noClaudeBuild && expectsArtifacts && (process.env.AGENTV3_WEAK_FAIL_NOTICE ?? '').trim().toLowerCase() !== 'off') {
         const failLang = detectLanguageHint(prompt)?.code ?? null;
         result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${weakTierBuildFailedNotice(failLang)}` };
+      }
+      // "WHAT THIS APP NEEDS FROM YOU" (admin question 2026-08-03: can v5.0 handle DB / multi-feature apps,
+      // and should it tell the user to paste keys in Settings?). A built app can be technically perfect and
+      // STILL have a Pay button that cannot charge, because the gateway key can only come from the user's
+      // OWN account — that is precisely the "looks done but does nothing" state the second absolute rule
+      // forbids. So on a SUCCESSFUL build we read the real output (declared packages + the env-vars the code
+      // actually references), subtract every secret the user has ALREADY saved, and append a SHORT localized
+      // checklist naming the exact key names and the exact settings path.
+      // Deliberately NOT a blocker and NOT a pre-build questionnaire: the app is built and shown first, the
+      // sandbox Postgres is still auto-provisioned silently (kind 'auto' is never surfaced), and a plain app
+      // — the overwhelmingly common case — produces an empty string and no extra line at all. Zero LLM cost:
+      // the detector is pure static analysis. Kill switch AGENTV3_APP_REQUIREMENTS=off.
+      if (result.ok && expectsArtifacts && (process.env.AGENTV3_APP_REQUIREMENTS ?? '').trim().toLowerCase() !== 'off') {
+        try {
+          const missing = unconfiguredRequirements(detectAppRequirements({ files: writtenFiles, prompt }), vaultSecrets);
+          const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
+          if (notice) {
+            result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'APP_REQUIREMENTS_SURFACED', autoResolved: false,
+              message: `Told the user which of their own credentials this app still needs: ${missing.map((r) => r.id).join(', ')}`.slice(0, 400),
+            });
+          }
+        } catch {
+          // A notice is never worth failing a successful build over — stay silent and ship the app.
+        }
       }
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the

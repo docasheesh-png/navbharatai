@@ -54,9 +54,27 @@ export interface AssembledProject {
   notes: string[];
 }
 
+// WHY A BLOCKLIST, NOT A WHITELIST (build-failure autopsy 2026-08-03):
+//
+// This used to be a whitelist of extensions — html/css/js/jsx/ts/tsx/json/md/txt/svg/xml/yml/env. Any
+// file whose extension was not on it was SILENTLY DROPPED from the pushed repository. That is a whole
+// class of mysterious build failures with no message pointing at the cause:
+//   • a component importing `./styles.scss`  → the file is gone → "Cannot resolve" → the build dies
+//   • `vite.config.mjs`, `postcss.config.cjs`, `tailwind.config.cjs` → gone → wrong or unstyled output
+//   • `.npmrc`, `.nvmrc`, `.env.production`, `App.vue`, `route.graphql` → gone
+// The user's app compiled perfectly inside NavBharatAI and then failed on the runner, because the code
+// that ran there was not the code they wrote.
+//
+// A whitelist has to predict every extension an app might ever use, and it silently loses whatever it
+// failed to predict. A blocklist only has to name what genuinely cannot survive as text — and when it is
+// wrong, the file is INCLUDED, which is the safe direction. Every value here is already a string from the
+// workspace store, so "is it text?" is really "is this a binary asset or build junk we should not push?".
+const BINARY_OR_JUNK = /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|icns|woff2?|ttf|otf|eot|mp[34]|m4a|wav|ogg|webm|mov|avi|pdf|zip|gz|tgz|bz2|7z|rar|jar|aab|apk|ipa|so|dll|dylib|exe|bin|wasm|db|sqlite3?|psd|ai|sketch|fig|keystore|jks|p12|pem|key)$/i;
+/** Lock files are deliberately not pushed — see the workflow's install step, which handles their absence. */
+const NEVER_PUSH = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|\.DS_Store|Thumbs\.db)$/i;
+
 function isTextPath(path: string): boolean {
-  return /\.(html?|css|js|jsx|ts|tsx|json|md|txt|svg|xml|yml|yaml|env|gitignore)$/i.test(path)
-    || /(^|\/)(\.gitignore|LICENSE|README)$/i.test(path);
+  return !BINARY_OR_JUNK.test(path) && !NEVER_PUSH.test(path);
 }
 
 /** Does this project build itself? Only a real `build` script counts — the workflow runs exactly that. */
@@ -130,15 +148,60 @@ export function buildPackageJson(
   pkg.scripts = scripts;
 
   const devDeps = { ...((pkg.devDependencies as Record<string, string>) || {}) };
-  devDeps['@capacitor/cli'] = devDeps['@capacitor/cli'] || '^6.2.0';
-  pkg.devDependencies = devDeps;
-
   const deps = { ...((pkg.dependencies as Record<string, string>) || {}) };
-  deps['@capacitor/core'] = deps['@capacitor/core'] || '^6.2.0';
-  deps['@capacitor/android'] = deps['@capacitor/android'] || '^6.2.0';
+
+  // CAPACITOR VERSIONS MUST AGREE (root cause of a real build failure, 2026-08-03).
+  //
+  // The three packages are one product split across three modules, and `cap add android` refuses to run
+  // when the CLI, core and platform are on different majors. The old code filled each one in
+  // independently with `existing || '^6.2.0'`, so an app that already declared `@capacitor/core: ^7`
+  // got `@capacitor/android: ^6.2.0` bolted on beside it. `npx cap add android` then failed in about a
+  // second — and because that failure was being swallowed by `|| echo`, the run marched on and died
+  // three steps later at Gradle with "chmod: cannot access './gradlew'".
+  //
+  // So the major is decided ONCE, from whatever the app already declares, and applied to all three.
+  const major = capacitorMajor({ ...deps, ...devDeps }) ?? DEFAULT_CAPACITOR_MAJOR;
+  const range = `^${major}.0.0`;
+  devDeps['@capacitor/cli'] = alignCapacitor(devDeps['@capacitor/cli'], major, range);
+  deps['@capacitor/core'] = alignCapacitor(deps['@capacitor/core'], major, range);
+  deps['@capacitor/android'] = alignCapacitor(deps['@capacitor/android'], major, range);
+
+  pkg.devDependencies = devDeps;
   pkg.dependencies = deps;
 
   return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+/** The Capacitor line NavBharatAI adds when the app expresses no preference of its own. */
+export const DEFAULT_CAPACITOR_MAJOR = 6;
+
+/** First major version number in a semver range, or null when there is nothing readable in it. */
+export function majorOfRange(range: string): number | null {
+  const m = /(\d+)\s*\./.exec(String(range || ''));
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * The Capacitor major this app is already built around.
+ *
+ * `@capacitor/core` is the authority when present — a plugin can lag a major behind, but core is what
+ * the app's own code is written against. Otherwise any declared `@capacitor/*` package answers it.
+ */
+export function capacitorMajor(all: Record<string, string>): number | null {
+  const core = all['@capacitor/core'] && majorOfRange(all['@capacitor/core']);
+  if (core) return core;
+  for (const [name, range] of Object.entries(all)) {
+    if (!name.startsWith('@capacitor/')) continue;
+    const m = majorOfRange(range);
+    if (m) return m;
+  }
+  return null;
+}
+
+/** Keep what the app already declared when it agrees with the chosen major; otherwise align it. */
+function alignCapacitor(existing: string | undefined, major: number, range: string): string {
+  return existing && majorOfRange(existing) === major ? existing : range;
 }
 
 /** The Capacitor config, pointing at whatever this app actually produces. */

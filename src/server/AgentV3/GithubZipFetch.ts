@@ -30,6 +30,16 @@ export interface GithubZipResult {
   bytes?: number;
 }
 
+/** A minimal byte-stream reader — exactly the slice of the web ReadableStream reader we use. */
+export interface ByteStreamReader {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel?(reason?: unknown): Promise<void> | void;
+}
+/** A minimal byte stream — what `fetch`'s `res.body` is (optional so a test fake can omit it). */
+export interface ByteStream {
+  getReader(): ByteStreamReader;
+}
+
 /** The minimal fetch surface used here — injectable so tests never touch the network. */
 export type ZipFetcher = (
   url: string,
@@ -39,7 +49,48 @@ export type ZipFetcher = (
   status: number;
   headers: { get(name: string): string | null };
   arrayBuffer(): Promise<ArrayBuffer>;
+  /** The response body as a stream. Present on real `fetch`; a test fake may omit it. */
+  body?: ByteStream | null;
 }>;
+
+/**
+ * Read a byte stream into a Buffer, ABORTING the moment it exceeds `maxBytes`.
+ *
+ * ROOT CAUSE this kills (admin question 2026-08-03, "what if someone imports a 100GB repo?"): the
+ * download guard checked `content-length` first — but codeload frequently streams the zipball with NO
+ * content-length, and the fallback path did `await res.arrayBuffer()`, buffering the ENTIRE body into
+ * memory BEFORE the size check. On a 2 GiB Cloud Run instance a multi-hundred-MB repo could therefore
+ * OOM-kill the process — taking down EVERY other user's in-flight build with it. One user's oversized
+ * import must never be able to break the app (first absolute rule).
+ *
+ * Streaming with a running total bounds peak memory at ~maxBytes regardless of how big the remote
+ * repo is, and cancels the download instead of draining it. Pure over the injected reader.
+ */
+export async function readStreamCapped(
+  stream: ByteStream,
+  maxBytes: number,
+): Promise<{ ok: true; buf: Buffer } | { ok: false; bytes: number }> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.length === 0) continue;
+      total += value.length;
+      if (total > maxBytes) {
+        // Stop pulling bytes we will never use — do not drain a huge body just to reject it.
+        try { await reader.cancel?.('over the import size cap'); } catch { /* cancel is best-effort */ }
+        return { ok: false, bytes: total };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try { await reader.cancel?.(); } catch { /* already closed */ }
+  }
+  return { ok: true, buf: Buffer.concat(chunks.map((c) => Buffer.from(c))) };
+}
 
 /** Default per-repo download ceiling (compressed). Generous over any real app; the extractor's own
  *  decompression-bomb guards bound the UNCOMPRESSED size independently. */
@@ -106,11 +157,27 @@ export async function fetchGithubRepoZip(opts: {
     // Guard the download size: refuse an over-cap body up front by its declared length when present.
     const declared = Number(res.headers.get('content-length') || '0');
     if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, status: res.status, reason: 'too-large', bytes: declared };
+    // STREAM the body with a running cap (see readStreamCapped). The content-length check above only
+    // helps when the header is present — codeload often streams without one, and buffering first and
+    // checking after is exactly how one oversized import could OOM the shared instance.
     let buf: Buffer;
-    try {
-      buf = Buffer.from(await res.arrayBuffer());
-    } catch {
-      return { ok: false, status: res.status, reason: 'network' };
+    if (res.body) {
+      let read: Awaited<ReturnType<typeof readStreamCapped>>;
+      try {
+        read = await readStreamCapped(res.body, maxBytes);
+      } catch {
+        return { ok: false, status: res.status, reason: 'network' };
+      }
+      if (!read.ok) return { ok: false, status: res.status, reason: 'too-large', bytes: read.bytes };
+      buf = read.buf;
+    } else {
+      // No stream available (a test fake, or a runtime without a body stream) — fall back to the
+      // buffered read. Still size-checked below, exactly as before.
+      try {
+        buf = Buffer.from(await res.arrayBuffer());
+      } catch {
+        return { ok: false, status: res.status, reason: 'network' };
+      }
     }
     if (buf.length > maxBytes) return { ok: false, status: res.status, reason: 'too-large', bytes: buf.length };
     if (buf.length === 0) return { ok: false, status: res.status, reason: 'empty' };

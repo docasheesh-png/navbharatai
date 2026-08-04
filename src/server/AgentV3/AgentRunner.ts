@@ -795,7 +795,17 @@ export class AgentRunner {
         }
         // LOOP BREAKER — steer the model off a repeated non-progressing call (best-effort; never blocks).
         const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
-        if (loopSteer) events.emit({ type: 'narration', agent: agentRole, text: '⚠️ Noticed a repeated step that isn\'t making progress — nudging a change of approach.', ts: Date.now() });
+        if (loopSteer) {
+          // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and
+          // the same dead call is now banned — say that, rather than repeating the softer first line.
+          const escalated = loopSteer.includes('LOOP GUARD — FINAL');
+          events.emit({
+            type: 'narration', agent: agentRole, ts: Date.now(),
+            text: escalated
+              ? '⚠️ Still repeating the same step — blocking it and moving on to finish the app.'
+              : '⚠️ Noticed a repeated step that isn\'t making progress — nudging a change of approach.',
+          });
+        }
         const steer = [truncationSteer, loopSteer].filter(Boolean).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());

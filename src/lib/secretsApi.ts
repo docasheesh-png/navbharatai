@@ -11,18 +11,9 @@
 // Pure of any component state; throws a real Error (with the server's message when present) so callers
 // can surface an honest failure instead of a silent no-op.
 
-import { auth } from './firebase';
+// authHeaders moved to lib/authedFetch when a second caller needed it — one auth helper, no drift.
+import { authHeaders } from './authedFetch';
 
-/** Build the Authorization header for the current signed-in user. Empty object when signed out (the
- *  server will then honestly answer 401 rather than us guessing). getIdToken() refreshes if expired. */
-async function authHeaders(): Promise<Record<string, string>> {
-  try {
-    const token = await auth.currentUser?.getIdToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    return {};
-  }
-}
 
 export interface SecretMeta {
   id: string;

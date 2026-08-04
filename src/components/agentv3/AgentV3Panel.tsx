@@ -27,6 +27,8 @@ import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';
+import { deployBlockedReason } from '../../lib/deployGuard';
+import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
@@ -2209,8 +2211,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
   // deploy tool, publishing to the CHOSEN provider's permanent public URL). Routed through the normal
   // stream so the user watches real progress; the live URL is then refreshed from the server.
-  const deployLive = (providerOverride?: string) => {
-    if (running || !state.workspaceId) return;
+  /**
+   * Start a real publish. Returns an HONEST reason when it could NOT start, null when it did.
+   *
+   * ROOT CAUSE (admin 2026-08-02): this used to be `if (running || !state.workspaceId) return;` — a
+   * SILENT no-op. The Publish modal closed itself first, so the user tapped a button, the sheet
+   * vanished, and nothing happened: "sabhi button farzi hai". The precondition is now a reported
+   * value (src/lib/deployGuard.ts) that every caller must surface — never a hidden branch.
+   */
+  const deployLive = (providerOverride?: string): string | null => {
+    const prov0 = providerOverride || deployProvider;
+    const blocked = deployBlockedReason({
+      running,
+      workspaceId: state.workspaceId,
+      providerConfigured: configuredProviders.some((p) => p.id === prov0),
+      providerName: providers.find((p) => p.id === prov0)?.name,
+    });
+    if (blocked) return blocked;
     // When triggered from the Git panel a specific provider is passed; otherwise use the picker.
     const prov = providerOverride || deployProvider;
     if (providerOverride) setDeployProvider(providerOverride);
@@ -2224,6 +2241,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
       { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, deployProvider: prov, appSignature: appSignaturePref() },
     );
+    // Show the live progress the publish is now producing — on mobile the user was left staring at
+    // whatever surface they came from, which is half of why the button felt like it did nothing.
+    setShowWorkspace(false); // the chat surface, where the deploy narration streams
+    return null;
   };
 
   // "Restore all files" — genuinely bring the whole project back into the workspace (the server
@@ -2402,11 +2423,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // Deploy requested from the Git panel (sidebar) for a specific real provider — run v5's REAL
   // build+deploy pipeline for that provider (the actual, tested deploy engine). Fires on each new
-  // pendingDeploy (nonce change). If there is no app in the workspace yet, deployLive no-ops safely.
+  // pendingDeploy (nonce change). If it CAN'T start, say why in the chat — this path used to drop
+  // deployLive's silent no-op on the floor too (same dead-button class, admin 2026-08-02).
   useEffect(() => {
     if (!pendingDeploy?.provider) return;
     setShowWorkspace(false);
-    deployLive(pendingDeploy.provider);
+    const reason = deployLive(pendingDeploy.provider);
+    if (reason) {
+      setAgentHistory((h) => [...h, { role: 'agent' as const, agent: 'architect', text: `⚠️ ${reason}`, ts: Date.now() }]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingDeploy?.nonce]);
 
@@ -2624,7 +2649,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           githubConnected={!!ghToken()}
           onConnectGitHub={() => void connectGitHub()}
           onClose={() => setShowHostingChooser(false)}
-          onDeploy={(id) => { setShowHostingChooser(false); deployLive(id); }}
+          // Close ONLY when the publish genuinely started; otherwise hand the reason back so the
+          // chooser shows it inline (never a modal that vanishes with nothing happening).
+          onDeploy={(id) => {
+            const reason = deployLive(id);
+            if (!reason) setShowHostingChooser(false);
+            return reason;
+          }}
         />
       )}
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
@@ -3923,7 +3954,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showFrameworkPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
-          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          {/* Capped + scrollable — an uncapped modal grows past a phone screen and everything below the
+              fold becomes unreachable (see the Import/Push modal below for the reported instance). */}
+          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
@@ -3948,7 +3981,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
-          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          {/* ROOT CAUSE of "PUSH button kaam ka nahi hai" (admin 2026-08-03): this card had NO height cap
+              and NO scroll, so on a phone it grew past the screen. In PUSH mode the commit-message field
+              and — critically — the push RESULT banner render near the BOTTOM, i.e. below the fold with
+              no way to reach them. The push itself ran fine (real blobs → tree → commit → ref); its only
+              feedback was simply off-screen, so the button felt dead. Same class as the Publish sheet
+              (#2037) — this was its surviving sibling. Cap at the viewport and scroll. */}
+          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
@@ -4111,9 +4150,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
 
-            {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason). */}
+            {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason).
+                STICKY: this is the ONLY feedback a push gives, and it lives below the repo list — on a
+                phone that put it off-screen, which is exactly why the button felt dead. Pinned to the
+                bottom of the scroll area so the answer is visible the moment a repo is tapped. */}
             {(pushBusy || pushResult) && (
-              <div className={`flex items-start gap-2 p-3 rounded-xl border text-[11px] ${pushResult && !pushResult.ok ? 'bg-amber-500/10 border-amber-500/20 text-amber-200' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-100'}`}>
+              <div className={`sticky bottom-0 z-10 flex items-start gap-2 p-3 rounded-xl border text-[11px] backdrop-blur-sm ${pushResult && !pushResult.ok ? 'bg-amber-950/80 border-amber-500/30 text-amber-200' : 'bg-indigo-950/80 border-indigo-500/30 text-indigo-100'}`}>
                 {pushBusy ? <TirangaLoader className="w-4 h-4 shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
                 <div className="min-w-0">
                   <p>{pushResult?.text || 'Pushing…'}</p>
@@ -4360,8 +4402,18 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/**
+ * The user-facing build-health card. The readiness engine's lines are deliberately FORENSIC
+ * ("hardcoded-secret @ server/index.js:24 — …") because the repair loop and the admin Report need
+ * file:line precision. But the CARD is a user surface, so it renders SHORT plain-language lines via
+ * simplifyHealthLines — de-duplicated and capped (admin 2026-08-02: "itna bada aur complex likhne ki
+ * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
+ */
 function BuildHealthCard({ health }: { health: BuildHealth }) {
   const ready = health.ready;
+  const blockers = simplifyHealthLines(health.blockers, 3);
+  const warnings = simplifyHealthLines(health.warnings, 2);
+  const more = blockers.more + warnings.more;
   return (
     <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
       <div className="flex items-center gap-1.5 font-semibold">
@@ -4371,19 +4423,22 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
         <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>Build health: {ready ? 'READY' : 'NOT READY'}</span>
         <span className="text-zinc-500">· {health.score}/100</span>
       </div>
-      {health.blockers.length > 0 && (
+      {blockers.lines.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-amber-200/90">
-          {health.blockers.slice(0, 6).map((b, i) => (
+          {blockers.lines.map((b, i) => (
             <li key={`b${i}`} className="flex gap-1"><span className="text-amber-500">✗</span><span>{b}</span></li>
           ))}
         </ul>
       )}
-      {health.warnings.length > 0 && (
+      {warnings.lines.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-zinc-400">
-          {health.warnings.slice(0, 4).map((w, i) => (
+          {warnings.lines.map((w, i) => (
             <li key={`w${i}`} className="flex gap-1"><span className="text-zinc-500">•</span><span>{w}</span></li>
           ))}
         </ul>
+      )}
+      {more > 0 && (
+        <div className="mt-1 text-[10px] text-zinc-500">+{more} more · see Report for details</div>
       )}
     </div>
   );

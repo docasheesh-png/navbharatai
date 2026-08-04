@@ -374,6 +374,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   real deploy of the user's Node/Express backend to Render via the Render API, `rnd_…` key. Read by
   `src/server/AgentV3/renderDeploy.ts`. BYO-account model: deploys to the account that owns this key; without
   it the backend-deploy path honestly reports "set RENDER_API_KEY", never a fake deploy.)
+- **User-account provisioning (ROADMAP #1 Phase 1 — zero-setup DB/Auth):** `SUPABASE_OAUTH_CLIENT_ID`,
+  `SUPABASE_OAUTH_CLIENT_SECRET` (admin SET in Cloud Run 2026-08-04. A **published Supabase OAuth app**
+  — `docasheesh-png's Org` → Settings → OAuth Apps → "Publish OAuth app". This is NOT a database
+  credential: it is NavBharatAI's platform identity, used ONCE per user to ask *their* Supabase account
+  for permission, so we can create a project **inside the user's own account**. That keeps the standing
+  rule intact — user apps run on the USER's account and bill, never NavBharatAI's. Callback:
+  `https://navbharatai.com/api/integrations/supabase/callback`. Granted scopes: Projects (read+write —
+  creates the project), Organizations (read — needs `org_id` to create in), Secrets (read — reads the new
+  project's anon key to wire the app), Auth (read+write — Phase 1.3 one-click login), Database (read+write
+  — migrations + schema types). Everything else deliberately left at **No access** (smaller consent screen
+  = more user trust); Storage can be added when Phase 1.4 needs it. ⚠️ Supabase FREE plan allows only
+  **2 projects per org** — a user already at the cap must get an honest "no room in your Supabase account"
+  message, never a silent failure.)
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
@@ -954,11 +967,16 @@ Two admin-mandated additions to the billing surface (both verified live: a real 
   carries ONLY tokens + the real bill + the user's selected tier, branded `NavBharatAI Pro v3.0` — never a
   provider/model name (GLM/Kimi/Claude/Sonnet/Opus/Gemini/Grok/…), never our internal real cost or markup
   (those stay ADMIN-only in the diagnostics report). This also fixed a real crash: Fix 65's per-tier
-  breakdown objects had mismatched shapes that made the client do `undefined.toFixed()`. ⚠️ OPEN ITEM
-  (Fix 68, not yet done): the downloadable **Build report** still shows provider names for everyone
-  (`PROVIDER_FALLBACK "Provider GLM failed"`, `providerDelivery`, `providerTokens`, `llmCalls` provider/
-  model). That report must be gated so regular users see a provider-anonymous view while the ADMIN keeps
-  the full detail. Do NOT surface provider names on any user-facing screen.
+  breakdown objects had mismatched shapes that made the client do `undefined.toFixed()`. ✅ **Fix 68 —
+  DONE (verified against live code 2026-08-04; this line previously read "not yet done" and was STALE).**
+  The build report is now gated: `GET /api/agentv3/diagnostics` resolves `showProviderDetail =
+  isReportAdmin(<VERIFIED email>)` and **fails CLOSED** (no email / lookup failure ⇒ anonymized), then a
+  non-admin gets `userFacingReport()` (`BuildDiagnostics.ts`) for the latest/session/by-id report and
+  `redactProviderError()` (`lib/providerRedaction.ts`) over the history list's `summary`/`rootCause`.
+  Test-locked in `providerRedaction.test.ts`, `BuildDiagnostics.test.ts` and `agentv3.test.ts`. Separately,
+  the user no longer downloads a report at all (admin 2026-07-29): "Report" submits it server-side to the
+  admin inbox and the user receives only `{ ok }`. The standing rule is unchanged and permanent: **do NOT
+  surface provider names on any user-facing screen.**
 
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 

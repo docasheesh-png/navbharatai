@@ -9,6 +9,8 @@
 // never ships node_modules, build output, .git, or live .env secrets; binary and
 // oversized files are skipped (a deploy is source/text).
 
+import { buildTarGz, shouldBulkLand, bulkLandEnabled } from './BulkLanding';
+
 /** The minimal slice of the sandbox actuator this collector needs. */
 export interface WorkspaceFileSource {
   listFiles(workspaceId: string): Promise<string[]>;
@@ -18,6 +20,14 @@ export interface WorkspaceFileSource {
 /** The minimal slice of the sandbox actuator the importer needs. */
 export interface WorkspaceFileSink {
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /**
+   * OPTIONAL bulk-landing capability (see BulkLanding.ts). When a sink can take one binary and run one
+   * command, a whole project lands in TWO round trips instead of one per file. Optional by design: any
+   * sink lacking these (LocalActuator in tests, a stub) transparently keeps the per-file path.
+   */
+  writeBinaryFile?(workspaceId: string, filePath: string, base64: string): Promise<void>;
+  runCommand?(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  readFile?(workspaceId: string, filePath: string): Promise<string>;
 }
 
 export interface CollectedFiles {
@@ -31,6 +41,19 @@ export interface ImportedFiles {
   written: string[];
   /** Paths rejected (unsafe path, excluded, secret, or too large). */
   skipped: string[];
+  /**
+   * HOW the files got there — recorded so a build report can answer it without guesswork.
+   *
+   * Shipping the bulk path with NO telemetry was a real mistake: when a data-loss event appeared on a
+   * live import (2026-08-03), nothing in the report said which landing path had run or how many files
+   * it had verified, so the change could neither be blamed nor cleared from the evidence alone.
+   * 'bulk' = one archive, count-verified; 'bulk+per-file' = archive plus the paths tar cannot carry;
+   * 'per-file' = the classic path (small import, missing capability, or a fallback after a failed
+   * or unproven bulk attempt).
+   */
+  landedVia?: 'bulk' | 'bulk+per-file' | 'per-file';
+  /** Files tar itself reported extracting, when the bulk path ran and was verified. */
+  bulkVerifiedCount?: number;
 }
 
 // Raised 4000 → 16000 so a Mitrify-scale (and up to ~50×) imported/collected app is not truncated
@@ -74,32 +97,39 @@ export async function collectWorkspaceFiles(
   const skipped: string[] = [];
   const all = await source.listFiles(workspaceId);
 
-  let totalBytes = 0;
-  for (const path of all) {
-    if (Object.keys(files).length >= MAX_FILES) {
-      skipped.push(path);
-      continue;
-    }
-    if (isExcludedPath(path)) {
-      skipped.push(path);
-      continue;
-    }
-    let content: string;
+  // ROOT CAUSE of the 13-minute post-import gap (admin build report 2026-08-03): this used to
+  // `await source.readFile(...)` ONE AT A TIME inside a for-loop. Against the E2B sandbox every read
+  // is a network round trip, so a 2034-file workspace cost ~2034 × ~390ms ≈ 790 SECONDS — which is
+  // exactly the 788s of silence between "import SUCCEEDED" (58s) and the agent starting (868s) in
+  // that report. It runs on EVERY turn (the File Guardian calls it before the agent edits anything),
+  // so this was a per-turn tax on every large app, not just imports.
+  //
+  // This is the THIRD instance of one bug class — serial awaits over a network — after the sandbox
+  // landing (648s incident) and the Firestore merge. Same fix, same discipline: SELECTION stays
+  // sequential and byte-exact (the caps below are applied in the original path order, so the chosen
+  // set is identical to before); only the latency-bound READS are parallelised.
+  const candidates = all.filter((path) => {
+    if (isExcludedPath(path)) { skipped.push(path); return false; }
+    return true;
+  });
+
+  const contents = new Map<string, string | null>();
+  await pool(candidates, READ_CONCURRENCY, async (path) => {
     try {
-      content = await source.readFile(workspaceId, path);
+      contents.set(path, await source.readFile(workspaceId, path));
     } catch {
-      skipped.push(path);
-      continue;
+      contents.set(path, null); // a failed read is a skip, exactly as before
     }
+  });
+
+  let totalBytes = 0;
+  for (const path of candidates) {
+    if (Object.keys(files).length >= MAX_FILES) { skipped.push(path); continue; }
+    const content = contents.get(path);
+    if (typeof content !== 'string') { skipped.push(path); continue; }
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > MAX_FILE_BYTES || looksBinary(content)) {
-      skipped.push(path);
-      continue;
-    }
-    if (totalBytes + bytes > MAX_TOTAL_BYTES) {
-      skipped.push(path);
-      continue;
-    }
+    if (bytes > MAX_FILE_BYTES || looksBinary(content)) { skipped.push(path); continue; }
+    if (totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }
     totalBytes += bytes;
     files[path] = content;
   }
@@ -149,6 +179,13 @@ async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Pro
 const WRITE_CONCURRENCY = Math.max(1, Math.min(64, Number(process.env.AGENTV3_IMPORT_WRITE_CONCURRENCY) || 12));
 
 /**
+ * How many sandbox READS may be in flight at once (collectWorkspaceFiles). Same latency-bound shape as
+ * the writes above: the File Guardian reads the whole workspace on every turn, so this is the knob that
+ * turned a 13-minute stall on a 2000-file app into seconds.
+ */
+const READ_CONCURRENCY = Math.max(1, Math.min(64, Number(process.env.AGENTV3_WORKSPACE_READ_CONCURRENCY) || 16));
+
+/**
  * SELECTION — which files land, and which are skipped. Pure, deterministic, ORDER-DEPENDENT (the
  * byte/count budgets are consumed in iteration order), so it is separated from the writing step:
  * parallelising the writes must not change WHICH files are chosen. Exported for testing.
@@ -182,6 +219,73 @@ export function selectImportableFiles(files: Record<string, string>): { accepted
  * as before; only the latency-bound writes are parallelised. Ordering between independent file writes
  * carries no meaning, so this is safe by construction.
  */
+/** The archive we upload, inside the workspace root; removed as soon as it is expanded. */
+const LANDING_ARCHIVE = '.nbai-landing.tar.gz';
+/** How many landed files are re-read byte-exact to prove the extraction really happened. */
+const BULK_VERIFY_SAMPLE = 5;
+
+/**
+ * FAST PATH — land every file in TWO round trips (upload one tar.gz, expand it in the sandbox).
+ *
+ * Returns the paths it verifiably landed, or null to mean "fall back to per-file writes". It NEVER
+ * throws and never reports a path it did not prove — three independent checks, because a faster
+ * landing must never be a PARTIAL one:
+ *   1. `tar` exits non-zero on any extraction error;
+ *   2. tar's own verbose listing is COUNTED and must equal the number of entries we archived. This is
+ *      the check that matters: a 5-file sample cannot detect a 20%-short extraction (2034 of 2543 —
+ *      the real data-loss shape seen on 2026-08-03), and the count costs no extra round trip because
+ *      tar prints it during the same command;
+ *   3. a spread-out SAMPLE is re-read byte-exact, which catches an extract that "succeeded" against
+ *      the wrong directory.
+ * Anything unproven ⇒ null ⇒ the slow path runs and the import is still complete.
+ */
+async function bulkLand(
+  sink: WorkspaceFileSink,
+  workspaceId: string,
+  accepted: Array<[string, string]>,
+): Promise<{ written: string[]; leftover: Array<[string, string]>; verifiedCount: number } | null> {
+  if (!sink.writeBinaryFile || !sink.runCommand) return null;
+  try {
+    const map = Object.fromEntries(accepted);
+    const { gz, included, excluded } = buildTarGz(map);
+    if (included.length === 0) return null;
+    await sink.writeBinaryFile(workspaceId, LANDING_ARCHIVE, gz.toString('base64'));
+    // `--overwrite` matches the proven checkpoint-restore invocation; runCommand's cwd is the
+    // workspace root, so the archive's relative paths land exactly where the per-file writes would.
+    // `-v` makes tar list what it ACTUALLY extracted; redirecting that listing to a temp file (GNU
+    // tar prints to stdout, BSD to stderr — both covered) lets tar's OWN exit status be captured
+    // directly, and `wc -l <file` turns the listing into one number. Pure POSIX sh by construction —
+    // the previous `set -o pipefail` was a bashism, and on a plain-sh sandbox the whole command
+    // errored, so the fast path silently NEVER engaged (every import quietly took the slow per-file
+    // path). `tr -d ' \t'` strips BSD wc's leading padding so the marker regex always matches.
+    const listFile = `${LANDING_ARCHIVE}.list`;
+    const res = await sink.runCommand(
+      workspaceId,
+      `tar -xzvf ${LANDING_ARCHIVE} --overwrite >${listFile} 2>&1; RC=$?; N=$(wc -l <${listFile} | tr -d ' \t'); rm -f ${LANDING_ARCHIVE} ${listFile}; echo "NBAI_EXTRACTED:$N"; exit $RC`,
+    );
+    if (!res || res.exitCode !== 0) {
+      try { await sink.runCommand(workspaceId, `rm -f ${LANDING_ARCHIVE} ${listFile}`); } catch { /* cleanup best-effort */ }
+      return null; // honest: unproven ⇒ the caller writes every file the slow way
+    }
+    // COUNT PROOF — the one that catches a silently-short extraction.
+    const m = /NBAI_EXTRACTED:(\d+)/.exec(String(res.stdout || ''));
+    const extracted = m ? Number(m[1]) : -1;
+    if (extracted !== included.length) return null; // short (or unreadable) ⇒ fall back, land everything
+    // WRONG-PLACE PROOF — re-read a spread-out sample and compare content byte-exact.
+    if (sink.readFile) {
+      const step = Math.max(1, Math.floor(included.length / BULK_VERIFY_SAMPLE));
+      for (let i = 0; i < included.length && i / step < BULK_VERIFY_SAMPLE; i += step) {
+        const path = included[i];
+        const got = await sink.readFile(workspaceId, path).catch(() => null);
+        if (got !== map[path]) return null; // extraction did not really happen ⇒ fall back
+      }
+    }
+    return { written: included, leftover: excluded.map((p) => [p, map[p]] as [string, string]), verifiedCount: extracted };
+  } catch {
+    return null; // any failure at all ⇒ the per-file path, which was already working
+  }
+}
+
 export async function writeWorkspaceFiles(
   sink: WorkspaceFileSink,
   workspaceId: string,
@@ -191,7 +295,25 @@ export async function writeWorkspaceFiles(
   const written: string[] = [];
   const failed: string[] = [];
 
-  await pool(accepted, WRITE_CONCURRENCY, async ([path, content]) => {
+  // BULK LANDING (self-import autopsy 2026-08-03): parallelising per-file writes only divided the
+  // problem — cost stayed LINEAR in file count (2540 files ÷ 12 ≈ 212 sequential round trips, the
+  // dominant cost of a large import). One archive + one extract is O(1) round trips instead. Only for
+  // imports big enough to pay back the two extra calls; a failure or an unproven extraction falls
+  // through to the loop below, so this can never make an import worse.
+  let toWrite = accepted;
+  let landedVia: ImportedFiles['landedVia'] = 'per-file';
+  let bulkVerifiedCount: number | undefined;
+  if (bulkLandEnabled() && shouldBulkLand(accepted.length)) {
+    const bulk = await bulkLand(sink, workspaceId, accepted);
+    if (bulk) {
+      written.push(...bulk.written);
+      toWrite = bulk.leftover; // paths the archive format can't carry (non-ASCII / very long)
+      landedVia = toWrite.length > 0 ? 'bulk+per-file' : 'bulk';
+      bulkVerifiedCount = bulk.verifiedCount;
+    }
+  }
+
+  await pool(toWrite, WRITE_CONCURRENCY, async ([path, content]) => {
     try {
       await sink.writeFile(workspaceId, path, content);
       written.push(path);
@@ -200,5 +322,5 @@ export async function writeWorkspaceFiles(
     }
   });
 
-  return { written, skipped: [...skipped, ...failed] };
+  return { written, skipped: [...skipped, ...failed], landedVia, bulkVerifiedCount };
 }

@@ -1288,3 +1288,60 @@ describe('honestModelLabel (autopsy 2026-07-27)', () => {
     expect(honestModelLabel(undefined, [])).toBeUndefined();
   });
 });
+
+describe('counts — an OBSERVATION is neither a self-heal nor an unresolved defect (mitrify 2026-08-04)', () => {
+  it('importTurnObservation marks the entry as an observation on an import turn', () => {
+    const o = importTurnObservation(true, 'x is unused');
+    expect(o.autoResolved).toBe(true);
+    expect(o.observation).toBe(true);
+    expect(o.message).toContain('nothing was changed');
+  });
+
+  it('leaves a real build turn untouched — no observation flag, not auto-resolved', () => {
+    const o = importTurnObservation(false, 'x is unused');
+    expect(o.autoResolved).toBe(false);
+    expect(o.observation).toBeUndefined();
+    expect(o.message).toBe('x is unused');
+  });
+
+  it('does not inflate the auto-resolved tally — the reported build claimed 32 self-heals for ~0 fixes', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'import my repo' });
+    // one genuine self-heal …
+    d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed it', autoResolved: true });
+    // … and three advisory notes about the user's pre-existing code
+    for (const dep of ['stripe', 'ws', 'date-fns']) {
+      d.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...importTurnObservation(true, `"${dep}" is declared but unused`) });
+    }
+    // … and one thing genuinely still owed
+    d.record({ phase: 'build', severity: 'warning', code: 'COMPLIANCE_LOG_LEAK_FOUND', message: 'credential in a console log', autoResolved: false });
+
+    const c = d.report().counts;
+    expect(c.total).toBe(5);
+    expect(c.autoResolved).toBe(1);   // NOT 4 — the notes are not fixes
+    expect(c.unresolved).toBe(1);     // NOT 4 — the notes are not our defects either
+    expect(c.observations).toBe(3);
+  });
+
+  it('omits the observations key entirely when there are none (no change to a normal build report)', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'build me an app' });
+    d.record({ phase: 'build', severity: 'warning', code: 'X', message: 'y', autoResolved: true });
+    expect(d.report().counts.observations).toBeUndefined();
+  });
+
+  // Mitrify autopsy #2 (2026-08-04): a read-only import+survey turn with ZERO real heals reported
+  // healCount 32 — heartbeats, tool calls and narration lines are all `severity:'info',
+  // autoResolved:true`, and every one of them was counted as a "self-heal". Narration is not a fix.
+  it('info-severity timeline events (heartbeats, tool calls, narration) never count as self-heals', () => {
+    const d = new BuildDiagnostics({ buildId: 'b', promptHash: 'p', sessionId: 's', workspaceId: 'w', prompt: 'import my repo' });
+    d.heartbeat();                                                     // info, autoResolved:true
+    d.ingestEvent({ type: 'tool_call', tool: 'read_file', callId: 'c1', ts: 1 } as unknown as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: true, summary: 'ok', ts: 2 } as AgentEvent);
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Reading your files…', ts: 3 } as AgentEvent);
+    // … one GENUINE heal: a real warning v5 resolved.
+    d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed a broken import', autoResolved: true });
+
+    const c = d.report().counts;
+    expect(c.autoResolved).toBe(1); // NOT 5 — the timeline is activity, not fixes
+    expect(c.unresolved).toBe(0);   // and excluding info from heals must not turn it into "unresolved"
+  });
+});

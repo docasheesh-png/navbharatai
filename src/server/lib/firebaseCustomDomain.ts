@@ -202,7 +202,13 @@ export async function ensureSite(workspaceId: string): Promise<string> {
 
 /** Attach (or return the existing) custom domain on the workspace's dedicated site. */
 export async function attachCustomDomain(workspaceId: string, domain: string): Promise<CustomDomainStatus> {
-  const siteId = siteIdForWorkspace(workspaceId);
+  // ROOT CAUSE of "Failed to start domain connection" (admin 2026-08-02, mitrify.xyz): this function
+  // assumed the workspace's dedicated site already existed — but the site is only created by the
+  // DEPLOY path (Deployment.ts). A user who connects a domain BEFORE a dedicated-site deploy (e.g.
+  // their app was published via the instant /pwa hosting instead) hit `customDomains.create` on a
+  // NONEXISTENT site → Google API 404 → 500. The site must be ensured HERE too — ensureSite is
+  // idempotent (409 = success), so a site the deploy path already created is simply reused.
+  const siteId = await ensureSite(workspaceId);
   const existing = await getCustomDomainRaw(siteId, domain);
   if (existing) return customDomainStatus(domain, existing);
   await api(
@@ -234,6 +240,36 @@ export async function customDomainStatusLive(
   const siteId = siteIdForWorkspace(workspaceId);
   const cd = await getCustomDomainRaw(siteId, domain);
   return cd ? customDomainStatus(domain, cd) : null;
+}
+
+/**
+ * Classify a custom-domain failure into an HONEST, user-facing message.
+ *
+ * ROOT CAUSE (admin 2026-08-02): every failure surfaced the same "Failed to start domain connection.
+ * Please try again." — including PERMANENT ones. Telling a user to retry something that can never
+ * succeed by retrying is a dishonest instruction (rule 3) and leaves them looping forever. The real
+ * classes need different answers, and only some of them are "try again":
+ *   • permission/auth   — the server isn't allowed to create the domain yet ⇒ ADMIN action, not a retry.
+ *   • already-taken     — the domain is attached elsewhere ⇒ the USER must free it; a retry won't help.
+ *   • quota/rate        — genuinely temporary ⇒ wait, then retry.
+ *   • invalid/not-found — the input is wrong ⇒ fix the spelling.
+ * Pure + unit-tested; never leaks the raw API text (the real detail stays in the server log).
+ */
+export function customDomainErrorMessage(err: unknown): string {
+  const raw = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
+  if (/permission|denied|forbidden|unauthorized|403|401|iam|scope|credential|auth token/.test(raw)) {
+    return 'Custom domains are not switched on for this server yet — our team has to enable it. Retrying will not help; please contact support.';
+  }
+  if (/already (exists|owned|in use)|taken|conflict|409/.test(raw)) {
+    return 'That domain is already connected to another site. Remove it there first, then connect it here.';
+  }
+  if (/quota|rate|429|resource_exhausted/.test(raw)) {
+    return 'Too many domain requests right now. Please wait a few minutes and try again.';
+  }
+  if (/invalid|not.?found|400|404/.test(raw)) {
+    return 'That domain could not be set up — check the spelling (like myshop.com, no https:// and no slashes) and try again.';
+  }
+  return 'Could not start the domain connection. Please try again in a moment.';
 }
 
 /** True when Firebase Hosting deploys are available (ADC present). Mirrors the deploy provider. */

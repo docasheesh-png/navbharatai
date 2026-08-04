@@ -17,6 +17,7 @@ export type DevServerFailureCause =
   | 'missing_script'  // the launch command names a script package.json doesn't have ("Missing script: dev")
   | 'port_in_use'     // the target port is occupied (EADDRINUSE)
   | 'db_unreachable'  // the app's database isn't running in the sandbox (Prisma P1001 / ECONNREFUSED :5432)
+  | 'missing_credential' // the app kills itself at boot because a USER-supplied key isn't set yet
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
   | 'crash'           // the process exited/crashed with no more specific signal
@@ -136,6 +137,7 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
     case 'missing_script': return 'code_fix'; // restarting re-runs the same wrong command forever — the LAUNCH COMMAND must change
     case 'port_in_use': return 'kill_port_retry';
     case 'db_unreachable': return 'reprovision_db'; // a blind restart can never revive a reaped Postgres — restart the DB itself
+    case 'missing_credential': return 'code_fix'; // the key is still unset on every restart — only the SOURCE can stop crashing
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
     case 'crash': return 'plain_retry';
@@ -148,6 +150,38 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
  * generic "Error:" never shadows a precise signal (a missing module, a busy port, a syntax error).
  * PURE. Call this only when the port is actually DOWN (a healthy server needs no diagnosis).
  */
+/**
+ * The env-var name whose absence killed the app at boot, or `null` when the log shows no such failure.
+ *
+ * HIGH PRECISION on purpose — a wrong hit would send the agent editing source for an unrelated crash.
+ * The name must look like a real environment variable (UPPER_SNAKE, i.e. at least one underscore), which
+ * is how essentially every credential is named (RAZORPAY_KEY_SECRET, SMTP_HOST, TWILIO_ACCOUNT_SID …).
+ * A single all-caps word without an underscore is deliberately NOT matched; it falls through to the
+ * generic crash branch rather than risk a false "edit your source" verdict.
+ *
+ * DATABASE_URL is excluded here because the caller reaches this only after the db_unreachable branch,
+ * which has a strictly better recovery for it (provision Postgres); this guard makes that explicit so a
+ * future reorder cannot silently downgrade the database path. PURE.
+ */
+export function missingCredentialFromLog(log: string): string | null {
+  const text = (log || '').slice(-8000);
+  const NAME = '[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+';
+  const patterns: RegExp[] = [
+    // "Error: Missing RAZORPAY_KEY_SECRET" / "Missing required environment variable: SMTP_HOST"
+    new RegExp(`\\bMissing\\s+(?:required\\s+)?(?:env(?:ironment)?\\s+var(?:iable)?s?\\s*:?\\s*)?["'\`]?(${NAME})["'\`]?`, 'i'),
+    // "STRIPE_SECRET_KEY is required" / "must be set" / "is not defined" / "is undefined"
+    new RegExp(`["'\`]?(${NAME})["'\`]?\\s+(?:is\\s+)?(?:required|must\\s+be\\s+set|is\\s+not\\s+set|not\\s+set|is\\s+not\\s+defined|not\\s+defined|is\\s+undefined|is\\s+missing)\\b`),
+    // "Environment variable SENDGRID_API_KEY is ..." (the name follows the phrase)
+    new RegExp(`\\benv(?:ironment)?\\s+var(?:iable)?s?\\s+["'\`]?(${NAME})["'\`]?`, 'i'),
+  ];
+  for (const re of patterns) {
+    const m = re.exec(text);
+    const name = m?.[1];
+    if (name && name !== 'DATABASE_URL') return name;
+  }
+  return null;
+}
+
 export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   const text = (log || '').slice(-8000); // the tail carries the fatal line; bound the scan
   const make = (cause: DevServerFailureCause, detail: string): DevServerDiagnosis => ({ cause, recovery: recoveryFor(cause), detail });
@@ -206,6 +240,21 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('db_unreachable', "The app needs a database but none is set up in the sandbox — provisioning PostgreSQL, writing DATABASE_URL, and retrying.");
   }
 
+  // 2.6) MISSING USER CREDENTIAL — the app kills itself at boot because an env var the END USER supplies
+  //    from their own account (a payment key, an SMTP password, a Maps key) is not set yet. Caught AFTER
+  //    db_unreachable (DATABASE_URL has a better recovery: provision Postgres) and BEFORE the generic
+  //    crash branch, which used to swallow it: `throw new Error('Missing RAZORPAY_KEY_SECRET')` matched
+  //    only `/\bError:/` → 'crash' → 'plain_retry', and a restart can NEVER help because the key is still
+  //    unset on the next boot. Both attempts were wasted and the report said "crashed on startup" instead
+  //    of the truth. This is the RETROACTIVE half of the missing-credential contract (2026-08-03): apps
+  //    built BEFORE the contract shipped still contain these boot-killers, and this is the moment it
+  //    actually bites — so classify it honestly and route it to the SOURCE fix.
+  const missingCred = missingCredentialFromLog(text);
+  if (missingCred) {
+    return make('missing_credential',
+      `The app refuses to start because ${missingCred} is not set — but that key is supplied later by the end user from their own account, so it is legitimately empty here. A restart can never fix this. Fix the SOURCE: delete the boot-time throw/exit for ${missingCred}, gate that feature on a boolean (e.g. \`const enabled = Boolean(process.env.${missingCred});\`), and render its control visibly disabled as "Coming soon" naming ${missingCred} and Settings → App Settings → Secrets & API Keys. Keep every other part of the app working, never crash at boot, and never fake a result.`);
+  }
+
   // 3) Code error in the generated source — a restart can NEVER fix this; the agent must edit the code.
   if (/\bSyntaxError\b/i.test(text)
     || /Transform failed with \d+ error/i.test(text)
@@ -241,11 +290,108 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
  * @param attempt    1-based attempt number that just failed
  * @param maxAttempts total recovery attempts allowed
  */
+/**
+ * Rewrite a diagnosis's detail for the GIVE-UP verdict, so it states what IS true instead of what we were
+ * about to do.
+ *
+ * ROOT CAUSE (mitrify autopsy 2026-08-04): every `detail` is written in the present-progressive voice of a
+ * recovery that is about to run — "provisioning PostgreSQL, writing DATABASE_URL, and retrying",
+ * "reinstalling dependencies and restarting", "freeing it and restarting". When attempts ran out, the
+ * caller printed that SAME text as the terminal message, so the user was told a database was being
+ * provisioned at the exact moment we stopped trying. Announcing an action we do not take is fake success.
+ *
+ * The terminal line keeps the real CAUSE (which is genuinely useful) and replaces the promise with the
+ * honest outcome plus, where one exists, what the user can actually do. PURE.
+ */
+export function terminalDetail(d: DevServerDiagnosis): string {
+  const tail = 'Automatic recovery is exhausted.';
+  switch (d.cause) {
+    case 'db_unreachable':
+      return `The app needs a database and one could not be started in the sandbox. ${tail} Connect your own database in Settings → App Settings → Database, then press Diagnose to boot it.`;
+    case 'missing_module':
+      return `A dependency the app needs is still missing after reinstalling. ${tail} Check that it is listed in package.json and installs cleanly.`;
+    case 'port_in_use':
+      return `The port stayed occupied by another process. ${tail}`;
+    case 'out_of_memory':
+      return `The dev server ran out of memory and was killed. ${tail} A smaller build or fewer watchers may be needed.`;
+    case 'crash':
+      return `The dev server kept crashing on startup. ${tail} ${d.detail}`.slice(0, 400);
+    case 'unknown':
+    default:
+      return `The dev server did not start and its log had no recognisable error. ${tail}`;
+  }
+}
+
+/**
+ * The message a NON-TECHNICAL USER should read when their preview does not come up — plain language,
+ * the real cause, and the ONE thing they can do about it.
+ *
+ * ROOT CAUSE (mitrify autopsy 2026-08-04). Two separate audiences were being served the same text:
+ *   • The Diagnose panel's headline GUESSED — "the exact cause is in the detail log below (a crash on
+ *     boot, a missing dependency, or a port conflict)" — while `classifyDevServerFailure` already knew
+ *     the answer deterministically. We made the user read a log to find out something we had computed.
+ *   • Where a real cause WAS shown, it was the AGENT's text. A `missing_credential` detail tells the
+ *     model to "delete the boot-time throw and gate the feature on a boolean" — instructions a user
+ *     cannot act on, about code they did not write.
+ *
+ * So the agent instruction and the user message are now different strings by construction. This one is
+ * for the human: it never names a file, a stack frame, or an internal fix, and for the two causes the
+ * user genuinely CAN resolve — a missing credential and a missing database — it says exactly where to
+ * go. (Admin: "agar app ko chalane ke liye user se kuch credential chahiye to user ko bolo!") PURE.
+ */
+export function userFacingPreviewFailure(diag: DevServerDiagnosis, port: number, log?: string): string {
+  switch (diag.cause) {
+    case 'missing_credential': {
+      const key = (log ? missingCredentialFromLog(log) : null) ?? 'a key';
+      return `Your app needs one of your own keys before it can start: \`${key}\`. Add it in Settings → App Settings → Secrets & API Keys, then press Diagnose again. Everything else in the app is ready.`;
+    }
+    case 'db_unreachable':
+      return 'Your app needs a database to start, and one could not be set up automatically here. Connect your own in Settings → App Settings → Database, then press Diagnose again — your data always stays in your own account.';
+    case 'missing_module':
+      return "One of the app's dependencies could not be installed, so it can't start. Ask me to fix the dependencies and I'll sort it out.";
+    case 'missing_script':
+      return "The app is being started with the wrong command — its package.json doesn't have that script. Ask me to fix the start command.";
+    case 'port_in_use':
+      return `Port ${port} was still being held by another process, so the app couldn't take it. Press Diagnose again in a few seconds.`;
+    case 'code_error':
+      return "There's an error in the app's code that stops it from starting. Ask me to fix it and I'll find and repair it.";
+    case 'out_of_memory':
+      return 'The app ran out of memory while starting. Ask me to make the build lighter, then try again.';
+    case 'crash':
+    case 'unknown':
+    default:
+      return "The app didn't finish starting. Press Diagnose to try again, or ask me to look into it and I'll read the logs and fix what I find.";
+  }
+}
+
+/**
+ * Strip pure NOISE from the log we show a user. `git status --porcelain` output (`?? client/`) was being
+ * concatenated into the Diagnose detail box, so the panel read like
+ * "…and retrying.?? .gitignore ?? DEPLOY_NOW.md ?? attached_assets/" — unrelated to the failure and
+ * meaningless to the reader. The agent's own copy of the log is untouched; this only cleans what a human
+ * sees. PURE.
+ */
+export function cleanPreviewLogForUser(log: string): string {
+  if (!log) return '';
+  // `?? path` is git's "untracked" marker — the only porcelain form that leaked here, and never
+  // meaningful to a user reading a startup failure. Nothing else is removed: a real error line that
+  // happens to start with a letter is untouched.
+  return log
+    .split('\n')
+    .filter((l) => !/^\s*\?\?\s+\S/.test(l))
+    .join('\n');
+}
+
 export function planDevServerRecovery(log: string, attempt: number, maxAttempts: number): DevServerDiagnosis {
   const d = classifyDevServerFailure(log);
-  // A syntax/transform error will fail identically on every restart — stop and surface it now.
-  if (d.cause === 'code_error') return d;
-  if (attempt >= Math.max(1, maxAttempts)) return { ...d, recovery: 'give_up' };
+  // Anything whose ONLY cure is a source change fails identically on every restart — stop and surface it
+  // now, on ANY attempt. Keyed on the RECOVERY, not on one cause: `code_error` was special-cased here,
+  // but `missing_script` and `missing_credential` are equally unfixable by restarting, and on the FINAL
+  // attempt they were being rewritten to 'give_up' — which throws away the one thing that would have
+  // fixed them (the actionable detail telling the agent exactly what to change). Fix the class, not the
+  // instance: every `code_fix` recovery short-circuits with its detail intact.
+  if (d.recovery === 'code_fix') return d;
+  if (attempt >= Math.max(1, maxAttempts)) return { ...d, recovery: 'give_up', detail: terminalDetail(d) };
   return d;
 }
 

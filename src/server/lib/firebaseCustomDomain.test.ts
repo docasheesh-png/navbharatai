@@ -5,6 +5,7 @@ import {
   customDomainRecords,
   customDomainStatus,
   firebaseCustomDomainsEnabled,
+  customDomainErrorMessage,
 } from './firebaseCustomDomain';
 
 describe('firebaseCustomDomain — pure helpers', () => {
@@ -133,3 +134,96 @@ describe('firebaseCustomDomain — pure helpers', () => {
 });
 
 // slice 1 — Firebase-native custom-domain primitive (see firebaseCustomDomain.ts)
+
+// ROOT CAUSE regression (admin 2026-08-02 — "Failed to start domain connection" on mitrify.xyz):
+// attachCustomDomain assumed the workspace's dedicated site already existed, but the site is only
+// created by the DEPLOY path. Connecting a domain BEFORE a dedicated-site deploy (e.g. the app was
+// published via instant /pwa hosting) hit customDomains.create on a NONEXISTENT site → 404 → 500.
+// This locks the fix: attach must ENSURE the site first (idempotent), then attach the domain.
+import { vi } from 'vitest';
+import { attachCustomDomain, siteIdForWorkspace as siteIdFor } from './firebaseCustomDomain';
+
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: class {
+    async getAccessToken() { return 'test-token'; }
+  },
+}));
+
+describe('attachCustomDomain — ensures the dedicated site exists BEFORE attaching (2026-08-02 fix)', () => {
+  it('creates the site first (idempotent), then attaches the domain to it', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET' });
+      // Site create → ok; first domain GET → 404 (not attached yet); create → ok; final GET → resource.
+      if (String(url).includes('/customDomains/')) {
+        if (calls.filter((c) => c.url.includes('/customDomains/')).length === 1) {
+          return { ok: false, status: 404, json: async () => ({ error: { message: 'HTTP 404 NOT_FOUND' } }) } as any;
+        }
+        return { ok: true, json: async () => ({ ownershipState: 'OWNERSHIP_PENDING' }) } as any;
+      }
+      return { ok: true, json: async () => ({}) } as any;
+    }));
+    try {
+      const workspaceId = 'agentv3-uid-sessionX';
+      const status = await attachCustomDomain(workspaceId, 'myshop.com');
+      const siteId = siteIdFor(workspaceId);
+      // THE fix: the very first API call must be the idempotent site create — never a domain call
+      // against a site that might not exist.
+      expect(calls[0].url).toContain(`/sites?siteId=${siteId}`);
+      expect(calls[0].method).toBe('POST');
+      // …and the domain operations then target that same site.
+      const domainCalls = calls.filter((c) => c.url.includes('/customDomains'));
+      expect(domainCalls.length).toBeGreaterThan(0);
+      for (const c of domainCalls) expect(c.url).toContain(`/sites/${siteId}/`);
+      expect(status.domain).toBe('myshop.com');
+      expect(status.active).toBe(false); // honest pending state for a fresh attach
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// HONESTY fix (admin 2026-08-02): every domain failure said "Please try again" — even permanent ones,
+// which loops the user forever on something a retry can never fix.
+describe('customDomainErrorMessage — the right answer per failure class (never a false "try again")', () => {
+  it('a PERMISSION failure says it is our side to enable and that retrying will not help', () => {
+    for (const raw of [
+      'Request had insufficient authentication scopes',
+      'PERMISSION_DENIED: caller lacks firebasehosting.customDomains.create',
+      'Firebase Hosting API error (HTTP 403)',
+    ]) {
+      const m = customDomainErrorMessage(new Error(raw));
+      expect(m).toMatch(/not switched on|enable/i);
+      expect(m).toMatch(/will not help|contact support/i);
+      expect(m).not.toMatch(/please try again in a moment/i);
+    }
+  });
+
+  it('an ALREADY-TAKEN domain tells the user to free it first (a retry cannot fix it)', () => {
+    const m = customDomainErrorMessage(new Error('customDomain already exists on another site'));
+    expect(m).toMatch(/already connected/i);
+    expect(m).toMatch(/remove it there first/i);
+  });
+
+  it('a quota/rate failure is the one case where waiting + retrying IS the advice', () => {
+    const m = customDomainErrorMessage(new Error('RESOURCE_EXHAUSTED: quota exceeded'));
+    expect(m).toMatch(/wait a few minutes/i);
+  });
+
+  it('an invalid/not-found domain points at the input, with a real example', () => {
+    const m = customDomainErrorMessage(new Error('HTTP 400: invalid domain name'));
+    expect(m).toMatch(/check the spelling/i);
+    expect(m).toContain('myshop.com');
+  });
+
+  it('an unknown failure keeps the honest transient default', () => {
+    expect(customDomainErrorMessage(new Error('socket hang up'))).toMatch(/try again in a moment/i);
+    expect(customDomainErrorMessage(undefined)).toMatch(/try again in a moment/i);
+  });
+
+  it('never leaks the raw API text to the user (detail belongs in the server log)', () => {
+    const m = customDomainErrorMessage(new Error('projects/gen-lang-client-0866594388/sites/nbai-abc123 PERMISSION_DENIED'));
+    expect(m).not.toContain('gen-lang-client');
+    expect(m).not.toContain('nbai-abc123');
+  });
+});

@@ -101,6 +101,43 @@ export function reviewCriticalUnresolvedSummary(count: number): string {
   );
 }
 
+/**
+ * How long the C9 reviewer-critical REPAIR pass may run, SCALED to how many findings it must fix and
+ * CLAMPED to the wall-clock headroom left. Pure + unit-tested (same idiom as reviewerBudgetMs).
+ *
+ * ROOT CAUSE (admin dashboard autopsy 2026-08-02): "Reviewer critical not resolved" was the TOP failure
+ * pattern across user-submitted reports (5 of 17 failed, 29%). The repair pass had a FLAT 120s cap no
+ * matter how many criticals it had to fix or how much build time remained — a 3-critical repair on the
+ * cheap-coder heal chain routinely died mid-edit at 120s, and the criticals shipped unresolved. Bigger
+ * repairs now get more time (up to 5 min) when the build actually HAS that time, and the cap shrinks
+ * when the wall clock is nearly spent — so a repair is neither starved with headroom to spare, nor
+ * started so large it gets cut off by the deadline (the exact "cut off mid-repair" failure recorded in
+ * reviewCriticalUnresolvedSummary's history).
+ */
+export function reviewerFixBudgetMs(itemCount: number, headroomMs: number): number {
+  const BASE = 120_000, PER_ITEM = 60_000, MIN = 60_000, MAX = 300_000, SAFETY = 30_000;
+  const items = Number.isFinite(itemCount) && itemCount > 0 ? Math.floor(itemCount) : 1;
+  const scaled = Math.min(BASE + Math.max(0, items - 1) * PER_ITEM, MAX);
+  if (!Number.isFinite(headroomMs)) return scaled;             // no wall-clock cap → the scaled budget
+  return Math.max(MIN, Math.min(scaled, headroomMs - SAFETY)); // else keep a 30s wall-clock safety margin
+}
+
+/**
+ * Should the C9 repair get ONE more attempt after a failed pass? Pure. Bounds (all three protect the
+ * "never loop / never overlap" invariants):
+ *  - max 2 attempts total — a structural failure won't converge by hammering;
+ *  - NEVER after a TIMEOUT — the raced-out runner may still be editing files in the background, and a
+ *    second concurrent runner editing the same workspace is a corruption risk (the budget fix above is
+ *    what attacks the timeout class);
+ *  - only with real headroom (> 150s) — a retry that will itself be cut off just burns the wall clock.
+ */
+export function reviewerFixShouldRetry(attempt: number, headroomMs: number, timedOut: boolean): boolean {
+  if (attempt >= 2) return false;
+  if (timedOut) return false;
+  if (!Number.isFinite(headroomMs)) return true;
+  return headroomMs > 150_000;
+}
+
 /** Max repair attempts per build. Default 1, hard-capped at 3 so a flaky error can't loop forever. */
 export function autoFixMaxAttempts(): number {
   const raw = Number(process.env.AGENTV3_AUTOFIX_ATTEMPTS);

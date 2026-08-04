@@ -44,15 +44,21 @@ export async function readWalletBalanceInr(read: WalletReader, userId: string): 
   }
   if (!data) return null; // no wallet doc at all → unknown → fail-open (brand-new user / infra blip).
   const bal = data.remaining_balance;
-  if (typeof bal === 'number' && Number.isFinite(bal)) return bal;
-  // FALLBACK (money-bleed fix, admin 2026-07-12): a wallet doc that EXISTS but has no numeric ₹ mirror
-  // (only the token balance) must NOT read as "unknown" — that would fail-open and let a 0-balance user
-  // build for free. Derive ₹ from the token balance at the shared rate. An existing wallet with 0 tokens
-  // is a real ₹0 → the gate blocks it. Only a doc with NEITHER numeric field stays null (→ fail-open).
   const tok = data.tokenBalance;
-  if (typeof tok === 'number' && Number.isFinite(tok)) {
-    return TOKENS_PER_RUPEE > 0 ? tok / TOKENS_PER_RUPEE : 0;
-  }
+  const balNum = typeof bal === 'number' && Number.isFinite(bal) ? bal : null;
+  const tokInr = typeof tok === 'number' && Number.isFinite(tok) && TOKENS_PER_RUPEE > 0 ? tok / TOKENS_PER_RUPEE : null;
+  // UNIFIED balance (GIFT-TOKEN bug, admin 2026-08-03: "₹0 + 50,000 tokens → app building off"). The wallet
+  // has TWO views of the same value — `remaining_balance` (₹) and `tokenBalance` — and the admin gift path
+  // bumped ONLY tokenBalance, leaving remaining_balance at 0. Reading ₹ ALONE (the old `if (bal) return bal`)
+  // therefore returned 0 and the gate blocked a user holding 50,000 gifted tokens. Judge the SPENDABLE value:
+  // if EITHER field shows money, the user can build → take the higher of the two when both exist. This never
+  // wrongly blocks (a positive token balance now counts) and never wrongly passes a truly-empty wallet
+  // (both 0 → 0). The gift path is also fixed at the source (admin.ts) to keep the ₹ mirror in sync; this is
+  // the defense-in-depth so ANY future drift can't strand a user's real balance.
+  // FALLBACK (money-bleed fix, admin 2026-07-12): a doc with NEITHER numeric field stays null (→ fail-open).
+  if (balNum != null && tokInr != null) return Math.max(balNum, tokInr);
+  if (balNum != null) return balNum; // ₹ present, no token mirror → ₹ as-is (preserves negative overdraft read)
+  if (tokInr != null) return tokInr; // token-only wallet → derived ₹
   return null;
 }
 

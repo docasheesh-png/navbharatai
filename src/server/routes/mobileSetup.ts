@@ -17,11 +17,23 @@
 
 import type { Express, Request, Response } from 'express';
 import axios from 'axios';
-import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
 import { assembleMobileProject } from '../lib/mobileProjectAssembler';
+// One repository-write implementation, shared with the self-healing build loop so the two can never
+// drift apart on branch handling, blob encoding or ref updates (rule 4).
+import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
+import { githubTokenFromRequest } from '../lib/mobileShipAuth';
+import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
+// COMPILE PRE-FLIGHT (admin 2026-08-04: "v5 live banaye, fix kare — GitHub par bas download ho"): the
+// app is verified — and healed by the same AI repair tier — BEFORE anything is pushed. GitHub only ever
+// receives an app already proven to compile, and every heal is written back into the user's v5
+// workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
+import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
+import { aiRepairEnabled, aiRepairModelChain } from '../lib/mobileBuildAiRepair';
+import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
 export function isValidRepoName(name: string): boolean {
@@ -38,90 +50,9 @@ export function repoNameFor(appName: string): string {
   return slug || 'my-app';
 }
 
-/** The user's GitHub token, sent as a second header so it is never confused with the Firebase one. */
-function githubToken(req: Request): string | null {
-  const raw = req.headers['x-github-token'];
-  const token = Array.isArray(raw) ? raw[0] : raw;
-  return typeof token === 'string' && token.trim() ? token.trim() : null;
-}
-
-type GhHeaders = Record<string, string>;
-
-/**
- * Find the repository, creating it when it does not exist yet.
- *
- * `auto_init` matters: a repository with no commits has no branch at all, and every push below needs
- * one to build on. Creating it empty and then discovering that is a confusing failure two steps later.
- */
-async function ensureRepo(
-  headers: GhHeaders,
-  owner: string,
-  repo: string,
-  description: string,
-): Promise<{ created: boolean; defaultBranch: string }> {
-  try {
-    const existing = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, { headers });
-    return { created: false, defaultBranch: existing.data?.default_branch || 'main' };
-  } catch (err) {
-    if ((err as { response?: { status?: number } })?.response?.status !== 404) throw err;
-  }
-  const made = await axios.post(
-    'https://api.github.com/user/repos',
-    { name: repo, description: description.slice(0, 300), private: true, auto_init: true },
-    { headers },
-  );
-  return { created: true, defaultBranch: made.data?.default_branch || 'main' };
-}
-
-/**
- * Commit every file in one go.
- *
- * Text goes straight into the tree, but the tree API's `content` field is text-only — a PNG sent that
- * way arrives corrupted. Binary files therefore become real blobs first (base64) and are referenced by
- * sha, which is the only way an icon survives the trip intact.
- */
-async function commitFiles(
-  headers: GhHeaders,
-  owner: string,
-  repo: string,
-  branch: string,
-  files: Record<string, string>,
-  binaryFiles: Record<string, string>,
-  message: string,
-): Promise<string> {
-  const refRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${branch}`, { headers });
-  const parentSha = refRes.data.object.sha;
-
-  const tree: Array<Record<string, string>> = Object.entries(files).map(([path, content]) => ({
-    path, mode: '100644', type: 'blob', content,
-  }));
-
-  for (const [path, base64] of Object.entries(binaryFiles)) {
-    const blob = await axios.post(
-      `https://api.github.com/repos/${owner}/${repo}/git/blobs`,
-      { content: base64, encoding: 'base64' },
-      { headers },
-    );
-    tree.push({ path, mode: '100644', type: 'blob', sha: blob.data.sha });
-  }
-
-  const treeRes = await axios.post(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees`,
-    { base_tree: parentSha, tree },
-    { headers },
-  );
-  const commitRes = await axios.post(
-    `https://api.github.com/repos/${owner}/${repo}/git/commits`,
-    { message, tree: treeRes.data.sha, parents: [parentSha] },
-    { headers },
-  );
-  await axios.patch(
-    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`,
-    { sha: commitRes.data.sha, force: false },
-    { headers },
-  );
-  return commitRes.data.sha;
-}
+// The GitHub token is read through the ONE shared helper, so this route and the ship/build routes can
+// never again disagree about which header carries it (see lib/mobileShipAuth.ts).
+const githubToken = githubTokenFromRequest;
 
 export function registerMobileSetupRoutes(app: Express): void {
   /**
@@ -163,7 +94,7 @@ export function registerMobileSetupRoutes(app: Express): void {
       });
     }
 
-    const headers: GhHeaders = { Authorization: `token ${ghToken}`, Accept: 'application/vnd.github.v3+json' };
+    const headers: GhHeaders = githubApiHeaders(ghToken);
 
     // Who the token belongs to — never taken from the client, so a token cannot be pointed at
     // somebody else's account.
@@ -175,6 +106,29 @@ export function registerMobileSetupRoutes(app: Express): void {
     } catch {
       return res.status(401).json({ error: 'That GitHub connection is no longer valid. Please reconnect GitHub and try again.' });
     }
+
+    // ── Compile pre-flight: verify here, heal here, and only then involve GitHub. ──
+    //
+    // A compile error found on the runner costs five minutes, an unreadable remote log, and a repair
+    // that can only edit files by committing them. Found HERE it costs seconds, and the fix lands in
+    // the user's own v5 workspace. The AI chain is the same weak-tier-safe one the GitHub loop uses.
+    const preflight = await preflightAndHeal(
+      appFiles,
+      callRepairModel,
+      aiRepairEnabled() ? aiRepairModelChain() : [],
+    );
+    if (!preflight.ok) {
+      return res.status(422).json({
+        error: preflightUserMessage(preflight.problems),
+        compileProblems: preflight.problems.slice(0, 10),
+      });
+    }
+    if (Object.keys(preflight.changed).length > 0) {
+      // The heal is real only if the user's app itself carries it — otherwise the workspace and the
+      // repository drift apart and the next ship re-fights the same errors.
+      try { await mergeWorkspaceFiles(workspaceId, preflight.changed); } catch { /* the push still proceeds */ }
+    }
+    appFiles = preflight.files;
 
     const includeIos = ios !== false;
     const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos });
@@ -203,11 +157,14 @@ export function registerMobileSetupRoutes(app: Express): void {
         fileCount: Object.keys(project.files).length + Object.keys(project.binaryFiles).length,
         kind: project.kind,
         webDir: project.webDir,
-        notes: project.notes,
+        notes: [...preflight.notes, ...project.notes],
         requiredSecrets: kit.requiredSecrets,
+        // Derived from the ONE workflow registry, never re-typed — a hand-written copy here is exactly
+        // how the APK workflow ended up generated-but-not-runnable.
         workflows: {
-          android: '.github/workflows/android-aab.yml',
-          ios: includeIos ? '.github/workflows/ios-ipa.yml' : null,
+          androidApk: workflowPath(SHIP_WORKFLOWS.androidApk),
+          android: workflowPath(SHIP_WORKFLOWS.androidAab),
+          ios: includeIos ? workflowPath(SHIP_WORKFLOWS.iosIpa) : null,
         },
       });
     } catch (err) {

@@ -35,7 +35,11 @@ jobs:
 
       - name: Boot server (background)
         run: |
-          PORT=8080 node dist/server.cjs &
+          # NODE_ENV was NOT set, so the server booted in DEVELOPMENT mode and ZAP scanned the Vite
+          # dev middleware — the report literally listed /@vite/client and /src/main.tsx as scanned URLs.
+          # Production security headers are gated on production mode, so for 37 nightly runs we were
+          # measuring something users never see, and then failing the build over it.
+          NODE_ENV=production PORT=8080 node dist/server.cjs &
           echo "Waiting for server on :8080 ..."
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:8080/api/health >/dev/null 2>&1; then
@@ -45,13 +49,23 @@ jobs:
           done
           echo "Server did not become healthy in time"; exit 1
 
+      # Pinned at v0.12.0 this job failed on EVERY run with
+      #   "Create Artifact Container failed: The artifact name zap_scan is not valid"
+      # — the scan itself ran, but the action uploaded its report through the artifact v1/v2 REST API
+      # (`_apis/pipelines/workflows/.../artifacts?api-version=6.0-preview`), which GitHub has shut down.
+      # So DAST was permanently red for a reason that had nothing to do with our security posture, which
+      # is worse than useless: a check that is always red trains everyone to ignore red. v0.15.0 uploads
+      # via actions/upload-artifact@v4. Tag verified to exist before bumping (2026-08-04).
       - name: OWASP ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.12.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: 'http://localhost:8080'
           rules_file_name: 'security/zap-baseline.conf'
           # Default behaviour fails the job on FAIL-level alerts (HIGH risk),
           # warns on WARN-level — exactly the P-SEC.2 gate (HIGH fails, MED warns).
           cmd_options: '-a'
-          allow_issue_writing: true
+          # Was `true`, and the action opened a NEW issue every night instead of updating one: 37 open
+          # duplicates of the same WARN-level header findings. That volume of noise is how a real finding
+          # gets missed. The full report is still kept as the run's artifact and printed in the job log.
+          allow_issue_writing: false
           fail_action: true

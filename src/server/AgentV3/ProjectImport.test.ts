@@ -8,6 +8,8 @@ import {
   detectImportedFramework,
   validateImportedProject,
   importSummaryLine,
+  importAccountingLine,
+  maskNonCodeRegions,
   droppedDetailNote,
   chooseMonorepoAppRoot,
   envTemplateNote,
@@ -252,6 +254,7 @@ describe('validateImportedProject', () => {
 function extracted(over: {
   files?: Record<string, string>;
   assets?: Record<string, string>;
+  sandboxAssets?: Record<string, string>;
   sandboxOnly?: Record<string, string>;
   dropped?: Partial<import('./ProjectImport').ExtractedProject['dropped']>;
   totalEntries?: number;
@@ -261,6 +264,7 @@ function extracted(over: {
   return {
     files: over.files ?? {},
     assets: over.assets ?? {},
+    sandboxAssets: over.sandboxAssets ?? {},
     sandboxOnly: over.sandboxOnly ?? {},
     dropped: { dir: 0, junk: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0, outsideAppRoot: 0, ...(over.dropped ?? {}) },
     totalEntries: over.totalEntries ?? 0,
@@ -386,10 +390,10 @@ describe('small binary assets', () => {
     expect(parseDataUri('data:image/png,rawtext')).toBeNull(); // not base64
   });
 
-  it('keeps a small image asset as a decodable data URI and drops a large one + a video', async () => {
-    const smallPng = Buffer.alloc(10 * 1024, 7); // 10KB — kept
-    const bigPng = Buffer.alloc(300 * 1024, 9);  // 300KB > 200KB cap — dropped
-    const video = Buffer.alloc(5 * 1024, 1);     // small but not a keepable asset type — dropped
+  it('durable-tiers a small image, sandbox-tiers a large one, drops a video', async () => {
+    const smallPng = Buffer.alloc(10 * 1024, 7);  // 10KB — durable asset
+    const bigPng = Buffer.alloc(900 * 1024, 9);   // 900KB > 640KB durable cap, <= 5MB — sandbox-only
+    const video = Buffer.alloc(5 * 1024, 1);      // not a keepable asset type — dropped
     const out = await extractZipProject(await makeZipBinary({
       'package.json': '{}',
       'public/logo.png': smallPng,
@@ -404,10 +408,13 @@ describe('small binary assets', () => {
     const parsed = parseDataUri(uri);
     expect(parsed).not.toBeNull();
     expect(Buffer.from(parsed!.base64, 'base64').equals(smallPng)).toBe(true); // real bytes, uncorrupted
-    // The oversized image and the video are dropped (counted as binary), not kept.
+    // The large image goes to the SANDBOX tier (renders in preview), not dropped, not durable.
+    expect(out.sandboxAssets['public/hero.png']).toMatch(/^data:image\/png;base64,/);
     expect(out.assets['public/hero.png']).toBeUndefined();
+    // Only the video is dropped now (a non-image binary).
     expect(out.assets['media/clip.mp4']).toBeUndefined();
-    expect(out.dropped.binary).toBe(2);
+    expect(out.sandboxAssets['media/clip.mp4']).toBeUndefined();
+    expect(out.dropped.binary).toBe(1);
     // Text files still land normally.
     expect(out.files['src/main.ts']).toBe('ok');
   });
@@ -764,5 +771,208 @@ describe('frameworkCoherenceGuidance', () => {
     expect(g).toContain('ONE framework');
     expect(g).toMatch(/do NOT mass-rewrite/i);
     expect(frameworkCoherenceGuidance(checkFrameworkCoherence({ 'package.json': REACT_PKG, 'src/App.tsx': 'export default () => <div/>;' }))).toBe('');
+  });
+});
+
+// ROOT CAUSE (admin 2026-08-03, mitrify GitHub import): the repo listing said "316 files", the build
+// said "166 source files", and NOTHING in the build report explained the gap — so the only reading
+// available was "10% bhi import nahi ho paya". These lock the durable accounting that answers it.
+describe('importAccountingLine — every archive entry is accounted for, in the report', () => {
+  it('states the total, what was KEPT, and what was NOT imported with a reason for each', () => {
+    const line = importAccountingLine(extracted({
+      files: Object.fromEntries(Array.from({ length: 165 }, (_, i) => [`src/f${i}.ts`, 'x'])),
+      assets: { 'logo.png': 'data:image/png;base64,AA' },
+      dropped: { binary: 138, junk: 6, secret: 2, dir: 4 },
+      totalEntries: 316,
+    }));
+    expect(line).toContain('316 archive entries');
+    expect(line).toContain('165 source files');
+    expect(line).toContain('1 image/font asset');
+    // every drop reason is named, with its count
+    expect(line).toContain('138 large binaries');
+    expect(line).toContain('6 OS/editor junk');
+    expect(line).toContain('2 secret files');
+    expect(line).toContain('4 dependency/build files');
+    expect(line).toContain('NOT imported 150'); // 138+6+2+4 — the numbers ADD UP
+  });
+
+  it('says plainly when nothing was dropped (never a silent "maybe something is missing")', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 1 }));
+    expect(line).toContain('nothing was dropped');
+    expect(line).not.toContain('NOT imported');
+  });
+
+  it('names the monorepo app root when the import was re-rooted', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 2, appRoot: 'apps/web' }));
+    expect(line).toContain('apps/web');
+  });
+
+  it('mentions sandbox-only lockfiles as KEPT, not lost', () => {
+    const line = importAccountingLine(extracted({
+      files: { 'a.ts': 'x' }, sandboxOnly: { 'package-lock.json': '{}' }, totalEntries: 2,
+    }));
+    expect(line).toContain('1 lockfile');
+    expect(line).toContain('sandbox only');
+  });
+
+  it('explains that source-file count is what matters (the exact confusion in the report)', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, dropped: { binary: 9 }, totalEntries: 10 }));
+    expect(line).toMatch(/npm install/);
+    expect(line).toMatch(/what the AI reads and edits/i);
+  });
+
+  it('singularises correctly for a one-entry archive', () => {
+    const line = importAccountingLine(extracted({ files: { 'a.ts': 'x' }, totalEntries: 1 }));
+    expect(line).toContain('1 archive entry');
+    expect(line).toContain('1 source file');
+  });
+});
+
+// ROOT CAUSE (self-import autopsy 2026-08-03): importing NavBharatAI itself warned "This import looks
+// INCOMPLETE — 20 file(s) its code references are missing", naming src/server/AgentV3/Missing,
+// .../b, src/lib/App, src/components/ide/component … NONE were real. They were analyzer TEST FIXTURES,
+// generated-code TEMPLATE LITERALS and a path quoted in a COMMENT. Worse, the warning offers "say
+// 'create the missing files' and I'll build them" — acting on that would have written garbage files
+// (Missing.ts, b.ts, App.ts) into a perfectly healthy repo. These lock the fix.
+describe('maskNonCodeRegions — only REAL code is scanned for imports', () => {
+  it('blanks line + block comments but preserves length and newlines', () => {
+    const src = "import a from './a';\n// import x from './Nope';\nconst b = 1;";
+    const masked = maskNonCodeRegions(src);
+    expect(masked).toHaveLength(src.length);
+    expect(masked.split('\n')).toHaveLength(3);
+    expect(masked).toContain("import a from './a';");
+    expect(masked).not.toContain('./Nope');
+  });
+
+  it('blanks template literals (generated-code samples)', () => {
+    const src = "const sample = `import Component from './component';`;";
+    expect(maskNonCodeRegions(src)).not.toContain('./component');
+  });
+
+  it('does NOT desynchronise on a template that CONTAINS comments (the scaffold-generator case)', () => {
+    // A code generator's template holds generated code WITH its own /* */ and // comments. A chained
+    // comment-then-template regex ate across the template's boundary, exposing its body as real code.
+    const src = [
+      'const TPL = `',
+      '/* generated header */',
+      '// keep this',
+      "import App from './App';",
+      '`;',
+      "import real from './real';",
+    ].join('\n');
+    const masked = maskNonCodeRegions(src);
+    expect(masked).not.toContain('./App');      // template body stayed masked
+    expect(masked).toContain("import real from './real';"); // real code after it survived
+  });
+
+  it('does NOT desynchronise on an ESCAPED backtick inside a template (markdown fence case)', () => {
+    const src = [
+      'const DOC = `',
+      '\\`\\`\\`ts',
+      "import { r } from './server/x/routes';",
+      '\\`\\`\\`',
+      '`;',
+      "import real from './real';",
+    ].join('\n');
+    const masked = maskNonCodeRegions(src);
+    expect(masked).not.toContain('./server/x/routes');
+    expect(masked).toContain("import real from './real';");
+  });
+
+  it('a backtick inside an ordinary string does not open a phantom template', () => {
+    const src = "const tick = '`';\nimport real from './real';";
+    expect(maskNonCodeRegions(src)).toContain("import real from './real';");
+  });
+
+  it('keeps ordinary string text (a real import specifier lives in one)', () => {
+    expect(maskNonCodeRegions("import x from './x';")).toContain("'./x'");
+  });
+});
+
+describe('findUnresolvedLocalImports — no phantom "missing files" from fixtures/templates/comments', () => {
+  const app = { 'src/App.tsx': "import React from 'react';\nexport default function App(){return null;}" };
+
+  it('ignores an import quoted INSIDE a test fixture string (the exact repo case)', () => {
+    // Verbatim shape from ArchitectureAnalysis.test.ts.
+    const files = {
+      ...app,
+      'src/analyze.test.ts': `const g = graphOf({ 'src/App.tsx': "import { X } from './Missing';\\nexport function App(){}" });`,
+    };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('ignores an import inside a generated-code TEMPLATE literal', () => {
+    const files = { ...app, 'src/gen.tsx': "const code = `import { Btn } from './button';`;" };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('ignores an import mentioned in a COMMENT', () => {
+    const files = { ...app, 'src/lib/firebase.ts': "// App.tsx re-exports so `import { auth } from './App'` keeps working.\nexport const x = 1;" };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('STILL reports a genuinely missing import (the real signal is not weakened)', () => {
+    const files = { 'src/App.tsx': "import Header from './components/Header';\nexport default function App(){return null;}" };
+    const out = findUnresolvedLocalImports(files);
+    expect(out).toHaveLength(1);
+    expect(out[0].missing).toBe('src/components/Header');
+    expect(out[0].importedBy).toBe('src/App.tsx');
+  });
+
+  it('still reports a missing import that follows a masked region in the same file', () => {
+    const files = {
+      'src/App.tsx': "const t = `import Fake from './Fake';`;\nimport Real from './Real';\nexport default function App(){return null;}",
+    };
+    const out = findUnresolvedLocalImports(files);
+    expect(out.map((o) => o.missing)).toEqual(['src/Real']); // the fake one is gone, the real one remains
+  });
+});
+
+// ADMIN 2026-08-03 ("88 large images not imported — will the app break?"): large IMAGES used to be
+// dropped, leaving imported apps with broken pictures. Two tiers now: small images persist durably;
+// larger images (too big for the Firestore-backed store) are materialized in the SANDBOX for the
+// preview but not persisted. Videos/other binaries are still dropped. Nothing crashes either way.
+describe('extractZipProject — large images go to the sandbox tier, not dropped', () => {
+  const img = (kb: number) => Buffer.alloc(kb * 1024, 0x41); // fake JPEG bytes, arbitrary size
+
+  it('keeps a SMALL image durably (assets) and a MID image sandbox-only', async () => {
+    const buf = await makeZipBinary({
+      'package.json': '{"name":"x"}',
+      'client/small.png': img(100),   // <= 640KB → durable asset
+      'client/big.jpg': img(1200),    // > 640KB, <= 5MB → sandbox-only
+    });
+    const ex = await extractZipProject(buf);
+    expect(Object.keys(ex.assets)).toContain('client/small.png');
+    expect(Object.keys(ex.sandboxAssets)).toContain('client/big.jpg');
+    expect(Object.keys(ex.assets)).not.toContain('client/big.jpg'); // not persisted durably
+    expect(ex.dropped.binary).toBe(0);                              // nothing dropped
+  });
+
+  it('drops an image bigger than the sandbox cap (5MB) — memory bound holds', async () => {
+    const buf = await makeZipBinary({ 'package.json': '{"name":"x"}', 'huge.png': img(6 * 1024) });
+    const ex = await extractZipProject(buf);
+    expect(Object.keys(ex.assets)).not.toContain('huge.png');
+    expect(Object.keys(ex.sandboxAssets)).not.toContain('huge.png');
+    expect(ex.dropped.binary).toBe(1);
+  });
+
+  it('still drops a NON-image binary (video) regardless of size', async () => {
+    const buf = await makeZipBinary({ 'package.json': '{"name":"x"}', 'demo.mp4': img(300) });
+    const ex = await extractZipProject(buf);
+    expect(Object.keys(ex.sandboxAssets)).not.toContain('demo.mp4');
+    expect(Object.keys(ex.assets)).not.toContain('demo.mp4');
+    expect(ex.dropped.binary).toBe(1);
+  });
+
+  it('accounting reports sandbox-only large images as KEPT (preview only), not lost', () => {
+    const line = importAccountingLine(extracted({
+      files: { 'a.ts': 'x' },
+      assets: { 'logo.png': 'data:image/png;base64,AA' },
+      sandboxAssets: { 'hero.jpg': 'data:image/jpeg;base64,AA', 'banner.png': 'data:image/png;base64,AA' },
+      totalEntries: 4,
+    }));
+    expect(line).toContain('2 large images (preview only)');
+    expect(line).toContain('1 image/font asset');
+    expect(line).toContain('nothing was dropped');
   });
 });

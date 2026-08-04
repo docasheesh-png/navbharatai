@@ -24,6 +24,11 @@ const COLLECTION = 'workspace_files_v3';
 const MAX_FILE_BYTES = 900 * 1024;
 /** Firestore batches allow up to 500 writes; stay under it. */
 const BATCH = 400;
+/** How many Firestore batch commits may be in flight at once during a merge (see mergeWorkspaceFiles). */
+const MERGE_COMMIT_CONCURRENCY = Math.max(
+  1,
+  Math.min(16, Number(process.env.AGENTV3_MERGE_COMMIT_CONCURRENCY) || 6),
+);
 
 let _db: admin.firestore.Firestore | null = null;
 
@@ -198,13 +203,24 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
     const root = db.collection(COLLECTION).doc(workspaceId);
     const filesCol = root.collection('files');
     // 1) Upsert ONLY the changed/added content docs.
+    //
+    // The commits run CONCURRENTLY (bounded). They used to be awaited one after another, so a large
+    // import paid every batch's round trip end-to-end — the same "serial awaits over a network" class
+    // that once made the sandbox landing take 648 seconds (see WorkspaceFiles.ts). Batches are
+    // independent upserts of DISTINCT docs, so ordering between them carries no meaning and running
+    // them together is safe by construction. Bounded so a huge import can't open unlimited sockets.
+    const commits: Array<Promise<unknown>> = [];
     for (let i = 0; i < entries.length; i += BATCH) {
       const batch = db.batch();
       for (const [path, content] of entries.slice(i, i + BATCH)) {
         batch.set(filesCol.doc(fileDocId(path)), { path, content });
       }
-      await batch.commit();
+      commits.push(batch.commit());
+      if (commits.length >= MERGE_COMMIT_CONCURRENCY) {
+        await Promise.all(commits.splice(0, commits.length));
+      }
     }
+    if (commits.length) await Promise.all(commits);
     // 2) UNION the authoritative path list (never drop unchanged files).
     const meta = await root.get();
     const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];

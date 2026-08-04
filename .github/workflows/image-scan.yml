@@ -22,21 +22,48 @@ jobs:
       - name: Build production image
         run: docker build -t navbharatai:scan .
 
-      - name: Trivy scan — FAIL on CRITICAL
-        uses: aquasecurity/trivy-action@0.28.0
+      # NO ACTION, ON PURPOSE. This workflow has now broken TWICE for reasons that had nothing to do
+      # with our security posture: first the pinned action tag was deleted upstream (job died at "Unable
+      # to resolve action" — the image was never scanned at all), then the newer action's own contract
+      # changed and both steps failed in ~2s, including the report-only one, which cannot fail on a CVE.
+      # Each time the red X looked exactly like a CVE finding, so the signal saying "your scanner is
+      # broken" read as "your container has a problem" — and neither got read.
+      #
+      # Trivy is now invoked DIRECTLY from its official image, pinned. There is no third-party action
+      # between us and the scanner, so an upstream release can no longer change what this job does, and
+      # any failure prints Trivy's own error instead of an action wrapper's. The DB cache is persisted so
+      # a rate-limited download does not turn into a mystery failure. Tag verified to exist (2026-08-04).
+      - name: Cache Trivy vulnerability DB
+        uses: actions/cache@v4
         with:
-          image-ref: 'navbharatai:scan'
-          format: 'table'
-          severity: 'CRITICAL'
-          exit-code: '1'           # CRITICAL CVE → fail the job
-          ignore-unfixed: true     # don't fail on CVEs with no available fix
+          path: ~/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Trivy scan — FAIL on CRITICAL
+        run: |
+          mkdir -p "$HOME/.cache/trivy"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            aquasec/trivy:0.73.0 image \
+              --scanners vuln \
+              --severity CRITICAL \
+              --ignore-unfixed \
+              --format table \
+              --exit-code 1 \
+              navbharatai:scan
 
       - name: Trivy scan — report HIGH (non-blocking)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: 'navbharatai:scan'
-          format: 'table'
-          severity: 'HIGH'
-          exit-code: '0'           # report only
-          ignore-unfixed: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            aquasec/trivy:0.73.0 image \
+              --scanners vuln \
+              --severity HIGH \
+              --ignore-unfixed \
+              --format table \
+              --exit-code 0 \
+              navbharatai:scan

@@ -18,6 +18,7 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
@@ -141,6 +142,11 @@ export function manifestSystemPrompt(framework: string): string {
     '- List EVERY source file the app needs (entry, components, styles, hooks, utils, config it must edit).',
     '- Edit/replace the scaffolded entry files (e.g. src/App.tsx, index.html) — do not nest a subfolder.',
     '- Keep it minimal but COMPLETE — no file the app references should be missing.',
+    // SIZE DISCIPLINE (admin 2026-08-02): "minimal" alone is an adjective a weak model reads as optional —
+    // a real build planned 50 files for an app needing ~12. The per-app NUMBER lives in the user prompt
+    // (fileBudgetInstruction); this is the app-agnostic anti-pattern that produces most of the bloat.
+    '- One file per REAL unit of the app. Never a separate file for a single tiny helper, type or constant —',
+    '  co-locate it with its only user. Fewer, cohesive files beat many thin ones.',
     '- Do NOT list node_modules, lockfiles, or build output.',
   ].join('\n');
 }
@@ -149,7 +155,10 @@ export function manifestUserPrompt(prompt: string, scaffoldPaths: string[]): str
   const scaffold = scaffoldPaths.length
     ? `Already scaffolded (edit/extend; root is the project root):\n${scaffoldPaths.slice(0, 60).map((p) => `  - ${p}`).join('\n')}`
     : 'The project starts empty — plan all files at the project root.';
-  return `Plan the file list for this app:\n\n${prompt}\n\n${scaffold}\n\nOutput the file list now (one "path :: purpose" per line).`;
+  // The size ceiling is derived HERE, from the prompt this function already receives, so every caller of
+  // the manifest lane inherits it automatically — there is no second path that can plan unbudgeted.
+  const budget = fileBudgetInstruction(fileBudgetForPrompt(prompt));
+  return `Plan the file list for this app:\n\n${prompt}\n\n${scaffold}\n\n${budget}\n\nOutput the file list now (one "path :: purpose" per line).`;
 }
 
 /** System prompt for a single-file generation call. */

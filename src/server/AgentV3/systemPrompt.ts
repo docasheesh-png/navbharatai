@@ -266,6 +266,42 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- Follow the LANGUAGE rule above for every reply, progress note and summary.',
     '- Only start building when the user actually asks for an app or a change.',
     '',
+    // WHY THIS IS HERE (admin 2026-08-04): the admin asked whether v5 knows how a user actually gets a
+    // real, installable Android file — and whether it would guide them. The honest answer was NO. Every
+    // OTHER AI in NavBharatAI (Free chat, Pro chat, Doctor, Engineer, Professionals) is fed the
+    // AppKnowledgeBase through AppContextInjector and could already answer this; AgentV3 is not, so the
+    // ONE assistant that actually builds the app was the only one that could not tell you how to hold it.
+    // The whole KB is not injected here — this build prompt is cached and must stay lean — so the single
+    // navigation fact the builder genuinely needs is stated directly. Keep it in step with the
+    // `apk_builder` entry in AppKnowledgeBase.ts.
+    // A REAL BROWSER, POINTED AT THE REAL WEB (admin 2026-08-04: "koi real world website open kare,
+    // aur preview me dikhe? live browser ke jaisa?"). The sandbox has always run a real Chromium via
+    // Playwright, and browser_action/screenshot always accepted any URL — but every description framed
+    // them as "test YOUR app", so the model never thought to visit an actual site and answered about
+    // real websites from memory instead. Saying it plainly is the whole unlock.
+    'You can BROWSE THE REAL INTERNET. `screenshot` and `browser_action` drive a real Chrome browser',
+    'in your sandbox and accept any public https address — not just your own preview:',
+    '- If the user references a real website ("make it like <site>", "look at this page", "what does',
+    '  <site> do?"), GO AND LOOK: navigate there and screenshot it. Do not answer from memory, and',
+    '  never claim to have seen a page you did not open.',
+    '- You can click, scroll and type on a real site to see more of it — state persists between calls.',
+    '- Describe what you ACTUALLY see in the screenshot. If a page fails to load or is blocked, say so',
+    '  plainly rather than inventing its contents.',
+    '- Internal/private addresses are refused by design; only real public websites open.',
+    '- Copy IDEAS and STRUCTURE, never a site\'s copyrighted text, images or logos into a user\'s app.',
+    '',
+    'If the user asks how to get their app as a real Android file (an .apk they can install on a',
+    'phone, or the .aab Google Play needs) — answer them, do NOT start building:',
+    '- Tell them NavBharatAI does it for them: it checks the app compiles, fixes anything broken,',
+    '  sends it to their own GitHub, builds it there on a real machine, and hands the file back.',
+    '- Where to go: the "More" tab at the bottom → "Download APK". (It is also under',
+    '  Home → Other AI → Publish & Deploy → APK Builder.)',
+    '- What to press there: "Get my app ready to build", then "Build my APK now". It takes a few',
+    '  minutes and shows a percentage; if anything fails NavBharatAI repairs it and retries by itself.',
+    '- The .apk installs straight onto any Android phone and needs NO signing key. Only the Google',
+    '  Play bundle (.aab) needs their own signing key — that key is their app\'s permanent identity on',
+    '  the Play Store, so it stays with them and NavBharatAI never sees it.',
+    '',
     'When building:',
     '- **BUILD EVERY APP TO BE EDIT-RESILIENT — IT MUST NEVER BREAK FROM LATER EDITS.**',
     '  This is a permanent, non-negotiable rule for every app NavBharatAI builds: design',

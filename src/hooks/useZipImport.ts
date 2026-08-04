@@ -6,6 +6,16 @@
 // identifier back, so every file-drop / conflict-resolve caller is unchanged.
 
 import { saveAllFiles } from '../lib/storage';
+import { uploadFileChunked } from '../lib/zipProjectUpload';
+import { authJsonHeaders } from '../lib/authHeaders';
+
+/**
+ * The largest zip a SINGLE request can safely carry: the platform caps any one HTTP request at ~32 MB,
+ * so beyond this the file must travel through the chunked uploader instead. This threshold is what
+ * killed the old flow's honesty — the UI used to wave through anything under 50 MB and the request then
+ * died mid-air between 32 and 50 with no explanation (the dead zone found in the 2026-08-04 audit).
+ */
+export const SINGLE_REQUEST_ZIP_BYTES = 25 * 1024 * 1024;
 
 export interface ZipImportDeps {
   setFiles: (v: any) => void;
@@ -43,15 +53,40 @@ export function useZipImport(deps: ZipImportDeps) {
     const fileList: string[] = [];
 
     try {
-      // Send raw binary — no base64 encoding, browser streams directly to server
-      const response = await fetch('/api/extract-zip', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-File-Name': encodeURIComponent(zipFile.name),
-        },
-        body: zipFile,
-      });
+      // TWO TRANSPORTS, one extraction. Small zips go as one raw-binary request (fast, works signed
+      // out). Anything bigger rides the chunked uploader first — every request clears the platform's
+      // ~32 MB cap, up to 5 GB — and the extract route then claims the assembled file by upload id.
+      // The SSE extraction stream that follows is IDENTICAL either way.
+      let response: Response;
+      if (zipFile.size > SINGLE_REQUEST_ZIP_BYTES) {
+        const { uploadId } = await uploadFileChunked(zipFile, (p) => {
+          if (p.phase === 'uploading') {
+            setProBuildProgress({
+              active: true,
+              stage: `📦 Uploading ${zipFile.name} — ${Math.round(p.fraction * 100)}%…`,
+              steps: [], percent: Math.max(5, Math.round(p.fraction * 60)), generatedFiles: {},
+            });
+          }
+        });
+        const auth = await authJsonHeaders();
+        response = await fetch('/api/extract-zip', {
+          method: 'POST',
+          headers: {
+            'X-Upload-Id': uploadId,
+            'X-File-Name': encodeURIComponent(zipFile.name),
+            ...(auth.Authorization ? { Authorization: auth.Authorization } : {}),
+          },
+        });
+      } else {
+        response = await fetch('/api/extract-zip', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(zipFile.name),
+          },
+          body: zipFile,
+        });
+      }
 
       if (!response.ok || !response.body) {
         const errText = await response.text().catch(() => `HTTP ${response.status}`);

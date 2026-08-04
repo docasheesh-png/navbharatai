@@ -7,6 +7,7 @@ import {
   firebaseHostingConfigured,
   attachCustomDomain,
   customDomainStatusLive,
+  customDomainErrorMessage,
 } from '../lib/firebaseCustomDomain';
 import { linkWorkspaceDomain } from '../lib/firebaseDomainLink';
 
@@ -65,7 +66,10 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
       res.json(status);
     } catch (err: any) {
-      sendSafeError(res, 500, 'Failed to start domain connection. Please try again.', err, 'nbai domain connect');
+      // HONEST failure (admin 2026-08-02): a permanent problem (server not permitted, domain taken)
+      // must NOT tell the user to "try again" — that loops them forever on something a retry can
+      // never fix. customDomainErrorMessage classifies it; the raw detail still goes to the log only.
+      sendSafeError(res, 500, customDomainErrorMessage(err), err, 'nbai domain connect');
     }
   });
 

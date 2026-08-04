@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES } from './zipUpload';
+import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES } from './zipUpload';
 
 describe('validChunkMeta', () => {
   it('accepts a real chunk sequence', () => {
@@ -105,5 +105,27 @@ describe('claimUpload contract', () => {
   it('the APK still passes the real inspection + malware scan (transport changed, safety did not)', () => {
     expect(STORE).toContain('await inspectApk(bytes)');
     expect(STORE).toContain('await scanFile(bytes, facts.sha256)');
+  });
+});
+
+describe('the 5 GB import (admin 2026-08-04) — real, because commit STREAMS from disk', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./zipUpload.ts', import.meta.url)), 'utf8');
+
+  it('the ceiling is 5 GB', () => {
+    expect(MAX_ARCHIVE_BYTES).toBe(5 * 1024 * 1024 * 1024);
+  });
+
+  it('THE REGRESSION THAT MADE EVEN 1 GB FICTION: commit must never buffer the whole archive', () => {
+    // fs.readFileSync(zip) + jszip held the entire archive in memory — a 1 GB commit needed ~2-3 GB of
+    // RAM, so the advertised cap was unreachable regardless of transport. Commit must stream from disk.
+    expect(SRC).toContain('extractZipProjectFromDisk(u.filePath)');
+    expect(SRC).not.toContain('readFileSync(u.filePath)');
+  });
+
+  it('begin refuses over-ceiling and no-disk-room uploads BEFORE any bytes move', () => {
+    // A 5 GB upload that dies at 90% (or fills the instance disk) is the dishonest version of a limit.
+    expect(SRC).toContain('declaredBytes > MAX_ARCHIVE_BYTES');
+    expect(SRC).toContain('hasSpaceForUpload(free, declaredBytes)');
+    expect(SRC).toContain('507');
   });
 });

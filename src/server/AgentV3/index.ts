@@ -62,7 +62,7 @@ export {
 } from './pricing';
 export type { BilledUsage, TokenRate, BillingTier } from './pricing';
 export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, secondOpinionToolDef, consensusToolDef, catalogForTools } from './ToolCatalog';
-export { ToolDispatcher } from './ToolDispatcher';
+export { ToolDispatcher, ALWAYS_WRITE_SECRETS } from './ToolDispatcher';
 export type { ActuatorPort, ToolResult, SubAgentSpawn } from './ToolDispatcher';
 export { makeSecondOpinion } from './SecondOpinion';
 export type { SecondOpinion, OpinionRouter } from './SecondOpinion';

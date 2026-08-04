@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseOwnerRepo, zipballUrl, classifyZipStatus, fetchGithubRepoZip, type ZipFetcher,
+  parseOwnerRepo, zipballUrl, classifyZipStatus, fetchGithubRepoZip, readStreamCapped,
+  GITHUB_ZIP_MAX_BYTES, type ZipFetcher, type ByteStream,
 } from './GithubZipFetch';
 
 /** A fake fetch that records the URLs + headers it saw and replies from a scripted matcher. */
@@ -109,5 +110,91 @@ describe('fetchGithubRepoZip — server-side fetch (no sandbox, no git)', () => 
     const res = await fetchGithubRepoZip({ url: 'https://gitlab.com/o/r', fetchImpl });
     expect(res).toMatchObject({ ok: false, reason: 'bad-url' });
     expect(calls.length).toBe(0);
+  });
+});
+
+/** A byte stream over scripted chunks that records whether it was CANCELLED (i.e. we stopped early). */
+function chunkStream(chunks: Uint8Array[]): { stream: ByteStream; state: { cancelled: boolean; pulled: number } } {
+  const state = { cancelled: false, pulled: 0 };
+  let i = 0;
+  const stream: ByteStream = {
+    getReader: () => ({
+      read: async () => {
+        if (state.cancelled || i >= chunks.length) return { done: true };
+        const value = chunks[i++];
+        state.pulled += value.length;
+        return { done: false, value };
+      },
+      cancel: async () => { state.cancelled = true; },
+    }),
+  };
+  return { stream, state };
+}
+
+// ROOT CAUSE (admin question 2026-08-03, "what if a user imports a 100GB repo?"): the size guard read
+// `content-length` first, but codeload often streams WITHOUT it — and the fallback buffered the WHOLE
+// body via arrayBuffer() BEFORE checking the size. On a 2 GiB instance one oversized import could
+// OOM-kill the process and take down every other user's build. These lock the streaming cap.
+describe('readStreamCapped — peak memory is bounded by the cap, not by the remote repo size', () => {
+  it('returns the bytes for a stream under the cap', async () => {
+    const { stream } = chunkStream([new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])]);
+    const r = await readStreamCapped(stream, 100);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(Array.from(r.buf)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('ABORTS as soon as the cap is crossed — it never reads the rest of a huge body', async () => {
+    const big = () => new Uint8Array(10); // 10 bytes per chunk
+    const { stream, state } = chunkStream([big(), big(), big(), big(), big(), big(), big(), big(), big(), big()]);
+    const r = await readStreamCapped(stream, 25); // cap crossed on the 3rd chunk
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.bytes).toBe(30);
+    expect(state.cancelled).toBe(true);      // the download was cancelled…
+    expect(state.pulled).toBeLessThanOrEqual(30); // …and we never pulled the remaining 70 bytes
+  });
+
+  it('cancels the reader even on a clean finish (no dangling connection)', async () => {
+    const { stream, state } = chunkStream([new Uint8Array([1])]);
+    await readStreamCapped(stream, 100);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it('tolerates empty chunks without miscounting', async () => {
+    const { stream } = chunkStream([new Uint8Array([]), new Uint8Array([7]), new Uint8Array([])]);
+    const r = await readStreamCapped(stream, 10);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(Array.from(r.buf)).toEqual([7]);
+  });
+});
+
+describe('fetchGithubRepoZip — an oversized repo is refused WITHOUT buffering it', () => {
+  it('rejects a body that exceeds the cap even when content-length is ABSENT (the OOM case)', async () => {
+    const oversized = new Uint8Array(GITHUB_ZIP_MAX_BYTES + 10);
+    const { stream, state } = chunkStream([oversized]);
+    const fetchImpl: ZipFetcher = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },  // NO content-length — exactly the codeload case
+      arrayBuffer: async () => { throw new Error('must not buffer the whole body'); },
+      body: stream,
+    });
+    const res = await fetchGithubRepoZip({ url: 'https://github.com/o/r', fetchImpl });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('too-large');
+    expect(state.cancelled).toBe(true); // download stopped, not drained
+  });
+
+  it('still succeeds via the stream for a normal repo', async () => {
+    const { stream } = chunkStream([new Uint8Array([9, 9, 9])]);
+    const fetchImpl: ZipFetcher = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      arrayBuffer: async () => { throw new Error('stream should be preferred'); },
+      body: stream,
+    });
+    const res = await fetchGithubRepoZip({ url: 'https://github.com/o/r', fetchImpl });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.bytes).toBe(3);
   });
 });

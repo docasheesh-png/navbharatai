@@ -545,16 +545,22 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   <p className="text-xs text-gray-600">No one online right now</p>
                 )}
               </div>
-              <div className="relative group inline-block">
+              {/* The unavailable state must be READABLE, not hover-only. A tooltip never fires on a
+                  touch device, and NavBharatAI is mobile-first (the Play Store app is the main surface) —
+                  so a phone user saw a dead grey button with no reason at all. The reason now sits in the
+                  label itself, and the honest alternative (what DOES work today) is named. */}
+              <div className="inline-flex flex-col gap-1">
                 <button
                   disabled
+                  title="Video calling is not built yet"
                   className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-600 cursor-not-allowed"
                 >
-                  <Video size={13} /> Start Video Call
+                  <Video size={13} /> Start Video Call — not available yet
                 </button>
-                <div className="absolute bottom-full left-0 mb-1.5 bg-[#0d1117] border border-white/10 text-gray-400 text-xs px-2 py-1 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity">
-                  Coming Soon
-                </div>
+                <p className="text-[10px] text-gray-500 leading-snug max-w-xs">
+                  Video calling isn&apos;t built yet — we won&apos;t show a button that does nothing. Use the
+                  room chat and @mentions to work together in the meantime.
+                </p>
               </div>
             </div>
           </div>

@@ -53,6 +53,10 @@ import {
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 import { AdminDashboard } from './components/AdminDashboard';
+// Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
+// native shell so the Play Console health declarations stay truthful. Web is untouched.
+import { isNativeApp } from './lib/mobileNative';
+import { medicalViewBlocked } from './lib/playCompliance';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
@@ -103,7 +107,6 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
-const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
 import { motion, AnimatePresence } from 'motion/react';
@@ -1091,34 +1094,44 @@ export default function App() {
     // that started it is gone on return — getRedirectResult MUST run here at the app
     // root to complete it. For a GitHub redirect we also capture the OAuth token so
     // NavBharatAI can connect to the user's repos.
-    // WEB ONLY: the native app never uses the redirect flow (it signs in via the native plugin), and its
-    // auth instance is deliberately created WITHOUT the popup/redirect resolver (src/lib/firebase.ts —
-    // the WKWebView init-hang root fix), so calling getRedirectResult there would throw on every launch.
-    if (Capacitor.isNativePlatform()) return;
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          try {
-            const ghCred = GithubAuthProvider.credentialFromResult(result);
-            if (ghCred?.accessToken) {
-              localStorage.setItem('gh_token', ghCred.accessToken);
-              rememberGithubOwner(result.user.uid); // this token belongs to THIS user
-              setGithubToken(ghCred.accessToken);
-            }
-          } catch { /* not a GitHub sign-in — ignore */ }
-          setUser(result.user);
-          setLoadingUser(false);
-          setShowAuth(false);
-        }
-      })
-      .catch((e) => {
-        const code = e?.code || '';
-        console.error('[auth] social redirect failed:', code || e?.message || e);
-        // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
-        if (code && code !== 'auth/no-auth-event') {
-          addToast('Sign-in failed. Please try again.', 'error');
-        }
-      });
+    // WEB ONLY — getRedirectResult: the native app never uses the redirect flow (it signs in via the
+    // native plugin), and its auth instance is deliberately created WITHOUT the popup/redirect resolver
+    // (src/lib/firebase.ts — the WKWebView init-hang root fix), so calling getRedirectResult there would
+    // throw on every launch.
+    //
+    // ⚠️ ROOT CAUSE of the "iOS app opens logged-out after every restart" bug (admin 2026-08-02, survived
+    // 8 fix attempts): this web-only guard used to be `if (Capacitor.isNativePlatform()) return;` — an
+    // EARLY RETURN that also skipped the onAuthStateChanged subscription below. On the native app NOTHING
+    // listened to Firebase auth: a restored session (and the cold-restart persistence heal wired inside
+    // the listener) never reached the UI, so every relaunch looked logged-out even when the session was
+    // saved. In-session login only appeared to work because AuthComponent flips the UI directly. The
+    // guard must therefore wrap ONLY getRedirectResult — the listener below runs on BOTH platforms.
+    if (!Capacitor.isNativePlatform()) {
+      getRedirectResult(auth)
+        .then((result) => {
+          if (result?.user) {
+            try {
+              const ghCred = GithubAuthProvider.credentialFromResult(result);
+              if (ghCred?.accessToken) {
+                localStorage.setItem('gh_token', ghCred.accessToken);
+                rememberGithubOwner(result.user.uid); // this token belongs to THIS user
+                setGithubToken(ghCred.accessToken);
+              }
+            } catch { /* not a GitHub sign-in — ignore */ }
+            setUser(result.user);
+            setLoadingUser(false);
+            setShowAuth(false);
+          }
+        })
+        .catch((e) => {
+          const code = e?.code || '';
+          console.error('[auth] social redirect failed:', code || e?.message || e);
+          // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
+          if (code && code !== 'auth/no-auth-event') {
+            addToast('Sign-in failed. Please try again.', 'error');
+          }
+        });
+    }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
@@ -1208,6 +1221,10 @@ export default function App() {
   };
 
   const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
+    // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
+    // the render guards below) means a medical view cannot open in the native shell no matter which
+    // button, deep link, or restored state asked for it.
+    if (medicalViewBlocked(view, isNativeApp())) return;
     // Pre-warm server when user opens chat tabs (fire-and-forget)
     if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
@@ -1909,11 +1926,7 @@ export default function App() {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      if (bucket === 'github') {
-        setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
-        return;
-      }
-      // < 50 MB: proceed with normal conflict check + import
+      // Up to 5 GB: proceed with the normal conflict check + import (chunked transport handles size)
       const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
       if (hasExisting) {
         setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
@@ -2747,8 +2760,8 @@ export default function App() {
           </div>
           )}
 
-          {/* ── Senior Doctor Assistant ── */}
-          {activeView === 'sda_chat' && (
+          {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
+          {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <SDAChat key={sdaResetKey} userId={user?.uid} />
             </div>
@@ -2953,7 +2966,7 @@ export default function App() {
               <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'pharmacist_ai' && (
+          {activeView === 'pharmacist_ai' && !medicalViewBlocked('pharmacist_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} />
             </div>
@@ -3073,12 +3086,12 @@ export default function App() {
               <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'maternity_ai' && (
+          {activeView === 'maternity_ai' && !medicalViewBlocked('maternity_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.maternity_ai} userId={user?.uid} />
             </div>
           )}
-          {activeView === 'firstaid_ai' && (
+          {activeView === 'firstaid_ai' && !medicalViewBlocked('firstaid_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.firstaid_ai} userId={user?.uid} />
             </div>
@@ -3374,12 +3387,6 @@ export default function App() {
           {/* Separate 'engine_builder' v5.0 view REMOVED — v5.0 is now reached only via the two
               gates (sidebar "NavBharatAI Pro v5.0" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
-
-          {activeView === 'entertainment' && (
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
-              <SocialHub />
-            </div>
-          )}
 
           {activeView === 'connect_domain' && (
             <ConnectMyWebsitePanel onBack={() => toggleTab('home')} uid={user?.uid} />

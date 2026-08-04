@@ -31,6 +31,9 @@ import { generateMobileExport, type MobileExportResult } from './MobileExportGen
 // The publishing walkthrough is embedded from the ONE structured source that also drives the in-app
 // checklist and the AI's answers, so the three can never drift (rule 4).
 import { renderPublishGuideText } from './storePublishGuide';
+// The workflow FILENAMES come from the one shared registry the dispatch allow-list also reads, so a
+// workflow can never be generated into a user's repo that the server then refuses to start.
+import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 
 /** A repository secret the USER must set — we can never set these for them (they are their identity). */
 export interface RequiredSecret {
@@ -97,6 +100,178 @@ const IOS_SECRETS: RequiredSecret[] = [
   },
 ];
 
+/**
+ * ONE-CLICK INSTALLABLE APK (admin 2026-08-02) — the zero-setup path.
+ *
+ * WHY THIS EXISTS: the signed .aab/.apk workflow below needs FOUR repository secrets, and the only way
+ * to produce them is to run `keytool` on a computer with Java, base64 the keystore, and paste four
+ * secrets into GitHub by hand. A non-technical user on a phone simply cannot do that, so "build my app"
+ * dead-ended for exactly the people it was built for.
+ *
+ * A DEBUG apk needs NO keystore at all — Gradle signs it with Android's universal debug key — and it
+ * installs on any phone. So this workflow gives the user the thing they actually asked for (hold my app
+ * in my hand, today) with zero credentials, while the signed workflow stays for Google Play, where a
+ * real key is genuinely unavoidable.
+ *
+ * Honest limits, stated in the workflow summary too: a debug apk CANNOT be uploaded to Google Play and
+ * is marked debuggable. It is for installing, testing and sharing — not for the store.
+ */
+// WHAT STOPPED THE BUILD — emitted into every generated workflow (autopsy 2026-08-03).
+//
+// A real failure reported by the admin showed GitHub's annotation saying only "Process completed with
+// exit code 1", with no indication of WHICH step died. That is unreadable for a non-technical user, and
+// it is nearly as bad for NavBharatAI's own self-healing loop, which then has to infer the stage from
+// pattern-matching a megabyte of log.
+//
+// This step runs ONLY on failure and reports the stage from the runner's actual filesystem — did the
+// libraries install, did the web build produce output, was the Android project created — which is
+// ground truth, not a guess. It writes two things: a plain-language explanation a user can read on the
+// GitHub page, and a single machine-readable NBAI_FAILED_STAGE line the classifier reads directly.
+// WHY EVERY SUMMARY STEP USES A QUOTED HEREDOC, NEVER echo (bug found 2026-08-03).
+//
+// These steps used to be a run of  echo "some prose" >> "$GITHUB_STEP_SUMMARY"  lines. The prose is
+// written for humans, so it contains quotes and parentheses - for example: run "Build Android App
+// Bundle (.aab, signed)". Once emitted into YAML those became UNQUOTED shell metacharacters and bash
+// died with a syntax error near the parenthesis.
+//
+// The damage was worse than a broken message: the Summary step runs LAST, after the artifact upload,
+// so the .apk was built and uploaded correctly and THEN the run turned red. Every successful build was
+// reported as a failure, and users would never collect an app that was actually sitting there ready.
+//
+// A quoted heredoc terminator makes the body literal text - there is no escaping left to get wrong,
+// which is why this is the fix for the class rather than another round of backslashes. The regression
+// test parses every generated run: block with bash -n, so any future escaping mistake fails CI.
+
+const FAILURE_DIAGNOSTIC = (): string => `
+      # Runs only when something above failed. See mobileShipKit.ts for why this exists.
+      - name: Explain what stopped the build
+        if: failure()
+        run: |
+          if [ ! -d node_modules ]; then
+            STAGE=install
+            WHY="It stopped while installing your app's libraries. Usually one package listed in package.json cannot be found, or two of them need different versions of the same thing."
+          elif [ ! -d dist ] && [ ! -d build ] && [ ! -d out ] && [ ! -d www ]; then
+            STAGE=webbuild
+            WHY="The libraries installed fine, but your app itself did not compile, so there was nothing to package. The error further up names the exact file and line."
+          elif [ ! -d android ]; then
+            STAGE=capacitor
+            WHY="Your app compiled correctly. It stopped while creating the Android project around it."
+          else
+            STAGE=android
+            WHY="Your app compiled correctly. It stopped while building the Android app itself."
+          fi
+          echo "NBAI_FAILED_STAGE=$STAGE"
+          {
+            echo "## The build stopped"
+            echo ""
+            echo "$WHY"
+            echo ""
+            echo "You do not have to fix this here. Open your app in NavBharatAI and press the build button again — it reads this result, repairs what it set up, and runs the build again on its own."
+          } >> "$GITHUB_STEP_SUMMARY"
+`;
+
+const ANDROID_APK_WORKFLOW = (appName: string): string => `# Build an INSTALLABLE Android app (.apk) for ${appName} — generated by NavBharatAI.
+#
+# This one needs NO secrets and NO signing key. It produces an apk you can install on any Android
+# phone right away. For Google Play you need the signed bundle instead — see android-aab.yml.
+#
+# Run it: GitHub → Actions → "Build Android APK (installable)" → Run workflow.
+
+name: Build Android APK (installable)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # NO npm cache here on purpose: NavBharatAI pushes the app's source but never a
+          # package-lock.json, and actions/setup-node with cache:'npm' HARD-FAILS when no lock file
+          # exists ("Dependencies lock file is not found") — killing the run ~18s in, before a single
+          # line of the app is built. The install step below already falls back to a plain install.
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # INSTALL (hardened 2026-08-03 after a real build died here in 36s with an unreadable log).
+      #
+      # Two things were wrong with the old "npm ci || npm install":
+      #   1. NavBharatAI pushes package.json but never a lock file, and npm ci REQUIRES one. So npm ci
+      #      failed on EVERY run and dumped a lock-file complaint into the log that was never the real
+      #      problem - burying the actual error under a red herring for anyone reading it.
+      #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
+      #      all, even though npm ships the exact fix for it.
+      # So: run the command that fits what is actually here, and keep ONE honest fallback.
+      - name: Install the app's libraries
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then
+            npm ci || npm install --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
+          fi
+
+      - name: Build the web app
+        run: npm run build
+
+      # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
+      #
+      # This step used to be:  npx cap add android || echo "already present - continuing"
+      # The intent was "do not fail if the project already exists", but || ignores EVERY error, so a
+      # genuine failure to create the project passed as green in 1 second. Gradle then ran against a
+      # directory that did not exist and died with "chmod: cannot access './gradlew'" - an error three
+      # steps away from its cause, pointing at the wrong thing entirely.
+      #
+      # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
+      # project is what actually broke, it is verified before anything downstream depends on it.
+      - name: Generate and sync the Android project
+        run: |
+          set -e
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+          if [ ! -f android/gradlew ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The Android project was not created, so there is nothing to compile."
+            exit 1
+          fi
+
+      # assembleDebug signs with Android's universal debug key, so no keystore and no secrets are
+      # needed — this is what makes the whole flow one click for a non-technical user.
+      - name: Build the installable APK
+        run: cd android && chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Upload the .apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+${FAILURE_DIAGNOSTIC()}
+      # Written with a quoted heredoc so the text below is never interpreted as shell code.
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'NBAI_EOF'
+          ## ${appName} — installable .apk built
+
+          Download the **app-apk** artifact, copy app-debug.apk to an Android phone and install it
+          (allow installs from unknown sources).
+
+          This apk is for installing and sharing. Google Play needs the SIGNED bundle instead — run
+          the "Build Android App Bundle (.aab, signed)" workflow once you have added your signing secrets.
+          NBAI_EOF
+`;
+
 /** Escapes nothing — GitHub expression syntax is emitted literally via \${{ … }} in the templates below. */
 const ANDROID_WORKFLOW = (appName: string): string => `# Build a SIGNED Android App Bundle (.aab) for ${appName} — generated by NavBharatAI.
 #
@@ -139,23 +314,59 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # NO npm cache here on purpose: NavBharatAI pushes the app's source but never a
+          # package-lock.json, and actions/setup-node with cache:'npm' HARD-FAILS when no lock file
+          # exists ("Dependencies lock file is not found") — killing the run ~18s in, before a single
+          # line of the app is built. The install step below already falls back to a plain install.
 
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install dependencies
-        run: npm ci || npm install
+      # INSTALL (hardened 2026-08-03 after a real build died here in 36s with an unreadable log).
+      #
+      # Two things were wrong with the old "npm ci || npm install":
+      #   1. NavBharatAI pushes package.json but never a lock file, and npm ci REQUIRES one. So npm ci
+      #      failed on EVERY run and dumped a lock-file complaint into the log that was never the real
+      #      problem - burying the actual error under a red herring for anyone reading it.
+      #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
+      #      all, even though npm ships the exact fix for it.
+      # So: run the command that fits what is actually here, and keep ONE honest fallback.
+      - name: Install the app's libraries
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then
+            npm ci || npm install --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
+          fi
 
       - name: Build the web app
         run: npm run build
 
+      # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
+      #
+      # This step used to be:  npx cap add android || echo "already present - continuing"
+      # The intent was "do not fail if the project already exists", but || ignores EVERY error, so a
+      # genuine failure to create the project passed as green in 1 second. Gradle then ran against a
+      # directory that did not exist and died with "chmod: cannot access './gradlew'" - an error three
+      # steps away from its cause, pointing at the wrong thing entirely.
+      #
+      # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
+      # project is what actually broke, it is verified before anything downstream depends on it.
       - name: Generate and sync the Android project
         run: |
-          npx cap add android || echo "android/ already present — continuing"
+          set -e
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
           npx cap sync android
+          if [ ! -f android/gradlew ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The Android project was not created, so there is nothing to compile."
+            exit 1
+          fi
 
       # Play REJECTS a re-used versionCode, so stamp it with the always-increasing run number.
       - name: Stamp a unique versionCode
@@ -218,7 +429,7 @@ jobs:
       - name: Always remove the keystore
         if: always()
         run: rm -f android/app/release.keystore || true
-
+${FAILURE_DIAGNOSTIC()}
       - name: Summary
         run: |
           echo "## ${appName} — signed .aab built" >> "$GITHUB_STEP_SUMMARY"
@@ -294,18 +505,54 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # NO npm cache here on purpose: NavBharatAI pushes the app's source but never a
+          # package-lock.json, and actions/setup-node with cache:'npm' HARD-FAILS when no lock file
+          # exists ("Dependencies lock file is not found") — killing the run ~18s in, before a single
+          # line of the app is built. The install step below already falls back to a plain install.
 
-      - name: Install dependencies
-        run: npm ci || npm install
+      # INSTALL (hardened 2026-08-03 after a real build died here in 36s with an unreadable log).
+      #
+      # Two things were wrong with the old "npm ci || npm install":
+      #   1. NavBharatAI pushes package.json but never a lock file, and npm ci REQUIRES one. So npm ci
+      #      failed on EVERY run and dumped a lock-file complaint into the log that was never the real
+      #      problem - burying the actual error under a red herring for anyone reading it.
+      #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
+      #      all, even though npm ships the exact fix for it.
+      # So: run the command that fits what is actually here, and keep ONE honest fallback.
+      - name: Install the app's libraries
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then
+            npm ci || npm install --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
+          fi
 
       - name: Build the web app
         run: npm run build
 
+      # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
+      #
+      # This step used to be:  npx cap add ios || echo "already present - continuing"
+      # The intent was "do not fail if the project already exists", but || ignores EVERY error, so a
+      # genuine failure to create the project passed as green in 1 second. Gradle then ran against a
+      # directory that did not exist and died with "chmod: cannot access './gradlew'" - an error three
+      # steps away from its cause, pointing at the wrong thing entirely.
+      #
+      # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
+      # project is what actually broke, it is verified before anything downstream depends on it.
       - name: Generate and sync the iOS project
         run: |
-          npx cap add ios || echo "ios/ already present — continuing"
+          set -e
+          if [ ! -d ios ]; then
+            npx cap add ios
+          fi
           npx cap sync ios
+          if [ ! -f ios/App/App.xcodeproj/project.pbxproj ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The iOS project was not created, so there is nothing to compile."
+            exit 1
+          fi
 
       # Apple rejects a re-used build number, and pre-answering export compliance stops the
       # "App Encryption Documentation" popup on every single upload.
@@ -536,11 +783,13 @@ export function generateShipKit(opts: ShipKitOptions = {}): ShipKitResult {
 
   const files: Record<string, string> = {
     ...base.files,
-    '.github/workflows/android-aab.yml': ANDROID_WORKFLOW(appName),
+    // The zero-secret, one-click installable apk comes FIRST — it is the path almost every user wants.
+    [workflowPath(SHIP_WORKFLOWS.androidApk)]: ANDROID_APK_WORKFLOW(appName),
+    [workflowPath(SHIP_WORKFLOWS.androidAab)]: ANDROID_WORKFLOW(appName),
     'SHIPPING.md': SHIPPING_MD(appName, base.appId, includeIos),
   };
   if (includeIos) {
-    files['.github/workflows/ios-ipa.yml'] = IOS_WORKFLOW(appName);
+    files[workflowPath(SHIP_WORKFLOWS.iosIpa)] = IOS_WORKFLOW(appName);
     files['fastlane/Fastfile'] = FASTFILE(base.appId);
   }
 

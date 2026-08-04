@@ -76,6 +76,60 @@ export function formatEta(ms: number): string {
   return `~${m} min`;
 }
 
+/** One live-ETA tick: the line to show, plus the (possibly re-baselined) budget for the next tick. */
+export interface EtaTick {
+  /** The user-facing status line. */
+  text: string;
+  /** The total budget to carry into the NEXT tick — extended when the build overran. */
+  totalMs: number;
+  /** True when this tick re-baselined the budget because the build overran its estimate. */
+  revised: boolean;
+}
+
+/** How far past the estimate we let a tick sit before re-baselining (matches the old 45s threshold). */
+const ETA_WRAP_THRESHOLD_MS = 45_000;
+const ETA_MIN_STEP_MS = 3 * 60_000;
+const ETA_MAX_STEP_MS = 10 * 60_000;
+
+/**
+ * Decide the live "Still building…" line for one heartbeat tick — and RE-BASELINE the budget when the
+ * build overruns.
+ *
+ * ROOT CAUSE it fixes (build-report autopsy 2026-08-02, SaaS dashboard): the caller computed
+ * `remaining = totalMs - elapsedMs` against a total that was fixed at build START and never revised.
+ * The moment a build passed its estimate, `remaining` went negative and EVERY later tick printed the
+ * identical "wrapping up (a little longer than estimated)" line — a real 31-minute build showed it 12
+ * times across 22 minutes while nowhere near done. "Wrapping up" at minute 8 is fair; at minute 30 it
+ * is simply untrue, and the code's own comment claimed it was "adapting as the build runs" when it was
+ * not.
+ *
+ * Now: inside the estimate the line counts down as before; on overrun the budget is EXTENDED by half
+ * the original estimate (clamped to 3–10 min) and the line says plainly that the app is bigger than
+ * expected and roughly how much longer — so the number keeps moving and never freezes on a stale claim.
+ * Pure: no clock reads, no I/O — every input is passed in.
+ */
+export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number): EtaTick {
+  const elapsed = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
+  const total = Number.isFinite(totalMs) && totalMs > 0 ? totalMs : 0;
+  const base = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : total;
+  const inTxt = formatEta(elapsed).replace('~', '');
+  const remaining = total - elapsed;
+  if (remaining > ETA_WRAP_THRESHOLD_MS) {
+    return {
+      text: `⏱️ Still building… ${inTxt} in · ~${formatEta(remaining).replace('~', '')} to go`,
+      totalMs: total,
+      revised: false,
+    };
+  }
+  // Overran: extend the budget and say so honestly, so the next tick shows a NEW number.
+  const step = Math.min(ETA_MAX_STEP_MS, Math.max(ETA_MIN_STEP_MS, Math.round(base / 2)));
+  return {
+    text: `⏱️ Still building… ${inTxt} in · this app is bigger than expected — about ${formatEta(step).replace('~', '')} more to go`,
+    totalMs: elapsed + step,
+    revised: true,
+  };
+}
+
 /**
  * Historical estimate: weighted average of past builds, weighting closer complexity scores more
  * heavily (inverse-distance). Returns null when there is no usable history.

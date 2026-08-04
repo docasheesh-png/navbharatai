@@ -1,5 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { planAppDefaults } from './appDefaults';
+import { planAppDefaults, defaultAssetPath } from './appDefaults';
+
+describe('defaultAssetPath — Vite ships only public/ (deploy-report autopsy 2026-08-03, buildId 588885e8)', () => {
+  it('routes the standalone assets into public/ for a Vite app so `npm run build` includes them', () => {
+    for (const f of ['vite-react', 'Vite-React', 'vite']) {
+      expect(defaultAssetPath('manifest.webmanifest', f)).toBe('public/manifest.webmanifest');
+      expect(defaultAssetPath('icon.svg', f)).toBe('public/icon.svg');
+      expect(defaultAssetPath('sw.js', f)).toBe('public/sw.js');
+      expect(defaultAssetPath('robots.txt', f)).toBe('public/robots.txt');
+    }
+  });
+  it('leaves the root path unchanged for a non-Vite / static / unknown framework', () => {
+    for (const f of ['static', 'html', 'remix', '', null, undefined]) {
+      expect(defaultAssetPath('manifest.webmanifest', f)).toBe('manifest.webmanifest');
+      expect(defaultAssetPath('sw.js', f)).toBe('sw.js');
+    }
+  });
+  it('never double-prefixes an already-pathed file', () => {
+    expect(defaultAssetPath('public/icon.svg', 'vite-react')).toBe('public/icon.svg');
+    expect(defaultAssetPath('assets/x.svg', 'vite-react')).toBe('assets/x.svg');
+  });
+});
 
 // U-2: app-scaffold quality defaults. Pure + idempotent — assert missing tags are added, present ones
 // are left alone, and re-running changes nothing.

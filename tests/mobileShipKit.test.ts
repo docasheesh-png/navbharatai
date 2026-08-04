@@ -14,6 +14,7 @@ describe('generateShipKit — the generated pipeline', () => {
     const kit = generateShipKit({ appName: 'My Shop' });
     expect(Object.keys(kit.files).sort()).toEqual([
       '.github/workflows/android-aab.yml',
+      '.github/workflows/android-apk.yml',
       '.github/workflows/ios-ipa.yml',
       'MOBILE_EXPORT.md',
       'SHIPPING.md',
@@ -202,3 +203,87 @@ describe('mobileShip guards (pure)', () => {
     expect(isDispatchableWorkflow(undefined)).toBe(false);
   });
 });
+
+describe('one-click installable APK — the zero-secret path (admin 2026-08-02)', () => {
+  const apk = () => generateShipKit({ appName: 'My App' }).files['.github/workflows/android-apk.yml'];
+
+  it('is always generated alongside the Play Store bundle workflow', () => {
+    const files = generateShipKit({ appName: 'My App' }).files;
+    expect(Object.keys(files)).toContain('.github/workflows/android-apk.yml');
+    expect(Object.keys(files)).toContain('.github/workflows/android-aab.yml');
+  });
+
+  it('THE POINT: needs NO signing secrets at all — that is what makes it one click', () => {
+    const wf = apk();
+    for (const secret of [
+      'ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD',
+    ]) {
+      expect(wf, secret).not.toContain(secret);
+    }
+    // The precise check: the workflow must never READ a secret. (Prose that merely mentions signing
+    // secrets, to point the user at the Play Store path, is fine and intended.)
+    expect(wf).not.toContain('${{ secrets.');
+    expect(wf).not.toMatch(/release\.keystore/);
+  });
+
+  it('really builds an installable apk (assembleDebug) and uploads it', () => {
+    const wf = apk();
+    expect(wf).toContain('assembleDebug');
+    expect(wf).toContain('android/app/build/outputs/apk/debug/app-debug.apk');
+    expect(wf).toContain('upload-artifact');
+    expect(wf).toContain('name: app-apk');
+  });
+
+  it('still does the real Capacitor work (web build + native sync)', () => {
+    const wf = apk();
+    expect(wf).toContain('npm run build');
+    expect(wf).toContain('npx cap sync android');
+    expect(wf).toContain('setup-java');
+  });
+
+  it('is HONEST about the limit — this file cannot go on Google Play', () => {
+    const wf = apk();
+    expect(wf).toMatch(/Google Play needs the SIGNED bundle/i);
+    expect(wf).toMatch(/install/i);
+  });
+
+  it('the Play Store workflow is UNCHANGED — it still requires the real signing secrets', () => {
+    const aab = generateShipKit({ appName: 'My App' }).files['.github/workflows/android-aab.yml'];
+    expect(aab).toContain('ANDROID_KEYSTORE_BASE64');
+    expect(aab).toContain('bundleRelease');
+  });
+});
+
+describe('generated workflows must actually RUN on GitHub (real failure 2026-08-02)', () => {
+  // A user's android-apk.yml died after 18 seconds with "Process completed with exit code 1".
+  // Cause: every generated workflow asked actions/setup-node for cache:'npm', but NavBharatAI pushes
+  // the app source WITHOUT a package-lock.json — and setup-node HARD-FAILS when the lock file it is
+  // told to cache does not exist, before a single line of the app is built.
+  const kit = () => generateShipKit({ appName: 'My App' }).files;
+  const workflows = () => Object.entries(kit()).filter(([p]) => p.startsWith('.github/workflows/'));
+
+  it('no generated workflow asks for an npm cache while no lock file is shipped', () => {
+    const shipsLockFile = Object.keys(kit()).some((p) => /package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$/.test(p));
+    expect(shipsLockFile).toBe(false); // documents WHY the cache must stay off
+    for (const [path, wf] of workflows()) {
+      expect(wf, path).not.toContain("cache: 'npm'");
+      expect(wf, path).not.toContain('cache: npm');
+    }
+  });
+
+  it('every workflow still installs dependencies in a lock-file-free way', () => {
+    for (const [path, wf] of workflows()) {
+      expect(wf, path).toContain('npm ci || npm install'); // ci fails without a lock, install then works
+    }
+  });
+
+  it('covers ALL generated workflows, not just the apk one (the bug was in all three)', () => {
+    const paths = workflows().map(([p]) => p).sort();
+    expect(paths).toEqual([
+      '.github/workflows/android-aab.yml',
+      '.github/workflows/android-apk.yml',
+      '.github/workflows/ios-ipa.yml',
+    ]);
+  });
+});
+

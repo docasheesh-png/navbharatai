@@ -21,7 +21,7 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 
@@ -36,8 +36,15 @@ export interface OwnRepoInfo { owner: string; repo: string; workBranch: string; 
 
 export interface HostingChooserProps {
   providers: HostingProvider[];
-  /** Publish the current app to a provider id (drives the real build+deploy pipeline). */
-  onDeploy: (providerId: string) => void;
+  /**
+   * Publish the current app to a provider id (drives the real build+deploy pipeline).
+   *
+   * Returns an HONEST reason string when the publish could NOT start (no app built yet, a build
+   * already running, …) and null/void when it genuinely started. The chooser shows that reason inline
+   * and stays open — it must never close on a publish that did not happen (admin 2026-08-02: the modal
+   * closed and nothing happened, so every button felt fake).
+   */
+  onDeploy: (providerId: string) => string | null | void;
   onClose: () => void;
   /** A build/deploy is already running — disable the actions. */
   busy: boolean;
@@ -60,6 +67,14 @@ export function HostingChooser({
   ownRepo, githubConnected, onConnectGitHub,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
+  // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
+  // A publish that cannot run must SAY SO here — never a button that silently does nothing.
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const publish = (providerId: string) => {
+    setBlocked(null);
+    const reason = onDeploy(providerId);
+    if (typeof reason === 'string' && reason) setBlocked(reason); // stays open, explains itself
+  };
   const hasOurHosting = providers.some((p) => p.id === NBAI_HOST_ID && p.configured);
   const byo = providers.filter((p) => p.configured && p.id !== NBAI_HOST_ID);
   // "Connect your own domain" is offered only when the server feature is on AND we have a workspace
@@ -73,9 +88,14 @@ export function HostingChooser({
       role="dialog"
       aria-label="Publish your app"
     >
-      <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+      {/* SCROLL FIX (admin 2026-08-02, phone): the card was `overflow-hidden` with NO height cap, so on a
+          phone the three publish paths were taller than the screen and everything below the fold —
+          including the "Set up" button and the full-stack note — was CLIPPED with no way to reach it
+          ("niche scroll nahi ho raha"). Cap the card at the viewport and scroll the BODY (the header
+          stays put); `overscroll-contain` keeps the swipe inside the sheet instead of scrolling the page. */}
+      <div className="w-full max-w-lg max-h-[85vh] flex flex-col bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
           <div className="flex items-center gap-2">
             <Rocket className="w-4 h-4 text-emerald-400" />
             <h3 className="text-sm font-bold text-white">Publish your app</h3>
@@ -85,6 +105,8 @@ export function HostingChooser({
           </button>
         </div>
 
+        {/* Body — the ONE scroll container for every view (choose / domain / self-host). */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {view === 'domain' && workspaceId ? (
           <div className="p-4">
             <NbaiDomainConnect workspaceId={workspaceId} onBack={() => setView('choose')} />
@@ -152,6 +174,13 @@ export function HostingChooser({
           </div>
         ) : (
         <>
+        {/* The publish did not start — say WHY, right where the user is looking. Never a silent no-op. */}
+        {blocked && (
+          <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-[11.5px] text-rose-200">
+            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>{blocked}</span>
+          </div>
+        )}
         <div className="p-4 grid gap-3 sm:grid-cols-3">
           {/* Path 1 — Host on NavBharatAI */}
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
@@ -168,13 +197,20 @@ export function HostingChooser({
               <li>• Fair-use limits apply (per-publish size + safety scan)</li>
             </ul>
             <button
-              onClick={() => onDeploy(NBAI_HOST_ID)}
+              onClick={() => publish(NBAI_HOST_ID)}
               disabled={busy || !hasOurHosting}
               className="mt-auto w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
             >
               {busy ? <TirangaLoader className="w-4 h-4" /> : <Rocket className="w-3.5 h-3.5" />}
               Publish on NavBharatAI
             </button>
+            {/* A disabled button with no explanation is its own dead end — say why it's greyed out. */}
+            {!hasOurHosting && (
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                NavBharatAI hosting isn&apos;t available right now — you can still publish to your own
+                provider or your own repo below.
+              </p>
+            )}
             {canConnectDomain && (
               <button
                 onClick={() => setView('domain')}
@@ -200,7 +236,7 @@ export function HostingChooser({
                 {byo.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => onDeploy(p.id)}
+                    onClick={() => publish(p.id)}
                     disabled={busy}
                     title={p.requirement}
                     className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white disabled:opacity-40 text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
@@ -251,6 +287,7 @@ export function HostingChooser({
         </div>
         </>
         )}
+        </div>
       </div>
     </div>
   );

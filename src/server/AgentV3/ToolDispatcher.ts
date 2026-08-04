@@ -1,4 +1,19 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { pipedGateExitCodeWarning } from './pipedGateExitCode';
+
+/**
+ * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
+ * command?" gate.
+ *
+ * ROOT CAUSE it closes (mitrify autopsy 2026-08-04, and the admin's direct question — "agar user keys daal
+ * bhi de, to kya app un keys ko padh payega?"): the secrets `.env` was written LAZILY, from inside
+ * `run_command`, the first time a command looked like npm/node/vite. But a managed preview — an import
+ * turn, the Diagnose button, `update_preview` — starts the dev server through the ACTUATOR, never through
+ * `run_command`. On those paths no `.env` was ever written, so the app booted with none of the keys the
+ * user had carefully saved in Settings. The keys were stored correctly, the app read `.env` correctly, and
+ * the two were never introduced. Now the write is also driven explicitly, before any dev server can start.
+ */
+export const ALWAYS_WRITE_SECRETS = '__navbharatai_always_write_secrets__';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
@@ -55,13 +70,13 @@ import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
-import { applyFullStackGuards } from './FullStackGuards';
+import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, conventionRelative } from './ProjectIntegrityChecks';
 
 /**
@@ -291,6 +306,10 @@ import { containsSymbol } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
+// Where the sandbox browser may go: its own preview, or the real public web — never an internal
+// infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
+// primitive; see lib/browseTarget.ts.
+import { classifyBrowseTarget } from '../lib/browseTarget';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -480,6 +499,7 @@ export class ToolDispatcher {
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
+    this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
     this.userSecretsEnv = env && typeof env === 'object' ? env : {};
   }
 
@@ -493,12 +513,15 @@ export class ToolDispatcher {
    * vault OVERRIDES any generated placeholder (mergeDotEnv), and existing .env lines are preserved.
    * Never throws — a failure just means the app runs without the injected keys (honest degradation).
    */
-  private async ensureUserSecretsEnvFile(command: string): Promise<void> {
+  async ensureUserSecretsEnvFile(command: string): Promise<void> {
     if (this.secretsEnvWritten) return;
     const names = Object.keys(this.userSecretsEnv);
     if (names.length === 0) return;
     // Only right before the app actually installs/builds/runs — that is when a .env must be on disk.
-    if (!/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
+    // `ALWAYS` is the explicit bypass used by the pre-flight write below and by update_preview, where a
+    // dev server is about to start WITHOUT any run_command having gone through this gate.
+    if (command !== ALWAYS_WRITE_SECRETS
+      && !/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
     this.secretsEnvWritten = true; // attempt once regardless of outcome — never rewrite on every command
     try {
       let existing = '';
@@ -1502,6 +1525,10 @@ export class ToolDispatcher {
         return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
       }
       const url = reqStr(input, 'url');
+      // The sandbox browser may reach its own dev server or the public web — never an internal
+      // infrastructure address. See lib/browseTarget.ts for why this guard exists.
+      const target = classifyBrowseTarget(url);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
       const width = typeof input.width === 'number' ? input.width : undefined;
       const height = typeof input.height === 'number' ? input.height : undefined;
       const viewport = width && height ? { width, height } : undefined;
@@ -1518,6 +1545,11 @@ export class ToolDispatcher {
     const action = reqStr(input, 'action');
     if (!BROWSER_ACTIONS.includes(action as BrowserActionName)) {
       return { content: `browser_action: unknown action "${action}". Valid: ${BROWSER_ACTIONS.join(', ')}.` };
+    }
+    const navUrl = optStr(input, 'url');
+    if (navUrl) {
+      const target = classifyBrowseTarget(navUrl);
+      if (target.kind === 'blocked') return { content: `Cannot open that address. ${target.reason}` };
     }
     const dir = input.direction;
     const direction: 'up' | 'down' | undefined = dir === 'up' ? 'up' : dir === 'down' ? 'down' : undefined;
@@ -1870,6 +1902,14 @@ export class ToolDispatcher {
             );
             return { path: file.path, kind, shrink: false, blocked: true };
           }
+          // DUPLICATE-MODULE guard PARITY (admin 2026-08-02: "duplicate file bane hi na"). write_file has
+          // refused a parallel copy under a second convention root (app/ vs src/) since the TaskForge
+          // autopsy — but write_files_batch never did, so the whole guard was one tool call away from being
+          // bypassed and a batch could quietly create the drifting second copy. Same decision, same refusal:
+          // block just this file and let the rest of the batch through.
+          if (kind === 'create' && this.duplicateModuleRefusal(file.path)) {
+            return { path: file.path, kind, shrink: false, blocked: true };
+          }
           // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
           // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
@@ -2030,6 +2070,28 @@ export class ToolDispatcher {
           );
           this.state?.appendTerminal(blockMsg);
           return blockMsg;
+        }
+        // STILL-IMPORTED FILE DELETION — BLOCKED (admin 2026-08-02: "galat tarah se file delete ho hi na").
+        // The bulk guard above deliberately allows deleting ONE stale file by name — right for genuinely
+        // dead code, catastrophic for a module other files still import: it vanishes, every importer breaks
+        // and the app stops building. The project's own import graph already knows who depends on what, so
+        // refuse EXACTLY the deletes that would orphan a live importer and allow the rest. Honest cleanup
+        // keeps working; a build-killing delete becomes impossible. Kill switch AGENTV3_DELETE_GUARD=off.
+        if (process.env.AGENTV3_DELETE_GUARD !== 'off') {
+          for (const target of singleSourceDeleteTargets(command)) {
+            let importers: string[] = [];
+            try { importers = getWorkspaceMemory(this.workspaceId).impactRadius(target).direct; } catch { importers = []; }
+            if (importers.length > 0) {
+              const blockMsg = importedFileDeletionMessage(target, importers);
+              try {
+                getWorkspaceMemory(this.workspaceId).recordAudit(
+                  `[BLOCKED-DESTRUCTIVE] refused delete of still-imported file ${target} (${importers.length} importer(s))`,
+                );
+              } catch { /* audit best-effort */ }
+              this.state?.appendTerminal(blockMsg);
+              return blockMsg;
+            }
+          }
         }
         // DESTRUCTIVE DEPENDENCY MUTATION — BLOCKED (deep-test SaaS dashboard, build 5ed0424a). The
         // preview was LIVE (Vite v5, dev server up), then the agent ran `npm audit fix --force` to "fix
@@ -2279,6 +2341,18 @@ export class ToolDispatcher {
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
         let out =
           `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
+        // THE PIPE ATE THE EXIT CODE (autopsy 56ee622f, 2026-08-04). `tsc --noEmit 2>&1 | head -30`
+        // exits 0 because `head` succeeds — a pipeline reports its LAST command's status. The agent
+        // verified its work with exactly that, was told "exit 0", moved on, and shipped an app with ~10
+        // real TypeScript errors whose preview then refused to start. It asked the only question it could
+        // and got a truthful-looking lie. We do not rewrite the shell (`set -o pipefail` is a bashism this
+        // repo has already been burned by); we read the output the command already produced and tell the
+        // agent the truth. Silent unless a gate tool was piped, exit was 0, AND the output carries a real
+        // compiler/test error. Kill switch AGENTV3_PIPED_GATE_CHECK=off.
+        if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
+          const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
+          if (lie) out = `${out}\n\n${lie}`;
+        }
         // PRISMA SCHEMA REPAIR HINT (widen the relation self-heal beyond the `prisma format` class):
         // when a prisma command STILL fails with a schema-validation error that `prisma format` cannot
         // mechanically fix (ambiguous relation, missing @id/@unique, missing fields/references, SQLite
@@ -2644,6 +2718,28 @@ export class ToolDispatcher {
               this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
+          // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
+          // `import ErrorBoundary from './ErrorBoundary'` + `import { ErrorBoundary } from './ErrorBoundary'`
+          // that BABEL rejects as "Duplicate declaration" — but esbuild AND tsc silently ACCEPT (a real
+          // compiler divergence), so the write-time guards and the type-checker miss it, and it white-screens
+          // the preview + refuses the dev-server port. Runs HERE, before the readiness gate, so the duplicate
+          // is removed on EVERY build — success, failure, OR wall-clock-capped alike (the route's post-build
+          // sweep ran too late and only on result.ok, so a 30-min capped build kept the duplicate). Pure +
+          // safe (dedupeSameModuleImports keeps the first binding, drops a later same-module redundant one);
+          // same durable write path; the cleaned file feeds the readiness gate below so its verdict is honest.
+          try {
+            for (const [file, content] of Object.entries(astFiles)) {
+              if (typeof content !== 'string') continue;
+              const deduped = dedupeSameModuleImports(file, content);
+              if (deduped !== content) {
+                astFiles[file] = deduped;
+                try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
+                try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
+                try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
+                this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+              }
+            }
+          } catch { /* best-effort — a failure just leaves the honest blocker below */ }
           // DEPENDENCY RECONCILE (P-PIPE): a package imported but not in package.json fails install/runtime
           // with "Cannot find module". For the curated well-known allowlist (real npm packages, version-
           // pinned; alias-colliding names excluded) add it to package.json deterministically so the app
@@ -6529,6 +6625,10 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
+        // The user's own keys MUST be on disk before a dev server starts. This path can start one via the
+        // actuator without any run_command having gone through the lazy gate, which is how an imported app
+        // booted with none of the keys its owner had saved in Settings (mitrify autopsy 2026-08-04).
+        await this.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
         // LOOP-BREAKER (build-diagnostics root cause): once preview has DEFINITIVELY failed —
         // including a managed dev-server start — stop the retry loop cold. Without this the model
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildReactPreview, isReactProject } from '../src/server/runtime/ReactPreview';
+import { describe, it, expect, afterEach } from 'vitest';
+import { buildReactPreview, isReactProject, vendoredReactBase } from '../src/server/runtime/ReactPreview';
 import { renderPreview } from '../src/server/runtime/renderPreview';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { scaffold } from '../src/server/project/Scaffold';
@@ -275,6 +275,80 @@ describe('buildReactPreview — legacy react interop fallback (Fix 34b)', () => 
     const html = buildReactPreview(reactVfs());
     expect(html).toContain('WITHOUT react-externalization (legacy interop fallback)');
     expect(html).toContain('on all 4 rungs');
+  });
+});
+
+// Vendored same-origin React (admin 2026-08-03, "in-browser preview ko 100x more strong"): React 18
+// ships from NavBharatAI's OWN origin (UMD + ESM facades in public/vendor/react18), so the preview's
+// FOUNDATION no longer depends on any third-party CDN. The CDN chain stays as the fallback.
+describe('buildReactPreview — vendored same-origin React runtime', () => {
+  const ORIGIN = 'https://navbharatai.com';
+  afterEach(() => { delete process.env.AGENTV3_VENDOR_REACT; });
+
+  it('with an origin + a React 18 app: UMD scripts + importmap facades come from OUR origin', () => {
+    const html = buildReactPreview(reactVfs(), ORIGIN);
+    // The official UMD builds load as plain <script>s before anything else needs React…
+    expect(html).toContain(`<script src="${ORIGIN}/vendor/react18/react.production.min.js"></script>`);
+    expect(html).toContain(`<script src="${ORIGIN}/vendor/react18/react-dom.production.min.js"></script>`);
+    // …and ALL five React specifiers resolve to the same-origin facades over that one copy.
+    expect(html).toContain(`"react":"${ORIGIN}/vendor/react18/react.mjs"`);
+    expect(html).toContain(`"react-dom":"${ORIGIN}/vendor/react18/react-dom.mjs"`);
+    expect(html).toContain(`"react-dom/client":"${ORIGIN}/vendor/react18/react-dom-client.mjs"`);
+    expect(html).toContain(`"react/jsx-runtime":"${ORIGIN}/vendor/react18/jsx-runtime.mjs"`);
+    expect(html).toContain(`"react/jsx-dev-runtime":"${ORIGIN}/vendor/react18/jsx-dev-runtime.mjs"`);
+  });
+
+  it('keeps the single-shared-React contract: other deps stay on esm.sh with ?external=react', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', zustand: '^4.5.0' } }),
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': "import { create } from 'zustand';\n",
+    });
+    const html = buildReactPreview(vfs, ORIGIN);
+    // zustand still comes from esm.sh, externalizing react — whose importmap entry is the facade,
+    // so zustand's internal `import "react"` lands on the ONE vendored copy.
+    expect(html).toContain('esm.sh/zustand@4.5.0?external=react,react-dom');
+    expect(html).toContain(`"react":"${ORIGIN}/vendor/react18/react.mjs"`);
+  });
+
+  it('no origin → CDN importmap unchanged (a srcDoc iframe cannot resolve root-relative vendor URLs)', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).not.toContain('/vendor/react18/');
+    expect(html).toMatch(/esm\.sh\/react@18/);
+  });
+
+  it('kill switch AGENTV3_VENDOR_REACT=off → CDN importmap unchanged', () => {
+    process.env.AGENTV3_VENDOR_REACT = 'off';
+    const html = buildReactPreview(reactVfs(), ORIGIN);
+    expect(html).not.toContain('/vendor/react18/');
+    expect(html).toMatch(/esm\.sh\/react@18/);
+  });
+
+  it('a non-18 React app is NEVER silently downgraded to the vendored 18 runtime', () => {
+    const v19 = VirtualFileSystem.fromRecord({
+      'package.json': JSON.stringify({ dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' } }),
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': 'export default ()=>null',
+    });
+    const html = buildReactPreview(v19, ORIGIN);
+    expect(html).not.toContain('/vendor/react18/');
+    expect(html).toContain('esm.sh/react@19.0.0');
+  });
+
+  it('vendoredReactBase: normalises a trailing slash and defaults an unpinned app to eligible', () => {
+    expect(vendoredReactBase(reactVfs(), 'https://x.com/')).toBe('https://x.com/vendor/react18');
+    const unpinned = VirtualFileSystem.fromRecord({ 'src/main.jsx': 'export default ()=>null' });
+    expect(vendoredReactBase(unpinned, 'https://x.com')).toBe('https://x.com/vendor/react18');
+    expect(vendoredReactBase(reactVfs(), undefined)).toBe(null);
+  });
+
+  it('CDN fallback rungs are version-guarded for vendored roots (no "latest" mid-fallback)', () => {
+    const html = buildReactPreview(reactVfs(), ORIGIN);
+    // Each rung builder detects a non-esm.sh (vendored) base and pins @18 instead of parsing it.
+    expect(html).toContain("IMAP[root].indexOf(ESM) !== 0");
+    expect(html).toContain('specUrlPlain');
+    // The facades throw an explicit error when the UMD is missing, dropping into these rungs.
+    expect(html).toContain(`${ORIGIN}/vendor/react18/react.mjs`);
   });
 });
 

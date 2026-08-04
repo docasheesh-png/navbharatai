@@ -12,6 +12,7 @@ import {
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
+import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
@@ -1234,12 +1235,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // build request, which is exactly what capped it at 18 MB and made a 161 MB import impossible.
   const handleZipProject = async (file: File) => {
     if (running || zipImporting) return;
+    // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used by the COMMIT call,
+    // which runs AFTER the entire archive has been transferred — so a missing one used to cost a 161 MB,
+    // multi-minute upload before the server could correctly refuse it. Resolve and validate the target
+    // here, in the first millisecond, exactly like the server's own size/disk preflight. This also fixes
+    // the id itself: this was the one call site passing `state.workspaceId` (empty until a build
+    // attaches) instead of the session's real id, so a FRESH tab could never import at all.
+    const targetWorkspaceId = resolveImportWorkspaceId({
+      stateWorkspaceId: state.workspaceId,
+      fallbackWorkspaceId: clientWorkspaceId(userId, sessionIdRef.current),
+    });
+    if (!targetWorkspaceId) {
+      setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${importTargetUnavailableMessage()}`, ts: Date.now() }]);
+      return;
+    }
     setZipImporting(true);
     const started = Date.now();
     setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
     try {
-      const result = await uploadZipProject(file, state.workspaceId, (p) => {
-        setZipProgress(p.phase === 'extracting' ? 'Extracting…' : `Uploading ${Math.round(p.fraction * 100)}%`);
+      const result = await uploadZipProject(file, targetWorkspaceId, (p) => {
+        setZipProgress(zipImportProgressLabel(p.phase, p.fraction));
       });
       setUserMsgs((c) => [...c, {
         role: 'agent',
@@ -1252,7 +1267,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const res = await fetch('/api/agentv3/workspace-files', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+          // The SAME resolved id the import landed in — reading back `state.workspaceId` here would
+          // ask an empty workspace for the files on exactly the fresh session this fix is about.
+          body: JSON.stringify({ workspaceId: targetWorkspaceId, userId, email }),
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.files && typeof data.files === 'object') onFilesSync?.(data.files);
@@ -3563,6 +3580,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
               </div>{/* /settings + attach row */}
               </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
+              {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
+                  transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
+                  screen showed one static "Importing…" line for minutes, which is indistinguishable from
+                  a crash ("sab ruk gaya"). A real percentage is the difference between working and frozen. */}
+              {zipImporting && (
+                <div className="order-1 w-full mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-800/60 bg-indigo-950/40 text-[11px] text-indigo-200">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span className="flex-1 truncate">{zipProgress || 'Preparing your project…'}</span>
+                  <span className="shrink-0 text-indigo-400">Large projects take a few minutes</span>
+                </div>
+              )}
               <div className="relative w-full order-1" data-tour="chat">
                 <textarea
                   ref={composerRef}

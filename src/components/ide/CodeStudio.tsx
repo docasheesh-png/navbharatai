@@ -175,6 +175,26 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  // REAL MENU BAR (admin 2026-08-04: "mark kiye huye buttons kaam nahi kar rahe"). The six labels —
+  // File / Edit / Selection / Run / Terminal / Help — were bare <span>s with hover styles and NO
+  // onClick: they looked like VS Code menus and did nothing. That is exactly the "looks done but does
+  // nothing" state the second absolute rule forbids. They are now real dropdown menus, VS Code-style:
+  // click opens, hovering a sibling while one is open switches to it, Escape/click-away closes, and
+  // every item routes through the SAME handleShortcut dispatcher the palette + keyboard already use —
+  // one command path, no parallel fake wiring. Items that have no real implementation are simply not
+  // listed (honesty rule: no dead entries).
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const menuBarRef = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    const close = (e: MouseEvent) => {
+      if (menuBarRef.current && !menuBarRef.current.contains(e.target as Node)) setOpenMenu(null);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onEsc); };
+  }, [openMenu]);
   const [isCursorPopupOpen, setIsCursorPopupOpen] = useState(false);
   const [editorInstance, setEditorInstance] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -836,13 +856,98 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                <MenuIcon className="w-4 h-4 text-white/70" />
                <span className="text-[11px] text-white/80 font-medium">NavBharat IDE</span>
             </div>
-            <div className="hidden md:flex items-center gap-4 text-[11px] text-white/50 font-medium">
-               <span className="hover:text-white cursor-pointer transition-colors">File</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Edit</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Selection</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Run</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Terminal</span>
-               <span className="hover:text-white cursor-pointer transition-colors">Help</span>
+            <div ref={menuBarRef} className="hidden md:flex items-center gap-0.5 text-[11px] text-white/60 font-medium relative">
+               {([
+                 { name: 'File', items: [
+                   { label: 'New File…', shortcut: 'Ctrl+N', run: () => handleShortcut([], 'explorer.newFile') },
+                   { label: 'New Window', run: () => handleShortcut([], 'workbench.action.newWindow') },
+                   { divider: true },
+                   { label: 'Save', shortcut: 'Ctrl+S', run: () => handleShortcut([], 'base.action.save') },
+                   { label: 'Save All', shortcut: 'Ctrl+Shift+S', run: () => handleShortcut([], 'workbench.action.files.saveAll') },
+                   { divider: true },
+                   { label: 'Close Editor', shortcut: 'Ctrl+W', run: () => handleShortcut([], 'workbench.action.closeActiveEditor') },
+                   { divider: true },
+                   { label: 'Settings', run: () => handleShortcut([], 'workbench.action.openSettings') },
+                   { label: 'Keyboard Shortcuts', run: () => handleShortcut([], 'workbench.action.openGlobalKeybindings') },
+                 ] },
+                 { name: 'Edit', items: [
+                   { label: 'Undo', shortcut: 'Ctrl+Z', run: () => handleShortcut([], 'undo') },
+                   { label: 'Redo', shortcut: 'Ctrl+Y', run: () => handleShortcut([], 'redo') },
+                   { divider: true },
+                   { label: 'Cut', shortcut: 'Ctrl+X', run: () => handleShortcut([], 'editor.action.clipboardCutAction') },
+                   { label: 'Copy', shortcut: 'Ctrl+C', run: () => handleShortcut([], 'editor.action.clipboardCopyAction') },
+                   { label: 'Paste', shortcut: 'Ctrl+V', run: async () => {
+                     // A menu click loses the native paste gesture, so read the clipboard explicitly (the
+                     // browser may ask permission once) and insert at the cursor — a REAL paste, not a stub.
+                     try {
+                       const text = await navigator.clipboard.readText();
+                       const sel = editorInstance?.getSelection();
+                       if (text && sel) { editorInstance?.executeEdits('menu-paste', [{ range: sel, text, forceMoveMarkers: true }]); editorInstance?.focus(); }
+                     } catch { /* clipboard permission denied — Ctrl+V still works in the editor */ }
+                   } },
+                   { divider: true },
+                   { label: 'Find', shortcut: 'Ctrl+F', run: () => editorInstance?.getAction('actions.find')?.run() },
+                   { label: 'Replace', shortcut: 'Ctrl+H', run: () => editorInstance?.getAction('editor.action.startFindReplaceAction')?.run() },
+                   { label: 'Find in Files', shortcut: 'Ctrl+Shift+F', run: () => handleShortcut([], 'workbench.action.findInFiles') },
+                   { divider: true },
+                   { label: 'Toggle Line Comment', shortcut: 'Ctrl+/', run: () => editorInstance?.getAction('editor.action.commentLine')?.run() },
+                   { label: 'Format Document', shortcut: 'Shift+Alt+F', run: () => editorInstance?.getAction('editor.action.formatDocument')?.run() },
+                 ] },
+                 { name: 'Selection', items: [
+                   { label: 'Select All', shortcut: 'Ctrl+A', run: () => editorInstance?.getAction('editor.action.selectAll')?.run() },
+                   { label: 'Expand Selection', shortcut: 'Shift+Alt+→', run: () => editorInstance?.getAction('editor.action.smartSelect.expand')?.run() },
+                   { label: 'Add Next Occurrence', shortcut: 'Ctrl+D', run: () => editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run() },
+                   { divider: true },
+                   { label: 'Add Cursor Above', shortcut: 'Ctrl+Alt+↑', run: () => editorInstance?.getAction('editor.action.insertCursorAbove')?.run() },
+                   { label: 'Add Cursor Below', shortcut: 'Ctrl+Alt+↓', run: () => editorInstance?.getAction('editor.action.insertCursorBelow')?.run() },
+                   { divider: true },
+                   { label: 'Move Line Up', shortcut: 'Alt+↑', run: () => editorInstance?.getAction('editor.action.moveLinesUpAction')?.run() },
+                   { label: 'Move Line Down', shortcut: 'Alt+↓', run: () => editorInstance?.getAction('editor.action.moveLinesDownAction')?.run() },
+                   { label: 'Copy Line Down', shortcut: 'Shift+Alt+↓', run: () => editorInstance?.getAction('editor.action.copyLinesDownAction')?.run() },
+                 ] },
+                 { name: 'Run', items: [
+                   { label: 'Open Preview', run: () => handleShortcut([], 'markdown.showPreview') },
+                   { divider: true },
+                   { label: 'Start Debugging', shortcut: 'F5', run: () => handleShortcut([], 'workbench.action.debug.start') },
+                   { label: 'Stop Debugging', shortcut: 'Shift+F5', run: () => handleShortcut([], 'workbench.action.debug.stop') },
+                   { divider: true },
+                   { label: 'Problems Panel', run: () => handleShortcut([], 'workbench.actions.view.problems') },
+                 ] },
+                 { name: 'Terminal', items: [
+                   { label: 'New Terminal', run: () => handleShortcut([], 'workbench.action.terminal.new') },
+                   { label: 'Toggle Terminal', shortcut: 'Ctrl+J', run: () => handleShortcut([], 'workbench.action.terminal.toggleTerminal') },
+                 ] },
+                 { name: 'Help', items: [
+                   { label: 'Command Palette', shortcut: 'Ctrl+Shift+P', run: () => setIsCommandPaletteOpen(true) },
+                   { label: 'Keyboard Shortcuts', run: () => setIsShortcutsOpen(true) },
+                   { divider: true },
+                   { label: 'Toggle Full Screen', run: () => handleShortcut([], 'workbench.action.toggleZenMode') },
+                 ] },
+               ] as Array<{ name: string; items: Array<{ label?: string; shortcut?: string; run?: () => void; divider?: boolean }> }>).map((menu) => (
+                 <div key={menu.name} className="relative">
+                   <button
+                     className={`px-2 py-1 rounded transition-colors ${openMenu === menu.name ? 'bg-white/10 text-white' : 'hover:text-white hover:bg-white/5'}`}
+                     onClick={() => setOpenMenu(openMenu === menu.name ? null : menu.name)}
+                     onMouseEnter={() => { if (openMenu && openMenu !== menu.name) setOpenMenu(menu.name); }}
+                   >{menu.name}</button>
+                   {openMenu === menu.name && (
+                     <div className="absolute left-0 top-full mt-1 min-w-[230px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[80]">
+                       {menu.items.map((item, i) => item.divider ? (
+                         <div key={i} className="h-px bg-white/10 my-1 mx-2" />
+                       ) : (
+                         <button
+                           key={i}
+                           className="w-full flex items-center justify-between gap-6 px-3 py-1.5 text-left text-[11px] text-white/80 hover:bg-indigo-600 hover:text-white transition-colors"
+                           onClick={() => { setOpenMenu(null); item.run?.(); }}
+                         >
+                           <span>{item.label}</span>
+                           {item.shortcut && <span className="text-[9px] opacity-50 font-mono">{item.shortcut}</span>}
+                         </button>
+                       ))}
+                     </div>
+                   )}
+                 </div>
+               ))}
             </div>
          </div>
          

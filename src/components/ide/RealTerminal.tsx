@@ -16,13 +16,18 @@ export interface RealTerminalProps {
   onClose: () => void;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
+  /** Hide this terminal's OWN header row. Set by TerminalPanel, which draws one shared header for all
+   *  sessions (title + tab dropdown + maximize + close) instead of one per terminal. */
+  hideHeader?: boolean;
+  /** Auto-focus the input when this session becomes the visible one (multi-terminal switching). */
+  autoFocus?: boolean;
 }
 
 type Line = { kind: 'cmd' | 'out' | 'err' | 'info'; text: string };
 
 const PROMPT = '$';
 
-export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId, email, onClose, isMaximized, onToggleMaximize }) => {
+export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId, email, onClose, isMaximized, onToggleMaximize, hideHeader, autoFocus }) => {
   const [lines, setLines] = useState<Line[]>([
     { kind: 'info', text: 'NavBharatAI terminal — runs real commands in your v5.0 sandbox (e.g. ls, cat package.json, npm run build). Each command is bounded by a 30s timeout.' },
   ]);
@@ -34,6 +39,7 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [lines, running]);
+  useEffect(() => { if (autoFocus) setTimeout(() => inputRef.current?.focus(), 0); }, [autoFocus]);
 
   const append = (next: Line[]) => setLines((cur) => [...cur, ...next]);
 
@@ -101,6 +107,7 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117] text-white" onClick={() => inputRef.current?.focus()}>
+      {!hideHeader && (
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 shrink-0">
         <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-1.5">
           <TerminalIcon className="w-3.5 h-3.5 text-indigo-400" />
@@ -117,6 +124,7 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
           </button>
         </div>
       </div>
+      )}
 
       <div className="flex-1 overflow-y-auto no-scrollbar px-3 py-2 font-mono text-[11px] leading-relaxed select-text">
         {lines.map((l, i) => (

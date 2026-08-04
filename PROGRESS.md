@@ -24736,3 +24736,67 @@ https://github.com/docasheesh-png/navbharatai/actions/runs/30909548544 — GREEN
 web payload matches a "no medical features" Play health declaration; every earlier bundle (incl. run
 #59, same morning) still contains Doctor AI and must NOT be uploaded against cleared declarations.
 Handed to the admin for the Play Console upload (Claude cannot reach Play Console — rule 6).
+
+---
+
+## 2026-08-04 — a 161.3 MB zip import that showed "Importing…" and then nothing
+
+**Admin report:** uploaded `1526mitrify.zip` (161.3 MB) into a FRESH v5.0 tab (Files 0 / Diff 0 /
+History 0, no build yet). One "📦 Importing…" line appeared and "sab ruk gaya".
+
+### Two defects, both certain from code (no guessing)
+
+**1. The import was the ONE call site sending a raw `state.workspaceId`.** Every other place in the
+panel uses `expectedWorkspaceId()`, which falls back to `clientWorkspaceId(userId, sessionId)` when a
+session has not attached a build yet. `state.workspaceId` is EMPTY on a fresh tab — exactly the
+reported state. Worse, the workspace id is only consumed by the COMMIT call, which runs AFTER the whole
+archive has transferred: so 161 MB uploaded over several minutes and only then did the server correctly
+answer 403 "This workspace does not belong to you." The user paid the full upload cost for a failure
+that was decidable in the first millisecond. The follow-up `/api/agentv3/workspace-files` read had the
+same wrong id, so even a successful import would have shown an empty Files tab on a fresh session.
+
+**2. `zipProgress` was tracked in state and rendered NOWHERE** — nor was `zipImporting`. A 161 MB
+transfer takes minutes; the screen showed one static line for all of it. Working and crashed looked
+identical, which is the whole substance of the report.
+
+### Fixes — `zipImportTarget.ts` (new, pure, 10 tests)
+- `resolveImportWorkspaceId()` — the same precedence `expectedWorkspaceId()` uses, so the import can no
+  longer disagree with the rest of the panel about which workspace this session is. Returns null only
+  when there is genuinely nowhere to land.
+- The precondition is now checked BEFORE any bytes move, mirroring the server's own size/disk preflight
+  in `/api/zip-upload/begin` (which already refuses in one second rather than dying at 90%). A doomed
+  import costs nothing instead of a multi-minute upload, and says so honestly
+  (`importTargetUnavailableMessage()` — "Nothing was uploaded, so your file is untouched").
+- `zipImportProgressLabel()` + a real progress strip above the composer: live percentage during upload,
+  a named "Unpacking your project on the server…" phase, and an explicit "Large projects take a few
+  minutes" note. Clamps NaN/out-of-range rather than rendering `NaN%`.
+
+**Sibling hunt (rule 3):** every other `state.workspaceId` use in the panel is either a guard
+(`if (state.workspaceId)`) or already applies the `|| clientWorkspaceId(...)` fallback. The one
+superficially similar case — `deployLive` at the Publish button — is CORRECT as-is: a deploy genuinely
+requires a built workspace and already reports an honest blocked reason (`deployGuard.ts`). The zip
+import was the only site silently sending an empty id to a write endpoint.
+
+### Verification
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json` clean · full `npx vitest run` green.
+
+### OPEN root cause (rule 6 — recorded, NOT silently patched)
+**The chunked upload assumes all of its requests reach the SAME Cloud Run instance, and nothing
+guarantees that.** `/api/zip-upload` keeps `pending` in an in-memory `Map` and appends chunks to a temp
+file on the instance's local disk. `cloudbuild.yaml` deploys with `--max-instances 10`,
+`--concurrency 100` and **no `--session-affinity`**, so a 161 MB upload's 21 sequential chunk requests
+can be load-balanced onto different instances; a chunk landing elsewhere gets 403 "Unknown or expired
+upload", and an instance recycling mid-upload loses the temp file outright. In practice HTTP keep-alive
+usually pins the connection to one instance, which is why this has not been the visible failure — but
+it is luck, not design, and it will bite under real concurrency.
+
+Not fixed here, deliberately: the one-line mitigation is adding `--session-affinity` to the Cloud Run
+deploy step, but that is a service-wide infra flag on the UNATTENDED auto-deploy, it is only
+best-effort (cookie-based) rather than a guarantee, and Claude cannot verify the resulting deploy
+(no gcloud access — rule 6). The robust fix is instance-independent chunk storage (GCS), which is its
+own change. Needs an admin decision on which.
+
+Related, same class: the advertised **5 GB** archive ceiling is optimistic on a `--memory 2Gi` instance
+whose container filesystem is memory-backed. The begin-time `hasSpaceForUpload` preflight is what keeps
+this honest today (it refuses with real numbers); the advertised number itself has not been re-derived
+from the instance's actual limits.

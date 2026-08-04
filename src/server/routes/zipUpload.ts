@@ -21,7 +21,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { verifyFirebaseToken, workspaceRateLimiter } from '../lib/authMiddleware';
+import { verifyFirebaseToken, workspaceRateLimiter, zipChunkRateLimiter } from '../lib/authMiddleware';
 // STREAMING extraction (admin 2026-08-04, "5 GB, real VS Code jaisa"): the archive is read from DISK
 // entry-by-entry — never `readFileSync` + jszip, which held the WHOLE archive in memory and made even
 // the old 1 GB cap partly fiction (a 1 GB commit needed ~2-3 GB of RAM). Peak memory is now bounded by
@@ -143,7 +143,9 @@ export function registerZipUploadRoutes(app: Express): void {
   });
 
   // ── 2. Chunk: append raw bytes (octet-stream — express.json never parses this) ─────────────
-  app.post('/api/zip-upload/chunk', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  // zipChunkRateLimiter, NOT workspaceRateLimiter: a 5 GB import is 640 chunk requests and the shared
+  // 60/hr workspace bucket capped it at ~470 MB (see ZIP_CHUNK_RATE for the full root cause).
+  app.post('/api/zip-upload/chunk', zipChunkRateLimiter(), async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     const uploadId = String(req.header('X-Upload-Id') || '');
     const index = Number(req.header('X-Chunk-Index'));

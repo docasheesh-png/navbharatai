@@ -24518,3 +24518,58 @@ nearest template.
 user who types "mujhe CRM banao" in their own words gets nothing. Fuzzy/domain matching would extend the
 benefit to every complex build, but it carries a real "wrong template" risk that the exact-match rule was
 written to avoid — so it is the admin's call, not an auto-adopted default.
+
+## 2026-08-04 — 5 GB ZIP IMPORT: streaming extraction, the dead zone closed, the fake gates removed
+
+**Admin (after the honest 5-route audit):** *"actual me yeh sabhi farzi hai. kisi 2 ko 5gb tak enhance
+karo... real VSC me jo hota hai, vaise kuch bana do! real working. my suggestion 2 aur 3 ko 100x."*
+
+**The audit's deepest finding, fixed first:** route #2's "1 GB" was itself part fiction — commit did
+`fs.readFileSync(zip)` + jszip, holding the ENTIRE archive in memory (~2-3 GB RAM for a 1 GB zip). The
+ceiling was never the transport; it was buffering the archive. What "VS Code jaisa" actually means on a
+server is: never load the project into memory — and that is what shipped.
+
+**`ProjectImportStream.ts` — streaming extraction (the core):** the archive stays ON DISK; yauzl's
+central directory gives every entry's path + declared size WITHOUT decompressing anything; only entries
+worth keeping are ever inflated. Three passes: SCAN (classify + count, node_modules paths counted but
+never stored) → conditional PKG-READ (monorepo re-root evidence) → CONTENT (read exactly the planned
+entries under the same budgets). Peak memory is a few MB whether the archive is 40 MB or 5 GB.
+**Parity, not a fork (rule 4):** every decision — skip dirs, secrets, asset tiers, lockfile tiers,
+budgets, root-strip, monorepo re-root — is IMPORTED from ProjectImport.ts, and a parity suite runs the
+same real archives through both extractors asserting identical files/assets/drop-accounting. Two
+deliberate, test-locked divergences: (a) an archive DECLARING >300 MB uncompressed is no longer refused
+as a "bomb" (streaming never inflates what it does not keep — this is exactly what lets a real 5 GB zip
+in; bombs stay bounded by the 1.5M-entry cap + per-entry read-abort); (b) a traversal (`..`) entry now
+refuses the WHOLE archive (yauzl validates at parse time) — stricter than the buffer path's drop-one,
+and correct: such an archive is hostile by definition.
+
+**Route #2 (v5 chunked import):** cap 1 GB → **5 GB**; commit swaps `readFileSync`+jszip for
+`extractZipProjectFromDisk`; `begin` now takes the declared fileSize and runs a **free-disk preflight**
+(`statfsSync` + headroom) so an oversized upload fails in ONE SECOND with the real numbers ("X GB free")
+instead of dying at 90% or wedging the instance disk.
+
+**Route #3 (legacy Files panel) — the dead zone closed:** its yauzl extraction ALWAYS streamed from a
+temp file; the only ceiling was the single-request transport (~32 MB platform cap) — while the UI waved
+through anything under 50 MB (the silent 32-50 MB dead zone) and told 50-500 MB users "go use GitHub".
+Now: >25 MB rides the SAME chunked uploader, and `/api/extract-zip` claims the assembled file by
+`X-Upload-Id` (ownership enforced via the verified uploader). Same extraction, same SSE stream, ceiling
+gone. Real change on this route: **~32 MB → 5 GB ≈ 160x.**
+
+**Fake gates deleted, honesty added:** `classifyZipSize`'s 50/500 MB buckets are gone (one honest gate:
+5 GB); the "use GitHub instead" modal variant is deleted; the too-large modal now tells the truth AND
+teaches the fix (delete node_modules/dist/.git, re-zip — usually lands under 100 MB) instead of saying
+"go download VS Code".
+
+**Honest boundaries stated, not hidden (rule 6):**
+- a 5 GB ZIP ≠ 5 GB of editable source. The archive can be 5 GB; the SOURCE that lands still obeys the
+  durable-store budgets (900KB/file, 80 MB total, 16k files) — which every real app fits, because 4 GB
+  zips are node_modules/media/.git, all skipped with honest counts;
+- **OPEN INFRA ITEM (admin console, not code):** Cloud Run's `/tmp` is in-memory by default, so the
+  assembled archive counts against instance RAM. The preflight makes this HONEST on any deployment
+  (refuses with real free-space numbers rather than crashing) — but for full-size 5 GB uploads to
+  succeed in prod, the service needs its memory raised or a gen2 volume for /tmp. Until then the
+  effective prod ceiling is whatever the instance's free /tmp allows, and the user is told exactly that.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **1028 files / 11093 tests, 0 failures**
+(parity suite builds real zips and runs both extractors; a 360 MB-declaring archive is proven to import
+via streaming while the buffer path refuses it).

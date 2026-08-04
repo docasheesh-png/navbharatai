@@ -57,7 +57,9 @@ export async function uploadFileChunked(
   const beginRes = await fetch('/api/zip-upload/begin', {
     method: 'POST',
     headers: jsonHeaders,
-    body: JSON.stringify({ fileName: file.name }),
+    // fileSize lets the server run its ceiling + free-disk preflight BEFORE any bytes move, so a
+    // too-big upload fails in one second with a real reason instead of dying at 90%.
+    body: JSON.stringify({ fileName: file.name, fileSize: file.size }),
   });
   const begin = await beginRes.json().catch(() => ({} as any));
   if (!beginRes.ok || typeof begin?.uploadId !== 'string') {

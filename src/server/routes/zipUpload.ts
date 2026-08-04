@@ -22,15 +22,24 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { verifyFirebaseToken, workspaceRateLimiter } from '../lib/authMiddleware';
-import { extractZipProject } from '../AgentV3/ProjectImport';
+// STREAMING extraction (admin 2026-08-04, "5 GB, real VS Code jaisa"): the archive is read from DISK
+// entry-by-entry — never `readFileSync` + jszip, which held the WHOLE archive in memory and made even
+// the old 1 GB cap partly fiction (a 1 GB commit needed ~2-3 GB of RAM). Peak memory is now bounded by
+// the kept-content budgets, not the archive size — which is what makes a 5 GB limit REAL.
+import { extractZipProjectFromDisk, freeDiskBytes, hasSpaceForUpload } from '../AgentV3/ProjectImportStream';
 import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { buildActuator } from './agentv3';
 
 /** One chunk stays far under Cloud Run's ~32 MB request cap even with protocol overhead. */
 export const ZIP_CHUNK_BYTES = 8 * 1024 * 1024;
-/** Total assembled archive ceiling — generous, but bounded so disk can't be exhausted. */
-const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024; // 1 GB
+/**
+ * Total assembled archive ceiling. 5 GB (admin 2026-08-04) — real because commit streams from disk
+ * instead of buffering the archive. The begin-time preflight below checks the temp filesystem actually
+ * HAS this much room and refuses honestly when it does not, so a big upload fails in one second with a
+ * real reason instead of dying at 90% — or worse, wedging the instance by filling its disk.
+ */
+export const MAX_ARCHIVE_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 /** An abandoned upload is swept after this long. */
 const UPLOAD_TTL_MS = 30 * 60 * 1000;
 
@@ -98,6 +107,20 @@ export function registerZipUploadRoutes(app: Express): void {
     sweepExpired(Date.now());
     const rawName = typeof req.body?.fileName === 'string' ? req.body.fileName : 'project.zip';
     const fileName = rawName.replace(/[^\w.\- ]/g, '').slice(0, 120) || 'project.zip';
+    // DECLARED size, when the client sends it: lets the ceiling and the disk preflight run BEFORE any
+    // bytes move. A client that omits it still gets the mid-stream ceiling enforcement on every chunk.
+    const declaredBytes = Number(req.body?.fileSize);
+    if (Number.isFinite(declaredBytes) && declaredBytes > MAX_ARCHIVE_BYTES) {
+      res.status(413).json({ error: `This file is ${(declaredBytes / (1024 ** 3)).toFixed(1)} GB — larger than the ${Math.round(MAX_ARCHIVE_BYTES / (1024 ** 3))} GB import limit. Remove node_modules/build folders and media from the zip; the source itself is never this big.` });
+      return;
+    }
+    if (Number.isFinite(declaredBytes) && declaredBytes > 0) {
+      const free = freeDiskBytes(os.tmpdir());
+      if (!hasSpaceForUpload(free, declaredBytes)) {
+        res.status(507).json({ error: `The server does not have enough free space for a ${(declaredBytes / (1024 ** 3)).toFixed(1)} GB upload right now (${free !== null ? (free / (1024 ** 3)).toFixed(1) : '?'} GB free). Try a smaller zip — removing node_modules and media usually shrinks it dramatically.` });
+        return;
+      }
+    }
     const uploadId = randomUUID();
     const filePath = path.join(os.tmpdir(), `nbai-zip-${uploadId}.zip`);
     try {
@@ -168,8 +191,9 @@ export function registerZipUploadRoutes(app: Express): void {
       return;
     }
     try {
-      const buf = fs.readFileSync(u.filePath);
-      const extracted = await extractZipProject(buf);
+      // From DISK, streaming — never readFileSync: buffering the archive is what made big imports
+      // impossible regardless of the advertised cap (see the module comment on ProjectImportStream).
+      const extracted = await extractZipProjectFromDisk(u.filePath);
       const files = extracted.files;
       const fileCount = Object.keys(files).length;
       if (fileCount === 0) {

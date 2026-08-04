@@ -20,17 +20,19 @@ export function isTextFile(name: string): boolean {
   return TEXT_EXT_RE.test(name);
 }
 
-export type ZipSizeBucket = 'too-large' | 'github' | 'ok';
+export type ZipSizeBucket = 'too-large' | 'ok';
+
+/** The import ceiling, shared with the server's chunked uploader (MAX_ARCHIVE_BYTES). */
+export const ZIP_IMPORT_MAX_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 
 /**
- * Bucket a ZIP by size:
- * - > 500 MB → 'too-large' (rejected)
- * - > 50 MB  → 'github'    (suggest GitHub import instead)
- * - else     → 'ok'        (import directly)
+ * Bucket a ZIP by size — 5 GB is the one honest gate.
+ *
+ * The old buckets were fiction twice over (2026-08-04 audit): "under 50 MB → ok" waved files into a
+ * single-request transport the platform kills at ~32 MB (a silent dead zone), and "50-500 MB → go use
+ * GitHub" was an excuse dressed as guidance. The transport is chunked now (useZipImport), so everything
+ * up to the server's real ceiling simply imports.
  */
 export function classifyZipSize(sizeBytes: number): ZipSizeBucket {
-  const sizeMB = sizeBytes / (1024 * 1024);
-  if (sizeMB > 500) return 'too-large';
-  if (sizeMB > 50) return 'github';
-  return 'ok';
+  return sizeBytes > ZIP_IMPORT_MAX_BYTES ? 'too-large' : 'ok';
 }

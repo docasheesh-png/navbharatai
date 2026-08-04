@@ -18,6 +18,17 @@
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
+import { pool } from './WorkspaceFiles';
+
+/**
+ * How many asset writes may be in flight at once.
+ *
+ * Matches the sandbox-write concurrency used for source files: the constraint is identical (network
+ * round-trips to the same sandbox), so a second, different number here would be an accident rather
+ * than a decision. Env-overridable for the same reason it is there — the true optimum depends on
+ * E2B's limits and wants measurement; what is certain is that 1 is wrong.
+ */
+const ASSET_WRITE_CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.AGENTV3_ASSET_WRITE_CONCURRENCY) || 16));
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { parseDataUri } from './ProjectImport';
 
@@ -119,15 +130,32 @@ export async function materializeAssets(
   workspaceId: string,
   assets: Record<string, string>,
 ): Promise<number> {
-  let written = 0;
+  // ROOT CAUSE, measured (mitrify autopsy 2026-08-04, build cb03bdde): this awaited ONE
+  // writeBinaryFile at a time. Every write is a NETWORK round-trip to the E2B sandbox, so an import
+  // carrying 129 assets + 22 large images cost ~151 sequential round-trips — 100 SECONDS of the
+  // 624-second build, spent doing nothing but waiting. The report shows it exactly: files landed at
+  // 22s, and the import did not report success until 122s.
+  //
+  // This is the FOURTH instance of one bug class in this repo — serial awaits over a network — after
+  // the sandbox landing (648s incident), the Firestore merge, and collectWorkspaceFiles (the
+  // 13-minute per-turn stall). Same fix, same shared helper, so the class is closed here rather than
+  // patched again: writes are latency-bound and independent, so concurrency is the entire win.
+  //
+  // Ordering between independent asset writes carries no meaning, and a failure is still per-asset
+  // (one broken image must never block the rest), so this is safe by construction.
+  const entries: Array<{ path: string; base64: string }> = [];
   for (const [path, dataUri] of Object.entries(assets || {})) {
     const parsed = parseDataUri(dataUri);
-    if (!parsed) continue;
+    if (parsed) entries.push({ path, base64: parsed.base64 });
+  }
+
+  let written = 0;
+  await pool(entries, ASSET_WRITE_CONCURRENCY, async (e) => {
     try {
-      await sink.writeBinaryFile(workspaceId, path, parsed.base64);
+      await sink.writeBinaryFile(workspaceId, e.path, e.base64);
       written++;
     } catch { /* one asset failing never blocks the rest — the app still runs, image just 404s */ }
-  }
+  });
   return written;
 }
 

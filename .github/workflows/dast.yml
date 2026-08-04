@@ -35,7 +35,11 @@ jobs:
 
       - name: Boot server (background)
         run: |
-          PORT=8080 node dist/server.cjs &
+          # NODE_ENV was NOT set, so the server booted in DEVELOPMENT mode and ZAP scanned the Vite
+          # dev middleware — the report literally listed /@vite/client and /src/main.tsx as scanned URLs.
+          # Production security headers are gated on production mode, so for 37 nightly runs we were
+          # measuring something users never see, and then failing the build over it.
+          NODE_ENV=production PORT=8080 node dist/server.cjs &
           echo "Waiting for server on :8080 ..."
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:8080/api/health >/dev/null 2>&1; then
@@ -60,5 +64,8 @@ jobs:
           # Default behaviour fails the job on FAIL-level alerts (HIGH risk),
           # warns on WARN-level — exactly the P-SEC.2 gate (HIGH fails, MED warns).
           cmd_options: '-a'
-          allow_issue_writing: true
+          # Was `true`, and the action opened a NEW issue every night instead of updating one: 37 open
+          # duplicates of the same WARN-level header findings. That volume of noise is how a real finding
+          # gets missed. The full report is still kept as the run's artifact and printed in the job log.
+          allow_issue_writing: false
           fail_action: true

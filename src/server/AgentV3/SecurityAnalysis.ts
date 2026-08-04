@@ -69,6 +69,47 @@ export function isEnvSecretsFile(file: string): boolean {
 // value, `<` only fires on `<your-key>` and `test` only on a `test…` value — which is the intent.
 const PLACEHOLDER = /(your[_-]?|example|placeholder|xxx+|<|\$\{|process\.env|import\.meta\.env|changeme|dummy|test)/i;
 
+// TEMPLATE FIELD NAMES used AS the value — the other half of "this is not a real credential"
+// (autopsy build 56ee622f, 2026-08-04).
+//
+// What went wrong: the reviewer told the agent to get live DB + payment credentials out of `.env`. The
+// agent did exactly the right thing — replaced them with placeholders and wrote a canonical
+// `.env.example` template:
+//     DATABASE_URL=postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+// The connection-string rule then captured `PASSWORD` as the password and asked PLACEHOLDER whether it
+// looked fake. PLACEHOLDER has `your_`, `example`, `xxx`, `changeme`, `dummy`, `test` … but NOT the single
+// most obvious template word of all: `PASSWORD`. So the finding fired at HIGH on `.env.example` — a file
+// that by definition contains nothing but placeholders — and became a READINESS_BLOCKER. The build was
+// marked NOT working and the user was told their app was broken.
+//
+// The engine punished itself for doing the right thing. Worse, it was inconsistent: the REAL `.env` was
+// only 'low' (correctly downgraded by isEnvSecretsFile) while the dummy TEMPLATE was 'high'.
+//
+// So a value that is merely the FIELD'S OWN NAME is a placeholder. Kept deliberately narrow — an exact
+// full-value match against a curated word list, never a substring — so a genuine secret that happens to
+// contain "user" (`user_a8f3k2`) is still caught. `.env.example` keeps its "real secrets here ARE a leak"
+// policy; it just can no longer mistake the template itself for the leak.
+const TEMPLATE_FIELD_VALUE = new Set([
+  'user', 'username', 'user_name', 'youruser', 'your_user', 'your_username',
+  'password', 'passwd', 'pass', 'yourpassword', 'your_password', 'db_password', 'dbpassword',
+  'host', 'hostname', 'your_host', 'yourhost', 'localhost',
+  'db', 'dbname', 'db_name', 'database', 'database_name', 'mydb', 'yourdb',
+  'port', 'secret', 'mysecret', 'key', 'apikey', 'api_key', 'token', 'credentials',
+  'replace_me', 'replaceme', 'none', 'null', 'todo', 'redacted',
+]);
+
+/**
+ * Is this captured credential VALUE a placeholder rather than a live secret? Combines the substring
+ * markers (`your-key`, `xxx`, `${…}`) with an EXACT match against the template-field word list, so the
+ * standard `scheme://USER:PASSWORD@HOST/DB` template is recognised for what it is. PURE.
+ */
+export function isPlaceholderValue(value: string | undefined | null): boolean {
+  const v = (value ?? '').trim();
+  if (!v) return true;
+  if (PLACEHOLDER.test(v)) return true;
+  return TEMPLATE_FIELD_VALUE.has(v.toLowerCase().replace(/[<>{}$]/g, ''));
+}
+
 // A security-sensitive context: the value being built is a secret/identity token, not a
 // throwaway. Used to keep the "weak randomness / weak hash" rules high-precision — they
 // fire ONLY when one of these words is on the same line, so an ordinary Math.random()
@@ -90,7 +131,7 @@ const RULES: Rule[] = [
     // false positive of a validation/UI message (password = "Password must be 8 characters").
     re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/i,
     message: 'Hardcoded credential — load it from an environment variable instead.',
-    ignore: (m) => PLACEHOLDER.test(m[2] ?? m[0]),
+    ignore: (m) => isPlaceholderValue(m[2] ?? m[0]),
     demoDowngrade: true,
   },
   {
@@ -100,7 +141,7 @@ const RULES: Rule[] = [
     // The assignment-based hardcoded-secret rule misses this URI form entirely.
     re: /\b(mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|rediss?|amqps?):\/\/[^\s:'"`@/]*:([^\s:'"`@/]{3,})@/i,
     message: 'Credentials embedded in a connection string — move the user/password to environment variables; never commit live DB/queue credentials.',
-    ignore: (m) => PLACEHOLDER.test(m[2] ?? m[0]),
+    ignore: (m) => isPlaceholderValue(m[2] ?? m[0]),
     demoDowngrade: true,
   },
   {

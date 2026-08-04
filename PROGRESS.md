@@ -25111,3 +25111,33 @@ Test-locked: skipped files are never overwritten, a genuinely absent file is sti
 recycled sandbox is still restored whole, and omitting the argument is byte-identical to before.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,324 tests, 0 failures**.
+
+## 2026-08-04 — The completeness reviewer was budgeted for the wrong app (last mitrify ledger item)
+
+**The report's ⏭️ SKIPPED item:** `Post-build review timed out after 90000ms on 9 files`, followed by
+telling the user *"send 'review it' and I'll run it on its own"* — the engine handing its own safety
+check back to the user.
+
+**ROOT CAUSE.** The app had **608 files**; the reviewer was budgeted for **9**. `reviewerBudgetMs`
+scaled with the number of files HANDED to the reviewer, but the work scales with the app it has to
+UNDERSTAND. On an edit to a large existing project those two numbers diverge wildly (here 9 vs 608),
+so a review that had to reason about a 608-file app got a 9-file app's budget, was killed mid-review,
+and its verdict was lost. This is the SAME class as the 2026-07-07 fix (a fixed 90s cap killing the
+reviewer on a 40-file app) — that fix scaled the budget by the right idea but the wrong input.
+
+**FIX.** `reviewerBudgetMs(fileCount, headroomMs, projectFileCount)` adds a context term (200ms per
+project file beyond the first 50), so the reported case now gets **201.6s instead of 90s**. The route
+captures the real project size BEFORE the existing fallback can shrink `rFiles` to just this turn's
+writes. Every existing guard is untouched: the 210s ceiling, the wall-clock headroom clamp (a reviewer
+must never be why a finished app times out) and the 45s floor. Omitting the argument is byte-identical
+to the old behaviour, and a genuinely small app still gets exactly 90s.
+
+**Verification:** server tsc clean; `npx vitest run` = **11,362 tests, 0 failures**.
+
+### Mitrify autopsy — LEDGER CLOSED
+Every item from the 2026-08-04 report is now fixed and merged (or recorded as an infra open item):
+report honesty ×3 · preview classifier + partial-install repair · never-substitute-an-edit ·
+`find_ui_element` (pixel→source + proof of absence) · assistant scaffold templates ·
+ETA broken-promise loop · File Guardian overwriting present files · reviewer budget.
+Remaining open (infra, unchanged): Cloud Run /tmp size for full 5 GB uploads; Play Store closed-testing
+(12 testers × 14 days) before production access.

@@ -792,7 +792,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         // engine as the main v5.0 panel, not the separate "Free" chat AI. Root-caused 2026-07-01: this
         // used to render <AIChat> wired to the Free-tier text-only endpoint, which has zero file
         // access and is explicitly instructed server-side to never write code — so it could only talk
-        // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for RealTerminal below)
+        // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for the terminal below)
         // give it the same identity; getAgentV3SessionId/getAgentV3WorkspaceId (shared with
         // AgentV3Panel via the same localStorage key) put it on the exact same workspace.
         return <AgentV3MiniChat userId={v3UserId} email={v3Email} />;

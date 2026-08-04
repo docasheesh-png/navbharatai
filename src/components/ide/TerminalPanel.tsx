@@ -1,22 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Terminal as TerminalIcon, X, Plus, Maximize2, Minimize2, ChevronDown } from 'lucide-react';
-import { RealTerminal } from './RealTerminal';
+import { ShellTerminal, closeShellSession } from './ShellTerminal';
 
 /**
  * MULTI-TERMINAL panel (admin spec 2026-08-04): "jab user terminal open kare, to uske andar hi ek
  * '+ New' button ho. Click karte hi dropdown khule jisme terminals ki list ho, aur last me '+ New'.
  * Har terminal ke last me x (close) button bhi."
  *
- * Code Studio previously mounted exactly ONE RealTerminal, so a long-running command blocked every
- * other one — you could not watch a dev server AND run `git status` without killing the first. This
- * panel owns the session list and draws one shared header for all of them; each session is a real,
- * independent RealTerminal.
+ * Code Studio previously mounted exactly ONE terminal, so a long-running command blocked every other
+ * one — you could not watch a dev server AND run `git status` without killing the first. This panel
+ * owns the session list and draws one shared header for all of them; each session is an independent
+ * ShellTerminal backed by its own real PTY in the sandbox.
  *
  * THE KEY DESIGN DECISION: every session stays MOUNTED and inactive ones are hidden with CSS, never
  * unmounted. A terminal's value is its scrollback and command history — unmounting to "save memory"
  * would silently wipe the output of a build you switched away from, which is precisely what a user
  * opens a second terminal to avoid. Hidden-not-destroyed also means a command keeps running while you
- * work in another tab, which is the whole point of having more than one.
+ * work in another tab, which is the whole point of having more than one. (The shell itself survives
+ * even a real unmount — ShellTerminal reattaches by shellId — so leaving Code Studio does not kill an
+ * install. Only the ✕ below kills a shell on purpose.)
  *
  * Closing the LAST terminal closes the panel (there is nothing left to show), matching VS Code.
  */
@@ -67,6 +69,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
   };
 
   const closeSession = (id: string) => {
+    // Closing a terminal is the ONE moment a shell should die on purpose — a tab switch or a
+    // navigation must never kill a running build, so the kill lives here and not in an unmount.
+    void closeShellSession(id, workspaceId, userId, email);
     setSessions((cur) => {
       const next = cur.filter((s) => s.id !== id);
       if (next.length === 0) { onClose(); return cur; } // last one closed → the panel goes away
@@ -159,13 +164,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       <div className="flex-1 min-h-0 relative">
         {sessions.map((s) => (
           <div key={s.id} className={`absolute inset-0 ${s.id === activeId ? '' : 'hidden'}`}>
-            <RealTerminal
-              hideHeader
-              autoFocus={s.id === activeId}
+            <ShellTerminal
+              sessionKey={s.id}
+              active={s.id === activeId}
               workspaceId={workspaceId}
               userId={userId}
               email={email}
-              onClose={() => closeSession(s.id)}
             />
           </div>
         ))}

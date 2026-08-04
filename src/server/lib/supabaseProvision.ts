@@ -251,6 +251,84 @@ export async function fetchProjectCredentials(
   return { ok: true, credentials: { projectRef, url: `https://${projectRef}.supabase.co`, anonKey } };
 }
 
+/** A refreshed grant. `refreshToken` may be rotated by the provider, so callers must store it back. */
+export interface RefreshedTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAtMs: number;
+}
+
+/**
+ * Exchange a refresh token for a new access token (Phase 1.2).
+ *
+ * WHY THIS MATTERS MORE THAN IT LOOKS. A Supabase access token lives about an hour, but a user
+ * connects once and then builds apps for weeks. Without this, the SECOND app they create would meet
+ * "your connection expired, please connect again" — turning a one-time setup into a recurring chore
+ * and quietly undoing the entire point of Phase 1.
+ *
+ * Two failure modes, deliberately distinguished, because the right user action differs:
+ *   • `unauthorized` — the grant is gone (revoked in their Supabase account, or the refresh token was
+ *     already rotated away). Only reconnecting fixes this, so we say exactly that.
+ *   • anything else — network, 5xx, throttling. Transient; the caller may retry without dragging the
+ *     user through consent again. Treating these as "revoked" would send people to re-authorise for
+ *     a blip that would have cleared on its own.
+ *
+ * ROTATION: Supabase may return a NEW refresh token, in which case the old one stops working. We
+ * always return whatever came back (falling back to the one we sent only when none was returned), and
+ * the caller persists it — dropping a rotated token silently breaks the connection an hour later, at
+ * which point the cause is very hard to see.
+ */
+export async function refreshAccessToken(
+  input: { refreshToken: string; clientId: string; clientSecret: string; nowMs: number },
+  fetchImpl: Fetch = globalThis.fetch,
+): Promise<{ ok: true; tokens: RefreshedTokens } | ProvisionError> {
+  const body = new URLSearchParams();
+  body.set('grant_type', 'refresh_token');
+  body.set('refresh_token', input.refreshToken);
+
+  let res: Response;
+  try {
+    res = await fetchImpl(`${SUPABASE_API}/v1/oauth/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${input.clientId}:${input.clientSecret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+  } catch (e) {
+    return { ok: false, failure: 'api-error', detail: String(e),
+      message: 'We could not reach Supabase to renew your connection. Please try again in a moment.' };
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    // 400 is how OAuth reports an invalid/expired/rotated grant — it means reconnect, not "retry".
+    if (res.status === 400 || res.status === 401) {
+      return { ok: false, failure: 'unauthorized', detail: text.slice(0, 500),
+        message: 'Your Supabase connection is no longer valid. Please connect Supabase again from Settings → Database.' };
+    }
+    return classifyStatus(res.status, text, 'read');
+  }
+
+  const data = (await res.json().catch(() => null)) as
+    { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown } | null;
+  const accessToken = typeof data?.access_token === 'string' ? data.access_token : '';
+  if (!accessToken) {
+    return { ok: false, failure: 'api-error',
+      message: 'Supabase did not return a renewed connection. Please try again in a moment.' };
+  }
+  const expiresIn = typeof data?.expires_in === 'number' ? data.expires_in : 3600;
+  return { ok: true, tokens: {
+    accessToken,
+    // Keep the OLD refresh token when none is returned — some responses omit it and it stays valid.
+    refreshToken: typeof data?.refresh_token === 'string' && data.refresh_token
+      ? data.refresh_token
+      : input.refreshToken,
+    expiresAtMs: input.nowMs + expiresIn * 1000,
+  } };
+}
+
 /** The env pairs written into the generated app — the SAME names the existing scaffolder already uses. */
 export function envForProject(c: ProjectCredentials): Record<string, string> {
   return { VITE_SUPABASE_URL: c.url, VITE_SUPABASE_ANON_KEY: c.anonKey };

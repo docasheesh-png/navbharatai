@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyStatus, listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
-  projectNameFor, envForProject, PROJECT_READY_STATUS,
+  projectNameFor, envForProject, refreshAccessToken, PROJECT_READY_STATUS,
 } from './supabaseProvision';
 
 /** A fake fetch that replays queued responses and records the requests it saw. */
@@ -197,5 +197,61 @@ describe('naming + env wiring', () => {
       VITE_SUPABASE_URL: 'https://r.supabase.co',
       VITE_SUPABASE_ANON_KEY: 'k',
     });
+  });
+});
+
+// Phase 1.2 — without refresh, a user who connects once meets "please connect again" on their SECOND
+// app, which quietly undoes the whole point of Phase 1.
+describe('refreshAccessToken — a one-time setup must stay one-time', () => {
+  const base = { refreshToken: 'old-refresh', clientId: 'cid', clientSecret: 'csec', nowMs: 1_000_000 };
+
+  it('returns a fresh access token with an absolute expiry', async () => {
+    const { impl, calls } = fakeFetch([{ json: { access_token: 'new-access', expires_in: 3600 } }]);
+    const r = await refreshAccessToken(base, impl);
+    expect(r).toEqual({ ok: true, tokens: {
+      accessToken: 'new-access', refreshToken: 'old-refresh', expiresAtMs: 1_000_000 + 3_600_000,
+    } });
+    const sent = new URLSearchParams(String(calls[0].init?.body));
+    expect(sent.get('grant_type')).toBe('refresh_token');
+    expect(sent.get('refresh_token')).toBe('old-refresh');
+  });
+
+  it('STORES a rotated refresh token — dropping it silently breaks the connection an hour later', async () => {
+    const { impl } = fakeFetch([{ json: { access_token: 'a', refresh_token: 'rotated', expires_in: 60 } }]);
+    const r = await refreshAccessToken(base, impl);
+    expect((r as { tokens: { refreshToken: string } }).tokens.refreshToken).toBe('rotated');
+  });
+
+  it('keeps the OLD refresh token when the response omits one (it stays valid)', async () => {
+    const { impl } = fakeFetch([{ json: { access_token: 'a', expires_in: 60 } }]);
+    expect((await refreshAccessToken(base, impl) as { tokens: { refreshToken: string } }).tokens.refreshToken)
+      .toBe('old-refresh');
+  });
+
+  it('400 means the grant is GONE — say reconnect, because nothing else fixes it', async () => {
+    const { impl } = fakeFetch([{ status: 400, text: 'invalid_grant' }]);
+    const r = await refreshAccessToken(base, impl);
+    expect(r).toMatchObject({ ok: false, failure: 'unauthorized' });
+    expect((r as { message: string }).message).toContain('connect Supabase again');
+  });
+
+  it('a 5xx or throttle is TRANSIENT — never drags the user back through consent', async () => {
+    for (const status of [500, 502, 429]) {
+      const { impl } = fakeFetch([{ status, text: 'oops' }]);
+      const r = await refreshAccessToken(base, impl);
+      expect((r as { failure: string }).failure).not.toBe('unauthorized');
+    }
+  });
+
+  it('a network failure is transient too, and says so in the user\'s language', async () => {
+    const { impl } = fakeFetch([{ throws: true }]);
+    const r = await refreshAccessToken(base, impl);
+    expect((r as { failure: string }).failure).toBe('api-error');
+    expect((r as { message: string }).message).toContain('could not reach Supabase');
+  });
+
+  it('refuses to claim success when no access token comes back', async () => {
+    const { impl } = fakeFetch([{ json: { expires_in: 3600 } }]);
+    expect((await refreshAccessToken(base, impl)).ok).toBe(false);
   });
 });

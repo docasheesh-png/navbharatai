@@ -30,10 +30,10 @@ import {
 } from '../lib/supabaseOAuth';
 import {
   listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
-  projectNameFor, envForProject,
+  projectNameFor, envForProject, refreshAccessToken,
 } from '../lib/supabaseProvision';
 import {
-  saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh,
+  saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh, updateTokens,
 } from '../lib/supabaseConnectionStore';
 import { audit } from '../lib/audit';
 import { getServerDb } from '../lib/serverDb';
@@ -271,11 +271,28 @@ export function registerSupabaseIntegrationRoutes(
       res.status(400).json({ error: 'No Supabase organization is linked. Please disconnect and connect again.' });
       return;
     }
-    // An expired access token here is a reconnect prompt, not a failure to hide: the refresh grant is
-    // Phase 1.2 work, so until it lands we say exactly what the user must do rather than half-trying.
+    // A Supabase access token lives about an hour, but a user connects once and builds for weeks — so
+    // an expired token is renewed SILENTLY here. Without this the user's second app would meet
+    // "please connect again", turning one-time setup into a recurring chore.
+    let accessToken = conn.accessToken;
     if (needsRefresh(conn.expiresAtMs, Date.now())) {
-      res.status(401).json({ error: 'Your Supabase connection has expired. Please connect Supabase again from Settings → Database.' });
-      return;
+      const renewed = await refreshAccessToken({
+        refreshToken: conn.refreshToken,
+        clientId: process.env.SUPABASE_OAUTH_CLIENT_ID as string,
+        clientSecret: process.env.SUPABASE_OAUTH_CLIENT_SECRET as string,
+        nowMs: Date.now(),
+      });
+      if (!renewed.ok) {
+        // Only a genuinely revoked grant sends the user back through consent; a network blip or a
+        // provider 5xx is transient and must not cost them a re-authorisation.
+        res.status(renewed.failure === 'unauthorized' ? 401 : 502)
+          .json({ error: renewed.message, failure: renewed.failure });
+        return;
+      }
+      accessToken = renewed.tokens.accessToken;
+      // Persist BEFORE spending it: Supabase may have rotated the refresh token, and losing that
+      // rotation silently breaks the connection an hour later, where the cause is very hard to see.
+      await updateTokens(uid, renewed.tokens);
     }
 
     const appLabel = typeof (req.body ?? {}).appLabel === 'string' ? (req.body as { appLabel: string }).appLabel : '';
@@ -287,7 +304,7 @@ export function registerSupabaseIntegrationRoutes(
     // can reset it in their own Supabase dashboard; keeping a copy would be a credential we have no
     // reason to hold.
     const created = await createProject({
-      token: conn.accessToken,
+      token: accessToken,
       orgId: conn.orgId,
       name: projectNameFor(appLabel),
       region,
@@ -301,13 +318,13 @@ export function registerSupabaseIntegrationRoutes(
 
     // "Created" is not "usable" — see supabaseProvision.waitUntilReady. Claiming success here would
     // hand the user a database that refuses every connection.
-    const ready = await waitUntilReady(conn.accessToken, created.project.id);
+    const ready = await waitUntilReady(accessToken, created.project.id);
     if (!ready.ok) {
       res.status(202).json({ error: ready.message, failure: ready.failure, projectRef: created.project.id });
       return;
     }
 
-    const creds = await fetchProjectCredentials(conn.accessToken, created.project.id);
+    const creds = await fetchProjectCredentials(accessToken, created.project.id);
     if (!creds.ok) {
       res.status(202).json({ error: creds.message, failure: creds.failure, projectRef: created.project.id });
       return;

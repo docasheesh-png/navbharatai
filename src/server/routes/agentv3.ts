@@ -10518,6 +10518,16 @@ export function registerAgentV3Routes(app: Express): void {
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
       }
+      // ADMIN-ONLY infra cost: how long this build held a real VM. A build is billed by WALL-CLOCK as
+      // well as by tokens, and until now only the token half was visible — so "why is the E2B bill this
+      // size?" had no answer in the product. Never part of the user's charge; omitted by construction
+      // from the user-facing report (allow-list). Best-effort, and honestly absent when unmeasurable.
+      try {
+        const held = typeof (actuator as any).sandboxHeldSeconds === 'function'
+          ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null
+          : null;
+        buildDiagRef?.setSandboxSeconds(held);
+      } catch { /* a cost measurement must never affect a build */ }
       // A zip/GitHub import's background preview boot must finish BEFORE the response ends — Cloud
       // Run throttles CPU after the stream closes, which would silently kill npm install mid-way.
       // Bounded + best-effort. The cap covers a HEAVY full-stack app: up to ~130s to provision a

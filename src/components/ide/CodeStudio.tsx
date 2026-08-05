@@ -34,6 +34,8 @@ import {
 interface CodeStudioProps {
   files: Record<string, string>;
   onFilesChange: (files: Record<string, string>) => void;
+  /** Force pending edits to the durable store and resolve once they are really stored (Save). */
+  onFlushEdits?: () => Promise<void>;
   /** Side-effect when files are deleted (clear durable storage; sync deletion to v5.0). */
   onFilesRemoved?: (paths: string[]) => void;
   onRun: (files: Record<string, string>) => void;
@@ -90,6 +92,7 @@ interface CodeStudioProps {
 export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   files,
   onFilesChange,
+  onFlushEdits,
   onFilesRemoved,
   onRun,
   generatedCode,
@@ -157,6 +160,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
    * before — same layout, same save, same focus. Nothing about the existing single-editor experience
    * is re-plumbed to make the split possible, so the feature cannot regress the common case.
    */
+  /** Recently closed tab paths, newest last — powers a REAL Reopen Closed Tab (Ctrl+Shift+T).
+   *  Bounded to 10: this is an undo for a misclick, not a session history. */
+  const [closedTabs, setClosedTabs] = useState<string[]>([]);
+  /**
+   * Text the PREVIEW wants to hand to the AI panel — Tag Mode's element reference, or the error
+   * overlay's Fix Bug prompt. Carries a nonce so tapping the SAME element twice still registers;
+   * a bare string would be identical and the effect downstream would ignore it.
+   */
+  const [aiPrefill, setAiPrefill] = useState<{ text: string; nonce: number } | undefined>();
   const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
   const [splitActive, setSplitActive] = useState<string>('');
   const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor
@@ -429,6 +441,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     });
   };
 
+  /**
+   * Save the focused file for real, and only report success once it is REALLY saved.
+   *
+   * Two steps, both required. `base.action.save` does the editor-side work (trim, final newline,
+   * format-on-save, mark the tab clean). `onFlushEdits` then pushes the change to the durable
+   * workspace and resolves once it is stored — the edit sync is debounced by 1.2s, so a "Saved ✓"
+   * shown before that resolves would be a fake success message the user would trust and act on.
+   * If the flush rejects, this rethrows and the button stays un-confirmed rather than lying.
+   */
+  const handleSaveActiveFile = async (): Promise<void> => {
+    handleShortcut([], 'base.action.save');
+    if (onFlushEdits) await onFlushEdits();
+  };
+
   /** Collapse the second group entirely, returning focus to the first. */
   const closeSplitEditor = () => {
     setSplitTabs([]);
@@ -458,6 +484,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
   const handleTabClose = (path: string) => {
     const newTabs = openTabs.filter(t => t.path !== path);
+    // Remember it so Ctrl+Shift+T can really bring it back. Bounded — this is an undo stack for a
+    // misclick, not a session history.
+    setClosedTabs(prev => [...prev.filter(p => p !== path), path].slice(-10));
     setOpenTabs(newTabs);
     if (activeFile === path) {
       setActiveFile(newTabs[newTabs.length - 1]?.path || '');
@@ -559,8 +588,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           setIsSidebarOpen(true);
           break;
         case 'workbench.view.debug':
-          setActiveScreen('debug');
-          setIsSidebarOpen(true);
+          // Ctrl+Shift+D. This used to set activeScreen='debug' and open the sidebar — but the sidebar
+          // renders from a switch that has no 'debug' case, so it fell through to `default: null` and
+          // the panel opened EMPTY. The shortcut was "handled" and still went nowhere, which is the
+          // blind spot in checking only that a case exists. The Debugger lives in its own panel (the
+          // footer's Debug tab and F5 both open it) — so open THAT, the one real debugger surface.
+          setIsDebugPanelOpen(true);
           break;
         case 'workbench.view.extensions':
           setActiveScreen('extensions');
@@ -667,10 +700,39 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         case 'workbench.action.focusFirstEditorGroup':
           if (editorInstance) editorInstance.focus();
           break;
-        case 'workbench.action.toggleDevTools':
-          // Cannot open Chrome dev tools via JS, but can log guidance
-          console.log('Press F12 or Ctrl+Shift+I to open DevTools');
+        // ── Four shortcuts the panel ADVERTISED but nothing handled (audit 2026-08-04) ──────────
+        // Each is now the real action, not an approximation. A shortcut listed in the Shortcuts panel
+        // is a promise; one that silently does nothing is the same defect as a button with no onClick.
+        case 'expandLineSelection':
+          // Monaco owns this id, but it lacks the `editor.`/`actions.` prefix the generic passthrough
+          // matches on — so Ctrl+L fell through every branch and did nothing.
+          editorInstance?.getAction('expandLineSelection')?.run();
           break;
+        case 'workbench.action.files.openFile':
+          // Ctrl+O — the same quick-open Ctrl+P already runs. Opening a file IS the quick-open.
+          setIsCommandPaletteOpen(true);
+          break;
+        case 'workbench.action.showAllSymbols':
+          // Ctrl+T — Monaco's quick outline: the symbols of the file you are in. Honestly scoped, and
+          // the Shortcuts panel now says "in File" rather than promising a whole-project symbol index
+          // we do not build.
+          editorInstance?.getAction('editor.action.quickOutline')?.run();
+          break;
+        case 'workbench.action.reopenClosedEditor': {
+          // Ctrl+Shift+T — genuinely reopens the last tab you closed, newest first, skipping any file
+          // that has since been deleted (reopening a tab onto a missing file would show an empty
+          // editor that looks like the file was emptied).
+          const stack = [...closedTabs];
+          while (stack.length > 0) {
+            const path = stack.pop()!;
+            if (files[path] === undefined) continue;
+            setClosedTabs(stack);
+            setOpenTabs(prev => (prev.some(t => t.path === path) ? prev : [...prev, { path }]));
+            setActiveFile(path);
+            break;
+          }
+          break;
+        }
         case 'base.action.save': {
           // Ctrl+S saves the file you are LOOKING at. With a split open that is the focused pane's
           // file — saving the left pane's file while the user types in the right one would write the
@@ -895,18 +957,16 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for the terminal below)
         // give it the same identity; getAgentV3SessionId/getAgentV3WorkspaceId (shared with
         // AgentV3Panel via the same localStorage key) put it on the exact same workspace.
-        return <AgentV3MiniChat userId={v3UserId} email={v3Email} />;
+        return <AgentV3MiniChat userId={v3UserId} email={v3Email} prefill={aiPrefill} />;
       case 'settings':
         return (
           <div className="p-6 h-full bg-[#161b22] space-y-6">
              <h3 className="text-white font-black uppercase tracking-widest text-[10px]">User Preferences</h3>
              <div className="space-y-4">
-                 {['General', 'Editor', 'Terminal', 'Extensions'].map(s => (
-                    <div key={s} className="flex items-center justify-between p-3 bg-black/20 rounded-xl border border-white/5 hover:border-white/10 cursor-pointer">
-                       <span className="text-xs font-medium text-[#c9d1d9]">{s}</span>
-                       <ChevronDown className="w-3.5 h-3.5 text-[#484f58]" />
-                    </div>
-                 ))}
+                 {/* REMOVED (2026-08-04): four rows — General / Editor / Terminal / Extensions —
+                     styled `cursor-pointer` with a chevron, and no onClick at all. They looked like
+                     navigation into sub-screens that were never built, so every tap did nothing. The
+                     real, working settings are directly below. */}
                  <div className="space-y-2">
                     <label className="text-[9px] font-black text-[#8b949e] uppercase">Interface Theme</label>
                     <select 
@@ -1285,7 +1345,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         {/* Dynamic Main Workspace */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
           {activeScreen === 'preview' ? (
-             <PreviewPanel files={files} generatedCode={generatedCode} onRun={() => onRun(files)} />
+             <PreviewPanel
+               files={files}
+               generatedCode={generatedCode}
+               onRun={() => onRun(files)}
+               /* Tag Mode and the error overlay's Fix Bug button both call this. Without it they were
+                  DEAD ENDS here — badges appeared on every element, you tapped one, and the handler
+                  was undefined. Worse than an inert button, because it invites the interaction first.
+                  Now the tap opens the AI panel with the element reference already in the box. */
+               onEditWithAI={(hint) => {
+                 if (hint) setAiPrefill({ text: hint, nonce: Date.now() });
+                 setActiveScreen('ai');
+                 setIsSidebarOpen(true);
+               }}
+             />
           ) : activeScreen === 'security' ? (
              <SecurityScan files={files} />
           ) : Object.keys(files).length === 0 ? (
@@ -1337,6 +1410,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onBreakpointToggle={handleToggleBreakpoint}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsDebugPanelOpen(true)}
+                onSave={handleSaveActiveFile}
+                hideHeaderDebug={isMobile}
                 dirtyTabs={dirtyTabs}
                 editorTheme={editorTheme}
                 editorOptions={{
@@ -1403,6 +1478,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    onBreakpointToggle={handleToggleBreakpoint}
                    onRun={() => onRun(files)}
                    onDebug={() => setIsDebugPanelOpen(true)}
+                   onSave={handleSaveActiveFile}
+                   hideHeaderDebug={isMobile}
                    dirtyTabs={dirtyTabs}
                    editorTheme={editorTheme}
                    editorOptions={{
@@ -1567,7 +1644,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               )}
           </AnimatePresence>
 
-          {/* Panel Toggle Handle */}
+          {/* Panel toggle handle — DESKTOP ONLY. On a phone the terminal now has exactly one entrance,
+              the footer's Terminal tab (admin 2026-08-04: "ek jagah rakho, footer me only"). It used to
+              have three (this handle, the More sheet, and nothing in the footer), which is how a user
+              ends up unsure whether they opened the same terminal or a different one. Desktop has no
+              footer, so the handle stays its way in. The Problems button is unrelated and stays. */}
           {!isPanelOpen && activeScreen !== 'preview' && (
              <div className="absolute bottom-4 right-4 z-[45] flex items-center gap-2">
                {problems.length > 0 && !isProblemsPanelOpen && (
@@ -1581,13 +1662,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                     {problems.length}
                  </button>
                )}
-               <button
-                 onClick={() => setIsPanelOpen(true)}
-                 aria-label="Open terminal panel"
-                 className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
-               >
-                  <ChevronUp className="w-5 h-5" />
-               </button>
+               {!isMobile && (
+                 <button
+                   onClick={() => setIsPanelOpen(true)}
+                   aria-label="Open terminal panel"
+                   className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
+                 >
+                    <ChevronUp className="w-5 h-5" />
+                 </button>
+               )}
              </div>
           )}
         </div>
@@ -1595,11 +1678,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
       {/* Activity Bar (Mobile Position) */}
       {/* PHONE BOTTOM-TAB IDE (admin 2026-07-31): a native-app-style bottom bar with the essentials —
-          Code · Files · Preview · AI · More — instead of the shrunk desktop ActivityBar. Each tab reuses
-          the same proven state transitions the desktop uses; "More" holds the secondary dev tools so
-          nothing is lost. Hidden while the AI overlay is open (its own X returns), matching prior
-          behaviour so the chat input is never covered. Desktop is unaffected. */}
-      {isMobile && activeScreen !== 'ai' && (
+          Code · Files · Terminal · Debug · More — instead of the shrunk desktop ActivityBar. Each tab
+          reuses the same proven state transitions the desktop uses; "More" holds the secondary dev
+          tools so nothing is lost. Desktop is unaffected.
+
+          IT NEVER HIDES ITSELF (admin 2026-08-04: "yeh apne aap gayab ho jata hai"). It used to vanish
+          whenever the AI overlay opened — which was the ONE moment the user most needed a way back,
+          leaving the IDE with no visible navigation at all. A bottom bar that disappears is not a
+          bottom bar; it is a trapdoor.
+
+          AI and PREVIEW are deliberately NOT here: both already live as buttons in the top-right
+          header, and offering the same action in two places on a phone-sized screen just costs a tab
+          and makes the user wonder whether the two are different. Their slots went to TERMINAL and
+          DEBUG, which previously had no home in the footer at all. */}
+      {isMobile && (
          <>
            {mobileMoreOpen && (
              <>
@@ -1608,7 +1700,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  {([
                    { label: 'Search', Icon: Search, onTap: () => handleScreenChange('search') },
                    { label: 'Source Control', Icon: GitBranch, onTap: () => handleScreenChange('git') },
-                   { label: 'Terminal', Icon: TerminalIcon, onTap: () => setIsPanelOpen(true) },
                    { label: 'Security', Icon: ShieldCheck, onTap: () => handleScreenChange('security') },
                    { label: 'Shortcuts', Icon: Keyboard, onTap: () => setIsShortcutsOpen(true) },
                  ]).map(({ label, Icon, onTap }) => (
@@ -1635,8 +1726,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              {([
                { id: 'code', label: 'Code', Icon: Code2, active: !isSidebarOpen && activeScreen !== 'preview', onTap: () => { setMobileMoreOpen(false); if (activeScreen === 'preview') setActiveScreen('files'); setIsSidebarOpen(false); } },
                { id: 'files', label: 'Files', Icon: FilesIcon, active: isSidebarOpen && activeScreen === 'files', onTap: () => { setMobileMoreOpen(false); setActiveScreen('files'); setIsSidebarOpen(true); } },
-               { id: 'preview', label: 'Preview', Icon: Monitor, active: activeScreen === 'preview', onTap: () => { setMobileMoreOpen(false); setActiveScreen('preview'); setIsSidebarOpen(false); } },
-               { id: 'ai', label: 'AI', Icon: Bot, active: false, onTap: () => { setMobileMoreOpen(false); setActiveScreen('ai'); setIsSidebarOpen(true); } },
+               { id: 'terminal', label: 'Terminal', Icon: TerminalIcon, active: isPanelOpen, onTap: () => { setMobileMoreOpen(false); setIsPanelOpen(v => !v); } },
+               { id: 'debug', label: 'Debug', Icon: Bug, active: isDebugPanelOpen, onTap: () => { setMobileMoreOpen(false); setIsDebugPanelOpen(v => !v); } },
                { id: 'more', label: 'More', Icon: MenuIcon, active: mobileMoreOpen, onTap: () => setMobileMoreOpen(v => !v) },
              ]).map(({ id, label, Icon, active, onTap }) => (
                <button

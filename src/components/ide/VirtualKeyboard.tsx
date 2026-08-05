@@ -71,7 +71,7 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
   { category: '🧠 CODE NAVIGATION', key: 'shift+f12', label: 'Find References', command: 'editor.action.referenceSearch.trigger', keys: ['Shift', 'F12'] },
   { category: '🧠 CODE NAVIGATION', key: 'ctrl+shift+o', label: 'Go to Symbol', command: 'editor.action.quickOutline', keys: ['Ctrl', 'Shift', 'O'] },
   { category: '🧠 CODE NAVIGATION', key: 'ctrl+g', label: 'Go to Line', command: 'editor.action.gotoLine', keys: ['Ctrl', 'G'] },
-  { category: '🧠 CODE NAVIGATION', key: 'ctrl+t', label: 'Search Symbols', command: 'workbench.action.showAllSymbols', keys: ['Ctrl', 'T'] },
+  { category: '🧠 CODE NAVIGATION', key: 'ctrl+t', label: 'Search Symbols in File', command: 'workbench.action.showAllSymbols', keys: ['Ctrl', 'T'] },
   { category: '🧠 CODE NAVIGATION', key: 'alt+left', label: 'Go Back', command: 'workbench.action.navigateBack', keys: ['Alt', '←'] },
   { category: '🧠 CODE NAVIGATION', key: 'alt+right', label: 'Go Forward', command: 'workbench.action.navigateForward', keys: ['Alt', '→'] },
 
@@ -84,16 +84,11 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
 
   // 🧩 TERMINAL SHORTCUTS
   { category: '🧩 TERMINAL SHORTCUTS', key: 'ctrl+shift+`', label: 'New Terminal', command: 'workbench.action.terminal.new', keys: ['Ctrl', 'Shift', '`'] },
-  { category: '🧩 TERMINAL SHORTCUTS', key: 'ctrl+shift+c', label: 'External Terminal', command: 'workbench.action.terminal.openNativeConsole', keys: ['Ctrl', 'Shift', 'C'] },
-  { category: '🧩 TERMINAL SHORTCUTS', key: 'up', label: 'Previous Command', command: 'workbench.action.terminal.runRecentCommand', keys: ['↑'] },
 
   // 🐞 DEBUGGING
   { category: '🐞 DEBUGGING', key: 'f5', label: 'Start Debugging', command: 'workbench.action.debug.start', keys: ['F5'] },
   { category: '🐞 DEBUGGING', key: 'shift+f5', label: 'Stop Debugging', command: 'workbench.action.debug.stop', keys: ['Shift', 'F5'] },
   { category: '🐞 DEBUGGING', key: 'f9', label: 'Toggle Breakpoint', command: 'editor.debug.action.toggleBreakpoint', keys: ['F9'] },
-  { category: '🐞 DEBUGGING', key: 'f10', label: 'Step Over', command: 'workbench.action.debug.stepOver', keys: ['F10'] },
-  { category: '🐞 DEBUGGING', key: 'f11', label: 'Step Into', command: 'workbench.action.debug.stepInto', keys: ['F11'] },
-  { category: '🐞 DEBUGGING', key: 'shift+f11', label: 'Step Out', command: 'workbench.action.debug.stepOut', keys: ['Shift', 'F11'] },
   { category: '🐞 DEBUGGING', key: 'ctrl+shift+d', label: 'Debug Panel', command: 'workbench.view.debug', keys: ['Ctrl', 'Shift', 'D'] },
 
   // 🌐 GIT SHORTCUTS
@@ -124,7 +119,6 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
 
   // 🚀 SUPER USEFUL HIDDEN
   { category: '🚀 SUPER USEFUL HIDDEN', key: 'ctrl+shift+v', label: 'Markdown Preview', command: 'markdown.showPreview', keys: ['Ctrl', 'Shift', 'V'] },
-  { category: '🚀 SUPER USEFUL HIDDEN', key: 'ctrl+shift+c', label: 'Open Dev Tools', command: 'workbench.action.toggleDevTools', keys: ['Ctrl', 'Shift', 'C'] },
   { category: '🚀 SUPER USEFUL HIDDEN', key: 'f2', label: 'Rename Variable', command: 'editor.action.rename', keys: ['F2'] },
   { category: '🚀 SUPER USEFUL HIDDEN', key: 'ctrl+.', label: 'Quick Fix', command: 'editor.action.quickFix', keys: ['Ctrl', '.'] },
   { category: '🚀 SUPER USEFUL HIDDEN', key: 'home', label: 'Line Start', command: 'cursorHome', keys: ['Home'] },

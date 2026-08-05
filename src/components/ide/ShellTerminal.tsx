@@ -132,6 +132,26 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   );
   const [barText, setBarText] = useState('');
   const barInputRef = useRef<HTMLInputElement | null>(null);
+  /**
+   * DIRECT TYPING INSIDE THE TERMINAL BOX on touch devices (admin 2026-08-05, third report: the
+   * command bar types fine — "waha to type ho raha hai, work bhi kar raha hai" — "par mujhe terminal
+   * box me hi type karna hai").
+   *
+   * The bar WORKING is the proof that unlocks this: iOS delivers input events reliably to a real
+   * <input> — it is only xterm's hidden textarea (keydown-driven) that starves. So the terminal box
+   * gets an invisible BRIDGE input of our own: tapping the box focuses it, and every character it
+   * receives is forwarded to the PTY that instant, per keystroke, like ssh. The PTY's echo paints
+   * into xterm, so typing visibly happens "in the terminal".
+   *
+   * The sentinel trick: an EMPTY input fires no event for Backspace on iOS (there is nothing to
+   * delete), so the bridge always holds one zero-width space. Value shrinking below the sentinel IS
+   * the backspace — sent as DEL (\x7f) — and the value then resets to the sentinel. Composition
+   * (Hindi and other IME keyboards) is respected: nothing is forwarded mid-composition; the composed
+   * text goes on compositionend.
+   */
+  const bridgeRef = useRef<HTMLInputElement | null>(null);
+  const composingRef = useRef(false);
+  const BRIDGE_SENTINEL = '\u200B';
 
   useEffect(() => {
     const gen = genRef.current + 1;
@@ -467,10 +487,83 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   /** Keeps the command-bar input focused (and the phone keyboard open) across helper-key taps. */
   const keepFocus = (e: React.PointerEvent) => e.preventDefault();
 
+  /**
+   * Forward whatever changed in the bridge to the PTY, then reset to the sentinel. Runs on every
+   * input event (per keystroke) and on compositionend — never mid-composition, so IME keyboards
+   * (Hindi, emoji) send the composed text once instead of a stream of half-formed characters.
+   */
+  const bridgeSync = () => {
+    const el = bridgeRef.current;
+    if (!el || composingRef.current) return;
+    const v = el.value;
+    if (v === BRIDGE_SENTINEL) return;
+    if (v.startsWith(BRIDGE_SENTINEL)) {
+      const added = v.slice(BRIDGE_SENTINEL.length);
+      if (added) void sendInput(added);
+    } else {
+      // The sentinel itself was deleted — that IS the backspace. DEL (\x7f) is what a TTY expects.
+      void sendInput('\x7f');
+      if (v) void sendInput(v); // anything typed in the same beat still goes through, in order
+    }
+    el.value = BRIDGE_SENTINEL;
+    try { el.setSelectionRange(1, 1); } catch { /* non-text state */ }
+  };
+
+  /** Control keys arrive as keydown (proven working on iOS by the command bar's Enter). */
+  const bridgeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const seq =
+      e.key === 'Enter' ? '\r'
+      : e.key === 'Tab' ? '\t'
+      : e.key === 'ArrowUp' ? '\x1b[A'
+      : e.key === 'ArrowDown' ? '\x1b[B'
+      : e.key === 'ArrowRight' ? '\x1b[C'
+      : e.key === 'ArrowLeft' ? '\x1b[D'
+      : e.key === 'Escape' ? '\x1b'
+      // A hardware Ctrl chord (iPad keyboard, touch laptop): letter → control byte, the real thing.
+      : e.ctrlKey && e.key.length === 1 && /[a-z]/i.test(e.key)
+        ? String.fromCharCode(e.key.toUpperCase().charCodeAt(0) - 64)
+        : null;
+    if (seq !== null) { e.preventDefault(); void sendInput(seq); }
+    // Backspace is deliberately NOT handled here: it reaches the PTY through the sentinel value
+    // change, and handling it twice would delete two characters per press.
+  };
+
+  /** Tapping the terminal box arms direct typing — focus OUR bridge, not xterm's starved textarea. */
+  const focusBridge = () => {
+    if (!showCommandBar) return;                       // desktop: xterm's own input works — leave it
+    if (status.kind === 'exited' || status.kind === 'unavailable') return;
+    const el = bridgeRef.current;
+    if (!el) return;
+    el.value = BRIDGE_SENTINEL;
+    el.focus();
+    try { el.setSelectionRange(1, 1); } catch { /* non-text state */ }
+  };
+
   return (
     <div className="h-full w-full bg-[#0d1117] flex flex-col">
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0" onClick={focusBridge}>
         <div ref={hostRef} className="absolute inset-0 p-2" />
+        {showCommandBar && (
+          // The invisible bridge that makes typing INSIDE the terminal box work on phones. It sits
+          // in the box (so iOS's scroll-into-view stays put), takes focus on tap, and forwards every
+          // keystroke to the PTY the instant it happens — the echo paints back into xterm above.
+          // pointer-events-none: it must never swallow the tap itself; focus is only programmatic.
+          <input
+            ref={bridgeRef}
+            defaultValue={BRIDGE_SENTINEL}
+            onInput={bridgeSync}
+            onKeyDown={bridgeKeyDown}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; bridgeSync(); }}
+            aria-label="Terminal direct input"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete="off"
+            className="absolute bottom-2 left-2 w-10 h-1 opacity-0 pointer-events-none"
+            tabIndex={-1}
+          />
+        )}
         {(status.kind === 'exited' || status.kind === 'unavailable') && (
           // Both terminal states get a way BACK. 'unavailable' used to be a dead end — after a
           // timed-out or failed open, the only recovery was closing the tab and opening a new one,

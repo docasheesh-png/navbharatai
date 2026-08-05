@@ -121,3 +121,56 @@ describe('ShellTerminal mobile command bar', () => {
     expect(code).toMatch(/if \(showCommandBar\) barInputRef\.current\?\.focus\(\);\s*else termRef\.current\?\.focus\(\);/);
   });
 });
+
+/**
+ * DIRECT TYPING INSIDE THE TERMINAL BOX (admin 2026-08-05, third report: the bar works — "par mujhe
+ * terminal box me hi type karna hai").
+ *
+ * The bar working proved iOS delivers input events to a real <input>; only xterm's keydown-driven
+ * hidden textarea starves. So the box carries an invisible bridge input of ours: tap the box, type,
+ * and every keystroke goes to the PTY that instant — echo paints back into xterm, so typing happens
+ * visibly "in the terminal", like ssh.
+ */
+describe('ShellTerminal in-box typing bridge', () => {
+  it('tapping the terminal box focuses OUR bridge, and only on touch devices', () => {
+    expect(code).toContain('onClick={focusBridge}');
+    const fb = code.slice(code.indexOf('const focusBridge'));
+    expect(fb).toContain('if (!showCommandBar) return;');
+  });
+
+  it('keeps a sentinel so Backspace is observable — an empty input fires no event for it on iOS', () => {
+    expect(code).toContain("BRIDGE_SENTINEL = '\\u200B'");
+    // the sentinel's deletion IS the backspace, forwarded as the DEL byte a TTY expects
+    expect(code).toContain("void sendInput('\\x7f')");
+  });
+
+  it('never forwards mid-composition — IME keyboards (Hindi) send composed text on compositionend', () => {
+    expect(code).toContain('onCompositionStart');
+    expect(code).toContain('onCompositionEnd');
+    const sync = code.slice(code.indexOf('const bridgeSync'));
+    expect(sync).toContain('composingRef.current) return');
+  });
+
+  it('control keys ride keydown: Enter, Tab, arrows, Escape, and hardware Ctrl chords', () => {
+    const kd = code.slice(code.indexOf('const bridgeKeyDown'));
+    expect(kd).toContain("'\\r'");
+    expect(kd).toContain("'\\x1b[A'");
+    expect(kd).toContain("'\\x1b[D'");
+    expect(kd).toContain('charCodeAt(0) - 64');            // Ctrl+letter → real control byte
+    // Backspace must NOT be double-handled (once via keydown + once via the sentinel = two deletes).
+    expect(kd).not.toContain("'Backspace'");
+  });
+
+  it('the bridge never swallows the tap itself and never disturbs layout', () => {
+    const el = code.slice(code.indexOf('ref={bridgeRef}'), code.indexOf('ref={bridgeRef}') + 900);
+    expect(el).toContain('pointer-events-none');
+    expect(el).toContain('opacity-0');
+    expect(el).toContain('autoCapitalize="none"');
+    expect(el).toContain('autoCorrect="off"');
+  });
+
+  it('a dead shell disarms the bridge — no keyboard against a terminal that cannot answer', () => {
+    const fb = code.slice(code.indexOf('const focusBridge'));
+    expect(fb).toMatch(/status\.kind === 'exited' \|\| status\.kind === 'unavailable'\) return/);
+  });
+});

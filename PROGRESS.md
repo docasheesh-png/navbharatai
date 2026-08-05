@@ -25977,3 +25977,32 @@ claim is that the bar's input path does not depend on ANY xterm key handling (it
 input → fetch), so the class of "keyboard events never reach xterm" cannot affect it. If typing in
 the BAR itself still fails on the admin's device, that would be new evidence pointing at the network
 layer (the /shell/input POST), which the diagnostics from #2129 would then name.
+
+## 2026-08-05 — In-box terminal typing on phones: the bridge input (PR #2141)
+
+**Third terminal report, and this one carried the decisive evidence.** The #2140 command bar WORKS on
+the admin's iPhone ("waha to type ho raha hai, work bhi kar raha hai") — but the requirement is typing
+INSIDE the terminal box itself ("par mujhe terminal box me hi type karna hai"), which still fed
+xterm's starved textarea.
+
+**Why the bar working matters:** it PROVES iOS delivers input events reliably to a real `<input>` —
+the failure is exclusively xterm's keydown-driven hidden textarea. So the terminal box now carries an
+invisible **bridge input** of our own (`ShellTerminal.tsx`): tapping the box focuses the bridge (not
+xterm's textarea), and every keystroke is forwarded to the PTY the instant it happens — per keystroke,
+like ssh. The PTY's echo paints into xterm, so typing visibly happens "in the terminal".
+
+Mechanics that make it correct: a **zero-width-space sentinel** stays in the input because an EMPTY
+input fires no event for Backspace on iOS — the sentinel's deletion IS the backspace, forwarded as DEL
+(\x7f), and keydown deliberately does NOT also handle Backspace (double-handling = two deletes per
+press). Composition (Hindi/IME keyboards) is respected — nothing forwards mid-composition; composed
+text goes on compositionend. Control keys ride keydown (proven working by the bar's Enter): Enter,
+Tab, arrows, Escape, and hardware Ctrl chords (iPad keyboards) as real control bytes. The bridge is
+`pointer-events-none` + `opacity-0` (never swallows the tap, never disturbs layout), disarms itself
+when the shell is exited/unavailable, and desktop behaviour is untouched (bridge arms only for coarse
+pointers). The #2137 wake-queue covers it during "Starting your workspace…", so typing into the box
+while the sandbox wakes now WORKS — the exact scenario of the admin's screenshots.
+
+**Tests:** 6 new invariants (tap→bridge gating, sentinel + DEL, composition guard, control-key map +
+no Backspace double-handling, pointer/layout neutrality, dead-shell disarm) → suite 1073 files /
+11983 tests green, tsc clean, bundle within budget. The command bar STAYS — it is the better tool for
+long commands and the honest fallback if any device surprises us again.

@@ -164,6 +164,10 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet } from '../AgentV3/SpaFallbackAnalysis';
+import {
+  planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
+  type SmokePlan, type SmokeResult,
+} from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
@@ -8767,6 +8771,10 @@ export function registerAgentV3Routes(app: Express): void {
       // App.tsx). Deterministic + free. Findings are ALWAYS recorded honestly (previously only the fuzzy
       // LLM reviewer text mentioned them — never structured). The bounded LLM SELF-HEAL is gated behind
       // AGENTV3_INTEGRITY_GATE (default OFF — canary first, like LintGate); flip on to auto-fix them.
+      // Planned inside the integrity block below, where the full project map is already in memory,
+      // and consumed by the route smoke check much further down. Declared here so the two are not
+      // forced to share a scope, and so planning cannot pay for a second workspace load.
+      let routeSmokePlan: SmokePlan | null = null;
       try {
         // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17, hardened after the edit-build
         // re-test): `writtenFiles` holds only the files THIS build wrote. On an EDIT build that is 3-4
@@ -8904,6 +8912,10 @@ export function registerAgentV3Routes(app: Express): void {
             });
           }
         } catch { /* a deterministic check must never break a build */ }
+        // Plan the route smoke check HERE, where the full project map is already loaded (see the
+        // POST_ANSWER_TIMING note above — re-loading it later would pay that cost twice for nothing).
+        try { routeSmokePlan = planSmokeChecks(Object.entries(integrityFiles).map(([path, content]) => ({ path, content }))); }
+        catch { /* planning is best-effort — no plan simply means no smoke check */ }
         for (const c of findCircularDependencies(integrityFiles)) {
           const loop = c.cycle.length === 1
             ? `${c.cycle[0]} imports itself`
@@ -9338,6 +9350,57 @@ export function registerAgentV3Routes(app: Express): void {
             break;
           }
         }
+      }
+
+      // ROUTE SMOKE CHECK (ROADMAP #1 Phase 4.2). "The build succeeded" and "the app works" are
+      // different claims, and only the first one was ever tested: the preview verifier proves a PAGE
+      // renders, while nothing proved the API behind it answers. An app could ship with every screen
+      // drawn and every button dead, and the report would say it passed.
+      //
+      // Calls the app's OWN declared routes and reports what actually came back. Two safety rules live
+      // in RouteSmokeCheck and are enforced there rather than here: GET only (a check must never run
+      // the user's writes against their data) and no path parameters (an invented id 404s, which we
+      // would then report as a broken route — a false alarm about working code).
+      //
+      // Never changes the verdict. This is EVIDENCE for the report, not a new way for a working build
+      // to be marked failed on a probe that could be wrong about a route it does not fully understand.
+      if (
+        process.env.AGENTV3_ROUTE_SMOKE !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
+        && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+      ) {
+        try {
+          const plan = routeSmokePlan;
+          if (plan && plan.targets.length > 0) {
+            const results: SmokeResult[] = [];
+            for (const target of plan.targets) {
+              if (abort.signal.aborted) break;
+              let status: number | null = null;
+              try {
+                const out = await withTimeout(
+                  actuator.runCommand(workspaceId, smokeCurlCommand(lastPreviewUrl, target)),
+                  15_000, 'route-smoke',
+                );
+                status = parseCurlStatus(out.stdout);
+              } catch { status = null; }
+              results.push(classifySmokeStatus(target, status));
+            }
+            const summary = summarizeSmoke(results, plan.skipped.length);
+            buildDiag.record({
+              phase: 'preview',
+              // A failure here is a real finding; a clean run is worth recording too, because "we
+              // checked and it worked" is the evidence this phase exists to produce.
+              severity: summary.hasFailures ? 'warning' : 'info',
+              code: summary.hasFailures ? 'ROUTE_SMOKE_FAILED' : 'ROUTE_SMOKE_PASSED',
+              message: summary.headline,
+              autoResolved: !summary.hasFailures,
+              detail: [
+                ...results.map((r) => `${r.verdict.toUpperCase()} ${r.path}${r.status === null ? '' : ` (${r.status})`}`),
+                ...plan.skipped.map((s) => `SKIPPED ${s.method} ${s.path} — ${s.why}`),
+              ].join('\n'),
+            });
+          }
+        } catch { /* the smoke check is evidence, never a gate — a failure here changes nothing */ }
       }
 
       // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a

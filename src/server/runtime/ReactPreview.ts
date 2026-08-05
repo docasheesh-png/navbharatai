@@ -292,7 +292,21 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   }
 
   const payload = JSON.stringify({ entry, modules }).replace(/<\//g, '<\\/');
-  const importmap = JSON.stringify({ imports: buildImportmap(vfs) }).replace(/<\//g, '<\\/');
+  const imports = buildImportmap(vfs);
+  const importmap = JSON.stringify({ imports }).replace(/<\//g, '<\\/');
+  // START THE DOWNLOADS NOW, not after the compiler finishes (admin 2026-08-05: "kitne bhi din baad
+  // open karo, preview pehle jaisa hi chalega").
+  //
+  // The loader can only call import() once Babel has loaded AND collectBare() has scanned the sources,
+  // so package downloading was fully SERIALIZED behind the compiler: two slow phases back to back on a
+  // phone with a cold cache. Nothing required that ordering — `specUrl` returns the importmap entry
+  // verbatim for every package.json dependency, so the exact URLs are known HERE, at render time.
+  //
+  // Declaring them as modulepreload lets the browser fetch them in parallel with the compiler; by the
+  // time import() runs they are already in the HTTP cache. This is a pure scheduling win with no new
+  // failure mode: a preload that 404s or is never used is a console note, and the real import() still
+  // walks its full three-rung CDN fallback. It shortens the wait — it cannot change the outcome.
+  const preloadTags = buildModulePreloads(imports);
   // Path aliases (@/… → local src) so imported shadcn/Vite/Next apps resolve locally, not via esm.sh.
   const aliasesJson = JSON.stringify(buildAliasMap(vfs, entry)).replace(/<\//g, '<\\/');
   const css = baseStyles(vfs);
@@ -334,6 +348,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
 ${tailwindCdn}
 ${styleTag}
 <script type="importmap">${importmap}</script>
+${preloadTags}
 ${babelTag}
 </head>
 <body>
@@ -1021,6 +1036,43 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   document.addEventListener('keydown', onKeyDown, true);
 })();
 </script>`;
+
+/**
+ * `<link rel="modulepreload">` tags for the packages the loader is going to import anyway.
+ *
+ * Exported for testing. Bounded and deliberately conservative:
+ *
+ * - **Capped** (`MAX_MODULE_PRELOADS`). A preload is a promise to the browser that the module WILL be
+ *   used; hundreds of them compete with the compiler for the same connections and would slow the very
+ *   thing this speeds up. The cap keeps the win where it is real. React's own entries are emitted first
+ *   because every React app loads them, so a huge dependency list can never crowd them out.
+ * - **Deduplicated by URL.** `react` and `react/jsx-runtime` are separate map keys that can resolve to
+ *   the same URL; preloading one URL twice is a wasted request.
+ * - **http(s) only.** The map is ours today, but a preload is emitted into the page unescaped-by-nature
+ *   — restricting the scheme means a future map entry can never turn into a `javascript:` URL here.
+ */
+export const MAX_MODULE_PRELOADS = 24;
+
+export function buildModulePreloads(imports: Record<string, string>): string {
+  // React first — every React app needs these, so they must never be the ones the cap drops.
+  const reactFirst = ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime'];
+  const ordered = [
+    ...reactFirst.filter((k) => imports[k]),
+    ...Object.keys(imports).filter((k) => !reactFirst.includes(k)),
+  ];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const key of ordered) {
+    const url = imports[key];
+    if (!url || !/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+    if (urls.length >= MAX_MODULE_PRELOADS) break;
+  }
+  return urls
+    .map((u) => `<link rel="modulepreload" href="${u.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" crossorigin />`)
+    .join('\n');
+}
 
 /** Build an esm.sh importmap from package.json deps (+ always-needed React entries). */
 function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {

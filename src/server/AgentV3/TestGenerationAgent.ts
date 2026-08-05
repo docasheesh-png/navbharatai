@@ -7,8 +7,11 @@
 // runnable Vitest skeleton for the top few that don't already have a test.
 //
 // Dependency-free: regex export extraction + the existing TestSkeletonGenerator. No extra LLM call,
-// no cost, no risk to the build result. HONEST: the skeletons carry explicit "// TODO: assert real
-// behaviour" markers (from TestSkeletonGenerator) — they never fake a passing assertion. Pure core → tested.
+// no cost, no risk to the build result. HONEST (and, since Phase 4.4, honest in both directions): the
+// skeletons assert only what is true by construction and mark the real behaviour with `it.todo`, which
+// vitest reports as PENDING — so they never fake a pass, and they also never fail on correct code. The
+// earlier version called every function with `undefined` arguments, which shipped a RED suite with a
+// brand-new app; a suite the user cannot trust is worse than no suite at all. Pure core → tested.
 
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 

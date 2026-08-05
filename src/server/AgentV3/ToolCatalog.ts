@@ -392,9 +392,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       name: 'generate_tests',
       description:
         'Generate a runnable Vitest unit-test SKELETON for a module you built and write it to the ' +
-        'workspace. Each function gets a describe/it with a smoke assertion + an explicit ' +
-        '"// TODO: assert real behaviour" — it never fakes a passing assertion that pretends to verify ' +
-        'logic. Use this to seed real tests for services/hooks/utils after building them.',
+        'workspace. Each function gets one assertion that is TRUE BY CONSTRUCTION (the export exists ' +
+        'and is callable — which catches a renamed or dropped export) plus an `it.todo` for the real ' +
+        'behaviour, which vitest reports as PENDING. It never invents arguments and never fakes a ' +
+        'passing assertion, so a fresh app can never ship a red suite for correct code. ' +
+        'Use this to seed real tests for services/hooks/utils after building them.',
       input_schema: {
         type: 'object',
         properties: {

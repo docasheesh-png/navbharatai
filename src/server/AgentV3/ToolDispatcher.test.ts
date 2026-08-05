@@ -331,7 +331,7 @@ describe('ToolDispatcher', () => {
     expect(act.files.has('API.md')).toBe(false);
   });
 
-  it('generate_tests writes a Vitest skeleton with an honest TODO (no faked assertion)', async () => {
+  it('generate_tests writes a skeleton that can neither fake a pass nor fail on correct code', async () => {
     const res = await d.dispatch(
       call('generate_tests', {
         path: 'src/services/auth.test.ts',
@@ -345,8 +345,12 @@ describe('ToolDispatcher', () => {
     expect(t).toContain("import { describe, it, expect } from 'vitest';");
     expect(t).toContain("from './auth'");
     expect(t).toContain('login');
-    expect(t).toContain('await login'); // async awaited
-    expect(t).toContain('TODO: assert real behaviour'); // honest skeleton, not a fake pass
+    // Phase 4.4: the scaffold no longer CALLS the function with invented arguments — for an async
+    // login(email, password) that threw, so a brand-new app shipped with a red suite for correct code.
+    expect(t).toContain("expect(typeof login).toBe('function');");
+    expect(t).toContain("it.todo('login — assert real behaviour with real arguments');");
+    expect(t).not.toContain('await login('); // no invented call
+    expect(t).not.toContain('undefined');
   });
 
   it('generate_tests requires path, module_path and functions', async () => {

@@ -5,19 +5,29 @@ import {
 
 describe('TestSkeletonGenerator (P-CGE.4)', () => {
   describe('generateUnitTest', () => {
-    it('scaffolds a Vitest unit test with imports + smoke assertion + TODO', () => {
+    // UPDATED (Phase 4.4). These used to lock in the generator CALLING each function with `undefined`
+    // for every argument and asserting `toBeDefined()`. That shipped a RED suite for correct code — a
+    // function needing arguments throws, a void function returns undefined — and a suite the user
+    // cannot trust is worse than no suite. The assertions below encode the replacement contract.
+    it('asserts only what is true by construction — the export exists and is callable', () => {
       const out = generateUnitTest({ modulePath: './math', functions: [{ name: 'add', params: ['a', 'b'] }] });
       expect(out).toContain("import { describe, it, expect } from 'vitest';");
       expect(out).toContain("import { add } from './math';");
       expect(out).toContain("describe('add', () => {");
-      expect(out).toContain('const result = add(');
-      expect(out).toContain('expect(result).toBeDefined();');
-      expect(out).toContain('// TODO: assert real behaviour');
+      // Small, but genuinely true — and it is what goes red when someone renames or drops the export.
+      expect(out).toContain("expect(typeof add).toBe('function');");
     });
-    it('awaits async functions', () => {
+
+    it('NEVER invents arguments, so a generated test cannot fail on correct code', () => {
+      const out = generateUnitTest({ modulePath: './math', functions: [{ name: 'add', params: ['a', 'b'] }] });
+      expect(out).not.toContain('undefined');
+      expect(out).not.toContain('expect(result).toBeDefined()');
+    });
+
+    it('marks the real behaviour as PENDING, which is neither passing nor failing', () => {
+      // vitest reports it.todo as pending, so an unwritten test can never be mistaken for a passing one.
       const out = generateUnitTest({ modulePath: './svc', functions: [{ name: 'fetchUser', async: true }] });
-      expect(out).toContain('async () => {');
-      expect(out).toContain('const result = await fetchUser(');
+      expect(out).toContain("it.todo('fetchUser — assert real behaviour with real arguments');");
     });
     it('emits an it.todo for a module with no functions', () => {
       const out = generateUnitTest({ modulePath: './empty', functions: [] });
@@ -26,12 +36,27 @@ describe('TestSkeletonGenerator (P-CGE.4)', () => {
   });
 
   describe('generateIntegrationTest', () => {
-    it('scaffolds supertest cases per route', () => {
+    it('honours an explicit expected status when the caller gives one', () => {
       const out = generateIntegrationTest({ routes: [{ method: 'get', path: '/health', expectStatus: 200 }] });
       expect(out).toContain("import request from 'supertest';");
       expect(out).toContain("await request(app).get('/health')");
       expect(out).toContain('expect(res.status).toBe(200);');
-      expect(out).toContain('// TODO: assert the response body');
+    });
+
+    it('without one, asserts only that the route is MOUNTED', () => {
+      // Demanding 200 fails a guarded route (401) or one that wants a query (400) — correct code,
+      // red test. "not 404" is true for any mounted route and catches the bug worth catching.
+      const out = generateIntegrationTest({ routes: [{ method: 'get', path: '/health' }] });
+      expect(out).toContain('expect(res.status).not.toBe(404);');
+    });
+
+    it('never RUNS a mutating route — a scaffold must not touch the user\'s data', () => {
+      // Someone running their suite against a dev database would have this create or delete real
+      // rows they never asked to touch.
+      const out = generateIntegrationTest({ routes: [{ method: 'post', path: '/orders' }, { method: 'delete', path: '/orders' }] });
+      expect(out).not.toContain('request(app).post');
+      expect(out).not.toContain('request(app).delete');
+      expect(out).toContain("it.todo('POST /orders — write this one yourself: it changes data');");
     });
   });
 

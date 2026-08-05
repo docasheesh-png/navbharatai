@@ -3,10 +3,19 @@
 // Pure, dependency-free generators that emit runnable Vitest test SKELETONS from declarative
 // input: unit tests for functions, integration tests for routes (supertest), and vi.fn mocks.
 //
-// HONESTY: these are starter scaffolds, not finished tests. Each generated `it(...)` contains a
-// smoke assertion plus an explicit `// TODO: assert real behaviour` marker — the generator never
-// emits a fake passing assertion that pretends to verify logic it doesn't. The output is real,
-// valid, runnable boilerplate that a developer (or a follow-up AI pass) completes.
+// HONESTY, AND THE BUG IT USED TO HAVE (ROADMAP #1 Phase 4.4). These are starter scaffolds, and the
+// generator never emits a fake passing assertion. But "not fake" was not enough: it used to CALL each
+// function with `undefined` for every argument and assert `expect(result).toBeDefined()`, and it hit
+// every route expecting exactly 200. For most real code that FAILS — a function that needs arguments
+// throws, a void function returns undefined, a POST without a body answers 400, a guarded route
+// answers 401. So the user's brand-new app shipped with a RED test suite for code that was correct,
+// which teaches them their own tests cannot be trusted. A suite nobody trusts is worse than no suite.
+//
+// The rule now: assert only what is TRUE BY CONSTRUCTION, and express the unknown part with vitest's
+// own pending mechanism (`it.todo`), which reports as PENDING — never as passed, never as failed.
+// What is left is still real: `expect(typeof fn).toBe('function')` genuinely catches a broken import
+// or a renamed export, and `expect(res.status).not.toBe(404)` genuinely catches a route that was
+// never mounted. Both are the actual bugs a smoke test exists to find.
 
 const clean = (s: unknown): string => (typeof s === 'string' ? s.trim() : '');
 const ident = (s: string): string => clean(s).replace(/[^A-Za-z0-9_$]/g, '') || 'value';
@@ -35,16 +44,18 @@ export function generateUnitTest(input: { modulePath: string; functions: Functio
   }
   for (const f of fns) {
     const name = ident(f.name);
-    const args = (f.params || []).map((p) => `/* ${ident(p)} */ undefined`).join(', ');
-    const awaitKw = f.async ? 'await ' : '';
-    const asyncKw = f.async ? 'async ' : '';
+    // The export exists and is callable. Small, but genuinely true and genuinely useful: this is the
+    // assertion that goes red when someone renames or removes the export, which is the single most
+    // common way a module quietly breaks its callers.
     lines.push(
       `describe('${name}', () => {`,
-      `  it('works for a basic case', ${asyncKw}() => {`,
-      `    const result = ${awaitKw}${name}(${args});`,
-      '    expect(result).toBeDefined();',
-      '    // TODO: assert real behaviour',
+      "  it('is exported and callable', () => {",
+      `    expect(typeof ${name}).toBe('function');`,
       '  });',
+      '',
+      `  // Fill this in with a real case: call ${name} with real arguments and assert what it should`,
+      '  // return or do. Until then vitest reports it as pending, so it is never mistaken for passing.',
+      `  it.todo('${name} — assert real behaviour with real arguments');`,
       '});',
       '',
     );
@@ -75,13 +86,25 @@ export function generateIntegrationTest(input: { appImport?: string; routes: Rou
     for (const r of routes) {
       const method = clean(r.method).toLowerCase();
       const path = clean(r.path);
-      const status = typeof r.expectStatus === 'number' ? r.expectStatus : 200;
+      const expected = typeof r.expectStatus === 'number' ? r.expectStatus : null;
+      // A generated test must not RUN the app's own mutations. Someone running their suite against a
+      // dev database would have this create or delete real rows they never asked to touch, and a
+      // scaffold is not worth that. Non-GET routes get a pending test to fill in deliberately.
+      if (method !== 'get' && method !== 'head') {
+        lines.push(`  it.todo('${method.toUpperCase()} ${path} — write this one yourself: it changes data');`);
+        continue;
+      }
       lines.push(
-        `  it('${method.toUpperCase()} ${path}', async () => {`,
+        `  it('${method.toUpperCase()} ${path} is mounted', async () => {`,
         `    const res = await request(app).${method}('${path}');`,
-        `    expect(res.status).toBe(${status});`,
-        '    // TODO: assert the response body',
+        expected !== null
+          // An explicit expectation came from the caller, so honour it exactly.
+          ? `    expect(res.status).toBe(${expected});`
+          // Otherwise assert only what is true for ANY mounted route. Demanding 200 would fail a
+          // guarded route (401) or one that wants a query (400) — correct code, red test.
+          : '    expect(res.status).not.toBe(404);',
         '  });',
+        `  it.todo('${method.toUpperCase()} ${path} — assert the response body');`,
       );
     }
   }

@@ -74,7 +74,12 @@ describe('planAutoTests', () => {
     expect(plan[0].testPath).toBe('src/lib/math.test.ts');
     expect(plan[0].modulePath).toBe('./math');
     expect(plan[0].content).toContain("import { add, sub } from './math'");
-    expect(plan[0].content).toContain('// TODO: assert real behaviour');
+    // Phase 4.4 contract: the written assertion is true by construction, and the real behaviour is
+    // PENDING rather than a TODO comment inside a test that already claims to pass.
+    expect(plan[0].content).toContain("expect(typeof add).toBe('function');");
+    expect(plan[0].content).toContain("it.todo('add — assert real behaviour with real arguments');");
+    // The scaffold must never invent arguments — that is what made these suites ship red.
+    expect(plan[0].content).not.toContain('undefined');
   });
 
   it('does not scaffold a test that already exists', () => {

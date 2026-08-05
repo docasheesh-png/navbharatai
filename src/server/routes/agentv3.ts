@@ -10196,7 +10196,14 @@ export function registerAgentV3Routes(app: Express): void {
       // writes nothing and parallelizes nothing — it is the load-bearing evidence for a future, flag-gated
       // parallel FE/BE build (safe only when the two sides own DISJOINT files). Best-effort; never affects
       // the build. `partitionable` on real builds is the signal that unblocks the next slice.
-      if (result && result.ok && writtenFiles.size > 0) {
+      // NOT ON AN IMPORT/SURVEY TURN (reports d5f0a2bc + 15985d3b, 2026-08-05). This partitions
+      // `writtenFiles`, which on a survey turn is just the `.env` we wrote — so a plainly full-stack
+      // 165-file app was described in the report as "0 frontend, 0 backend, 0 shared, 1 other. No
+      // clean full-stack split". Every word of that was true about the one file it measured and
+      // false about the app, which is the worst kind of wrong: a confident, specific, misleading
+      // line in the admin's primary diagnostic. It measures what WE built, so on a turn where we
+      // built nothing it stays silent rather than describing our own `.env`.
+      if (result && result.ok && writtenFiles.size > 0 && !isImportTurn) {
         try {
           const fbPart = partitionFrontendBackend([...writtenFiles.keys()]);
           buildDiag.record({

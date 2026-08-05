@@ -2261,6 +2261,14 @@ describe('post-build code gates never run on an import/survey turn', () => {
     }
   });
 
+  it('the FE/BE partition line stays silent on a survey turn, instead of describing our .env', () => {
+    // Report 15985d3b described a plainly full-stack 165-file app as "0 frontend, 0 backend, 0
+    // shared, 1 other. No clean full-stack split" — true about the one file it measured (`.env`)
+    // and false about the app. A confident, specific, misleading line in the admin's own diagnostic
+    // is worse than no line.
+    expect(SRC).toContain('if (result && result.ok && writtenFiles.size > 0 && !isImportTurn) {');
+  });
+
   it('no code gate is left on the old size-only guard', () => {
     // The exact shape that let infra writes through, in any of the four.
     expect(SRC).not.toContain("&& result.ok && writtenFiles.size > 0 && !abort.signal.aborted");

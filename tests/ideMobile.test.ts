@@ -9,11 +9,23 @@ import { join } from 'path';
 const studio = readFileSync(join(__dirname, '../src/components/ide/CodeStudio.tsx'), 'utf8');
 const editor = readFileSync(join(__dirname, '../src/components/ide/Editor.tsx'), 'utf8');
 
+
+/**
+ * The phone footer block, sliced by its real boundaries rather than a fixed character count. A
+ * character window broke the moment a menu entry was added — a test that fails for a change it does
+ * not cover teaches people to widen the number instead of reading the failure.
+ */
+const footerBlock = (): string => {
+  const start = studio.indexOf('PHONE BOTTOM-TAB IDE');
+  const end = studio.indexOf('Code Studio\'s own footer is now the BOTTOM-MOST bar', start);
+  return studio.slice(start, end > start ? end + 4000 : start + 9000);
+};
+
 describe('Mobile editor is tuned for touch', () => {
   it('CodeStudio overrides Monaco options when isMobile (no minimap/sticky, word-wrap, fat scrollbars)', () => {
     const i = studio.indexOf('...(isMobile ? {');
     expect(i).toBeGreaterThan(-1);
-    const block = studio.slice(i, i + 900);
+    const block = studio.slice(i, i + 900);   // the phone-override object itself, not the footer
     expect(block).toContain('minimap: { enabled: false }');
     expect(block).toContain('stickyScroll: { enabled: false }');
     expect(block).toContain("wordWrap: 'on'");
@@ -78,9 +90,8 @@ describe('Save is real, and says so honestly', () => {
 
 describe('Phone bottom-tab IDE', () => {
   it('has a bottom tab bar with Code / Files / Terminal / Debug / More', () => {
-    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
-    expect(i).toBeGreaterThan(-1);
-    const block = studio.slice(i, i + 4200);
+    expect(studio.indexOf('PHONE BOTTOM-TAB IDE')).toBeGreaterThan(-1);
+    const block = footerBlock();
     for (const label of ["label: 'Code'", "label: 'Files'", "label: 'Terminal'", "label: 'Debug'", "label: 'More'"]) {
       expect(block).toContain(label);
     }
@@ -93,8 +104,7 @@ describe('Phone bottom-tab IDE', () => {
   it('NEVER hides itself — a bottom bar that vanishes is a trapdoor', () => {
     // It used to disappear whenever the AI overlay opened — the one moment the user most needed a way
     // back, leaving the IDE with no visible navigation at all (admin: "apne aap gayab ho jata hai").
-    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
-    const block = studio.slice(i, i + 4200);
+    const block = footerBlock();
     expect(block).toContain('{isMobile && (');
     expect(block).not.toContain("isMobile && activeScreen !== 'ai' && (");
   });
@@ -102,8 +112,7 @@ describe('Phone bottom-tab IDE', () => {
   it('the terminal has exactly ONE entrance on a phone', () => {
     // It had three (a floating handle, the More sheet, and no footer tab), so a user could not tell
     // whether they had opened the same terminal or a different one.
-    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
-    const block = studio.slice(i, i + 4200);
+    const block = footerBlock();
     expect(block).toContain("label: 'Terminal', Icon: TerminalIcon");   // the footer tab
     expect(block).not.toContain("{ label: 'Terminal', Icon: TerminalIcon, onTap:");  // gone from More
     // The floating handle is desktop-only now.
@@ -112,8 +121,7 @@ describe('Phone bottom-tab IDE', () => {
   });
 
   it('the More sheet keeps the remaining secondary dev tools reachable', () => {
-    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
-    const block = studio.slice(i, i + 4200);
+    const block = footerBlock();
     for (const label of ["label: 'Search'", "label: 'Source Control'", "label: 'Security'", "label: 'Shortcuts'"]) {
       expect(block).toContain(label);
     }

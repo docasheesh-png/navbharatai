@@ -70,3 +70,54 @@ describe('ShellTerminal input during startup', () => {
     expect(restart).toContain('queueHintShownRef.current = false');
   });
 });
+
+/**
+ * TOUCH DEVICES GET A COMMAND BAR (admin 2026-08-05, second live report — typing still dead on an
+ * iPhone WITH the keystroke queue deployed).
+ *
+ * The named root cause: xterm.js does not support mobile soft keyboards — its hidden-textarea input
+ * path never produces onData on iOS, so the keyboard opens and nothing types, and no amount of
+ * plumbing behind onData can fix a path that never fires. The command bar is an input channel we own
+ * end-to-end: a real <input> whose submit goes straight to the PTY.
+ */
+describe('ShellTerminal mobile command bar', () => {
+  it('exists, and only for coarse (touch) pointers — desktop xterm typing is untouched', () => {
+    expect(code).toContain("matchMedia?.('(pointer: coarse)')");
+    expect(code).toContain('showCommandBar');
+  });
+
+  it('submits through the SAME sendInput path, with the real TTY line ending', () => {
+    expect(code).toContain("void sendInput(barText + '\\r')");
+  });
+
+  it('carries the keys a shell is unusable without: interrupt, completion, history', () => {
+    expect(code).toContain("sendInput('\\x03')");     // Ctrl+C
+    expect(code).toContain("sendInput('\\t')");       // Tab
+    expect(code).toContain("sendInput('\\x1b[A')");   // history up
+    expect(code).toContain("sendInput('\\x1b[B')");   // history down
+  });
+
+  it('disables the mobile-hostile keyboard behaviours a command input cannot survive', () => {
+    // autoCapitalize/autoCorrect would turn `npm` into `Npm` and "correct" flags into words —
+    // a command bar with autocorrect on is a bug generator, not a terminal.
+    expect(code).toContain('autoCapitalize="none"');
+    expect(code).toContain('autoCorrect="off"');
+    expect(code).toContain('spellCheck={false}');
+    expect(code).toContain('enterKeyHint="send"');
+  });
+
+  it('is never a dead control: input disabled with an honest placeholder when the shell is gone', () => {
+    expect(code).toMatch(/disabled=\{status\.kind === 'exited' \|\| status\.kind === 'unavailable'\}/);
+    expect(code).toContain('Terminal closed');
+    expect(code).toContain('Terminal not available');
+  });
+
+  it('helper keys keep the input focused so the phone keyboard stays open between taps', () => {
+    expect(code).toContain('onPointerDown={keepFocus}');
+    expect(code).toMatch(/keepFocus = \(e: React\.PointerEvent\) => e\.preventDefault\(\)/);
+  });
+
+  it('on a touch device, tab-activation focuses the BAR, never xterm — whose keyboard cannot type', () => {
+    expect(code).toMatch(/if \(showCommandBar\) barInputRef\.current\?\.focus\(\);\s*else termRef\.current\?\.focus\(\);/);
+  });
+});

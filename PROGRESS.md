@@ -25942,3 +25942,38 @@ verified directly) — in prod the egress is open, and the fallback rungs cover 
 
 **Still open toward "Bolt jaisa": HMR-style state-preserving edits** (Bolt keeps app state across an
 edit; we re-import). Next slice.
+
+## 2026-08-05 — Terminal typing on phones: the root cause was NEVER our plumbing (PR #2140)
+
+**Second live report of the same symptom** ("terminal me kuch bhi type nahi ho raha hai!!!") — WITH
+the #2137 keystroke queue deployed. That fix was real (the pre-open black hole existed and is closed)
+but it was not THIS bug's root. The honest-limit note on #2137 anticipated exactly this outcome.
+
+**Named root cause: xterm.js does not support mobile soft keyboards.** Its input path is a hidden
+textarea driven by keydown/composition events, which iOS's software keyboard does not deliver
+reliably. The keyboard OPENS (the textarea takes focus — exactly what the admin's first screenshot
+showed) but `onData` never fires. No fix behind onData can repair a path that never fires; patching
+around an unsupported dependency path would be the definition of a surface patch.
+
+**Fix (`ShellTerminal.tsx`): an input channel we own end-to-end.** On coarse-pointer (touch) devices
+the terminal gains a COMMAND BAR — a real `<input>` + Run button whose submit goes straight to the
+PTY via the same `sendInput` path (so the #2137 queue covers it during workspace wake), plus the keys
+a shell is unusable without: `^C` (\x03), `Tab`, `↑`/`↓` history (arrow escape sequences). The PTY
+echoes the command back through the stream, so output looks identical to key-by-key typing. This is
+the approach real mobile terminals (Termius, Blink) take. Details that matter: `autoCapitalize=none`
+/ `autoCorrect=off` (autocorrect turns `npm` into `Npm` — a command bar with autocorrect is a bug
+generator), `enterKeyHint=send`, helper keys hold focus via `onPointerDown preventDefault` so the
+phone keyboard stays open between taps, tab-activation focuses the BAR (focusing xterm on touch
+raises a keyboard that cannot type — the reported dead end), and the input disables itself with an
+honest placeholder when the shell is exited/unavailable (never a dead control). Desktop xterm typing
+is untouched; the bar renders only for coarse pointers.
+
+**Tests:** 7 new invariants in `shellTerminalInput.test.ts` (bar gated to touch, same send path +
+real \r, control keys, keyboard-hostile attrs off, disabled-state honesty, focus retention, bar-first
+activation focus). Full gate: 1073 files / 11977 tests green, tsc clean, bundle within budget.
+
+**Honest verification boundary:** I cannot run iOS Safari from this session — the deterministic
+claim is that the bar's input path does not depend on ANY xterm key handling (it is a plain React
+input → fetch), so the class of "keyboard events never reach xterm" cannot affect it. If typing in
+the BAR itself still fails on the admin's device, that would be new evidence pointing at the network
+layer (the /shell/input POST), which the diagnostics from #2129 would then name.

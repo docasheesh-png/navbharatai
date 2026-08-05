@@ -113,6 +113,25 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
    */
   const genRef = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: 'connecting' });
+  /**
+   * TOUCH DEVICES GET A REAL COMMAND BAR (admin 2026-08-05, second live report: "terminal me kuch
+   * bhi type nahi ho raha hai!!!" — on an iPhone, keyboard open, nothing typed).
+   *
+   * Root cause, named honestly: xterm.js does NOT support mobile soft keyboards. Its input path is a
+   * hidden textarea driven by keydown/composition events, which iOS's software keyboard does not
+   * deliver reliably — the keyboard OPENS (the textarea takes focus, which is exactly what the
+   * admin's screenshot showed) but onData never fires, so no fix inside our keystroke plumbing can
+   * ever make direct typing work there. Patching around an unsupported path would be a surface
+   * patch; the root-cause answer is an input channel WE own end-to-end: a visible command bar that
+   * sends straight to the PTY — the same approach real mobile terminals (Termius, Blink) take.
+   * Desktop keyboards work fine through xterm and are unchanged; the bar appears only for coarse
+   * (touch) pointers.
+   */
+  const [showCommandBar] = useState<boolean>(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches,
+  );
+  const [barText, setBarText] = useState('');
+  const barInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const gen = genRef.current + 1;
@@ -178,11 +197,15 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   useEffect(() => {
     if (!active) return;
     // A hidden container has no size, so xterm sized itself to nothing. Refit and focus on return.
+    // On a touch device, focus goes to the COMMAND BAR — focusing xterm there raises a keyboard
+    // whose keys xterm cannot receive (the exact reported dead end).
     const t = setTimeout(() => {
       try { fitRef.current?.fit(); } catch { /* mid-layout */ }
-      termRef.current?.focus();
+      if (showCommandBar) barInputRef.current?.focus();
+      else termRef.current?.focus();
     }, 0);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   async function start(term: Terminal, fit: FitAddon, alive: () => boolean): Promise<void> {
@@ -434,19 +457,65 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     void start(term, fit, () => genRef.current === gen);
   };
 
+  const sendBarCommand = () => {
+    // '\r' is what pressing Enter in a real TTY sends. The PTY echoes the command back through the
+    // stream, so the typed line appears in the terminal exactly as if xterm had sent it key by key.
+    void sendInput(barText + '\r');
+    setBarText('');
+    barInputRef.current?.focus();
+  };
+  /** Keeps the command-bar input focused (and the phone keyboard open) across helper-key taps. */
+  const keepFocus = (e: React.PointerEvent) => e.preventDefault();
+
   return (
-    <div className="relative h-full w-full bg-[#0d1117]">
-      <div ref={hostRef} className="absolute inset-0 p-2" />
-      {(status.kind === 'exited' || status.kind === 'unavailable') && (
-        // Both terminal states get a way BACK. 'unavailable' used to be a dead end — after a
-        // timed-out or failed open, the only recovery was closing the tab and opening a new one,
-        // which nobody discovers from an error message.
-        <button
-          onClick={restart}
-          className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-widest shadow-lg"
-        >
-          {status.kind === 'exited' ? 'Restart terminal' : 'Try again'}
-        </button>
+    <div className="h-full w-full bg-[#0d1117] flex flex-col">
+      <div className="relative flex-1 min-h-0">
+        <div ref={hostRef} className="absolute inset-0 p-2" />
+        {(status.kind === 'exited' || status.kind === 'unavailable') && (
+          // Both terminal states get a way BACK. 'unavailable' used to be a dead end — after a
+          // timed-out or failed open, the only recovery was closing the tab and opening a new one,
+          // which nobody discovers from an error message.
+          <button
+            onClick={restart}
+            className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-widest shadow-lg"
+          >
+            {status.kind === 'exited' ? 'Restart terminal' : 'Try again'}
+          </button>
+        )}
+      </div>
+      {showCommandBar && (
+        <div className="shrink-0 border-t border-zinc-800 bg-[#0d1117] px-1.5 py-1.5 flex items-center gap-1.5">
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x03')} aria-label="Send Ctrl+C (interrupt)"
+            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">^C</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\t')} aria-label="Send Tab (completion)"
+            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">Tab</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[A')} aria-label="History up"
+            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">↑</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[B')} aria-label="History down"
+            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">↓</button>
+          <input
+            ref={barInputRef}
+            value={barText}
+            onChange={(e) => setBarText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendBarCommand(); } }}
+            disabled={status.kind === 'exited' || status.kind === 'unavailable'}
+            placeholder={
+              status.kind === 'exited' ? 'Terminal closed — tap "Restart terminal"'
+              : status.kind === 'unavailable' ? 'Terminal not available — tap "Try again"'
+              : status.kind === 'connecting' ? 'Type a command — it runs when the workspace is ready'
+              : 'Type a command…'
+            }
+            aria-label="Terminal command input"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete="off"
+            enterKeyHint="send"
+            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-[13px] text-zinc-100 font-mono outline-none focus:border-indigo-500"
+          />
+          <button onPointerDown={keepFocus} onClick={sendBarCommand} aria-label="Run command"
+            className="shrink-0 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold">Run</button>
+        </div>
       )}
     </div>
   );

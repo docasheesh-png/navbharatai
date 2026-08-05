@@ -12,6 +12,7 @@ import { CommandPalette } from './CommandPalette';
 import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
 import { PreviewPanel } from './PreviewPanel';
+import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
@@ -36,6 +37,8 @@ interface CodeStudioProps {
   onFilesChange: (files: Record<string, string>) => void;
   /** Force pending edits to the durable store and resolve once they are really stored (Save). */
   onFlushEdits?: () => Promise<void>;
+  /** Live v5.0 preview state — the SAME object the slide-menu Preview renders from. */
+  v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
   /** Side-effect when files are deleted (clear durable storage; sync deletion to v5.0). */
   onFilesRemoved?: (paths: string[]) => void;
   onRun: (files: Record<string, string>) => void;
@@ -93,6 +96,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   files,
   onFilesChange,
   onFlushEdits,
+  v3Preview,
   onFilesRemoved,
   onRun,
   generatedCode,
@@ -1345,6 +1349,22 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         {/* Dynamic Main Workspace */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
           {activeScreen === 'preview' ? (
+             /* THE one preview. When a v5.0 workspace exists we render the very same PreviewSurface
+                the slide-menu Preview uses, so Code Studio, the sidebar and v5.0 are literally one
+                preview of one running app — not three views that can disagree. The legacy
+                generatedCode panel below remains ONLY for flows with no v5 workspace at all (there is
+                nothing else to show there); with a workspace it never renders again. */
+             v3Preview?.workspaceId || v3Preview?.previewUrl ? (
+               <PreviewSurface
+                 url={v3Preview?.previewUrl}
+                 workspaceId={v3Preview?.workspaceId}
+                 userId={v3UserId}
+                 email={v3Email}
+                 framework={v3Preview?.framework}
+                 autoResume={!v3Preview?.running}
+                 onFileEdited={(path, content) => onFilesChange({ ...files, [path]: content })}
+               />
+             ) : (
              <PreviewPanel
                files={files}
                generatedCode={generatedCode}
@@ -1359,6 +1379,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  setIsSidebarOpen(true);
                }}
              />
+             )
           ) : activeScreen === 'security' ? (
              <SecurityScan files={files} />
           ) : Object.keys(files).length === 0 ? (

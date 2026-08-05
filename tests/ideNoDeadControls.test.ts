@@ -244,3 +244,58 @@ describe('no inert icons in the editor toolbar', () => {
     expect(panel).not.toContain('opacity-0 group-hover:opacity-100');
   });
 });
+
+/**
+ * ONE APP, ONE VIEW OF IT (admin 2026-08-05, from the live site).
+ *
+ * Three symptoms, two root causes:
+ *   • an app built EARLIER opened empty in Code Studio
+ *   • Code Studio's preview said "Waiting for magic…" while the status bar said PREVIEW LIVE · 13 FILES
+ *   • Code Studio's preview was a different preview from the slide-menu / v5 one
+ *
+ * Both causes were the same shape: Code Studio read app-level state that only a build finishing IN
+ * THAT SESSION ever populated, so two views of one running app disagreed with each other.
+ */
+describe('Code Studio shows the SAME app the rest of the product does', () => {
+  it('renders the v5 PreviewSurface — not the retired generatedCode panel — when a workspace exists', () => {
+    expect(studio).toContain("import { PreviewSurface }");
+    const i = studio.indexOf('v3Preview?.workspaceId || v3Preview?.previewUrl');
+    expect(i).toBeGreaterThan(-1);
+    const block = studio.slice(i, i + 700);
+    expect(block).toContain('<PreviewSurface');
+    expect(block).toContain('url={v3Preview?.previewUrl}');
+    expect(block).toContain('workspaceId={v3Preview?.workspaceId}');
+  });
+
+  it('is handed the same preview state the slide-menu Preview renders from', () => {
+    const panels = read('src/components/panels/ViewPanels.tsx');
+    const i = panels.indexOf('<CodeStudio');
+    expect(panels.slice(i, i + 1600)).toContain('v3Preview={v3Preview}');
+    // The slide-menu Preview reads the very same object — that is what makes them one preview.
+    expect(panels).toContain('url={v3Preview?.previewUrl}');
+  });
+
+  it('hydrates the file set from the workspace, not only from a build that just finished', () => {
+    const app = read('src/App.tsx');
+    expect(app).toContain('hydratedWorkspaceRef');
+    const i = app.indexOf('const hydratedWorkspaceRef');
+    const block = app.slice(i, i + 2200);
+    expect(block).toContain("'/api/agentv3/workspace-files'");
+    // Must never clobber files the user already has open, and must not echo the load back as an edit.
+    expect(block).toContain('if (Object.keys(files).length > 0) return;');
+    expect(block).toContain('noteRemote(clean)');
+    // Once per workspace, so it cannot loop.
+    expect(block).toContain('hydratedWorkspaceRef.current === workspaceId');
+  });
+
+  it('the terminal names the real reason it failed', () => {
+    // "Could not reach the terminal service." on its own told nobody anything — including me, when a
+    // live report arrived and I could not reproduce it. An error that hides its cause is a second bug.
+    const shell = read('src/components/ide/ShellTerminal.tsx');
+    expect(shell).toContain('session expired');       // 401/403
+    expect(shell).toContain('Too many terminals');    // 429
+    expect(shell).toContain('not enabled on this server'); // 404
+    expect(shell).toContain('navigator.onLine');      // genuinely offline
+    expect(shell).toContain('e instanceof Error');    // carries the browser's own reason
+  });
+});

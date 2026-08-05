@@ -118,6 +118,29 @@ export function buildInsertSql(opts: { table: string; values: Record<string, unk
   return `insert into public.${table} (${cols}) values (${vals}) returning *`;
 }
 
+/**
+ * Many rows in one statement — the import path (Phase 2.5).
+ *
+ * One statement per batch, not per row, and that is a correctness decision as much as a speed one:
+ * a single INSERT is atomic, so a batch either lands completely or not at all. Row-at-a-time would
+ * leave a failed import half-applied with no record of where it stopped.
+ *
+ * Every row is filled from the SAME column list — a row that omits a column gets an explicit NULL
+ * rather than a shorter tuple, because a ragged VALUES list is a syntax error and silently reordering
+ * to make it fit would put values in the wrong columns.
+ */
+export function buildBulkInsertSql(opts: { table: string; columns: string[]; rows: Array<Record<string, unknown>> }): string {
+  const table = quoteIdent(opts.table);
+  const cols = Array.isArray(opts.columns) ? opts.columns : [];
+  if (cols.length === 0) throw new Error('nothing to import — no matching columns');
+  const rows = Array.isArray(opts.rows) ? opts.rows : [];
+  if (rows.length === 0) throw new Error('nothing to import — no rows');
+  for (const c of cols) if (!isSafeIdentifier(c)) throw new Error(`unsafe column: ${String(c).slice(0, 40)}`);
+  const colList = cols.map(quoteIdent).join(', ');
+  const tuples = rows.map((row) => `(${cols.map((c) => sqlLiteral(row?.[c] ?? null)).join(', ')})`).join(', ');
+  return `insert into public.${table} (${colList}) values ${tuples} returning *`;
+}
+
 export function buildUpdateSql(opts: {
   table: string; values: Record<string, unknown>; key: RowKey; pkColumns: string[]; columns?: string[];
 }): string {

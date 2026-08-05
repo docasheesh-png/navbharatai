@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sqlLiteral, primaryKeySql, whereFromKey, buildInsertSql, buildUpdateSql, buildDeleteSql,
-  verifySingleRow,
+  buildBulkInsertSql, verifySingleRow,
 } from './supabaseWrite';
 
 describe('sqlLiteral — the only place a value becomes SQL text', () => {
@@ -171,5 +171,36 @@ describe('verifySingleRow — the write is checked, never assumed', () => {
 
   it('a non-array response is a failure, not an empty success', () => {
     expect(verifySingleRow(null as never).ok).toBe(false);
+  });
+});
+
+describe('buildBulkInsertSql — the import path', () => {
+  it('writes one statement for many rows', () => {
+    // One statement per batch is a correctness decision as much as a speed one: a single INSERT is
+    // atomic, so a batch either lands completely or not at all.
+    expect(buildBulkInsertSql({ table: 'users', columns: ['a', 'b'], rows: [{ a: 1, b: 'x' }, { a: 2, b: 'y' }] }))
+      .toBe(`insert into public."users" ("a", "b") values (1, 'x'), (2, 'y') returning *`);
+  });
+
+  it('fills a missing field with an explicit NULL rather than a shorter tuple', () => {
+    // A ragged VALUES list is a syntax error, and quietly closing the gap would put values in the
+    // wrong columns.
+    expect(buildBulkInsertSql({ table: 't', columns: ['a', 'b'], rows: [{ a: 1 }] }))
+      .toContain('values (1, NULL)');
+  });
+
+  it('refuses an empty import instead of emitting a statement with no values', () => {
+    expect(() => buildBulkInsertSql({ table: 't', columns: [], rows: [{ a: 1 }] })).toThrow(/no matching columns/);
+    expect(() => buildBulkInsertSql({ table: 't', columns: ['a'], rows: [] })).toThrow(/no rows/);
+  });
+
+  it('refuses an injected column or table', () => {
+    expect(() => buildBulkInsertSql({ table: 't', columns: ['a"; drop table x; --'], rows: [{ a: 1 }] })).toThrow();
+    expect(() => buildBulkInsertSql({ table: 't; drop table t', columns: ['a'], rows: [{ a: 1 }] })).toThrow();
+  });
+
+  it('escapes a value carrying a quote, exactly as the single-row path does', () => {
+    expect(buildBulkInsertSql({ table: 't', columns: ['a'], rows: [{ a: "O'Brien" }] }))
+      .toContain("('O''Brien')");
   });
 });

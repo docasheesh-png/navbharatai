@@ -229,3 +229,58 @@ describe('the Schema view is complete (Phase 2.3)', () => {
     expect(studio).toContain("setSelected(fk.referencesTable)");
   });
 });
+
+/**
+ * CSV (Phase 2.5). A data importer that guesses wrong corrupts a database quietly, so the two things
+ * locked here are the honest reporting of a partial import and the null/empty-string distinction.
+ */
+describe('CSV import and export', () => {
+  const csv = read('src/lib/csv.ts');
+
+  it('exports through the tested writer, never a hand-rolled join', () => {
+    expect(route).toContain("app.get('/api/integrations/supabase/export'");
+    expect(route).toContain('toCsv(rows, columns)');
+  });
+
+  it('knows there is more by ASKING for one extra row, rather than guessing', () => {
+    expect(route).toContain('limit ${limit + 1}');
+    expect(route).toContain("X-Nbai-Truncated");
+  });
+
+  it('keeps the exported file clean CSV — the warning is a header, not a comment inside it', () => {
+    // A warning line inside the file would corrupt the data for every other tool that opens it.
+    expect(route).toContain('res.setHeader');
+    expect(route).not.toMatch(/# (warning|truncated)/i);
+  });
+
+  it('a PARTIAL import is reported with the real number, not called a failure', () => {
+    // Rows go in atomic batches, so a failure can leave earlier ones applied. "Import failed" would
+    // send the user to re-run the file and duplicate everything that did land.
+    expect(route).toContain('imported,');
+    expect(route).toContain('total: incoming.length');
+    expect(studio).toContain('Imported ${imported} of ${total} rows.');
+  });
+
+  it('unknown columns are named back to the user, never silently dropped', () => {
+    expect(route).toContain('unknownColumns: unknown');
+    expect(route).toContain('matchColumns(headers, tableColumns)');
+    expect(studio).toContain('the table does not have');
+  });
+
+  it('the file is parsed in the BROWSER first, so nothing reaches the database unseen', () => {
+    expect(studio).toContain('parseCsv(text)');
+    expect(studio).toContain('setImportPreview');
+  });
+
+  it('a missing value and an empty string stay different all the way through', () => {
+    // Guessing here is what corrupts data: a,,c is missing; a,"",c is an empty string.
+    expect(csv).toContain('An empty cell can honestly mean two different things');
+    expect(csv).toContain("if (value === null || value === undefined) return '';");
+  });
+
+  it('import is only offered where a write is allowed at all', () => {
+    const at = studio.indexOf('Import CSV');
+    expect(at).toBeGreaterThan(-1);
+    expect(studio.slice(Math.max(0, at - 400), at)).toContain('editable &&');
+  });
+});

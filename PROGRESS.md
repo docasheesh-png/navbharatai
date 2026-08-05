@@ -25903,3 +25903,42 @@ silently. The two old "compiler is cacheable" tests now guard the FALLBACK page 
 open — the artifact/vendoring root cause recorded earlier today stays open; #2132's preload only
 parallelises it; (2) HMR-style state-preserving edits (Bolt keeps app state across an edit; our reload
 re-imports) — a separate slice, not started.
+
+## 2026-08-05 — Bolt-parity slice 2: same-origin dependency mirror (PR #2139)
+
+**This closes the open root cause recorded this morning** ("old apps still open SLOWLY — every open
+re-resolves dependencies from the esm.sh CDN"). The preview's importmap now points at OUR origin:
+`GET /api/esm/<pkg>@<ver>` (`src/server/routes/esmMirror.ts`), a host-pinned mirror of esm.sh.
+
+**Why this is the "kitne bhi din baad" answer.** Every module URL is version-pinned, so the mirror
+serves `Cache-Control: immutable, max-age=1y` — the USER'S OWN BROWSER keeps every dependency on disk.
+Reopening an old app loads its deps with ZERO network. Three layers: browser disk cache → bounded
+instance LRU (128 MB total / 3 MB per entry, one user's fetch warms it for all) → esm.sh only on a
+genuine miss. Combined with #2138 (no compiler on the device) and #2132 (parallel preloads — which now
+warm the mirror URLs), the reopen path is: cached HTML + cached deps + execute.
+
+**The part that had to be exactly right:** esm.sh module bodies import their internal chunks by
+ABSOLUTE path (`import "/v135/…"`), which resolves against the module's own URL — from a mirrored
+module it would escape the mirror. Rewritten with **es-module-lexer** (new prod dep — a real parser
+giving exact specifier byte-ranges), because a regex cannot tell an import specifier from a string
+literal containing a path, and corrupting one library string is a blank preview with no visible cause.
+The lexer caught a real convention trap in review: dynamic `import("…")` ranges INCLUDE the quotes
+(static ranges don't) — handled and test-locked. Unparseable bodies pass through unmodified.
+
+**No new failure mode, by construction.** The loader's existing three-rung fallback makes the mirror
+rung 1; esm.run and plain esm.sh remain rungs 2/3, so a mirror outage degrades to exactly yesterday's
+behaviour. Kill switch `AGENTV3_PREVIEW_DEP_PROXY=off` reverts the importmap to direct esm.sh without
+a deploy; origin-less renders (tests, static route) stay on esm.sh automatically. Deliberately NOT
+rate-limited (a preview legitimately requests dozens of modules in a burst; the LRU + entry caps are
+the resource bound); host pinned, path validated (no traversal/scheme), `ACAO: *` because npm bytes
+are public and the sandboxed iframe has an opaque origin.
+
+**Verified:** 15 new tests (rewriter incl. the string-literal trap and quote convention, path guard,
+LRU eviction + per-entry cap, end-to-end route against a mock upstream, importmap/preload/DEP_BASE
+integration, kill-switch + origin-less fallbacks). Full gate 1073 files / 11970 tests green, both tsc
+clean, bundle within budget. REAL BOOT SMOKE: server booted, health 200, mirror mounted, traversal
+400; upstream fetch 502s ONLY because this dev container's egress proxy blocks esm.sh (CONNECT 403,
+verified directly) — in prod the egress is open, and the fallback rungs cover even that.
+
+**Still open toward "Bolt jaisa": HMR-style state-preserving edits** (Bolt keeps app state across an
+edit; we re-import). Next slice.

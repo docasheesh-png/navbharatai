@@ -1,0 +1,125 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+/**
+ * NO DEAD CONTROLS IN THE IDE (admin 2026-08-04: "koi hidden bugs ya kuch aur inactive button to nahi
+ * rah gaye?").
+ *
+ * A shortcut listed in the Shortcuts panel, or an icon rendered in a toolbar, is a PROMISE to the user.
+ * One that silently does nothing is the same defect as a button with no onClick — and it is worse than
+ * a missing feature, because it teaches the user that the app is broken.
+ *
+ * The audit that prompted this found ten: a ▶ that only re-ran the preview, a <Layout/> icon with no
+ * handler at all, four permanently-disabled debugger controls, and nine shortcuts advertised in the
+ * panel that no `case` in handleShortcut ever matched — including three debug-stepping keys for a
+ * debugger that does not exist and a "Open Dev Tools" a web page cannot open.
+ *
+ * This test does the whole audit mechanically, so the next one is caught by CI instead of by an admin
+ * tapping a button and finding nothing happens.
+ */
+const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+const studio = read('src/components/ide/CodeStudio.tsx');
+const editor = read('src/components/ide/Editor.tsx');
+
+/** Commands the UI advertises to the user (Shortcuts panel + Command Palette). */
+function advertisedCommands(): Set<string> {
+  const out = new Set<string>();
+  for (const f of ['src/components/ide/VirtualKeyboard.tsx', 'src/components/ide/CommandPalette.tsx']) {
+    const src = read(f);
+    for (const m of src.matchAll(/command:\s*'([^']+)'/g)) out.add(m[1]);
+    for (const m of src.matchAll(/action:\s*'([^']+)'/g)) out.add(m[1]);
+  }
+  return out;
+}
+
+/** Commands handleShortcut explicitly handles. */
+function handledCommands(): Set<string> {
+  const start = studio.indexOf('const handleShortcut');
+  const body = studio.slice(start, studio.indexOf('\n  }, [', start));
+  return new Set([...body.matchAll(/case '([^']+)'/g)].map((m) => m[1]));
+}
+
+/**
+ * Monaco action ids are forwarded wholesale to the editor, so they need no `case`. The prefixes here
+ * mirror the real forwarding condition in handleShortcut — keep them in step if that changes.
+ */
+const isMonacoPassthrough = (c: string) =>
+  c.startsWith('editor.') || c.startsWith('actions.') || c.startsWith('cursor')
+  || c === 'undo' || c === 'redo' || c === 'acceptSelectedSuggestion';
+
+describe('every advertised shortcut actually does something', () => {
+  it('no command in the Shortcuts panel is unhandled', () => {
+    const handled = handledCommands();
+    const dead = [...advertisedCommands()].filter((c) => !handled.has(c) && !isMonacoPassthrough(c)).sort();
+    expect(dead).toEqual([]);
+  });
+
+  it('the four that were silently dead are now really implemented', () => {
+    const handled = handledCommands();
+    for (const c of [
+      'expandLineSelection',              // Ctrl+L — lacks the prefix the passthrough matched on
+      'workbench.action.files.openFile',  // Ctrl+O — routes to the real quick-open
+      'workbench.action.showAllSymbols',  // Ctrl+T — Monaco's quick outline
+      'workbench.action.reopenClosedEditor', // Ctrl+Shift+T — a real closed-tab stack
+    ]) {
+      expect(handled.has(c)).toBe(true);
+    }
+    // Reopen must restore a real tab, and skip files that no longer exist — reopening onto a deleted
+    // file would show an empty editor that looks like the file was emptied.
+    const i = studio.indexOf("case 'workbench.action.reopenClosedEditor'");
+    const body = studio.slice(i, i + 900);
+    expect(body).toContain('closedTabs');
+    expect(body).toContain('files[path] === undefined');
+    expect(body).toContain('setActiveFile(path)');
+  });
+
+  it('shortcuts a browser genuinely cannot perform are GONE, not stubbed', () => {
+    const kb = read('src/components/ide/VirtualKeyboard.tsx');
+    for (const c of [
+      'workbench.action.toggleDevTools',              // a page cannot open browser devtools
+      'workbench.action.terminal.openNativeConsole',  // no native OS console from a browser
+      'workbench.action.debug.stepInto',              // no live debugger exists
+      'workbench.action.debug.stepOver',
+      'workbench.action.debug.stepOut',
+      'workbench.action.terminal.runRecentCommand',   // the real shell's own ↑ already does this
+    ]) {
+      expect(kb).not.toContain(`command: '${c}'`);
+    }
+    // And nothing quietly logs guidance instead of acting.
+    expect(studio).not.toContain("console.log('Press F12");
+  });
+
+  it('no two OF OUR OWN commands claim the same key', () => {
+    // Ctrl+Shift+C was listed twice — "External Terminal" and "Open Dev Tools". Both routed through our
+    // own switch, so at most one could ever fire and the other was dead by construction.
+    //
+    // Deliberately scoped to commands WE dispatch. Monaco passthroughs may legitimately share a key:
+    // Tab is bound to both `acceptSelectedSuggestion` and `editor.action.inlineSuggest.commit`, exactly
+    // as in VS Code, and Monaco resolves which applies from what is on screen. Flagging that would be
+    // the test inventing a rule the editor itself does not follow.
+    const kb = read('src/components/ide/VirtualKeyboard.tsx');
+    const ours = [...kb.matchAll(/key:\s*'([^']+)'[^\n]*?command:\s*'([^']+)'/g)]
+      .filter((m) => !isMonacoPassthrough(m[2]))
+      .map((m) => m[1]);
+    const dupes = ours.filter((k, i) => ours.indexOf(k) !== i);
+    expect([...new Set(dupes)]).toEqual([]);
+  });
+});
+
+describe('no inert icons in the editor toolbar', () => {
+  it('every clickable-looking icon in the toolbar row has a handler', () => {
+    // The <Layout/> icon sat here styled `cursor-pointer` with no onClick at all.
+    const row = editor.slice(editor.indexOf('{/* DEBUG'), editor.indexOf('{/* C11: Binary file warning'));
+    const inert = [...row.matchAll(/<([A-Z]\w+)\s+className="[^"]*cursor-pointer[^"]*"\s*\/>/g)].map((m) => m[1]);
+    expect(inert).toEqual([]);
+  });
+
+  it('the debugger ships no disabled run controls', () => {
+    const panel = read('src/components/ide/DebugPanel.tsx');
+    expect(panel).not.toContain('cursor-not-allowed');
+    expect(panel).not.toMatch(/<button[^>]*\sdisabled\b/);
+    // …while still saying plainly what is not available, so nobody hunts for a stepper.
+    expect(panel.toLowerCase()).toContain('not available yet');
+  });
+});

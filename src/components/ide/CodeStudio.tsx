@@ -160,6 +160,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
    * before — same layout, same save, same focus. Nothing about the existing single-editor experience
    * is re-plumbed to make the split possible, so the feature cannot regress the common case.
    */
+  /** Recently closed tab paths, newest last — powers a REAL Reopen Closed Tab (Ctrl+Shift+T).
+   *  Bounded to 10: this is an undo for a misclick, not a session history. */
+  const [closedTabs, setClosedTabs] = useState<string[]>([]);
   const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
   const [splitActive, setSplitActive] = useState<string>('');
   const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor
@@ -475,6 +478,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
   const handleTabClose = (path: string) => {
     const newTabs = openTabs.filter(t => t.path !== path);
+    // Remember it so Ctrl+Shift+T can really bring it back. Bounded — this is an undo stack for a
+    // misclick, not a session history.
+    setClosedTabs(prev => [...prev.filter(p => p !== path), path].slice(-10));
     setOpenTabs(newTabs);
     if (activeFile === path) {
       setActiveFile(newTabs[newTabs.length - 1]?.path || '');
@@ -684,10 +690,39 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         case 'workbench.action.focusFirstEditorGroup':
           if (editorInstance) editorInstance.focus();
           break;
-        case 'workbench.action.toggleDevTools':
-          // Cannot open Chrome dev tools via JS, but can log guidance
-          console.log('Press F12 or Ctrl+Shift+I to open DevTools');
+        // ── Four shortcuts the panel ADVERTISED but nothing handled (audit 2026-08-04) ──────────
+        // Each is now the real action, not an approximation. A shortcut listed in the Shortcuts panel
+        // is a promise; one that silently does nothing is the same defect as a button with no onClick.
+        case 'expandLineSelection':
+          // Monaco owns this id, but it lacks the `editor.`/`actions.` prefix the generic passthrough
+          // matches on — so Ctrl+L fell through every branch and did nothing.
+          editorInstance?.getAction('expandLineSelection')?.run();
           break;
+        case 'workbench.action.files.openFile':
+          // Ctrl+O — the same quick-open Ctrl+P already runs. Opening a file IS the quick-open.
+          setIsCommandPaletteOpen(true);
+          break;
+        case 'workbench.action.showAllSymbols':
+          // Ctrl+T — Monaco's quick outline: the symbols of the file you are in. Honestly scoped, and
+          // the Shortcuts panel now says "in File" rather than promising a whole-project symbol index
+          // we do not build.
+          editorInstance?.getAction('editor.action.quickOutline')?.run();
+          break;
+        case 'workbench.action.reopenClosedEditor': {
+          // Ctrl+Shift+T — genuinely reopens the last tab you closed, newest first, skipping any file
+          // that has since been deleted (reopening a tab onto a missing file would show an empty
+          // editor that looks like the file was emptied).
+          const stack = [...closedTabs];
+          while (stack.length > 0) {
+            const path = stack.pop()!;
+            if (files[path] === undefined) continue;
+            setClosedTabs(stack);
+            setOpenTabs(prev => (prev.some(t => t.path === path) ? prev : [...prev, { path }]));
+            setActiveFile(path);
+            break;
+          }
+          break;
+        }
         case 'base.action.save': {
           // Ctrl+S saves the file you are LOOKING at. With a split open that is the focused pane's
           // file — saving the left pane's file while the user types in the right one would write the

@@ -23,11 +23,19 @@ describe('DebugPanel', () => {
     expect(html).toContain('No breakpoints yet');
   });
 
-  it('renders the run controls as disabled (no fake stepping)', () => {
+  it('ships NO run controls at all — not even disabled ones', () => {
+    // It used to render Continue / Step over / Step into / Pause permanently disabled. That was honest
+    // about live debugging not existing, but four greyed-out buttons still read as a BROKEN feature
+    // rather than an unbuilt one — and since Debug became a footer tab they are the first thing a user
+    // sees. The honest state is a sentence, not a row of controls nobody can press.
     const html = renderToStaticMarkup(
       <DebugPanel breakpoints={{}} onClose={noop} onJumpToBreakpoint={noop} onClearBreakpoint={noop} onClearAll={noop} />,
     );
-    expect(html).toContain('disabled');
-    expect(html.toLowerCase()).toContain('live pause coming soon');
+    expect(html).not.toContain('disabled');
+    expect(html).not.toContain('cursor-not-allowed');
+    // …but it still SAYS so plainly, so nobody hunts for a stepper that does not exist.
+    expect(html.toLowerCase()).toContain('not available yet');
+    // The part that IS real stays real.
+    expect(html.toLowerCase()).toContain('breakpoints');
   });
 });

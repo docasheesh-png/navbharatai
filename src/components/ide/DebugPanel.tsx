@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Bug, X, MapPin, Trash2, Play, ArrowRight, ArrowDown, Pause, Layers, Braces } from 'lucide-react';
+import { Bug, X, MapPin, Trash2, Layers, Braces } from 'lucide-react';
 import type { BreakpointMap } from '../../lib/breakpoints';
 import { breakpointList, breakpointCount } from '../../lib/breakpoints';
 
@@ -54,19 +54,15 @@ export function DebugPanel({ onClose, breakpoints, onJumpToBreakpoint, onClearBr
         </div>
       </div>
 
-      {/* Run controls — DISABLED until live pause (cloud sandbox CDP) ships. No fake stepping. */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/5 shrink-0" title="Live debugging (pause/step) is coming in a later update">
-        {[
-          { icon: Play, label: 'Continue' },
-          { icon: ArrowRight, label: 'Step over' },
-          { icon: ArrowDown, label: 'Step into' },
-          { icon: Pause, label: 'Pause' },
-        ].map(({ icon: Icon, label }) => (
-          <button key={label} disabled title={`${label} — available once live debugging ships`} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded text-zinc-600 cursor-not-allowed">
-            <Icon className="w-3.5 h-3.5" />
-          </button>
-        ))}
-        <span className="ml-2 text-[10px] text-zinc-600">live pause coming soon</span>
+      {/* No run controls. There used to be four — Continue / Step over / Step into / Pause — rendered
+          permanently DISABLED, which was honest about live debugging not existing but still put four
+          dead buttons in front of the user. Since Debug became a footer tab (2026-08-04) they are the
+          first thing you see, and a row of greyed-out controls reads as a broken feature rather than an
+          unbuilt one. One plain sentence says the same thing without pretending there is a control to
+          press. Breakpoints below are fully real. */}
+      <div className="px-3 py-2 border-b border-white/5 shrink-0 text-[10px] leading-relaxed text-zinc-500">
+        Set breakpoints in the editor gutter and manage them here. Pausing execution and stepping
+        through code line by line is not available yet.
       </div>
 
       {/* Tabs */}

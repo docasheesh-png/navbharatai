@@ -25521,3 +25521,107 @@ THEY granted. Their data, their bill, their account; we only do the work.
 per-app secrets vault polish (1.4).
 
 
+
+---
+
+## 2026-08-05 — ROADMAP #1: Phase 2 complete, Phase 3 complete, Phase 4 mostly complete
+
+One long autonomous run. Every item below shipped through the normal cycle (branch → gate → PR → CI
+green → merge), with `AppKnowledgeBase` updated in the same commit wherever a user-facing capability
+changed. Merged PRs: **#2110, #2114, #2115, #2117, #2118, #2119, #2120, #2121, #2122, #2123, #2124, #2125**.
+
+### First: two things that were already wrong and shipping
+
+- **Database Studio was browsing NavBharatAI's OWN Firestore.** Typing a collection name pointed the
+  studio at the platform's store, from the browser, with the platform's client SDK. That store must
+  never back a user's app (standing constraint), and a signed-in user could page through the platform
+  collections Firestore rules leave readable. Both that path and the demo path are gone; a regression
+  test asserts the Firestore client cannot return to that file. (#2114)
+- **Generated tests were shipping RED with brand-new apps.** The unit scaffold called every function
+  with `undefined` for each argument and asserted `toBeDefined()`; the integration scaffold demanded
+  exactly 200 from every route. A function needing arguments throws, a void function returns undefined,
+  a POST without a body answers 400, a guarded route answers 401 — so a correct app arrived with a
+  failing suite, which teaches the user their own tests cannot be trusted. Root cause behind both: the
+  generator asserted behaviour it could not know. Now it asserts only what is true by construction
+  (`typeof fn === 'function'`, `status !== 404`) and marks the rest `it.todo`, which vitest reports as
+  PENDING — never passed, never failed. It also no longer RUNS a mutating route: someone testing
+  against a dev database would have had rows created or deleted they never asked to touch. (#2124)
+
+### Phase 2 — the user's own data (COMPLETE)
+- **2.1** Database Studio reads the user's real Supabase project. Identifiers validated then quoted
+  (`quoteIdent` THROWS rather than emitting a half-escaped string), numbers clamped, project ref
+  derived from the caller's own stored URL and never from a request. Row counts are the planner's
+  ESTIMATE and the UI says "about" — an exact `count(*)` scans every table on every page load. (#2114)
+- **2.2** Edit / add / delete. **No primary key, no write** — refused, not "handled carefully": without
+  a key nothing provably identifies one row, and an UPDATE matching four looks like one matching one
+  until the damage is done. A NULL key is refused too (`col = NULL` is never true, so it would report
+  success having changed nothing). Every statement ends in `returning *` and is verified to have hit
+  exactly one row. (#2115)
+- **2.3** Relations (outgoing only) + indexes in the Schema view. (#2115)
+- **2.4** SQL runner. Read-only is enforced by **Postgres**, not a keyword check: the statement runs
+  wrapped as a subquery, where a write is not grammatical and a data-modifying CTE is refused. A
+  keyword check waves `WITH gone AS (DELETE … RETURNING *) SELECT * FROM gone` straight through. One
+  statement only, decided by a real tokenizer (quotes, dollar-quoting, nested block comments). (#2115)
+- **2.5** CSV import/export. The decision that changes data: `a,,c` is MISSING, `a,"",c` is an EMPTY
+  STRING — same as Postgres `COPY … WITH CSV`, so a psql export round-trips. A round-trip test caught a
+  real bug mid-write: the blank-line filter dropped any row whose values were all empty, so a genuine
+  `null,''` row vanished on re-import. Partial imports report the real count rather than "failed",
+  which would send the user to re-run the file and duplicate what landed. (#2117)
+
+### Phase 3 — first impression (COMPLETE except 3.5)
+- **3.1** was already substantially DONE (palette, spacing, radius/shadow tokens, heading type scale).
+  Verified before building — not rebuilt.
+- **3.2** Screen recipes in the scaffold stylesheet: data table, empty state, dashboard shell, hero,
+  pricing, auth card, skeletons, dialog, toolbar, stat tiles. `nb-` prefixed, because a bare `.table`
+  would silently fight Tailwind's `table` utility. A test locks the kit and the prompt together: a
+  class the prompt names but the stylesheet lacks ships unstyled markup; a class the stylesheet has but
+  the prompt never mentions is dead weight in every app. (#2118)
+- **3.3** Motion: only `transform`/`opacity` (animating layout properties re-lays-out every frame — the
+  janky feel people associate with AI-built apps), 120–220ms, and reduced-motion turns EVERYTHING off,
+  not just the shimmer. (#2119)
+- **3.4** Layout sketches on the starter cards. Deliberately NOT screenshots: we do not have one per
+  template, photographs go stale the day the engine improves, and a convincing fake would be a picture
+  of an app that does not exist shown to someone deciding what to build. A test asserts the words
+  "preview" and "screenshot" never reach the user. (#2120)
+- **3.5 community gallery — NOT started, deliberately.** It is a public content surface, and the Nav
+  Store's VirusTotal licensing item (commercial use of the free API) is still open. Adding a second
+  public surface before that is settled would be adding risk.
+- **3.6** Visual editor: margin, Stack/Row/Column, alignment, gap, wrap. "Put these side by side" used
+  to cost a whole build round-trip. Row sets `flex-wrap: wrap` (a nowrap row built on a desktop is the
+  classic thing that overflows a phone); Stack CLEARS the flex declarations so a leftover `gap` does
+  not reappear later like a setting the user never made; "block" means NOT FLEX, so a grid never lights
+  up "Row". **Multi-select is NOT built** and is left honestly undone. The visual editor also had no
+  `AppKnowledgeBase` entry at all — no AI in the app could tell a user it existed. Added. (#2121)
+
+### Phase 4 — evidence (4.1–4.4 done)
+- **4.1** The "Cannot GET /customer/home" class, named at its cause. Prevention first (the prompt now
+  requires the static mount and catch-all, with the ordering warning — a catch-all before the API
+  routes answers the app's own fetch calls with HTML, which is strictly worse), plus a deterministic
+  analyzer that only fires when all three conditions hold, ignores hash routing, and strips comments so
+  a commented-out fallback does not silence it. Reported, never auto-written: the fix must land after
+  the app's own API routes. (#2122)
+- **4.2** Route smoke check after every successful build. GET/HEAD only (a check must never run the
+  user's writes against their data) and no path parameters (an invented id 404s, which we would report
+  as a broken route). 401/403 = the route EXISTS and is GUARDED — calling that a failure would fail
+  every app with authentication. "No answer" is kept distinct from "answered 404". Never changes the
+  verdict. Kill switch `AGENTV3_ROUTE_SMOKE=off`. (#2123)
+- **4.3** E2E net written into every app — **not run**. The roadmap said "run it on every build"; that
+  is the wrong trade at ~300 MB of browser per build, for every user, to add a signal the render check,
+  console capture and route smoke largely already give. The report says WRITTEN and says outright it
+  has not been run. Kill switch `AGENTV3_AUTO_E2E=off`. (#2125)
+- **4.5 browser self-test flow — NOT started.** **4.6 (Lighthouse + axe) is an admin/infra item** in the
+  roadmap itself: it needs headless Chrome infrastructure this session cannot provision.
+
+### Also fixed this run
+- The post-answer stretch (user's answer at 399s, build ended at 624s) is now MEASURED
+  (`POST_ANSWER_TIMING`) rather than guessed at. Deliberately not "optimised" by backgrounding the
+  integrity pass: that pass exists because an edit build writes 3–4 files, so `writtenFiles` alone
+  makes the checks blind, and backgrounding risks the report finalising before findings land.
+- "Report" can now send an EARLIER build. A chat is many builds, and a bug from three edits ago used to
+  be unreportable — the user clicked Report and we received a report about a different, working build.
+  Rows show only what the user already watched happen; the report content stays admin-only. The submit
+  path also gained the active-build identity guard the download path always had. (#2110)
+
+**Open, and honestly named:** 3.5 (blocked behind the VirusTotal licensing item), 4.5, 4.6 (infra),
+visual-editor multi-select, and the two autopsy items still unreproduced — the pre-kill/orphaned-corpse
+half of "Cannot GET", and attribution of the 238s event hole (now instrumentable).

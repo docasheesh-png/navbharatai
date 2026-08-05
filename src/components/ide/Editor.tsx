@@ -304,8 +304,12 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                 }}
                 aria-label={`Close tab ${tab.path}`}
                 className={cn(
-                  "p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity",
-                  isActive && "opacity-100"
+                  // Same touch trap as the file rows: hover-only meant a phone could not close a
+                  // BACKGROUND tab at all without first switching to it. Pointer devices keep the
+                  // reveal-on-hover; touch shows every ✕.
+                  "p-0.5 rounded hover:bg-white/10 transition-opacity",
+                  "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100",
+                  isActive && "[@media(hover:hover)]:opacity-100"
                 )}
               >
                 <X className="w-3 h-3" />

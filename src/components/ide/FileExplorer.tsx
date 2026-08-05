@@ -247,7 +247,12 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
               <Lock className="w-2.5 h-2.5 shrink-0 text-[#484f58]/60" title="Read-only / auto-generated file" />
             )}
           </div>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+          {/* TOUCH-SAFE reveal. These are the row's real actions (open in GitHub, delete), and
+              `opacity-0 group-hover:opacity-100` made them INVISIBLE on a phone — there is no hover to
+              trigger, so deleting a file from the Files tab was impossible on the device where Files IS
+              a footer tab. Gated on `(hover: hover)`: pointer devices keep the tidy reveal-on-hover,
+              touch devices get them permanently. */}
+          <div className="opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
             {/* J19: Open in GitHub */}
             {githubRepoUrl && (
               <a

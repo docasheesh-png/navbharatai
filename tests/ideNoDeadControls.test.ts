@@ -141,6 +141,35 @@ describe('no inert icons in the editor toolbar', () => {
     expect(stripComments(panel)).not.toMatch(/coming soon/i);
   });
 
+  it('NO phone-reachable IDE surface hides a control behind hover', () => {
+    // A touch device never fires hover, so `opacity-0 group-hover:opacity-100` is not a subtle reveal
+    // there — it is an invisible, untappable control. Two real capabilities were lost this way:
+    // deleting a file from the Files tab, and closing a background editor tab. Both surfaces are
+    // FOOTER TABS on a phone, i.e. exactly where they are used most.
+    //
+    // The fix is not "always visible" — that loses the desktop polish. It is `(hover: hover)`: pointer
+    // devices keep the reveal, touch devices get the control. So what is banned is an UNGATED
+    // opacity-0 reveal, not the pattern itself.
+    for (const f of [
+      'src/components/ide/FileExplorer.tsx',
+      'src/components/ide/Editor.tsx',
+      'src/components/ide/DebugPanel.tsx',
+      'src/components/ide/CodeStudio.tsx',
+      'src/components/ide/TerminalPanel.tsx',
+      'src/components/ide/GitPanel.tsx',
+      'src/components/ide/ProblemsPanel.tsx',
+    ]) {
+      // Comments stripped: the files explain this very pattern, and a test that forbids a word
+      // in a comment only teaches the next person to delete the explanation.
+      const src = stripComments(read(f));
+      // An `opacity-0 … group-hover:opacity-100` that is NOT gated on (hover: hover).
+      const ungated = [...src.matchAll(/opacity-0\s+(?:\[@media\(hover:hover\)\]:)?group-hover(?:\/\w+)?:opacity-100/g)]
+        .map((m) => m[0])
+        .filter((m) => !m.includes('hover:hover'));
+      expect({ file: f, ungated }).toEqual({ file: f, ungated: [] });
+    }
+  });
+
   it('no control in the debugger is HOVER-ONLY — a phone has no hover', () => {
     // `opacity-0 group-hover:opacity-100` makes a button invisible and effectively untappable on
     // touch. Debug is a phone footer tab, so that is exactly where its remove-breakpoint ✕ is used

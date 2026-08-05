@@ -373,6 +373,25 @@ ${babelTag}
   var cache = {};
   var bareCache = {};
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
+  // PROGRESS, not elapsed time. See the watchdog below — every module that finishes (or definitively
+  // fails) stamps this, and that is what decides whether the preview is working or hung.
+  var nbaiLastProgress = Date.now();
+  var nbaiPkgsDone = 0;
+  var nbaiPkgsTotal = 0;
+  var nbaiPending = 0;   // package downloads currently IN FLIGHT — see nbaiPkgDeadline below
+  function nbaiProgress() { nbaiLastProgress = Date.now(); }
+  // Packages download in PARALLEL, so "nothing completed recently" does NOT by itself mean stuck: one
+  // big dependency (firebase, @mui — a megabyte-plus) can still be streaming long after every small
+  // one finished. Killing the preview then would repeat the exact bug the stall watchdog was built to
+  // end. So a stall only counts while NOTHING is in flight, and each download carries its own generous
+  // deadline — which is what guarantees nbaiPending returns to 0 even against a CDN that accepts the
+  // connection and then never answers (the one hang a stall check cannot otherwise see).
+  var PKG_TIMEOUT_MS = 180000;
+  function nbaiPkgDeadline(spec) {
+    return new Promise(function (_res, rej) {
+      setTimeout(function () { rej(new Error('timed out after 180s')); }, PKG_TIMEOUT_MS);
+    });
+  }
   var missingLocal = {};   // resolved path → importer, for local files referenced but never created
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
   // ROOT-LOCAL SPECIFIERS (CoreUI report 2026-07-07): real Vite apps import from the project ROOT
@@ -392,38 +411,68 @@ ${babelTag}
   var IMG_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
   // Boot-overlay lifecycle: hidden the moment the app REALLY paints (first child in #root) or an
-  // error takes over; a 45s watchdog turns a silent hang into an explicit, named failure. 45s (not 25s):
-  // a large app (a SaaS dashboard's 600 KB+ bundle) loading React + many deps from the esm.sh CDN and
-  // compiling in-browser on a slow mobile network legitimately needs longer, and the server-side preview
-  // start already allows 90s — the old 25s ceiling false-failed real, still-loading previews (autopsy
-  // 2026-07-31). The reload button is always available, so a genuine hang is never trapped by the wait.
+  // error takes over. THE WATCHDOG WATCHES PROGRESS, NOT THE CLOCK.
+  //
+  // It used to be a flat timeout — 25s, then raised to 45s for the same reason, and still firing on
+  // apps that were merely slow (admin 2026-08-05: an old, fully-built app reopened days later, error
+  // "npm packages are still downloading", with bareLoadErrors EMPTY — i.e. nothing had failed; a
+  // working preview was killed mid-load). Raising the number again is a treadmill: any fixed ceiling
+  // is wrong for SOME app on SOME network, and the bigger the project the more certainly it is wrong.
+  //
+  // A preview that is still pulling modules IS working, however long it takes; one that has not
+  // advanced in STALL_MS is genuinely stuck. So every module that resolves — or definitively fails —
+  // stamps nbaiLastProgress, and only a stall raises the error. A big app on a slow phone can now take
+  // as long as it needs, and a truly hung one is reported FASTER than the old 45s.
+  //
+  // The absolute ceiling remains, far out, purely so a pathological loop cannot spin forever.
   var bootEl = document.getElementById('__nbai_boot');
   var bootStart = Date.now();
+  var STALL_MS = 20000;        // no module has resolved for this long ⇒ genuinely stuck
+  var HARD_CEILING_MS = 600000; // 10 min, backstop only
   var bootTick = setInterval(function () {
     var s = document.getElementById('__nbai_boot_s');
-    if (s) s.textContent = Math.round((Date.now() - bootStart) / 1000) + 's';
+    if (!s) return;
+    // Show real progress, not just a rising number. "12/34 packages" tells the user it is working;
+    // a bare seconds counter on a slow network reads exactly like a hang.
+    var secs = Math.round((Date.now() - bootStart) / 1000) + 's';
+    s.textContent = nbaiPkgsTotal > 0 ? (nbaiPkgsDone + '/' + nbaiPkgsTotal + ' packages · ' + secs) : secs;
   }, 1000);
-  var bootWatchdog = setTimeout(function () {
+  function nbaiBootFail() {
     if (!bootEl) return; // already mounted or errored
     var failed = Object.keys(bareLoadErrors);
-    var reason = 'The preview did not start within 45 seconds.\\n\\n';
+    var waited = Math.round((Date.now() - bootStart) / 1000);
+    var reason = 'The preview stopped making progress after ' + waited + ' seconds.\\n\\n';
     if (failed.length) {
       reason += 'These npm packages FAILED to load from the CDN:\\n'
         + failed.map(function (s) { return '  • ' + s + ' — ' + bareLoadErrors[s]; }).join('\\n')
         + '\\n\\nCheck your network and tap the reload (↻) button to retry.';
+    } else if (nbaiPending > 0) {
+      reason += nbaiPending + ' of ' + nbaiPkgsTotal + ' packages were still downloading after ' + waited
+        + ' seconds — the network is extremely slow right now. Tap the reload (↻) button to retry.';
     } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       reason += 'You appear to be OFFLINE. The preview needs the network once to download npm packages — reconnect and tap the reload (↻) button.';
     } else {
-      reason += 'npm packages are still downloading (a slow network), or a module hung while loading. Tap the reload (↻) button to retry.';
+      reason += 'Loaded ' + nbaiPkgsDone + ' of ' + nbaiPkgsTotal + ' packages, then the network went quiet. Tap the reload (↻) button to retry.';
     }
     showError(reason);
-  }, 45000);
+  }
+  var bootWatchdog = setInterval(function () {
+    if (!bootEl) { clearInterval(bootWatchdog); return; }
+    // A download still in flight is NOT a stall — a single large package can stream for a long time
+    // after every small one has finished, and treating that quiet gap as a hang is precisely the
+    // false failure this watchdog replaced. Its own per-package deadline bounds that wait instead.
+    var stalled = nbaiPending === 0 && Date.now() - nbaiLastProgress > STALL_MS;
+    if (stalled || Date.now() - bootStart > HARD_CEILING_MS) {
+      clearInterval(bootWatchdog);
+      nbaiBootFail();
+    }
+  }, 2000);
   function hideBoot() {
     if (!bootEl) return;
     bootEl.style.display = 'none';
     bootEl = null;
     clearInterval(bootTick);
-    clearTimeout(bootWatchdog);
+    clearInterval(bootWatchdog);   // an interval now, not a timeout — see the watchdog above
   }
   try {
     new MutationObserver(function () {
@@ -621,6 +670,7 @@ ${babelTag}
       if (typeof Babel === 'undefined') { showError('Could not load the preview compiler (network blocked?).'); return; }
       var bare = collectBare();
       forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
+      nbaiPkgsTotal = bare.length; nbaiProgress();
       await Promise.all(bare.map(async function (spec) {
         // An npm package's CSS file ('simplebar-react/dist/simplebar.min.css') is a STYLESHEET, not
         // an ES module — dynamic import() of it fails outright (the CoreUI failure). Load it as a
@@ -632,35 +682,45 @@ ${babelTag}
           link.href = specUrl(spec).split('?')[0];
           document.head.appendChild(link);
           bareCache[spec] = { __esModule: true, default: {} };
+          nbaiPkgsDone++; nbaiProgress();
           return;
         }
-        try { bareCache[spec] = interop(await import(specUrl(spec))); }
-        catch (e) {
-          // esm.sh flaked for this package — retry ONCE from the fallback CDN before giving up, so a
-          // single transient CDN hiccup doesn't blank the whole preview.
-          try {
-            bareCache[spec] = interop(await import(specUrlAlt(spec)));
-            console.warn('[preview] loaded', spec, 'from fallback CDN after esm.sh failed');
-          } catch (e2) {
-            // LAST RUNG (Conduit report 2026-07-07): plain esm.sh WITHOUT the react-externalization
-            // query. A legacy package (React 16/17 era) whose externalized \`import {Component} from
-            // 'react'\` hits a named-export binding mismatch ("does not provide an export named
-            // 'Component'") loads fine when it bundles its OWN react copy. Class-component apps
-            // tolerate that; a rare dual-React hook conflict then surfaces as its own honest error.
+        // Each rung races the shared per-package deadline, so a CDN that accepts the connection and
+        // then never answers cannot hold nbaiPending above zero forever (see nbaiPkgDeadline).
+        nbaiPending++;
+        try {
+          try { bareCache[spec] = interop(await Promise.race([import(specUrl(spec)), nbaiPkgDeadline(spec)])); }
+          catch (e) {
+            // esm.sh flaked for this package — retry ONCE from the fallback CDN before giving up, so a
+            // single transient CDN hiccup doesn't blank the whole preview.
             try {
-              bareCache[spec] = interop(await import(ESM + spec));
-              console.warn('[preview] loaded', spec, 'WITHOUT react-externalization (legacy interop fallback)');
-            } catch (e3) {
-              // Record EVERY rung's real failure so the surfaced error names the true causes,
-              // not just the first rung's message.
-              bareLoadErrors[spec] = [
-                (e && e.message) ? e.message : String(e),
-                (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
-                (e3 && e3.message) ? 'plain: ' + e3.message : '',
-              ].filter(Boolean).join(' | ');
-              console.warn('[preview] failed to load', spec, 'on all 3 rungs —', bareLoadErrors[spec]);
+              bareCache[spec] = interop(await Promise.race([import(specUrlAlt(spec)), nbaiPkgDeadline(spec)]));
+              console.warn('[preview] loaded', spec, 'from fallback CDN after esm.sh failed');
+            } catch (e2) {
+              // LAST RUNG (Conduit report 2026-07-07): plain esm.sh WITHOUT the react-externalization
+              // query. A legacy package (React 16/17 era) whose externalized \`import {Component} from
+              // 'react'\` hits a named-export binding mismatch ("does not provide an export named
+              // 'Component'") loads fine when it bundles its OWN react copy. Class-component apps
+              // tolerate that; a rare dual-React hook conflict then surfaces as its own honest error.
+              try {
+                bareCache[spec] = interop(await Promise.race([import(ESM + spec), nbaiPkgDeadline(spec)]));
+                console.warn('[preview] loaded', spec, 'WITHOUT react-externalization (legacy interop fallback)');
+              } catch (e3) {
+                // Record EVERY rung's real failure so the surfaced error names the true causes,
+                // not just the first rung's message.
+                bareLoadErrors[spec] = [
+                  (e && e.message) ? e.message : String(e),
+                  (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
+                  (e3 && e3.message) ? 'plain: ' + e3.message : '',
+                ].filter(Boolean).join(' | ');
+                console.warn('[preview] failed to load', spec, 'on all 3 rungs —', bareLoadErrors[spec]);
+              }
             }
           }
+        } finally {
+          // Settled either way — loaded or definitively failed. A definitive failure IS progress: it
+          // is what lets the wait end instead of hanging on a package that is never going to arrive.
+          nbaiPending--; nbaiPkgsDone++; nbaiProgress();
         }
       }));
       requireModule(ENTRY);

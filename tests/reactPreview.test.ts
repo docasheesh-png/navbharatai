@@ -260,11 +260,18 @@ describe('buildReactPreview — imported-app loader resilience (Fix 33)', () => 
     expect(html).toContain('IMG_PLACEHOLDER');
     expect(html).toContain('data:image/gif;base64');
   });
-  it('ships the Ashok Chakra boot overlay + the 45s stuck watchdog (bumped from 25s for large apps 2026-07-31)', () => {
+  it('ships the Ashok Chakra boot overlay + a PROGRESS-based stuck watchdog', () => {
+    // The flat timeout is gone (2026-08-05). It was 25s, then 45s for the same reason, and still
+    // false-failed a fully-built app reopened days later — the error said "packages are still
+    // downloading" with NOTHING recorded as failed, i.e. a working preview killed mid-load. Any fixed
+    // ceiling is wrong for some app on some network, so the watchdog now fires on a STALL instead:
+    // a preview still pulling modules is working, however long it takes.
     const html = buildReactPreview(reactVfs());
     expect(html).toContain('__nbai_boot');
     expect(html).toContain('__nbai_spin');
-    expect(html).toContain('did not start within 45 seconds');
+    expect(html).not.toContain('did not start within 45 seconds');
+    expect(html).toContain('nbaiLastProgress');
+    expect(html).toContain('STALL_MS');
   });
 });
 

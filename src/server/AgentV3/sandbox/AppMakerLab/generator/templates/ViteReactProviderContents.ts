@@ -312,4 +312,106 @@ small, .muted { color: var(--muted); }
 /* Labelled field — vertical label + input spacing so forms read cleanly. */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .field > label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   COMPONENT RECIPES (ROADMAP #1 Phase 3.2)
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+   The screens every app needs and every model re-invents badly: a data table, an empty state, a
+   dashboard shell, a hero, pricing, an auth card, loading skeletons and a dialog. Written once,
+   here, so the FIRST build already looks designed instead of the model producing a fresh mediocre
+   version of each per app — which also costs fewer tokens than describing them every time.
+
+   NAMES ARE PREFIXED ON PURPOSE. Tailwind ships "table", "hidden", "hero"-adjacent and other bare
+   utility names; a plain ".table" here would silently fight "class="table"" in any app that also
+   uses Tailwind. Every recipe below is ".nb-*" so the two can coexist in the same project without
+   either one quietly losing. */
+
+/* Data table — sticky header, zebra rows, hover, and a horizontal scroll that keeps the PAGE from
+   scrolling sideways on a phone (the usual mobile-table defect). Wrap: <div class="nb-table-wrap">. */
+.nb-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.nb-table { width: 100%; border-collapse: collapse; font-size: 0.925rem; }
+.nb-table th, .nb-table td { padding: 10px 14px; text-align: left; white-space: nowrap; }
+.nb-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--card); color: var(--muted);
+  font-weight: 600; font-size: 0.8rem; letter-spacing: 0.02em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.nb-table tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.nb-table tbody tr:last-child { border-bottom: 0; }
+.nb-table tbody tr:hover { background: var(--accent-soft); }
+.nb-table td.nb-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Empty state — what a new user sees FIRST, before any data exists. A blank panel reads as broken,
+   so this always carries an explanation and room for the action that fills it. */
+.nb-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 48px 24px; text-align: center; color: var(--muted); }
+.nb-empty-icon { font-size: 2.5rem; line-height: 1; opacity: 0.5; }
+.nb-empty-title { font-size: 1.05rem; font-weight: 700; color: var(--fg); }
+.nb-empty-text { max-width: 40ch; font-size: 0.9rem; }
+
+/* Dashboard shell — sidebar + topbar + content. Collapses to a single column on a phone, because a
+   fixed sidebar on a 390px screen leaves no room for the app itself. */
+.nb-shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+.nb-sidebar { border-right: 1px solid var(--border); background: var(--card); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+.nb-sidebar a, .nb-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 10px;
+  color: var(--muted); font-size: 0.925rem; font-weight: 500; text-decoration: none;
+}
+.nb-sidebar a:hover, .nb-nav-item:hover { background: var(--accent-soft); color: var(--fg); text-decoration: none; }
+.nb-sidebar a.active, .nb-nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
+.nb-main { padding: 24px 20px; min-width: 0; }
+@media (max-width: 820px) {
+  .nb-shell { grid-template-columns: 1fr; }
+  .nb-sidebar { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .nb-main { padding: 16px; }
+}
+
+/* Hero — the first screen of a landing page. The gradient uses the app's own accent, so it is
+   branded rather than a stock purple that belongs to no product. */
+.nb-hero { padding: 72px 20px; text-align: center; background: linear-gradient(160deg, var(--accent-soft), transparent 70%); border-bottom: 1px solid var(--border); }
+.nb-hero h1 { font-size: clamp(2rem, 5vw, 3.25rem); max-width: 22ch; margin-inline: auto; }
+.nb-hero-sub { max-width: 56ch; margin: 0 auto 24px; color: var(--muted); font-size: clamp(1rem, 2.2vw, 1.15rem); }
+.nb-hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+/* Pricing — equal-height cards with one highlighted plan, which is what makes a pricing page read. */
+.nb-pricing { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: stretch; }
+.nb-plan { display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+.nb-plan-featured { border-color: var(--accent); box-shadow: var(--shadow); position: relative; }
+.nb-plan-price { font-size: 2.25rem; font-weight: 800; letter-spacing: -0.02em; }
+.nb-plan-price small { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
+.nb-plan ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; font-size: 0.925rem; color: var(--muted); }
+.nb-plan .nb-plan-cta { margin-top: auto; }
+
+/* Auth card — a centred sign-in/sign-up panel. Narrow on purpose: a full-width login form on a
+   desktop looks unfinished. */
+.nb-auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.nb-auth-card { width: 100%; max-width: 380px; padding: 28px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.nb-auth-card h1 { font-size: 1.4rem; margin-bottom: 4px; }
+.nb-auth-sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
+
+/* Loading skeleton — shown while data is on its way. A spinner says "something is happening"; a
+   skeleton says WHAT is coming, so the layout does not jump when it arrives. */
+.nb-skeleton { background: linear-gradient(90deg, var(--border) 25%, color-mix(in srgb, var(--border) 40%, transparent) 50%, var(--border) 75%); background-size: 200% 100%; animation: nb-shimmer 1.4s ease-in-out infinite; border-radius: 8px; min-height: 14px; }
+@keyframes nb-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+/* Honour a reader who asked the system for less motion — the shimmer is decoration, not information. */
+@media (prefers-reduced-motion: reduce) { .nb-skeleton { animation: none; } }
+
+/* Dialog — a modal over a dimmed page. */
+.nb-modal-backdrop { position: fixed; inset: 0; background: rgba(9, 9, 14, 0.55); display: grid; place-items: center; padding: 20px; z-index: 50; }
+.nb-modal { width: 100%; max-width: 460px; max-height: 85vh; overflow-y: auto; padding: 22px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.nb-modal-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 6px; }
+.nb-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+/* Toolbar — the row above a table or list: title on the left, actions pushed right, wrapping on
+   a phone instead of overflowing. */
+.nb-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.nb-toolbar .nb-spacer { margin-left: auto; }
+
+/* Stat tile — the numbers across the top of a dashboard. */
+.nb-stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.nb-stat { padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+.nb-stat-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
+.nb-stat-value { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 `;

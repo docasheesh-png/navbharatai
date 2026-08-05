@@ -14,12 +14,20 @@
 // PURE & deterministic: no I/O. The route wiring that calls this is wrapped so
 // it can NEVER affect (let alone break) a build.
 
+import { devanagariLanguage, detectRomanizedIndic, type LanguageEvidence } from './IndicLanguage';
+
 /** A detected language: a short tag plus an English display name. */
 export interface LanguageHint {
   /** Short tag (e.g. 'hi', 'ta'). */
   code: string;
   /** English display name fed into the build instruction (e.g. 'Hindi'). */
   name: string;
+  /**
+   * HOW we know (Phase 6.1). A distinctive script is proof; a romanized guess is a guess, and the
+   * instruction says so out loud rather than asserting it — see `languageInstruction`. Optional so
+   * every existing caller keeps compiling unchanged.
+   */
+  evidence?: LanguageEvidence;
 }
 
 /** A Unicode script range mapped to a language hint. */
@@ -108,7 +116,14 @@ export function detectLanguageHint(text: string): LanguageHint | null {
     // not help distinguish a language.
   }
 
-  if (distinctiveLetters === 0) return null;
+  // NO DISTINCTIVE SCRIPT — but that is NOT the same as "no language" (Phase 6.1). Most Indian
+  // users type on a phone in Roman script: "enakku oru kadai app venum" carries zero non-Latin
+  // characters, so a script detector is blind to it by construction. Probed before this was added:
+  // romanized Tamil, Telugu and Marathi all returned null here. The romanized pass is deliberately
+  // timid (≥2 distinct markers, no English lookalikes, ties refused) — a miss costs the generic
+  // fallback that already works, while a false positive costs the user their whole app in a
+  // language they cannot read.
+  if (distinctiveLetters === 0) return detectRomanizedIndic(text);
 
   // Find the top distinctive script.
   let topIdx = -1;
@@ -129,5 +144,9 @@ export function detectLanguageHint(text: string): LanguageHint | null {
   if (topCount / totalLetters < DOMINANCE_THRESHOLD) return null;
 
   const script = SCRIPTS[topIdx];
-  return { code: script.code, name: script.name };
+  // DEVANAGARI IS NOT ONE LANGUAGE (Phase 6.1). Hindi and Marathi share the block, and this table
+  // used to map all of it to Hindi with a comment admitting it — so a Marathi user's app was built
+  // in Hindi. Marathi has markers Hindi does not use, so the two separate without guessing.
+  if (script.code === 'hi') return devanagariLanguage(text);
+  return { code: script.code, name: script.name, evidence: 'script' };
 }

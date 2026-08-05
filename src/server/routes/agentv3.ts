@@ -122,6 +122,7 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from '../AgentV3/ImportPreview';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
+import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -7686,8 +7687,12 @@ export function registerAgentV3Routes(app: Express): void {
       // language the request used. Best-effort — NEVER blocks a build.
       try {
         const hint = detectLanguageHint(prompt);
+        // Phase 6.1: the instruction now states its own CONFIDENCE. A distinctive script is proof and
+        // is asserted plainly; a romanized guess ("enakku … venum") says it is a guess and tells the
+        // model to follow the user's actual words if it is wrong — overstating a guess is how a
+        // mis-detection becomes an entire app the user cannot read.
         const langInstruction = hint
-          ? `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}. Keep code identifiers and comments in English.`
+          ? languageInstruction({ code: hint.code, name: hint.name, evidence: hint.evidence ?? 'script' })
           : `Language: generate all user-facing text in the app in the SAME language the user used in this request (default to English if it is English). Keep code identifiers and comments in English.`;
         buildPrompt = `${langInstruction}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }

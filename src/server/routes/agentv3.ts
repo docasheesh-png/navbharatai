@@ -166,6 +166,7 @@ import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation,
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
+import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import {
   planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
@@ -9514,10 +9515,30 @@ export function registerAgentV3Routes(app: Express): void {
               writtenFiles.set(path, content);
               added.push(path);
             }
+            // SIGN-IN FLOW (Phase 4.5). The smoke spec proves the app LOADS; this proves the login
+            // form exists, accepts input and submits without throwing. An app whose sign-in is broken
+            // is completely unusable no matter how good everything behind it is.
+            //
+            // Every selector is READ from the component this build produced, never guessed. A guessed
+            // selector fails against working code — the exact bug removed from the unit scaffolds one
+            // phase ago — so when the evidence is not in the markup, NO spec is written. A missing
+            // test is honest; a red test against a correct app is not.
+            const auth = findAuthFlow(e2eFiles);
+            if (auth) {
+              let authExists = false;
+              try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
+              if (!authExists) {
+                const spec = buildAuthFlowSpec(auth);
+                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
+                writtenFiles.set(AUTH_SPEC_PATH, spec);
+                added.push(AUTH_SPEC_PATH);
+              }
+            }
             if (added.length > 0) {
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'E2E_SCAFFOLDED',
-                message: e2eAutoScaffoldNote(added),
+                message: e2eAutoScaffoldNote(added)
+                  + (auth ? ` The sign-in test reads its selectors from ${auth.file}, so they keep working as long as that form does.` : ''),
                 autoResolved: true,
               });
             }

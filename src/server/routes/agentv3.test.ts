@@ -2161,7 +2161,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      reason "your files were left untouched, as asked"). It also refuses a failed build, a
     //      project with no UI, and any project that already has an E2E setup — and writes CREATE-ONLY,
     //      so a file the user owns is never overwritten. Considered ✓.
-    expect(count).toBe(14);
+    //   1× the sign-in flow spec (ROADMAP #1 Phase 4.5, 2026-08-05) — written INSIDE the same
+    //      `shouldAutoScaffoldE2e` branch as the E2E net above, so it inherits every one of that
+    //      decision's refusals (import/survey turn, failed build, no UI, existing E2E setup) rather
+    //      than re-deriving them and drifting. Create-only, and written at all only when the login
+    //      form's real selectors are readable from the markup. Considered ✓.
+    expect(count).toBe(15);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

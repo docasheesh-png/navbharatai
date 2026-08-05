@@ -20,6 +20,7 @@ import { join } from 'path';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
+import { precompileModules } from './PreviewPrecompile';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -264,17 +265,6 @@ function baseStyles(vfs: VirtualFileSystem): string {
  */
 export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): string {
   const entry = findEntry(vfs);
-  // Load the self-hosted compiler via an ABSOLUTE same-origin URL when the caller's origin is known
-  // (root-relative paths don't resolve inside a sandboxed <iframe srcDoc>). Falls back to the
-  // root-relative path when no origin is provided (e.g. unit tests, the /preview/:id static route).
-  const babelPrimary = origin ? `${origin.replace(/\/$/, '')}${BABEL_PRIMARY}` : BABEL_PRIMARY;
-  // Prefer INLINING the compiler (always works); fall back to a <script src=…> only when the source
-  // can't be read from disk. The escapes guard against the (extremely unlikely) "</script>" in the
-  // minified source breaking out of the tag.
-  const inlineBabel = babelInlineSource();
-  const babelTag = inlineBabel
-    ? `<script>${inlineBabel.replace(/<\/script>/gi, '<\\/script>')}</script>`
-    : `<script src="${babelPrimary}"></script>`;
 
   // Gather every source + css module so the in-browser loader can resolve imports.
   const modules: Record<string, string> = {};
@@ -291,7 +281,29 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
       + `<p>Expected a module entry (e.g. <code>src/main.jsx</code>) referenced by index.html.</p></body></html>`;
   }
 
-  const payload = JSON.stringify({ entry, modules }).replace(/<\//g, '<\\/');
+  // PRECOMPILED PATH (admin 2026-08-05, "Bolt jaisa"): compile every module on the SERVER with the
+  // exact pipeline the browser loader uses, ship the compiled code, and ship NO compiler at all —
+  // the device just executes. When precompilation declines (kill switch, or any module failing to
+  // compile), `compiled` is null and the page below is byte-for-byte today's browser-Babel page,
+  // where the same compiler reports the same error honestly.
+  const compiled = precompileModules(modules);
+  const precompiled = compiled != null;
+
+  // Load the self-hosted compiler via an ABSOLUTE same-origin URL when the caller's origin is known
+  // (root-relative paths don't resolve inside a sandboxed <iframe srcDoc>). Falls back to the
+  // root-relative path when no origin is provided (e.g. unit tests, the /preview/:id static route).
+  const babelPrimary = origin ? `${origin.replace(/\/$/, '')}${BABEL_PRIMARY}` : BABEL_PRIMARY;
+  // Prefer INLINING the compiler (always works); fall back to a <script src=…> only when the source
+  // can't be read from disk. The escapes guard against the (extremely unlikely) "</script>" in the
+  // minified source breaking out of the tag. A precompiled page ships no compiler in any form.
+  const inlineBabel = precompiled ? null : babelInlineSource();
+  const babelTag = precompiled
+    ? ''
+    : inlineBabel
+      ? `<script>${inlineBabel.replace(/<\/script>/gi, '<\\/script>')}</script>`
+      : `<script src="${babelPrimary}"></script>`;
+
+  const payload = JSON.stringify({ entry, modules: compiled ?? modules }).replace(/<\//g, '<\\/');
   const imports = buildImportmap(vfs);
   const importmap = JSON.stringify({ imports }).replace(/<\//g, '<\\/');
   // START THE DOWNLOADS NOW, not after the compiler finishes (admin 2026-08-05: "kitne bhi din baad
@@ -368,6 +380,9 @@ ${babelTag}
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;
+  // True when every module arrived ALREADY COMPILED from the server — the device then runs no
+  // compiler at all (no Babel download, no per-module transform on the phone's main thread).
+  var PRECOMPILED = ${precompiled};
   var IMAP = ${importmap ? 'JSON.parse(document.querySelector(\'script[type="importmap"]\').textContent).imports' : '{}'};
   // Path aliases (e.g. '@' -> '/client/src'): rewrite an alias-prefixed import to a root-absolute
   // LOCAL path so it resolves against the project's own files instead of being fetched from the CDN.
@@ -587,7 +602,10 @@ ${babelTag}
         p.node.attributes.push(t.jsxAttribute(t.jsxIdentifier('data-nbai-src'), t.stringLiteral(v)));
       } } };
     };
-    try { transformed = Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
+    // Precompiled pages: the server already ran this exact transform (PreviewPrecompile.ts) — the
+    // code in SOURCES IS the compiled output, so it runs as-is. The Babel branch is the fallback
+    // path and the two must stay semantically identical (locked by ReactPreview.precompile.test.ts).
+    try { transformed = PRECOMPILED ? code : Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
     catch (e) { throw new Error('Compile ' + path + ': ' + e.message); }
     var module = { exports: {} };
     cache[path] = module;
@@ -681,8 +699,10 @@ ${babelTag}
   (async function () {
     try {
       // Self-hosted compiler loads from <head>; if that failed, try CDN fallbacks before giving up.
-      for (var bi = 0; bi < BABEL_FALLBACKS.length && typeof Babel === 'undefined'; bi++) { await loadScript(BABEL_FALLBACKS[bi]); }
-      if (typeof Babel === 'undefined') { showError('Could not load the preview compiler (network blocked?).'); return; }
+      // A PRECOMPILED page ships no compiler and needs none — the compile already happened on the
+      // server, so boot goes straight to dependencies.
+      for (var bi = 0; bi < BABEL_FALLBACKS.length && !PRECOMPILED && typeof Babel === 'undefined'; bi++) { await loadScript(BABEL_FALLBACKS[bi]); }
+      if (!PRECOMPILED && typeof Babel === 'undefined') { showError('Could not load the preview compiler (network blocked?).'); return; }
       var bare = collectBare();
       forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
       nbaiPkgsTotal = bare.length; nbaiProgress();

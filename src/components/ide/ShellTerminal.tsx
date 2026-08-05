@@ -190,6 +190,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       return;
     }
 
+    // Opening a dormant workspace now WAKES it server-side, and resuming a sandbox takes real seconds.
+    // Say so, or the terminal looks frozen for the one moment it is doing the most work.
+    term.write('\x1b[90mStarting your workspace…\x1b[0m\r\n');
+
     let cols = 80;
     let rows = 24;
     try { const d = fit.proposeDimensions(); if (d) { cols = d.cols; rows = d.rows; } } catch { /* defaults */ }

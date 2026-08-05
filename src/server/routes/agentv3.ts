@@ -3920,6 +3920,58 @@ export function registerAgentV3Routes(app: Express): void {
   // same strict verification /exec uses, because a shell runs arbitrary commands.
   // ===============================================================================================
 
+  /** Files seeded back on a terminal wake. High enough for a real project, low enough that a huge
+   *  one cannot hold the open request indefinitely — the shell opens either way, and the build path
+   *  restores the rest. */
+  const TERMINAL_WAKE_MAX_FILES = 400;
+
+  /**
+   * Wake a dormant workspace so the TERMINAL can open in it.
+   *
+   * WHY (admin screenshot 2026-08-05). Opening the terminal on a project with 21 saved files said:
+   * "Workspace is dormant — send a message in v5.0 chat to bring the sandbox back online, then the
+   * terminal works again." That is honest, and it is still the wrong answer: it hands the user a chore
+   * and sends them to a different screen to perform it. A real IDE opens the terminal. We already know
+   * the workspace, we already have the durable files, and the resume path is proven — the only reason
+   * the terminal did not use it is that nobody had wired it.
+   *
+   * The sequence is the build path's own, minus everything a terminal does not need: resume this
+   * workspace's sandbox (or create one), seed the durable files back into it, open a git repo so
+   * checkpoints keep working, and register the session so the PTY host becomes reachable.
+   *
+   * Bounded and best-effort. On any failure the caller falls through to exactly today's honest dormant
+   * message — this can make the terminal work, never make it worse. Kill switch:
+   * AGENTV3_TERMINAL_AUTOWAKE=off.
+   */
+  async function wakeWorkspaceForTerminal(workspaceId: string, userId?: string): Promise<boolean> {
+    if (process.env.AGENTV3_TERMINAL_AUTOWAKE === 'off') return false;
+    // No cloud sandbox on this deployment ⇒ nothing to wake, and LocalActuator has no TTY anyway.
+    if (!process.env.E2B_API_KEY?.trim()) return false;
+    try {
+      const actuator = buildActuator();
+      const resumeSandboxId = sandboxResumeEnabled()
+        ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
+        : undefined;
+      await actuator.ensureWorkspace(workspaceId, undefined, resumeSandboxId);
+      // Seed the saved project back in. A RESUMED sandbox usually still has the files, but a recreated
+      // one comes back empty — and a terminal opening onto an empty directory would look exactly like
+      // the data loss this whole path exists to avoid. Bounded so a very large project cannot hold the
+      // request open indefinitely; the shell still opens either way.
+      const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      const entries = Object.entries(saved).slice(0, TERMINAL_WAKE_MAX_FILES);   // see the constant
+      for (const [path, content] of entries) {
+        if (typeof content !== 'string') continue;
+        await actuator.writeFile(workspaceId, path, content).catch(() => {});
+      }
+      const git = new GitManager(actuator, workspaceId);
+      await git.ensureRepo().catch(() => false);
+      registerSession(workspaceId, git, userId, actuator);
+      return true;
+    } catch {
+      return false;   // fall through to the honest dormant message — never worse than before
+    }
+  }
+
   /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
   app.post('/api/agentv3/shell/open', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
@@ -3937,7 +3989,15 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    const host = ptyHostForSession(workspaceId, userId ?? undefined);
+    let host = ptyHostForSession(workspaceId, userId ?? undefined);
+    // Dormant workspace with a real saved project? Wake it instead of sending the user to another
+    // screen to do it by hand.
+    if (!host) {
+      const hasProject = await countWorkspaceFiles(workspaceId).catch(() => 0);
+      if (hasProject > 0 && await wakeWorkspaceForTerminal(workspaceId, userId ?? undefined)) {
+        host = ptyHostForSession(workspaceId, userId ?? undefined);
+      }
+    }
     const result = await openShell(workspaceId, host, {
       userId: userId ?? undefined,
       cols: Number(req.body?.cols),

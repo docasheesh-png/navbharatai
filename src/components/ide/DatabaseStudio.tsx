@@ -8,16 +8,18 @@
 // (`users`, `posts`). Both paths are gone. The studio now reads the Supabase project that Phase 1
 // provisions inside the user's own account, through the server, which holds the token.
 //
-// Read-only, deliberately: writes are Phase 2.2 with their own confirmation path. Every mutating
-// control is absent rather than present-but-broken — a Delete button that does nothing is exactly the
-// half-built feature the constitution forbids.
+// Editing (Phase 2.2) is real, and it is deliberately NARROW. A row can only be changed when the
+// table has a real PRIMARY KEY, read from the database's own catalogue — without one there is no
+// expression that provably identifies a single row, so the controls are not shown at all and the
+// reason is stated. Deleting asks first, and every write is verified server-side to have touched
+// exactly one row before it is reported as saved.
 //
 // Sample data survives for one case only: nobody has connected a database yet. It is labelled sample,
 // and it is never writable, because rows that look live but go nowhere are a lie about where the
 // user's data is.
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns } from 'lucide-react';
+import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns, Plus, Edit2, Trash2, X, Lock, Link2, Play, Zap } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { Breadcrumb } from '../ui/Breadcrumb';
 import { authedFetch } from '../../lib/authedFetch';
@@ -41,6 +43,8 @@ const PAGE_SIZE = 50;
 
 interface TableInfo { name: string; rowEstimate: number }
 interface ColumnInfo { name: string; type: string; nullable: boolean; default: string | null }
+interface ForeignKey { name: string; column: string; referencesTable: string; referencesColumn: string }
+interface IndexInfo { name: string; unique: boolean; primary: boolean; definition: string }
 
 export function DatabaseStudio() {
   const [connected, setConnected] = useState(false);
@@ -61,7 +65,23 @@ export function DatabaseStudio() {
   const [sortField, setSortField] = useState('');
   const [sortDesc, setSortDesc] = useState(false);
   const [copied, setCopied] = useState('');
-  const [view, setView] = useState<'table' | 'json' | 'schema'>('table');
+  const [view, setView] = useState<'table' | 'json' | 'schema' | 'sql'>('table');
+  const [relations, setRelations] = useState<{ foreignKeys: ForeignKey[]; indexes: IndexInfo[] } | null>(null);
+
+  // SQL runner (2.4). `allowWrite` is off by default and resets after every run, so a write can never
+  // be the thing that happens because a toggle was left on from ten minutes ago.
+  const [sqlText, setSqlText] = useState('select * from ');
+  const [sqlRunning, setSqlRunning] = useState(false);
+  const [sqlResult, setSqlResult] = useState<{ rows: DBRow[]; columns: string[]; rowCount: number; capped: boolean; elapsedMs: number; readOnly: boolean } | null>(null);
+  const [sqlError, setSqlError] = useState('');
+
+  // Editing (2.2). `primaryKey` is what makes a row addressable; an empty key means this table is
+  // read-only and the UI says why rather than offering a Save that cannot work.
+  const [primaryKey, setPrimaryKey] = useState<string[]>([]);
+  const [editing, setEditing] = useState<{ row: DBRow; json: string } | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const state = studioState({ connected, hasDatabase });
   const live = state.isRealData;
@@ -136,6 +156,21 @@ export function DatabaseStudio() {
     setSelected((s) => s || 'users');
   }, [booting, live]);
 
+  // The key is fetched BEFORE any edit control is offered, so a table we cannot safely write is
+  // shown read-only with the reason instead of a Save that fails at the last moment.
+  useEffect(() => {
+    if (!live || !selected) { setPrimaryKey([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authedFetch(`/api/integrations/supabase/primary-key?table=${encodeURIComponent(selected)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) setPrimaryKey(res.ok && Array.isArray(data.primaryKey) ? data.primaryKey : []);
+      } catch { if (!cancelled) setPrimaryKey([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [live, selected]);
+
   useEffect(() => { setOffset(0); }, [selected]);
   useEffect(() => { if (selected) void loadRows(selected, offset); }, [selected, offset, loadRows]);
 
@@ -149,6 +184,14 @@ export function DatabaseStudio() {
         const res = await authedFetch(`/api/integrations/supabase/columns?table=${encodeURIComponent(selected)}`);
         const data = await res.json().catch(() => ({}));
         if (!cancelled && res.ok && Array.isArray(data.columns)) setSchema(data.columns);
+        const rel = await authedFetch(`/api/integrations/supabase/relations?table=${encodeURIComponent(selected)}`);
+        const rj = await rel.json().catch(() => ({}));
+        if (!cancelled && rel.ok) {
+          setRelations({
+            foreignKeys: Array.isArray(rj.foreignKeys) ? rj.foreignKeys : [],
+            indexes: Array.isArray(rj.indexes) ? rj.indexes : [],
+          });
+        }
       } catch { /* the schema panel is additive — a failure leaves the rows untouched */ }
     })();
     return () => { cancelled = true; };
@@ -168,6 +211,104 @@ export function DatabaseStudio() {
 
   const copyCell = (val: string) => {
     navigator.clipboard.writeText(val).then(() => { setCopied(val); setTimeout(() => setCopied(''), 1500); }).catch(() => { /* clipboard blocked — nothing to report */ });
+  };
+
+  const editable = live && primaryKey.length > 0;
+
+  /** The key of one row — exactly the primary-key columns, taken from the row we are looking at. */
+  const keyOf = (row: DBRow): Record<string, unknown> =>
+    Object.fromEntries(primaryKey.map((c) => [c, row[c]]));
+
+  /**
+   * One place for every write, so success and failure are handled identically.
+   *
+   * The row is re-read from the server's response rather than patched locally: a database applies
+   * defaults, triggers and type coercion, so the row we think we saved and the row that now exists
+   * are not always the same — and showing our guess would be a quiet lie about their data.
+   */
+  const write = async (method: 'POST' | 'PATCH' | 'DELETE', body: Record<string, unknown>): Promise<boolean> => {
+    setSaving(true);
+    setWriteError('');
+    try {
+      const res = await authedFetch('/api/integrations/supabase/row', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ table: selected, ...body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { setWriteError(data?.error || 'That change could not be saved.'); return false; }
+      await loadRows(selected, offset);
+      return true;
+    } catch (e) {
+      setWriteError(e instanceof Error ? e.message : 'That change could not be saved.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    let values: Record<string, unknown>;
+    try { values = JSON.parse(editing.json); } catch { setWriteError('That is not valid JSON — check the syntax.'); return; }
+    // The key columns are what identify the row; sending them as values too would let a typo silently
+    // move the row to a different key instead of editing the one on screen.
+    const changed = Object.fromEntries(Object.entries(values).filter(([k]) => !primaryKey.includes(k)));
+    if (Object.keys(changed).length === 0) { setWriteError('Nothing to save — no fields were changed.'); return; }
+    if (await write('PATCH', { key: keyOf(editing.row), values: changed })) setEditing(null);
+  };
+
+  const addRow = async () => {
+    if (adding === null) return;
+    let values: Record<string, unknown>;
+    try { values = JSON.parse(adding); } catch { setWriteError('That is not valid JSON — check the syntax.'); return; }
+    if (await write('POST', { values })) setAdding(null);
+  };
+
+  const deleteRow = async (row: DBRow) => {
+    // Deleting is the one action with no undo, so it asks — and names the row it will remove.
+    const label = primaryKey.map((c) => `${c}=${renderCell(row[c])}`).join(', ');
+    if (!window.confirm(`Delete this row (${label}) from "${selected}"? This cannot be undone.`)) return;
+    await write('DELETE', { key: keyOf(row) });
+  };
+
+  /**
+   * Run whatever the user typed.
+   *
+   * `allowWrite` is passed explicitly and only after they confirm, because the server's default is
+   * read-only — enforced by Postgres, not by us reading the text (see sqlSafety.ts). A confirmation
+   * that could be bypassed by a stale toggle would not be a confirmation at all, so it resets here.
+   */
+  const runSql = async (allowWrite: boolean) => {
+    if (sqlRunning || !sqlText.trim()) return;
+    if (allowWrite) {
+      if (!window.confirm('This will CHANGE your database and cannot be undone. Run it anyway?')) return;
+    }
+    setSqlRunning(true);
+    setSqlError('');
+    try {
+      const res = await authedFetch('/api/integrations/supabase/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: sqlText, allowWrite }),
+      }, 60_000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { setSqlError(data?.error || 'That query could not be run.'); setSqlResult(null); return; }
+      setSqlResult({
+        rows: Array.isArray(data.rows) ? data.rows : [],
+        columns: Array.isArray(data.columns) ? data.columns : [],
+        rowCount: Number(data.rowCount ?? 0),
+        capped: !!data.capped,
+        elapsedMs: Number(data.elapsedMs ?? 0),
+        readOnly: !!data.readOnly,
+      });
+      // A write can change what the table view is showing, so re-read it rather than leave a stale page.
+      if (allowWrite && selected) await loadRows(selected, offset);
+    } catch (e) {
+      setSqlError(e instanceof Error ? e.message : 'That query could not be run.');
+    } finally {
+      setSqlRunning(false);
+    }
   };
 
   const exportJson = () => {
@@ -201,8 +342,8 @@ export function DatabaseStudio() {
             {state.label}
           </div>
           <div className="flex items-center gap-1.5">
-            {(['table', 'json', 'schema'] as const).map((v) => (
-              <button key={v} onClick={() => setView(v)} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-all capitalize ${view === v ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-white/40'}`}>{v}</button>
+            {(['table', 'json', 'schema', 'sql'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-all capitalize ${view === v ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-white/40'}`}>{v === 'sql' ? 'SQL' : v}</button>
             ))}
           </div>
         </div>
@@ -260,6 +401,14 @@ export function DatabaseStudio() {
             </div>
             <span className="text-xs text-white/30">{pageSummary({ offset, shown: visibleRows.length, rowEstimate })}</span>
             <div className="ml-auto flex items-center gap-1">
+              {editable && (
+                <button
+                  onClick={() => { setWriteError(''); setAdding(`{\n  "field": "value"\n}`); }}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 mr-1 bg-cyan-600/20 border border-cyan-500/30 rounded-lg text-cyan-300 hover:bg-cyan-600/30 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add row
+                </button>
+              )}
               <button
                 onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 disabled={offset === 0 || loading}
@@ -287,10 +436,42 @@ export function DatabaseStudio() {
             </div>
           )}
 
-          {error && (
+          {/* No primary key = no safe way to name one row. Say that, rather than offering a broken Save. */}
+          {live && selected && primaryKey.length === 0 && (
+            <div className="mx-3 mt-2 flex items-start gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+              <Lock className="w-4 h-4 text-white/40 shrink-0 mt-0.5" />
+              <p className="text-xs text-white/50 leading-relaxed">
+                <span className="text-white/70">Read-only.</span> "{selected}" has no primary key, so NavBharatAI
+                cannot tell one row from another and will not risk changing the wrong one. Add a primary key to this
+                table to edit it here.
+              </p>
+            </div>
+          )}
+
+          {(error || writeError) && (
             <div className="mx-3 mt-2 flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-              <p className="text-xs text-red-300">{error}</p>
+              <p className="text-xs text-red-300">{error || writeError}</p>
+            </div>
+          )}
+
+          {/* Add row */}
+          {adding !== null && (
+            <div className="mx-3 mt-2 bg-[#161b22] border border-cyan-500/20 rounded-xl p-3">
+              <p className="text-xs text-white/50 mb-2">New row in "{selected}" (JSON)</p>
+              <textarea
+                className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-2 text-xs font-mono text-white/70 resize-none focus:outline-none mb-2"
+                rows={5}
+                value={adding}
+                onChange={(e) => setAdding(e.target.value)}
+                spellCheck={false}
+              />
+              <div className="flex gap-2">
+                <button onClick={() => void addRow()} disabled={saving} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all">
+                  {saving ? <TirangaLoader className="w-3 h-3" /> : <Check className="w-3 h-3" />} Add
+                </button>
+                <button onClick={() => { setAdding(null); setWriteError(''); }} className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/40">Cancel</button>
+              </div>
             </div>
           )}
 
@@ -326,11 +507,12 @@ export function DatabaseStudio() {
                           </div>
                         </th>
                       ))}
+                      {editable && <th className="w-16 px-2 py-2.5 text-white/30 text-right font-normal">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {visibleRows.map((row, ri) => (
-                      <tr key={ri} className="border-b border-white/3 hover:bg-white/2 transition-colors">
+                      <tr key={ri} className="border-b border-white/3 hover:bg-white/2 transition-colors group">
                         {headerKeys.map((key) => {
                           const val = renderCell(row[key]);
                           return (
@@ -346,6 +528,26 @@ export function DatabaseStudio() {
                             </td>
                           );
                         })}
+                        {editable && (
+                          <td className="px-2 py-2">
+                            <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => { setWriteError(''); setEditing({ row, json: JSON.stringify(row, null, 2) }); }}
+                                className="p-1 text-white/30 hover:text-cyan-400 transition-colors"
+                                title="Edit this row"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => void deleteRow(row)}
+                                className="p-1 text-white/30 hover:text-red-400 transition-colors"
+                                title="Delete this row"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -379,7 +581,10 @@ export function DatabaseStudio() {
                   <tbody>
                     {schema.map((c) => (
                       <tr key={c.name} className="border-b border-white/3">
-                        <td className="px-3 py-2 text-white/70 flex items-center gap-1.5"><Columns className="w-3 h-3 text-white/20" />{c.name}</td>
+                        <td className="px-3 py-2 text-white/70 flex items-center gap-1.5">
+                          <Columns className="w-3 h-3 text-white/20" />{c.name}
+                          {primaryKey.includes(c.name) && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-cyan-300">PK</span>}
+                        </td>
                         <td className="px-3 py-2 text-cyan-300/70">{c.type}</td>
                         <td className="px-3 py-2 text-white/40">{c.nullable ? 'yes' : 'no'}</td>
                         <td className="px-3 py-2 text-white/30">{c.default ?? '—'}</td>
@@ -388,9 +593,172 @@ export function DatabaseStudio() {
                   </tbody>
                 </table>
               )}
+
+              {/* Relations — outgoing only: "what does this user_id point at?" is the question a
+                  person browsing a row is actually asking. */}
+              {relations && relations.foreignKeys.length > 0 && (
+                <div className="mt-6">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Relations</p>
+                  {relations.foreignKeys.map((fk) => (
+                    <div key={`${fk.name}-${fk.column}`} className="flex items-center gap-2 py-1.5 text-xs border-b border-white/3">
+                      <Link2 className="w-3 h-3 text-white/20 shrink-0" />
+                      <span className="text-white/70">{fk.column}</span>
+                      <span className="text-white/25">→</span>
+                      <button
+                        onClick={() => { setSelected(fk.referencesTable); setView('table'); }}
+                        className="text-cyan-300/80 hover:text-cyan-200 hover:underline"
+                        title={`Open ${fk.referencesTable}`}
+                      >
+                        {fk.referencesTable}.{fk.referencesColumn}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Indexes — the usual reason a generated app slows down as it fills up is that the
+                  column the app filters by has none. */}
+              {relations && relations.indexes.length > 0 && (
+                <div className="mt-6">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Indexes</p>
+                  {relations.indexes.map((ix) => (
+                    <div key={ix.name} className="py-1.5 text-xs border-b border-white/3">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-3 h-3 text-white/20 shrink-0" />
+                        <span className="text-white/70">{ix.name}</span>
+                        {ix.primary && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-cyan-300">primary</span>}
+                        {ix.unique && !ix.primary && <span className="text-[9px] px-1 rounded bg-white/10 text-white/50">unique</span>}
+                      </div>
+                      <p className="pl-5 text-[10px] text-white/25 font-mono truncate" title={ix.definition}>{ix.definition}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === 'sql' && (
+            <div className="flex-1 overflow-auto p-4">
+              {!live ? (
+                <p className="text-xs text-white/30">Connect a database to run queries.</p>
+              ) : (
+                <>
+                  <textarea
+                    className="w-full bg-[#0d1117] border border-white/10 rounded-xl p-3 text-xs font-mono text-white/80 resize-y focus:outline-none focus:border-cyan-500/50"
+                    rows={6}
+                    value={sqlText}
+                    onChange={(e) => setSqlText(e.target.value)}
+                    spellCheck={false}
+                    placeholder="select * from users where created_at > now() - interval '7 days'"
+                  />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => void runSql(false)}
+                      disabled={sqlRunning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-all"
+                    >
+                      {sqlRunning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} Run
+                    </button>
+                    {/* A separate button, not a toggle: a toggle left on from ten minutes ago is how a
+                        read becomes a write nobody meant to run. This one always asks first. */}
+                    <button
+                      onClick={() => void runSql(true)}
+                      disabled={sqlRunning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/15 border border-red-500/30 text-red-300 hover:bg-red-600/25 disabled:opacity-40 rounded-lg text-xs transition-all"
+                      title="Run a statement that CHANGES your database. You will be asked to confirm."
+                    >
+                      Run as a change…
+                    </button>
+                    <p className="text-[10px] text-white/25 ml-1">
+                      Run is read-only — your database rejects anything that would change data.
+                    </p>
+                  </div>
+
+                  {sqlError && (
+                    <div className="mt-3 flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-300 leading-relaxed">{sqlError}</p>
+                    </div>
+                  )}
+
+                  {sqlResult && (
+                    <div className="mt-3">
+                      <p className="text-[10px] text-white/30 mb-2">
+                        {sqlResult.rowCount} row{sqlResult.rowCount === 1 ? '' : 's'} · {sqlResult.elapsedMs} ms
+                        {sqlResult.capped && <span className="text-amber-300/80"> · showing the first {sqlResult.rowCount} — there may be more</span>}
+                        {!sqlResult.readOnly && <span className="text-red-300/80"> · this changed your database</span>}
+                      </p>
+                      {sqlResult.rows.length === 0 ? (
+                        <p className="text-xs text-white/30">No rows returned.</p>
+                      ) : (
+                        <div className="overflow-auto border border-white/5 rounded-xl">
+                          <table className="w-full text-xs border-collapse min-w-max">
+                            <thead className="bg-[#161b22]">
+                              <tr className="border-b border-white/5">
+                                {sqlResult.columns.map((c) => (
+                                  <th key={c} className="text-left px-3 py-2 font-normal text-white/40 whitespace-nowrap">{c}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sqlResult.rows.map((row, ri) => (
+                                <tr key={ri} className="border-b border-white/3">
+                                  {sqlResult.columns.map((c) => {
+                                    const val = renderCell(row[c]);
+                                    return (
+                                      <td key={c} className="px-3 py-2 max-w-xs">
+                                        <span className={`truncate block ${row[c] === null || row[c] === undefined ? 'text-white/15 italic' : 'text-white/60'}`} title={val}>{val}</span>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
+
+        {/* Edit panel — the key columns are shown but not editable: they identify the row we are
+            changing, and letting a typo rewrite them would move the row instead of editing it. */}
+        {editing && (
+          <div className="w-80 border-l border-white/5 bg-[#161b22] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white">Edit row</p>
+                <p className="text-[10px] text-white/30 truncate">
+                  {primaryKey.map((c) => `${c}=${renderCell(editing.row[c])}`).join(', ')}
+                </p>
+              </div>
+              <button onClick={() => { setEditing(null); setWriteError(''); }} aria-label="Close">
+                <X className="w-4 h-4 text-white/40 hover:text-white/70" />
+              </button>
+            </div>
+            <div className="flex-1 p-3 overflow-auto">
+              <textarea
+                className="w-full h-full min-h-[300px] bg-[#0d1117] border border-white/10 rounded-xl p-3 text-xs font-mono text-white/70 resize-none focus:outline-none focus:border-cyan-500/50"
+                value={editing.json}
+                onChange={(e) => setEditing({ ...editing, json: e.target.value })}
+                spellCheck={false}
+              />
+              <p className="mt-2 text-[10px] text-white/30 leading-relaxed">
+                {primaryKey.join(', ')} identif{primaryKey.length === 1 ? 'ies' : 'y'} this row and {primaryKey.length === 1 ? 'is' : 'are'} not changed by saving.
+              </p>
+            </div>
+            <div className="p-3 border-t border-white/5 flex gap-2">
+              <button onClick={() => void saveEdit()} disabled={saving} className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all">
+                {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />} Save
+              </button>
+              <button onClick={() => { setEditing(null); setWriteError(''); }} className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs text-white/40 transition-all">Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

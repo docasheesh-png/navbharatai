@@ -49,20 +49,64 @@ describe('sample rows are labelled, and never pretend to be live', () => {
   });
 });
 
-describe('read-only in 2.1 — no half-built write controls', () => {
-  it('ships no edit / delete / add-row affordance', () => {
-    // A button that looks like it saves and does not is the half-done feature the constitution
-    // forbids. Writes arrive in 2.2, with confirmation, or not at all.
-    expect(studio).not.toContain('Add Row');
-    expect(studio).not.toContain('saveEdit');
-    expect(studio).not.toContain('deleteRow');
+/**
+ * Editing (Phase 2.2). Reading a table wrong shows the wrong screen; writing one wrong destroys data,
+ * with no undo. These lock the two structural guarantees rather than trusting a call site.
+ */
+describe('writes exist, and they are narrow on purpose', () => {
+  const write = read('src/server/lib/supabaseWrite.ts');
+
+  it('the three write routes are there', () => {
+    expect(route).toContain("app.post('/api/integrations/supabase/row'");
+    expect(route).toContain("app.patch('/api/integrations/supabase/row'");
+    expect(route).toContain("app.delete('/api/integrations/supabase/row'");
   });
 
-  it('the server exposes only reads for the data GUI', () => {
-    expect(route).toContain("app.get('/api/integrations/supabase/tables'");
-    expect(route).toContain("app.get('/api/integrations/supabase/rows'");
-    expect(route).toContain("app.get('/api/integrations/supabase/columns'");
-    expect(route).not.toMatch(/app\.(post|delete|put|patch)\('\/api\/integrations\/supabase\/rows'/);
+  it('a table with NO primary key is refused, with a reason the user can act on', () => {
+    // Not "handled carefully" — refused. Without a key nothing provably identifies a single row.
+    expect(route).toContain("failure: 'no-primary-key'");
+    expect(route).toContain('has no primary key');
+    expect(write).toContain("throw new Error('this table has no primary key')");
+  });
+
+  it('the key comes from the DATABASE catalogue, never inferred from a column name', () => {
+    expect(route).toContain('async function primaryKeyOf');
+    expect(route).toContain('primaryKeySql(table)');
+    expect(write).toContain('i.indisprimary');
+  });
+
+  it('every UPDATE and DELETE is built through whereFromKey, so neither can be unscoped', () => {
+    const upd = write.slice(write.indexOf('export function buildUpdateSql'), write.indexOf('export function buildDeleteSql'));
+    expect(upd).toContain('whereFromKey(opts.key, opts.pkColumns)');
+    const del = write.slice(write.indexOf('export function buildDeleteSql'));
+    expect(del).toContain('whereFromKey(opts.key, opts.pkColumns)');
+  });
+
+  it('the value encoder throws rather than falling back to String(value)', () => {
+    // A stringified surprise is how a value stops being a value and becomes syntax.
+    expect(write).toContain('throw new Error(`cannot store a value of type ${typeof value}`)');
+    expect(write).not.toMatch(/return String\(value\);\s*\/\/ fallback/);
+  });
+
+  it('every write is VERIFIED to have hit exactly one row before it is called saved', () => {
+    expect(route).toContain('verifySingleRow(result.rows)');
+    expect(write).toContain('export function verifySingleRow');
+  });
+
+  it('the UI only offers editing when a key exists, and says why when it does not', () => {
+    expect(studio).toContain('const editable = live && primaryKey.length > 0');
+    expect(studio).toContain('has no primary key');
+    expect(studio).toContain('/api/integrations/supabase/primary-key');
+  });
+
+  it('deleting asks first — it is the one action with no undo', () => {
+    expect(studio).toContain('window.confirm');
+    expect(studio).toContain('This cannot be undone');
+  });
+
+  it('the saved row is re-read from the server, not patched locally', () => {
+    // A database applies defaults, triggers and coercion; showing our guess would be a quiet lie.
+    expect(studio).toContain('await loadRows(selected, offset)');
   });
 });
 
@@ -119,5 +163,69 @@ describe('KB — the studio\'s entry tells the truth about what it shows', () =>
     expect(e).toBeTruthy();
     expect(e!.description.toLowerCase()).toContain('your own database');
     expect(e!.keywords).toContain('database studio');
+  });
+});
+
+/**
+ * The query runner (Phase 2.4). A SQL box is the feature most likely to become an accidental
+ * "delete everything" button, so read-only is enforced by Postgres, not by reading the text.
+ */
+describe('running your own SQL — read-only by construction', () => {
+  const safety = read('src/server/lib/sqlSafety.ts');
+
+  it('read-only is the DEFAULT: a write needs the caller to say so explicitly', () => {
+    expect(route).toContain('const wantsWrite = req.body?.allowWrite === true');
+    expect(route).toContain('wantsWrite ? writeQuery(sql) : readOnlyQuery(sql)');
+  });
+
+  it('the read path is WRAPPED, so the database refuses a write we never had to recognise', () => {
+    // A keyword check waves `WITH gone AS (DELETE ... RETURNING *) SELECT * FROM gone` straight
+    // through. Wrapped as a subquery, Postgres rejects it outright.
+    expect(safety).toContain('select * from (');
+    expect(safety).toContain('as nbai_q limit');
+  });
+
+  it('only ever one statement, on both paths', () => {
+    expect(safety.match(/statements\.length > 1/g)?.length ?? 0).toBe(2);
+  });
+
+  it('the splitter is a tokenizer, not a split on ";"', () => {
+    // Every interesting bypass lives exactly where a naive split gets it wrong.
+    for (const marker of ["ch === \"'\"", "ch === '\"'", "ch === '$'", "ch === '-' && next === '-'", "ch === '/' && next === '*'"]) {
+      expect(safety).toContain(marker);
+    }
+    expect(safety).not.toMatch(/sql\.split\(';'\)/);
+  });
+
+  it('the verb description is presentation, and says so — never a security control', () => {
+    expect(safety).toContain('NEVER a security control');
+  });
+
+  it('the UI asks before a write and does not keep a sticky toggle', () => {
+    // A toggle left on from ten minutes ago is how a read becomes a write nobody meant to run.
+    expect(studio).toContain('void runSql(false)');
+    expect(studio).toContain('void runSql(true)');
+    expect(studio).toContain('cannot be undone. Run it anyway?');
+  });
+
+  it('a capped result says there may be more, instead of implying that was everything', () => {
+    expect(route).toContain('capped: !wantsWrite && result.rows.length >= QUERY_ROW_CAP');
+    expect(studio).toContain('there may be more');
+  });
+});
+
+describe('the Schema view is complete (Phase 2.3)', () => {
+  it('serves relations and indexes', () => {
+    expect(route).toContain("app.get('/api/integrations/supabase/relations'");
+    expect(route).toContain('listForeignKeysSql(table)');
+    expect(route).toContain('listIndexesSql(table)');
+  });
+
+  it('indexes are additive — losing them does not cost the user the relations', () => {
+    expect(route).toContain('indexes: indexes.ok ?');
+  });
+
+  it('a relation is clickable, because "what does this point at" ends in opening that table', () => {
+    expect(studio).toContain("setSelected(fk.referencesTable)");
   });
 });

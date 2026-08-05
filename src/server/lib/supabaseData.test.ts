@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   projectRefFromUrl, isSafeIdentifier, quoteIdent, boundedInt,
   listTablesSql, listColumnsSql, readRowsSql, runQuery, columnsOf,
+  listForeignKeysSql, listIndexesSql,
   MAX_ROWS, DEFAULT_ROWS,
 } from './supabaseData';
 
@@ -173,5 +174,28 @@ describe('columnsOf — the header must not depend on the first row', () => {
   it('survives an empty page and junk rows', () => {
     expect(columnsOf([])).toEqual([]);
     expect(columnsOf([null as never, 'x' as never])).toEqual([]);
+  });
+});
+
+describe('listForeignKeysSql / listIndexesSql — the Schema view (2.3)', () => {
+  it('foreign keys pair each column with the one it points at, in key order', () => {
+    const sql = listForeignKeysSql('orders');
+    expect(sql).toContain("con.contype = 'f'");
+    expect(sql).toContain("cl.relname = 'orders'");
+    // Composite keys must not cross-join into every combination — the ordinality join is what
+    // keeps column 2 paired with referenced column 2.
+    expect(sql).toContain('fk.ord = k.ord');
+  });
+
+  it('indexes list the primary key first, which is the one that answers "can I edit this?"', () => {
+    const sql = listIndexesSql('orders');
+    expect(sql).toContain('pg_get_indexdef');
+    expect(sql).toContain('ix.indisprimary desc');
+    expect(sql).toContain("t.relname = 'orders'");
+  });
+
+  it('both refuse an injected table name before any SQL is produced', () => {
+    expect(() => listForeignKeysSql("t'; drop table users; --")).toThrow();
+    expect(() => listIndexesSql('t; drop table users')).toThrow();
   });
 });

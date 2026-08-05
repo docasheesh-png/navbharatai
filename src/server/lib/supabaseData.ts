@@ -168,6 +168,51 @@ export async function runQuery(
   return { ok: true, rows: parsed as Array<Record<string, unknown>> };
 }
 
+/**
+ * Foreign keys OUT of this table (Phase 2.3).
+ *
+ * Only outgoing links, because that is the question a person browsing a row is actually asking —
+ * "what does this `user_id` point at?" — and listing every table that references this one turns a
+ * detail panel into a directory.
+ */
+export function listForeignKeysSql(table: string): string {
+  return `select
+       con.conname            as constraint_name,
+       att.attname            as column_name,
+       cl2.relname            as references_table,
+       att2.attname           as references_column
+  from pg_constraint con
+  join pg_class cl on cl.oid = con.conrelid
+  join pg_namespace n on n.oid = cl.relnamespace
+  join unnest(con.conkey)  with ordinality as k(attnum, ord) on true
+  join unnest(con.confkey) with ordinality as fk(attnum, ord) on fk.ord = k.ord
+  join pg_attribute att  on att.attrelid  = con.conrelid  and att.attnum  = k.attnum
+  join pg_attribute att2 on att2.attrelid = con.confrelid and att2.attnum = fk.attnum
+  join pg_class cl2 on cl2.oid = con.confrelid
+ where con.contype = 'f' and n.nspname = 'public' and cl.relname = ${literal(table)}
+ order by con.conname, k.ord`;
+}
+
+/**
+ * Indexes on this table (Phase 2.3).
+ *
+ * Worth showing because it explains performance the user can otherwise only guess at — a table with
+ * no index on the column their app filters by is the single most common reason a generated app slows
+ * down as it fills up.
+ */
+export function listIndexesSql(table: string): string {
+  return `select i.relname as index_name,
+       ix.indisunique  as is_unique,
+       ix.indisprimary as is_primary,
+       pg_get_indexdef(ix.indexrelid) as definition
+  from pg_index ix
+  join pg_class t on t.oid = ix.indrelid
+  join pg_class i on i.oid = ix.indexrelid
+  join pg_namespace n on n.oid = t.relnamespace
+ where n.nspname = 'public' and t.relname = ${literal(table)}
+ order by ix.indisprimary desc, i.relname`;
+}
+
 /** Column names across a page of rows — the table header, including columns that are null in row 1. */
 export function columnsOf(rows: Array<Record<string, unknown>>): string[] {
   const seen = new Set<string>();

@@ -35,9 +35,13 @@ import {
 import {
   saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh, updateTokens,
 } from '../lib/supabaseConnectionStore';
+import {
+  projectRefFromUrl, isSafeIdentifier, boundedInt, listTablesSql, listColumnsSql, readRowsSql,
+  runQuery, columnsOf, MAX_ROWS, DEFAULT_ROWS,
+} from '../lib/supabaseData';
 import { audit } from '../lib/audit';
 import { getServerDb } from '../lib/serverDb';
-import { encrypt } from '../lib/secrets';
+import { encrypt, loadUserVaultSecrets } from '../lib/secrets';
 import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 
 /**
@@ -48,6 +52,38 @@ import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
  * than the provider's US default.
  */
 export const DEFAULT_REGION = 'ap-south-1';
+
+/**
+ * A usable access token for this user — renewed silently if the stored one is stale.
+ *
+ * ONE implementation on purpose (Phase 2.1). This block was written for provisioning; the Data GUI
+ * needs exactly the same thing, and a second copy is how the two drift — the dangerous half being
+ * the rotation persistence: Supabase may hand back a NEW refresh token, and a caller that forgets to
+ * store it breaks the connection an hour later, somewhere else entirely, where the cause is nearly
+ * impossible to find. Centralising it means that can only be got right or wrong once.
+ *
+ * Returns a status rather than throwing, because the two failures need different words: a genuinely
+ * revoked grant sends the user back through consent (401), while a network blip or a provider 5xx is
+ * transient (502) and must never cost them a re-authorisation.
+ */
+async function freshAccessToken(
+  userId: string,
+  conn: { accessToken: string; refreshToken: string; expiresAtMs: number },
+): Promise<{ ok: true; token: string } | { ok: false; status: number; message: string; failure: string }> {
+  if (!needsRefresh(conn.expiresAtMs, Date.now())) return { ok: true, token: conn.accessToken };
+  const renewed = await refreshAccessToken({
+    refreshToken: conn.refreshToken,
+    clientId: process.env.SUPABASE_OAUTH_CLIENT_ID as string,
+    clientSecret: process.env.SUPABASE_OAUTH_CLIENT_SECRET as string,
+    nowMs: Date.now(),
+  });
+  if (!renewed.ok) {
+    return { ok: false, status: renewed.failure === 'unauthorized' ? 401 : 502, message: renewed.message, failure: renewed.failure };
+  }
+  // Persist BEFORE spending it — see above.
+  await updateTokens(userId, renewed.tokens);
+  return { ok: true, token: renewed.tokens.accessToken };
+}
 
 /**
  * Write the provisioned keys into the user's encrypted vault, replacing any earlier value.
@@ -275,26 +311,12 @@ export function registerSupabaseIntegrationRoutes(
     // A Supabase access token lives about an hour, but a user connects once and builds for weeks — so
     // an expired token is renewed SILENTLY here. Without this the user's second app would meet
     // "please connect again", turning one-time setup into a recurring chore.
-    let accessToken = conn.accessToken;
-    if (needsRefresh(conn.expiresAtMs, Date.now())) {
-      const renewed = await refreshAccessToken({
-        refreshToken: conn.refreshToken,
-        clientId: process.env.SUPABASE_OAUTH_CLIENT_ID as string,
-        clientSecret: process.env.SUPABASE_OAUTH_CLIENT_SECRET as string,
-        nowMs: Date.now(),
-      });
-      if (!renewed.ok) {
-        // Only a genuinely revoked grant sends the user back through consent; a network blip or a
-        // provider 5xx is transient and must not cost them a re-authorisation.
-        res.status(renewed.failure === 'unauthorized' ? 401 : 502)
-          .json({ error: renewed.message, failure: renewed.failure });
-        return;
-      }
-      accessToken = renewed.tokens.accessToken;
-      // Persist BEFORE spending it: Supabase may have rotated the refresh token, and losing that
-      // rotation silently breaks the connection an hour later, where the cause is very hard to see.
-      await updateTokens(uid, renewed.tokens);
+    const fresh = await freshAccessToken(uid, conn);
+    if (!fresh.ok) {
+      res.status(fresh.status).json({ error: fresh.message, failure: fresh.failure });
+      return;
     }
+    const accessToken = fresh.token;
 
     const appLabel = typeof (req.body ?? {}).appLabel === 'string' ? (req.body as { appLabel: string }).appLabel : '';
     const region = typeof (req.body ?? {}).region === 'string' && (req.body as { region: string }).region
@@ -380,6 +402,120 @@ export function registerSupabaseIntegrationRoutes(
       url: creds.credentials.url,
       schemaApplied,
       ...(schemaNote ? { schemaNote } : {}),
+    });
+  });
+
+  // ── Data GUI (ROADMAP #1 Phase 2.1) ────────────────────────────────────────────────────────────
+  // Read the user's OWN database. Until now Database Studio showed demo rows, or — if you typed a
+  // collection name — NavBharatAI's own Firestore, which is the wrong database twice over: not the
+  // user's data, and a store that must never back a user's app.
+  //
+  // READ-ONLY. Writes are Phase 2.2 with their own confirmation path; shipping "browse" and "silently
+  // mutate" together is how a data GUI destroys someone's rows.
+
+  /**
+   * Everything a data read needs, resolved from the VERIFIED user: a live token and their project.
+   *
+   * The project ref is derived from the `VITE_SUPABASE_URL` we already store, because provisioning
+   * never recorded the ref separately — so for users provisioned before Phase 2.1 the URL is the only
+   * place it exists. `projectRefFromUrl` refuses anything that is not a real Supabase project URL,
+   * so a custom domain yields an honest "not connected" rather than a call aimed at a guessed ref.
+   */
+  async function resolveDataAccess(req: Request): Promise<
+    { ok: true; token: string; projectRef: string } | { ok: false; status: number; error: string }
+  > {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) return { ok: false, status: 401, error: 'Please sign in first.' };
+    const conn = await getConnection(uid);
+    if (!conn) return { ok: false, status: 400, error: 'Connect your database first — Settings → Database.' };
+    const fresh = await freshAccessToken(uid, conn);
+    if (!fresh.ok) return { ok: false, status: fresh.status, error: fresh.message };
+    const secrets = await loadUserVaultSecrets(uid).catch(() => ({} as Record<string, string>));
+    const projectRef = projectRefFromUrl(secrets.VITE_SUPABASE_URL);
+    if (!projectRef) {
+      return { ok: false, status: 400, error: 'No database is set up for your account yet. Create one in Settings → Database.' };
+    }
+    return { ok: true, token: fresh.token, projectRef };
+  }
+
+  /** Turn a classified data failure into a response — the provider's own text never goes out. */
+  function sendDataError(res: Response, err: { failure: string; message: string; detail?: string }): void {
+    if (err.detail) console.error(`[SUPABASE-DATA] ${err.failure}: ${err.detail}`);
+    res.status(err.failure === 'unauthorized' ? 401 : err.failure === 'bad-request' ? 400 : 502)
+      .json({ error: err.message, failure: err.failure });
+  }
+
+  // The sidebar: which tables exist, and roughly how many rows each holds.
+  app.get('/api/integrations/supabase/tables', async (req: Request, res: Response) => {
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+    const result = await runQuery(access.token, access.projectRef, listTablesSql());
+    if (!result.ok) { sendDataError(res, result); return; }
+    res.json({
+      tables: result.rows.map((r) => ({
+        name: String(r.table_name ?? ''),
+        rowEstimate: Number(r.row_estimate ?? 0),
+      })).filter((t) => t.name),
+    });
+  });
+
+  // One page of one table, plus its columns so the header is right even when a column is null
+  // throughout the page.
+  app.get('/api/integrations/supabase/rows', async (req: Request, res: Response) => {
+    const table = typeof req.query.table === 'string' ? req.query.table : '';
+    if (!isSafeIdentifier(table)) {
+      res.status(400).json({ error: 'That table name is not one NavBharatAI can read.' });
+      return;
+    }
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+
+    const limit = boundedInt(req.query.limit, DEFAULT_ROWS, 1, MAX_ROWS);
+    const offset = boundedInt(req.query.offset, 0, 0, 1_000_000);
+    const orderBy = typeof req.query.orderBy === 'string' && isSafeIdentifier(req.query.orderBy) ? req.query.orderBy : undefined;
+    const desc = req.query.desc === '1' || req.query.desc === 'true';
+
+    const [rows, columns] = await Promise.all([
+      runQuery(access.token, access.projectRef, readRowsSql({ table, limit, offset, orderBy, desc })),
+      runQuery(access.token, access.projectRef, listColumnsSql(table)),
+    ]);
+    if (!rows.ok) { sendDataError(res, rows); return; }
+    // The column list is a nicety: a page of rows is still worth showing if the catalogue read fails,
+    // so we fall back to the keys actually present rather than failing the whole request.
+    const declared = columns.ok
+      ? columns.rows.map((c) => String(c.column_name ?? '')).filter(Boolean)
+      : [];
+    res.json({
+      table,
+      rows: rows.rows,
+      columns: declared.length ? declared : columnsOf(rows.rows),
+      limit,
+      offset,
+      // Honest paging without a count(*): a full page MIGHT have more after it, and we say "might"
+      // rather than inventing a total we did not measure.
+      hasMore: rows.rows.length === limit,
+    });
+  });
+
+  // Phase 2.3 — the shape of one table (columns, types, nullability, defaults).
+  app.get('/api/integrations/supabase/columns', async (req: Request, res: Response) => {
+    const table = typeof req.query.table === 'string' ? req.query.table : '';
+    if (!isSafeIdentifier(table)) {
+      res.status(400).json({ error: 'That table name is not one NavBharatAI can read.' });
+      return;
+    }
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+    const result = await runQuery(access.token, access.projectRef, listColumnsSql(table));
+    if (!result.ok) { sendDataError(res, result); return; }
+    res.json({
+      table,
+      columns: result.rows.map((c) => ({
+        name: String(c.column_name ?? ''),
+        type: String(c.data_type ?? ''),
+        nullable: String(c.is_nullable ?? '').toUpperCase() === 'YES',
+        default: c.column_default === null || c.column_default === undefined ? null : String(c.column_default),
+      })).filter((c) => c.name),
     });
   });
 

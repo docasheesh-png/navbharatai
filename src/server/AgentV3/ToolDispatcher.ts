@@ -594,7 +594,15 @@ export class ToolDispatcher {
           const nextGi = gitignoreWithEnv(gi);
           if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
         } catch { /* gitignore hardening is best-effort */ }
-        this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
+        // "✅ ready" is EARNED, not inferred from a URL existing (admin task 1, 2026-08-05 — the
+        // Mitrify false-success class): provisionBackend returns a fallback URL even when Postgres
+        // never came up, so this line used to promise a database the very next migrate could not
+        // reach. Only a real SELECT 1 gets the checkmark; anything else says what actually happened.
+        if (prov?.dbVerified === false) {
+          this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ The sandbox database did not pass its connection test — I wrote DATABASE_URL and will keep going; the next database step will retry it.', ts: Date.now() });
+        } else {
+          this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
+        }
       }
     } catch {
       // Provisioning genuinely failed — do NOT fake it. The migrate command runs next and its real

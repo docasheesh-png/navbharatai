@@ -7,6 +7,7 @@ import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
+import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
@@ -945,7 +946,10 @@ export class E2BActuator implements IEngineerActuator {
               const current = await sandbox.files.read(envPath).catch(() => '');
               await sandbox.files.write(envPath, mergeEnvVar(current, 'DATABASE_URL', url)).catch(() => {});
             }
-            stdout += ' (PostgreSQL provisioned + DATABASE_URL written to .env).';
+            // The Mitrify build printed "provisioned + written" here while the app's very next connect
+            // got ECONNREFUSED — because a URL existed either way. The shared note says only what the
+            // SELECT 1 actually proved (admin task 1, 2026-08-05).
+            stdout += ` ${provisionOutcomeNote({ verified: prov?.dbVerified === true, failure: prov?.dbVerifyFailure ?? 'no-output' })}`;
           } catch {
             stdout += ' (PostgreSQL provision reported errors — retrying anyway).';
           }
@@ -1502,50 +1506,32 @@ const {chromium}=require('playwright');
     const sandbox = await this.getSandbox(workspaceId);
 
     let dbUrl = '';
+    let dbOutcome: DbProvisionOutcome | undefined;
     if (features.includes('db')) {
-      // Install PostgreSQL if missing, then start it and create the app database.
-      // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
-      // Idempotent: installs Postgres only if missing, (re)starts the cluster, then POLLS pg_isready until
-      // the server actually accepts connections before declaring success. The readiness poll (not a flat
-      // `sleep 2`) is what makes this reliable both on first provision AND as a boot-time restart of a
-      // reaped Postgres (EstateNest autopsy 2026-07-20) — a slow start is waited for instead of abandoned,
-      // and the "DB_URL:" marker is emitted ONLY when the DB is genuinely reachable, so a failed start is
-      // not masked as ready. `createdb` is retried after readiness so the app database always exists.
+      // Install PostgreSQL if missing, start it, create the app database — then prove it with a REAL
+      // `SELECT 1` over the exact URL the app is handed (admin task 1, 2026-08-05; script + parser in
+      // dbProvisionVerify.ts, where the Mitrify false-success story lives). pg_isready remains the
+      // WAIT; SELECT 1 is the only thing allowed to declare success — pg_isready cannot see a missing
+      // database or broken auth, and it is not what the app experiences.
       const pgResult = await sandbox.commands.run(
-        `if ! which psql > /dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq 2>&1 | tail -2
-  apt-get install -y -qq postgresql 2>&1 | tail -5
-fi
-PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
-for i in $(seq 1 20); do
-  if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
-  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
-  sleep 1
-done
-if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
-  su postgres -c "createdb myapp 2>/dev/null || true"
-  echo "DB_URL:postgresql://postgres@localhost:5432/myapp"
-else
-  echo "DB_NOT_READY"
-fi`,
+        dbProvisionScript(),
         { timeoutMs: 120_000 },
       ).catch(() => null);
 
-      const match = pgResult?.stdout?.match(/DB_URL:(postgresql:\/\/\S+)/);
-      // Only trust a DB_URL the sandbox confirmed reachable. If the poll never saw pg_isready succeed
-      // (DB_NOT_READY / null result), fall back to the canonical URL so the .env still points at the
-      // local Postgres — the downstream P1001 detector (dev-server reprovision + mid-build lock-release)
-      // then handles a genuinely-dead DB honestly rather than this masking a failure as ready.
-      dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
+      dbOutcome = parseDbProvision(pgResult?.stdout);
+      // The fallback URL is still written on failure — DELIBERATELY — so .env points at the local
+      // Postgres and a late-starting server heals without a rewrite (the downstream P1001 detector
+      // handles a genuinely-dead DB). What the fallback may no longer do is masquerade as success:
+      // `dbVerified` carries the truth to every caller, and "provisioned" can only be SAID where it
+      // was PROVEN.
+      dbUrl = dbOutcome.url ?? CANONICAL_DB_URL;
       // KEEPALIVE WATCHDOG (last-5-reports class fix, 2026-07-20): the sandbox reaps the Postgres daemon
       // minutes after provision — the root class behind builds #14→#18. Arm ONE in-sandbox loop (pgrep-
       // guarded against duplicates) that restarts the cluster within ~20s of it dying, so a reap
       // self-heals BEFORE any migrate/seed/preview can hit P1001. Armed here — the single provisioning
       // choke point — so first provision, mid-build revival, and preview-boot revival all re-arm it.
       // Best-effort: if nohup/setsid can't detach in this sandbox, the reactive nets still stand.
-      if (match) {
+      if (dbOutcome.verified) {
         await sandbox.commands.run(postgresWatchdogCommand(), { timeoutMs: 15_000 }).catch(() => null);
       }
     }
@@ -1557,7 +1543,11 @@ fi`,
     if (features.includes('storage')) envVars.STORAGE_DIR  = './uploads';
 
     const scaffoldFiles = BackendProvisioner.getScaffoldFiles(features);
-    return { dbUrl, envVars, scaffoldFiles };
+    return {
+      dbUrl, envVars, scaffoldFiles,
+      dbVerified: dbOutcome?.verified,
+      dbVerifyFailure: dbOutcome ? dbOutcome.failure : undefined,
+    };
   }
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {

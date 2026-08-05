@@ -19,6 +19,10 @@ import { join } from 'path';
  * tapping a button and finding nothing happens.
  */
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+
+/** Source minus comments — for invariants about what the USER sees, not what the file explains. */
+const stripComments = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const studio = read('src/components/ide/CodeStudio.tsx');
 const editor = read('src/components/ide/Editor.tsx');
 
@@ -121,5 +125,27 @@ describe('no inert icons in the editor toolbar', () => {
     expect(panel).not.toMatch(/<button[^>]*\sdisabled\b/);
     // …while still saying plainly what is not available, so nobody hunts for a stepper.
     expect(panel.toLowerCase()).toContain('not available yet');
+  });
+
+  it('the debugger has no tabs that lead to a "coming soon" screen', () => {
+    // It shipped Call Stack and Variables tabs whose only content was a deferred-state message. Same
+    // defect as the disabled buttons: two things a user can tap that go nowhere — and they DO tap them,
+    // to find out. The panel is single-purpose now, and breakpoints are completely real.
+    const panel = read('src/components/ide/DebugPanel.tsx');
+    expect(panel).not.toContain("label: 'Call Stack'");
+    expect(panel).not.toContain("label: 'Variables'");
+    expect(panel).not.toContain('DeferredState');
+    // Checked against the CODE only. The file's header comment still recounts what was removed and
+    // why — that history is worth keeping, and a test that forbids a word in a comment would just
+    // teach the next person to delete the explanation.
+    expect(stripComments(panel)).not.toMatch(/coming soon/i);
+  });
+
+  it('no control in the debugger is HOVER-ONLY — a phone has no hover', () => {
+    // `opacity-0 group-hover:opacity-100` makes a button invisible and effectively untappable on
+    // touch. Debug is a phone footer tab, so that is exactly where its remove-breakpoint ✕ is used
+    // most. Fading in on hover is fine; starting at zero is not.
+    const panel = read('src/components/ide/DebugPanel.tsx');
+    expect(panel).not.toContain('opacity-0 group-hover:opacity-100');
   });
 });

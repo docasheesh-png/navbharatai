@@ -5619,6 +5619,10 @@ export function registerAgentV3Routes(app: Express): void {
                     phase: 'preview', severity: 'warning', code: 'IMPORT_DB_PROVISION_FAILED',
                     message: `PostgreSQL was set up but the real connection test FAILED after ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${prov.dbVerifyFailure === 'not-ready' ? 'the server never accepted connections' : prov.dbVerifyFailure === 'select1-failed' ? 'the server accepted connections but SELECT 1 over the app\'s URL did not succeed' : 'provisioning returned no result'}). DATABASE_URL is written for a late heal, but the app will likely fail to connect on boot.`,
                     autoResolved: false,
+                    // WHY, for us — pg_ctlcluster's own error, whether psql exists, which user we
+                    // are. Report 15985d3b said this truthfully and still left the cause unknown,
+                    // because every reason had been swallowed inside the sandbox script.
+                    ...(prov.dbDiagnostics ? { detail: prov.dbDiagnostics.slice(0, 800) } : {}),
                   });
                 } else {
                   opts.diag?.record({

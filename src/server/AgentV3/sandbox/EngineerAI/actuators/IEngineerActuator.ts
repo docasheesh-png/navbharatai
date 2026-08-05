@@ -10,6 +10,12 @@ export interface BackendProvisionResult {
   dbVerified?: boolean;
   /** Why verification failed, when it did — feeds the one shared outcome message. */
   dbVerifyFailure?: 'not-ready' | 'select1-failed' | 'no-output' | null;
+  /**
+   * WHY the database would not come up — pg_ctlcluster's own error, whether psql exists, which user
+   * we are. ADMIN-ONLY: it belongs in the report's detail, never in the user's message (report
+   * 15985d3b told the user the truth and still left us unable to say what to fix).
+   */
+  dbDiagnostics?: string;
 }
 
 export interface IEngineerActuator {

@@ -40,7 +40,17 @@ export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL): string {
   apt-get install -y -qq postgresql 2>&1 | tail -5
 fi
 PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
+# WHY IT FAILED, not just THAT it failed (report 15985d3b, 2026-08-05). That build said "the server
+# never accepted connections" after 21s and stopped there — every reason was thrown away:
+# pg_ctlcluster's error went to \`| tail -3 || true\`, the retry loop sent its own to /dev/null, and
+# nobody recorded whether psql was even installed or whether PG_VER resolved at all. So we could tell
+# the user the truth and still not know what to fix. These markers cost nothing and turn the next
+# report into evidence — the same measure-first move that already exonerated the integrity pass.
+echo "DB_DIAG_PSQL:$(which psql 2>/dev/null || echo none)"
+echo "DB_DIAG_PGVER:\${PG_VER:-none}"
+echo "DB_DIAG_WHOAMI:$(id -un 2>/dev/null || echo unknown)"
+START_ERR=$(pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3)
+echo "DB_DIAG_START:\${START_ERR:-ok}"
 for i in $(seq 1 20); do
   if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
   pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
@@ -48,14 +58,34 @@ for i in $(seq 1 20); do
 done
 if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
   su postgres -c "createdb myapp 2>/dev/null || true"
-  if [ "$(psql "${dbUrl}" -Atc 'SELECT 1' 2>/dev/null)" = "1" ]; then
+  SELECT1=$(psql "${dbUrl}" -Atc 'SELECT 1' 2>&1)
+  if [ "$SELECT1" = "1" ]; then
     echo "DB_URL:${dbUrl}"
   else
+    # The psql error itself — a missing database and a refused password need different fixes, and
+    # "SELECT 1 failed" alone cannot tell them apart.
+    echo "DB_DIAG_SELECT1:$SELECT1"
     echo "DB_SELECT1_FAILED"
   fi
 else
+  echo "DB_DIAG_ISREADY:$(pg_isready -h localhost -p 5432 2>&1 | tail -1)"
   echo "DB_NOT_READY"
 fi`;
+}
+
+/**
+ * The diagnostic lines the script emitted, as a single readable string.
+ *
+ * Kept OUT of the user-facing message and put in the report's `detail`: "postgres would not start"
+ * is what a person needs; `pg_ctlcluster: Insufficient privileges` is what WE need. Returns '' when
+ * the script emitted none, so a caller can decide not to add an empty detail.
+ */
+export function provisionDiagnostics(stdout: string | null | undefined): string {
+  const lines = String(stdout ?? '').split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('DB_DIAG_'))
+    .map((l) => l.replace(/^DB_DIAG_/, ''));
+  return lines.join('\n');
 }
 
 export type DbProvisionFailure = 'not-ready' | 'select1-failed' | 'no-output';

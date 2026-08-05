@@ -19,6 +19,7 @@
 // module is pure so the classification + env generation are fully unit-testable.
 
 import { randomBytes } from 'node:crypto';
+import { classifyDevServerFailure, missingCredentialFromLog } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 
 /** SQL/ORM drivers whose presence means the app needs a database to boot. */
 const DB_DEPS = [
@@ -220,6 +221,36 @@ export function externalServiceNote(varNames: string[]): string {
 }
 
 /**
+ * The HALF-BOOT verdict (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc).
+ *
+ * The zombie-server shape: the port is open (the process logged "serving on port X" and an
+ * unhandledRejection handler kept it alive), but the async boot died BEFORE the client-serving
+ * middleware mounted — so every page answers "Cannot GET /…" while the server looks up. On that
+ * build we HELD the boot log naming the exact cause (`ECONNREFUSED …:5432` at ensureSchema) and the
+ * verdict still guessed "it isn't serving the app's pages (only its API)" — which was wrong even
+ * about the API. We made the user debug something we had already computed.
+ *
+ * `classifyDevServerFailure` (already ANSI-stripped, already tested) does the recognising; this maps
+ * ONLY the two causes with both high classifier confidence AND a clear user story into a verdict
+ * sentence. Everything else returns null and the generic line stands — a wrong specific cause is
+ * worse than an honest generic one, and false alarms are what teach people to ignore the verdict.
+ * PURE.
+ */
+export function halfBootCause(bootLog: string | null | undefined): string | null {
+  const log = String(bootLog ?? '');
+  if (!log.trim()) return null;
+  const cause = classifyDevServerFailure(log).cause;
+  if (cause === 'db_unreachable') {
+    return 'Your app started but could not reach its database (connection refused), so it stopped booting half-way — its pages were never mounted. That is why pages answer "Cannot GET"';
+  }
+  if (cause === 'missing_credential') {
+    const key = missingCredentialFromLog(log);
+    return `Your app started but stopped booting half-way because a required key${key ? ` (\`${key}\`)` : ''} is missing — its pages were never mounted. Add it in Settings → App Settings → Secrets & API Keys`;
+  }
+  return null;
+}
+
+/**
  * EARN the "live preview is up" verdict (admin 2026-08-03, "Cannot GET /customer/home"): a port being
  * up is NOT the app serving. The boot must actually VISIT the home route and read the rendered HTML;
  * this turns that (already-classified) result into the honest user-facing narration.
@@ -228,11 +259,19 @@ export function externalServiceNote(varNames: string[]): string {
  * @param problems  the specific problems it found (e.g. "Cannot GET", build-error overlay) — the WHY.
  * @param port      the bound port, for the success line.
  * @param needsDb   full-stack apps: point at the most common real cause + the honest partial state.
+ * @param bootCause from `halfBootCause` over the boot log — the NAMED cause, when one is known. It
+ *                  replaces the guess, never merely decorates it (task 2: the verdict must say what
+ *                  the log proves, and only fall back to the guess when the log proves nothing).
+ * @param fixOffer  an optional one-line permission ask ("say 'fix the boot' …") appended when the
+ *                  engine knows how to repair the named cause — the user's reply IS the permission.
  * PURE.
  */
-export function previewServeNarration(opts: { rendered: boolean; problems: string[]; port: number; needsDb: boolean }): { ok: boolean; text: string } {
+export function previewServeNarration(opts: { rendered: boolean; problems: string[]; port: number; needsDb: boolean; bootCause?: string | null; fixOffer?: string | null }): { ok: boolean; text: string } {
   if (opts.rendered) {
     return { ok: true, text: `✅ Live preview is up on port ${opts.port} — open the Preview tab (Live server).` };
+  }
+  if (opts.bootCause) {
+    return { ok: false, text: `⚠️ ${opts.bootCause}. Tap reload (↻) once the cause is fixed, or press Diagnose for the full boot log.${opts.fixOffer ? ` ${opts.fixOffer}` : ''}` };
   }
   const why = opts.problems[0] || 'the server started but is not serving its pages yet';
   // A full-stack app that serves its API but 404s its client routes is the classic Express-serves-SPA
@@ -241,5 +280,5 @@ export function previewServeNarration(opts: { rendered: boolean; problems: strin
   const tail = cannotGet && opts.needsDb
     ? ' Your server started, but it isn\'t serving the app\'s pages (only its API). Tap reload (↻) — a dev server can take a moment — or press Diagnose for the full boot log.'
     : ' Tap reload (↻) in the Preview tab, or press Diagnose to see the exact boot log.';
-  return { ok: false, text: `⚠️ ${why}.${tail}` };
+  return { ok: false, text: `⚠️ ${why}.${tail}${opts.fixOffer ? ` ${opts.fixOffer}` : ''}` };
 }

@@ -2,6 +2,14 @@ export interface BackendProvisionResult {
   dbUrl: string;
   envVars: Record<string, string>;
   scaffoldFiles: { path: string; content: string }[];
+  /**
+   * True only when a REAL `SELECT 1` succeeded over the exact DATABASE_URL handed to the app
+   * (admin task 1, 2026-08-05 — the Mitrify false-success class). `undefined` = this actuator
+   * does not verify (Local/Docker stubs); callers must then not CLAIM verification either.
+   */
+  dbVerified?: boolean;
+  /** Why verification failed, when it did — feeds the one shared outcome message. */
+  dbVerifyFailure?: 'not-ready' | 'select1-failed' | 'no-output' | null;
 }
 
 export interface IEngineerActuator {

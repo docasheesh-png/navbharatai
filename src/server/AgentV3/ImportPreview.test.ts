@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration } from './ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from './ImportPreview';
 
 describe('previewBootFailureAdvisory (honest DB state, admin 2026-07-24) — a failed boot names the real cause', () => {
   it('DB-needed + not provisioned → tells the user to connect their own database', () => {
@@ -203,5 +203,78 @@ describe('previewServeNarration — "✅ up" is EARNED by the home route renderi
     const v = previewServeNarration({ rendered: false, problems: ['the preview could not be reached to verify it'], port: 8080, needsDb: false });
     expect(v.ok).toBe(false);
     expect(v.text).toMatch(/could not be reached/i);
+  });
+});
+
+/**
+ * halfBootCause (admin task 2, 2026-08-05). On Mitrify build d5f0a2bc the boot log NAMED the cause —
+ * ECONNREFUSED at ensureSchema — and the verdict still guessed "only its API is serving", wrong even
+ * about the API. The verdict must say what the log proves, and guess only when it proves nothing.
+ */
+describe('halfBootCause — the verdict reads the log we already captured', () => {
+  // Condensed from the REAL Mitrify boot log — the exact failure this exists for.
+  const MITRIFY_LOG = `
+11:05:22 AM [express] serving on port 5000
+UNHANDLED REJECTION — server kept alive: AggregateError [ECONNREFUSED]:
+    at async ensureSchema (/home/user/workspace/server/ensureSchema.ts:15:18)
+    Error: connect ECONNREFUSED 127.0.0.1:5432
+`;
+
+  it('names the database cause from the real Mitrify log', () => {
+    const cause = halfBootCause(MITRIFY_LOG);
+    expect(cause).toContain('could not reach its database');
+    expect(cause).toContain('stopped booting half-way');
+    expect(cause).toContain('Cannot GET');
+  });
+
+  it('names a missing key, with the key, when that is what the log shows', () => {
+    const cause = halfBootCause('Error: Missing STRIPE_SECRET_KEY\n  at boot');
+    expect(cause).toContain('required key');
+    expect(cause).toContain('STRIPE_SECRET_KEY');
+    expect(cause).toContain('Settings');
+  });
+
+  it('returns null rather than guessing — a wrong specific cause is worse than an honest generic one', () => {
+    // port_in_use / generic crash / empty: the half-boot story is not proven, so the generic verdict
+    // stands. False alarms are what teach people to ignore the verdict.
+    expect(halfBootCause('Error: listen EADDRINUSE: address already in use :::5000')).toBeNull();
+    expect(halfBootCause('some unrelated noise')).toBeNull();
+    expect(halfBootCause('')).toBeNull();
+    expect(halfBootCause(null)).toBeNull();
+    expect(halfBootCause(undefined)).toBeNull();
+  });
+});
+
+describe('previewServeNarration with a NAMED cause (task 2) and a fix offer (task 3)', () => {
+  it('the named cause REPLACES the guess — never decorates it', () => {
+    const v = previewServeNarration({
+      rendered: false, problems: ['the server returned 404 / "Cannot GET"'], port: 5000, needsDb: true,
+      bootCause: 'Your app started but could not reach its database (connection refused), so it stopped booting half-way — its pages were never mounted. That is why pages answer "Cannot GET"',
+    });
+    expect(v.ok).toBe(false);
+    expect(v.text).toContain('could not reach its database');
+    // The old guess ("only its API") must be gone — it was wrong even about the API.
+    expect(v.text).not.toContain('only its API');
+  });
+
+  it('appends the permission ask when the engine knows the repair — the reply IS the permission', () => {
+    const v = previewServeNarration({
+      rendered: false, problems: [], port: 5000, needsDb: true,
+      bootCause: 'Your app started but could not reach its database…',
+      fixOffer: 'I can make this app serve its pages even when the database is down — say "fix the boot guard" and I\'ll apply it.',
+    });
+    expect(v.text).toContain('say "fix the boot guard"');
+  });
+
+  it('a success needs no cause and carries no offer', () => {
+    const v = previewServeNarration({ rendered: true, problems: [], port: 5000, needsDb: true, bootCause: 'x', fixOffer: 'y' });
+    expect(v.ok).toBe(true);
+    expect(v.text).not.toContain('x');
+    expect(v.text).not.toContain('y');
+  });
+
+  it('without a named cause the old honest generic line stands, unchanged', () => {
+    const v = previewServeNarration({ rendered: false, problems: ['the server returned 404 / "Cannot GET"'], port: 5000, needsDb: true, bootCause: null });
+    expect(v.text).toContain("isn't serving the app's pages");
   });
 });

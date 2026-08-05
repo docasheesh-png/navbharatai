@@ -120,7 +120,8 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from '../AgentV3/ImportPreview';
+import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -3241,7 +3242,11 @@ export function registerAgentV3Routes(app: Express): void {
             ? `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
             : served.rendered
               ? `Dev server is up on port ${boundPort} — preview restored.`
-              : `Dev server is up on port ${boundPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
+              // Task 2 (2026-08-05): the boot log is right here in `combined` — when it NAMES the
+              // cause (half-boot on an unreachable database, a missing key), say THAT instead of
+              // pointing the user into the log to find something we already computed.
+              : halfBootCause(combined)
+                ?? `Dev server is up on port ${boundPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
           detail: combined.slice(-4000),
         });
         return;
@@ -5600,14 +5605,27 @@ export function registerAgentV3Routes(app: Express): void {
                 const prov = await withTimeout(actuator.provisionBackend(workspaceId, ['db']), 130_000, 'import-db-provision');
                 Object.assign(provided, prov.envVars ?? {}); // DATABASE_URL
                 // FORENSIC TRAIL (admin 2026-08-04): this outcome used to be swallowed entirely, so a
-                // report could never say whether the database the app needs actually came up. An
-                // autopsy of the "Cannot GET" class then has to GUESS, which is how a plausible-but-
-                // wrong root cause gets shipped.
-                opts.diag?.record({
-                  phase: 'preview', severity: 'info', code: 'IMPORT_DB_PROVISIONED',
-                  message: `Sandbox database provisioned for the preview in ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${Object.keys(prov.envVars ?? {}).join(', ') || 'no env vars returned'}).`,
-                  autoResolved: true,
-                });
+                // report could never say whether the database the app needs actually came up.
+                //
+                // AND THE CLAIM IS NOW EARNED (admin task 1, 2026-08-05 — Mitrify build d5f0a2bc): this
+                // very line once said "provisioned in 21s" while the app's next connect to that same URL
+                // got ECONNREFUSED, because provisionBackend returned a fallback URL even when its
+                // readiness poll had failed — and this record trusted the URL's existence. "Provisioned"
+                // is now said only when a real SELECT 1 succeeded over the exact URL the app was handed;
+                // anything less is recorded as the failure it is.
+                if (prov.dbVerified === false) {
+                  opts.diag?.record({
+                    phase: 'preview', severity: 'warning', code: 'IMPORT_DB_PROVISION_FAILED',
+                    message: `PostgreSQL was set up but the real connection test FAILED after ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${prov.dbVerifyFailure === 'not-ready' ? 'the server never accepted connections' : prov.dbVerifyFailure === 'select1-failed' ? 'the server accepted connections but SELECT 1 over the app\'s URL did not succeed' : 'provisioning returned no result'}). DATABASE_URL is written for a late heal, but the app will likely fail to connect on boot.`,
+                    autoResolved: false,
+                  });
+                } else {
+                  opts.diag?.record({
+                    phase: 'preview', severity: 'info', code: 'IMPORT_DB_PROVISIONED',
+                    message: `Sandbox database provisioned for the preview in ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${Object.keys(prov.envVars ?? {}).join(', ') || 'no env vars returned'})${prov.dbVerified === true ? ' — connection verified with a real SELECT 1' : ''}.`,
+                    autoResolved: true,
+                  });
+                }
               } catch (e) {
                 // Still best-effort — the boot continues without a database — but NEVER silent again.
                 opts.diag?.record({
@@ -5671,7 +5689,20 @@ export function registerAgentV3Routes(app: Express): void {
                 } catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
                 emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               }
-              const verdict = previewServeNarration({ rendered: served.rendered, problems: served.problems, port: bootPort, needsDb });
+              // BOOT LOG DIAGNOSER (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc): the boot log
+              // is IN HAND here, and on that build it named the exact cause (`ECONNREFUSED …:5432` at
+              // ensureSchema) while the verdict still guessed "it isn't serving the app's pages (only
+              // its API)" — wrong even about the API, since route registration had died with the same
+              // rejection. The verdict now says what the log PROVES and only guesses when it proves
+              // nothing. And when the code shows the repairable zombie shape (task 3), the verdict
+              // carries the one-line permission ask — the user's reply is the permission.
+              const bootCause = served.rendered ? null : halfBootCause(combined);
+              const zombie = served.rendered ? null : analyzeDbCoupledBoot(importedFiles);
+              const verdict = previewServeNarration({
+                rendered: served.rendered, problems: served.problems, port: bootPort, needsDb,
+                bootCause,
+                fixOffer: zombie ? dbCoupledBootFixOffer() : null,
+              });
               emitLive({ type: 'narration', agent: 'architect', text: verdict.text, ts: Date.now() });
               // The verdict is the fact the next autopsy needs — a served=false here IS the
               // "Cannot GET /customer/home" class, named with its exact problem.
@@ -8990,6 +9021,24 @@ export function registerAgentV3Routes(app: Express): void {
               code: 'SPA_FALLBACK_MISSING',
               ...obs(spa.message),
               detail: `Client router found in ${spa.routerFile}. Add to ${spa.file}:\n${spaFallbackSnippet(spa)}`,
+            });
+          }
+        } catch { /* a deterministic check must never break a build */ }
+        // DB-COUPLED BOOT — the "zombie server" (admin task 3, 2026-08-05; sibling of the SPA-fallback
+        // check above, verified end-to-end against the Mitrify repo): page serving awaited BEHIND an
+        // unguarded database call, so a down database kills the boot half-way and every page answers
+        // "Cannot GET /…" while the port looks alive. Reported with the proven fix as an instruction;
+        // never auto-written — the record's message carries the permission ask, and the user's reply
+        // is the permission (an import turn's files stay untouched, as asked).
+        try {
+          const zombie = analyzeDbCoupledBoot(integrityFiles);
+          if (zombie) {
+            buildDiag.record({
+              phase: 'build',
+              severity: 'warning',
+              code: 'DB_COUPLED_BOOT',
+              ...obs(`${zombie.message} ${dbCoupledBootFixOffer()}`),
+              detail: dbCoupledBootFixInstruction(zombie),
             });
           }
         } catch { /* a deterministic check must never break a build */ }

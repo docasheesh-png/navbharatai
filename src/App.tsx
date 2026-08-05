@@ -2076,6 +2076,58 @@ export default function App() {
   // feature parity with the in-panel one — auto-resuming a dead sandbox and the framework-aware
   // Diagnose flow both need them (previously only the in-panel PreviewSurface received these props).
   const [v3Preview, setV3Preview] = useState<{ previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }>({});
+
+  /**
+   * HYDRATE the app's file set from the v5.0 workspace whenever one becomes known and we are holding
+   * nothing.
+   *
+   * ROOT CAUSE (admin 2026-08-05: "old app ka code Code Studio me kholа — kuch bhi nahi dikha").
+   * AgentV3Panel pushes its files up ONLY from a `state.done` effect — i.e. only after a build
+   * FINISHES IN THIS SESSION. Opening an app built earlier never satisfies that, so `files` stayed
+   * empty: Code Studio showed nothing, and `generatedCode` stayed the "Waiting for magic…"
+   * placeholder — while the v5 panel, reading the server directly, correctly reported
+   * "PREVIEW LIVE · 13 FILES". Two views of one app, disagreeing.
+   *
+   * Reads the SAME endpoint the import path already uses, so there is one source of truth. Guarded to
+   * run once per workspace and ONLY while `files` is empty — it must never overwrite the user's live
+   * edits or race the build's own sync.
+   */
+  const hydratedWorkspaceRef = useRef<string | null>(null);
+  useEffect(() => {
+    const workspaceId = v3Preview.workspaceId;
+    if (!workspaceId || !user?.uid) return;
+    if (hydratedWorkspaceRef.current === workspaceId) return;
+    if (Object.keys(files).length > 0) return;   // never clobber what is already open
+    hydratedWorkspaceRef.current = workspaceId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const tok = await auth.currentUser?.getIdToken().catch(() => null);
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+        const res = await fetch('/api/agentv3/workspace-files', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ workspaceId, userId: user.uid, email: user.email || '' }),
+        });
+        const data = await res.json().catch(() => null);
+        if (cancelled || !res.ok || !data?.files || typeof data.files !== 'object') return;
+        const clean = sanitizeFileMap(data.files);
+        if (Object.keys(clean).length === 0) return;
+        // Mark them as REMOTE so the edit syncer does not echo them straight back to the server as if
+        // the user had just typed them.
+        workspaceSyncerRef.current?.noteRemote(clean);
+        setFiles(clean);
+        addLog(`Loaded ${Object.keys(clean).length} files from your workspace.`, 'success');
+      } catch {
+        // Honest degradation: the Files/Code Studio views keep their existing empty state rather than
+        // showing a half-loaded project. A retry happens naturally on the next workspace change.
+        hydratedWorkspaceRef.current = null;
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v3Preview.workspaceId, user?.uid]);
   // Dynamic per-view footer (admin 2026-07-07): while v5.0 is the active view on mobile/tablet, the
   // bottom nav swaps to v5.0's own items. AgentV3Panel registers its REAL actions here (null when
   // v5.0 is closed/unmounted — the nav then falls back to the default items, never dead buttons).

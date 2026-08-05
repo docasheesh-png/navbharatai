@@ -167,6 +167,13 @@ export function ViewPanels({
             files={files}
             onFilesChange={onIdeFilesChange}
             onFlushEdits={onFlushIdeEdits}
+            /* ONE PREVIEW EVERYWHERE — extended to Code Studio (admin 2026-08-05: "code studio
+               preview = slidebar preview = v5 preview, sab ek hi hone chahiye"). Code Studio was the
+               last surface still rendering the retired v2.0 generatedCode preview, which the v5
+               engine never writes — so it showed "Waiting for magic…" while the real app was running
+               and the status bar said PREVIEW LIVE · 13 FILES. It now gets the same state the
+               slide-menu Preview does, and renders the same PreviewSurface from it. */
+            v3Preview={v3Preview}
             onFilesRemoved={onFilesRemoved}
             onRun={(f: any) => updatePreview(f || files)}
             generatedCode={generatedCode}

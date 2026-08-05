@@ -204,7 +204,15 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       if (!alive()) return;
 
       if (!res.ok || !j) {
-        const message = j?.error || `Could not open a terminal (${res.status}).`;
+        // Say WHICH failure this is. A bare "couldn't open" sends the user (and whoever debugs it)
+        // hunting, when the status code already names the cause.
+        const message = j?.error || (
+          res.status === 401 || res.status === 403 ? 'Your session expired — reload the page and sign in again to use the terminal.'
+          : res.status === 429 ? 'Too many terminals opened just now. Wait a few seconds and try again.'
+          : res.status === 404 ? 'The terminal service is not enabled on this server.'
+          : res.status >= 500 ? `The terminal service failed (${res.status}). Try again in a moment.`
+          : `Could not open a terminal (${res.status}).`
+        );
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[31m${message}\x1b[0m\r\n`);
         return;
@@ -225,10 +233,19 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       attachedShells.set(sessionKey, j.shellId);
       setStatus({ kind: 'live' });
       void stream(term, alive);
-    } catch {
+    } catch (e) {
       if (!alive()) return;
-      setStatus({ kind: 'unavailable', message: 'Could not reach the terminal service.' });
-      term.write('\x1b[31mCould not reach the terminal service.\x1b[0m\r\n');
+      // The request never completed at all — offline, a dropped connection, or the server closing it.
+      // Carry the browser's own reason: "Could not reach the terminal service." on its own told
+      // nobody anything, including me when a live report arrived and I could not reproduce it
+      // (admin screenshot 2026-08-05). An error that does not name its cause is a second bug.
+      const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      const message = offline
+        ? 'You appear to be offline — the terminal needs a connection.'
+        : `Could not reach the terminal service${detail}. Check your connection, then reopen the terminal.`;
+      setStatus({ kind: 'unavailable', message });
+      term.write(`\x1b[31m${message}\x1b[0m\r\n`);
     }
   }
 

@@ -163,6 +163,7 @@ import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { pickerItems } from '../../lib/reportPicker';
+import { analyzeSpaFallback, spaFallbackSnippet } from '../AgentV3/SpaFallbackAnalysis';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
@@ -8881,6 +8882,28 @@ export function registerAgentV3Routes(app: Express): void {
         // rootCause — which is exactly what made a successful survey report "14 unresolved problems" with
         // an unused-dependency hint as its headline cause. Unchanged on a real build/edit turn.
         const obs = (message: string) => importTurnObservation(isImportTurn, message);
+        // MISSING SPA FALLBACK (ROADMAP #1 Phase 4.1) — the "Cannot GET /customer/home" class. Until now
+        // this was only ever noticed AFTER the fact, by the preview verifier, as a symptom with no named
+        // cause; the report said the preview did not render and the autopsy had to guess why. This names
+        // it exactly, from the code, before the user ever meets it.
+        //
+        // Reported, not auto-written: the fix has to land AFTER the app's own API routes, and where that
+        // is depends on a file we did not write. Inserting it at the wrong line would make the catch-all
+        // answer the app's own /api calls with HTML — turning a routing bug into a broken API, which is
+        // strictly worse than the bug being fixed. The C9 repair pass takes it from here with the exact
+        // snippet, which is the difference between a hint and an instruction.
+        try {
+          const spa = analyzeSpaFallback(integrityFiles);
+          if (spa) {
+            buildDiag.record({
+              phase: 'build',
+              severity: 'warning',
+              code: 'SPA_FALLBACK_MISSING',
+              ...obs(spa.message),
+              detail: `Client router found in ${spa.routerFile}. Add to ${spa.file}:\n${spaFallbackSnippet(spa)}`,
+            });
+          }
+        } catch { /* a deterministic check must never break a build */ }
         for (const c of findCircularDependencies(integrityFiles)) {
           const loop = c.cycle.length === 1
             ? `${c.cycle[0]} imports itself`

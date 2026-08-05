@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Wifi, Smartphone, Send, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle,
-  Brain, Trash2, Bot, ArrowRight, Wrench, AlertTriangle, Globe, Eraser,
+  Brain, Trash2, Bot, ArrowRight, Wrench, AlertTriangle, Globe, Eraser, Cpu, Download, Loader2,
 } from 'lucide-react';
 import {
   howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
@@ -14,6 +14,9 @@ import {
   parseTeaching, addMemory, removeMemory, loadMemories, saveMemories, type UserMemory,
 } from '../../lib/offlineMemory';
 import { loadChat, saveChat, clearChat, type PersistedChatMsg } from '../../lib/offlineChatStore';
+import { probeDevice, recommendTier, TIER_INFO, type TierRecommendation } from '../../lib/offlineDeviceTier';
+import { loadOfflineLlm, resetOfflineLlm, STAGE1_MODEL, type OfflineLlm, type LlmProgress } from '../../lib/offlineLlmEngine';
+import { loadBetaState, saveBetaState, shouldUseLlm, buildLlmMessages, type BetaState } from '../../lib/offlineBeta';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
@@ -43,6 +46,8 @@ interface ChatMsg {
   features?: AppFeature[];
   deviceMatches?: DeviceHelp[];
   online?: boolean;
+  /** True when this reply came from the experimental on-device model (shows the "can be wrong" label). */
+  beta?: boolean;
 }
 
 let msgSeq = 0;
@@ -195,6 +200,14 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
   const [isTouch, setIsTouch] = useState(false);
 
+  // ── Offline Thinking (beta) — on-device LLM, DEFAULT OFF ──────────────────────────────────────────
+  const [beta, setBeta] = useState<BetaState>(() => { try { return loadBetaState(); } catch { return { enabled: false }; } });
+  const [betaOpen, setBetaOpen] = useState(false);
+  const [deviceRec, setDeviceRec] = useState<TierRecommendation | null>(null);
+  const [dlProgress, setDlProgress] = useState<LlmProgress | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+  const llmRef = useRef<OfflineLlm | null>(null);
+
   useEffect(() => { setMemories(loadMemories()); }, []);
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -207,29 +220,88 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
 
   const persist = (list: UserMemory[]) => { setMemories(list); saveMemories(list); };
   const clearChatHistory = () => { setMessages([]); clearChat(); };
+  const pushBot = (bot: ChatMsg) => setMessages((prev) => [...prev, bot]);
+
+  /** Ensure the on-device model is loaded (downloads/caches on first use, streaming progress). Throws on
+   *  failure — the caller falls back to the honest deterministic reply. */
+  const ensureLlm = async (): Promise<OfflineLlm> => {
+    if (llmRef.current) return llmRef.current;
+    const llm = await loadOfflineLlm({ modelId: beta.modelId ?? STAGE1_MODEL, onProgress: setDlProgress });
+    setDlProgress(null);
+    llmRef.current = llm;
+    return llm;
+  };
 
   const send = (raw?: string) => {
     const text = (raw ?? input).trim();
     if (!text || typing) return;
     setInput('');
+    const userTurns = [...messages, { id: uid(), role: 'user', text } as ChatMsg];
     setMessages((prev) => [...prev, { id: uid(), role: 'user', text }]);
 
-    // Teaching command → store on-device and confirm; otherwise a normal deterministic reply.
+    // Teaching command → store on-device and confirm.
     const parsed = parseTeaching(text);
-    let bot: ChatMsg;
     if (parsed) {
       persist(addMemory(memories, parsed, uid(), Date.now()));
-      bot = { id: uid(), role: 'bot', text: teachAck(parsed), answerKind: 'memory' };
-    } else {
-      const r = buildChatReply(text, new Date(), memories);
-      bot = { id: uid(), role: 'bot', text: r.text, answerKind: r.answerKind, features: r.features, deviceMatches: r.deviceMatches, online: r.online };
+      setTyping(true);
+      window.setTimeout(() => { pushBot({ id: uid(), role: 'bot', text: teachAck(parsed), answerKind: 'memory' }); setTyping(false); }, 280);
+      return;
     }
-    // A brief "typing" beat so it reads like a chat (purely cosmetic — the reply is already computed).
+
+    const r = buildChatReply(text, new Date(), memories);
+    // On-device LLM fills the gap ONLY when the beta is on and the deterministic engine had no confident
+    // answer. Facts/navigation/math/date always stay on the reliable deterministic path above.
+    if (shouldUseLlm(r, beta.enabled)) {
+      setTyping(true);
+      (async () => {
+        try {
+          const llm = await ensureLlm();
+          const facts = memories.map((m) => (m.kind === 'qa' ? `${m.trigger} → ${m.text}` : m.text));
+          const recent = userTurns.map((m) => ({ role: m.role, text: m.text }));
+          const out = (await llm.generate(buildLlmMessages(text, recent, facts))).trim();
+          pushBot({ id: uid(), role: 'bot', text: out || "I couldn't come up with a good answer for that.", beta: true, online: true });
+        } catch {
+          // Honest fallback — never fake a result; degrade to the deterministic "go online" reply.
+          setDlProgress(null);
+          pushBot({ id: uid(), role: 'bot', text: r.text, online: true });
+        } finally {
+          setTyping(false);
+        }
+      })();
+      return;
+    }
+
+    // Deterministic reply — a brief "typing" beat so it reads like a chat.
+    const bot: ChatMsg = { id: uid(), role: 'bot', text: r.text, answerKind: r.answerKind, features: r.features, deviceMatches: r.deviceMatches, online: r.online };
     setTyping(true);
-    window.setTimeout(() => {
-      setMessages((prev) => [...prev, bot]);
-      setTyping(false);
-    }, 280);
+    window.setTimeout(() => { pushBot(bot); setTyping(false); }, 280);
+  };
+
+  // ── Beta controls ──────────────────────────────────────────────────────────────────────────────
+  const openBeta = () => {
+    setBetaOpen((v) => !v);
+    if (!deviceRec) probeDevice().then((s) => setDeviceRec(recommendTier(s))).catch(() => setDeviceRec(recommendTier({ webgpu: false })));
+  };
+  const downloadAndEnable = async () => {
+    setDlError(null);
+    setDlProgress({ progress: 0, text: 'Starting…' });
+    try {
+      const llm = await loadOfflineLlm({ modelId: STAGE1_MODEL, onProgress: setDlProgress });
+      llmRef.current = llm;
+      const st: BetaState = { enabled: true, modelId: STAGE1_MODEL };
+      setBeta(st); saveBetaState(st);
+    } catch {
+      setDlError("Couldn't set up the on-device AI. It needs a WebGPU-capable device (updated Chrome on Android) and a stable connection for the one-time download. The deterministic chat still works.");
+    } finally {
+      setDlProgress(null);
+    }
+  };
+  const disableBeta = () => {
+    try { llmRef.current?.unload(); } catch { /* best-effort */ }
+    llmRef.current = null;
+    resetOfflineLlm();
+    const st: BetaState = { enabled: false };
+    setBeta(st); saveBetaState(st);
   };
 
   const forget = (id: string) => persist(removeMemory(memories, id));
@@ -253,6 +325,13 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={openBeta}
+              title="Offline Thinking (beta) — on-device AI"
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-full border text-[9px] font-black uppercase tracking-widest ${betaOpen || beta.enabled ? 'bg-fuchsia-500/15 border-fuchsia-400/40 text-fuchsia-200' : 'bg-white/[0.03] border-white/10 text-[#8b949e] hover:text-white'}`}
+            >
+              <Cpu className="w-3.5 h-3.5" />{beta.enabled ? 'On' : 'Beta'}
+            </button>
             {messages.length > 0 && (
               <button
                 onClick={clearChatHistory}
@@ -281,6 +360,61 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Offline Thinking (beta) panel — honest, opt-in, on-device LLM */}
+      {betaOpen && (
+        <div className="shrink-0 border-b border-white/5 bg-[#0d1117] px-4 py-3.5 space-y-3 max-h-[70vh] overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-fuchsia-500 to-indigo-600 flex items-center justify-center shrink-0 ring-1 ring-white/10"><Cpu className="w-4 h-4 text-white" /></div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-white">Offline Thinking <span className="text-fuchsia-300">(Beta)</span></h3>
+              <p className="text-[11px] text-[#8b949e] leading-relaxed mt-0.5">
+                An experimental AI that runs <span className="text-[#c9d1d9] font-semibold">entirely on your phone</span> — no internet, nothing uploaded. It can chat about open-ended things the deterministic assistant sends online. Because it's a small on-device model, <span className="text-amber-300/90 font-semibold">it can be wrong</span> — facts still use the reliable engine.
+              </p>
+            </div>
+          </div>
+
+          {/* Device readiness (real detection) */}
+          {!deviceRec ? (
+            <p className="text-[11px] text-[#8b949e] flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking your device…</p>
+          ) : !deviceRec.supported ? (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/20">
+              <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
+              <p className="text-[11px] text-[#c9d1d9] leading-relaxed">Not available on this device. {deviceRec.reason}</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/[0.05] border border-emerald-500/15">
+                <Cpu className="w-4 h-4 text-emerald-300 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-[#c9d1d9] leading-relaxed">{deviceRec.reason} It downloads once over the internet (Wi-Fi recommended), then works fully offline.</p>
+              </div>
+
+              {dlProgress ? (
+                <div className="space-y-1.5">
+                  <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-fuchsia-500 to-indigo-500 transition-all" style={{ width: `${Math.round((dlProgress.progress || 0) * 100)}%` }} />
+                  </div>
+                  <p className="text-[10px] text-[#8b949e] truncate">{Math.round((dlProgress.progress || 0) * 100)}% · {dlProgress.text || 'Downloading model…'}</p>
+                </div>
+              ) : beta.enabled ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> On-device AI is ON</span>
+                  <button onClick={disableBeta} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 hover:border-red-400/40 hover:text-red-300 text-[11px] font-bold text-[#c9d1d9] transition-colors">
+                    Turn off
+                  </button>
+                </div>
+              ) : (
+                <button onClick={downloadAndEnable} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white text-[12px] font-black transition-all active:scale-95">
+                  <Download className="w-4 h-4" /> Download &amp; enable (~{TIER_INFO[deviceRec.tier].approxDownloadMB} MB)
+                </button>
+              )}
+
+              {dlError && <p className="flex items-start gap-1.5 text-[10.5px] text-red-300/90 leading-relaxed"><AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {dlError}</p>}
+              {beta.enabled && <p className="text-[10px] text-[#484f58] leading-relaxed">Turning off stops using it; the downloaded model stays cached on your device until you clear the app's browser data.</p>}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Taught-memory panel (toggled from the header) */}
       {showMemories && memories.length > 0 && (
@@ -331,7 +465,10 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
                   {m.role === 'user' ? <span className="text-[11px] font-black text-white">You</span> : <Bot className="w-4 h-4 text-white" />}
                 </div>
                 <div className={`min-w-0 max-w-[85%] space-y-2 ${m.role === 'user' ? 'items-end' : ''}`}>
-                  <div className={`inline-block rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed break-words ${m.role === 'user' ? 'rounded-tr-sm bg-indigo-600 text-white' : 'rounded-tl-sm bg-[#161b22] border border-white/5 text-[#c9d1d9]'}`}>
+                  {m.beta && (
+                    <p className="text-[9px] font-black uppercase tracking-widest text-fuchsia-300/80 flex items-center gap-1"><Cpu className="w-3 h-3" /> Experimental on-device AI · can be wrong</p>
+                  )}
+                  <div className={`inline-block rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed break-words ${m.role === 'user' ? 'rounded-tr-sm bg-indigo-600 text-white' : `rounded-tl-sm ${m.beta ? 'bg-fuchsia-500/[0.08] border border-fuchsia-500/20' : 'bg-[#161b22] border border-white/5'} text-[#c9d1d9]`}`}>
                     {m.role === 'bot' && m.answerKind && (
                       <span className="inline-flex items-center gap-1 mr-1.5 align-middle"><AnswerIcon kind={m.answerKind} /></span>
                     )}

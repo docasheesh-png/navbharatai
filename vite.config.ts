@@ -26,6 +26,19 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Give the on-device LLM (web-llm) its OWN named chunk. It is a LAZY, OPT-IN dependency —
+          // fetched only when a user turns on the Offline-Thinking beta, never part of the main app
+          // load — so naming it lets the bundle-size budget exclude it (see scripts/bundleBudget.mjs)
+          // instead of counting a ~2 MB beta-only chunk against the main-app ceiling.
+          manualChunks(id: string) {
+            if (id.includes('@mlc-ai/web-llm')) return 'webllm';
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

@@ -64,6 +64,17 @@ export function checkBudget(measured, budgets = BUDGETS) {
   return { ok: violations.length === 0, violations };
 }
 
+/**
+ * LAZY, OPT-IN chunks that are NEVER part of the main app's initial load — so they must not count
+ * against the app bundle budget. Today this is the on-device LLM (web-llm), a ~2 MB chunk fetched only
+ * when a user turns on the Offline-Thinking beta (named `webllm-*` via vite manualChunks). The budget
+ * still protects every eagerly-loaded chunk. Pure predicate so it's unit-testable.
+ */
+export const EXCLUDED_CHUNK_PREFIXES = ['webllm'];
+export function isBudgetExcludedJs(file) {
+  return EXCLUDED_CHUNK_PREFIXES.some((p) => file.startsWith(p));
+}
+
 /** Measure the gzipped sizes of the built bundle. Returns the `measured` shape above. */
 export function measureDist(distDir = 'dist') {
   const assetsDir = join(distDir, 'assets');
@@ -75,6 +86,7 @@ export function measureDist(distDir = 'dist') {
   let largestChunkGzip = 0;
   let largestChunkName = '';
   for (const file of readdirSync(assetsDir)) {
+    if (file.endsWith('.js') && isBudgetExcludedJs(file)) continue; // opt-in lazy chunk (e.g. web-llm)
     const gz = gzipSync(readFileSync(join(assetsDir, file))).length;
     if (file.endsWith('.js')) {
       totalJs += gz;

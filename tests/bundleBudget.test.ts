@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkBudget, BUDGETS } from '../scripts/bundleBudget.mjs';
+import { checkBudget, BUDGETS, isBudgetExcludedJs } from '../scripts/bundleBudget.mjs';
 
 describe('bundle-budget (P-TQA.5)', () => {
   it('passes when every measure is within budget', () => {
@@ -45,5 +45,15 @@ describe('bundle-budget (P-TQA.5)', () => {
     expect(BUDGETS.largestChunkGzipKB).toBeGreaterThan(567);
     expect(BUDGETS.totalJsGzipKB).toBeGreaterThan(918);
     expect(BUDGETS.totalCssGzipKB).toBeGreaterThan(33);
+  });
+
+  it('excludes lazy opt-in chunks (web-llm) from the budget, but nothing else', () => {
+    // The on-device LLM chunk is fetched only when the Offline-Thinking beta is enabled, so it must not
+    // count against the main-app budget.
+    expect(isBudgetExcludedJs('webllm-DT0Ab8E6.js')).toBe(true);
+    // Everything that IS part of the main app load stays budgeted.
+    expect(isBudgetExcludedJs('index-abc123.js')).toBe(false);
+    expect(isBudgetExcludedJs('OfflineAI-xyz.js')).toBe(false);
+    expect(isBudgetExcludedJs('CodeStudio-abc.js')).toBe(false);
   });
 });

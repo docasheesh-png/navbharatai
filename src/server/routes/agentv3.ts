@@ -164,6 +164,8 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet } from '../AgentV3/SpaFallbackAnalysis';
+import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
+import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import {
   planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
   type SmokePlan, type SmokeResult,
@@ -9401,6 +9403,55 @@ export function registerAgentV3Routes(app: Express): void {
             });
           }
         } catch { /* the smoke check is evidence, never a gate — a failure here changes nothing */ }
+      }
+
+      // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
+      // which in practice meant most apps shipped without one. This makes it a system reflex.
+      //
+      // Deliberately NOT executed here. Playwright pulls a browser of roughly 300 MB, and paying that
+      // on every build — for every user, free tier included — would make builds materially slower to
+      // add a signal we now largely have from the render check, the console-error capture and the
+      // route smoke check. Writing the files costs nothing and leaves the user something real they
+      // own: a net that runs in their own repo and their own CI whenever they want it. The report
+      // says WRITTEN, never "passed" — a scaffold reported as a test run is a fake verdict.
+      if (process.env.AGENTV3_AUTO_E2E !== 'off' && !abort.signal.aborted) {
+        try {
+          const e2eFiles = Object.fromEntries(writtenFiles);
+          const decision = shouldAutoScaffoldE2e({
+            files: e2eFiles,
+            ok: result.ok,
+            isImportTurn,
+            hasPreview: !!lastPreviewUrl,
+          });
+          if (decision.scaffold) {
+            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev' });
+            const added: string[] = [];
+            for (const [path, content] of Object.entries(plan.files) as Array<[string, string]>) {
+              // Create-only: an existing file here belongs to the user, and the decision above already
+              // refused whole projects that have their own E2E setup.
+              let exists = false;
+              try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
+              if (exists) continue;
+              await actuator.writeFile(workspaceId, path, content);
+              writtenFiles.set(path, content);
+              added.push(path);
+            }
+            if (added.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'E2E_SCAFFOLDED',
+                message: e2eAutoScaffoldNote(added),
+                autoResolved: true,
+              });
+            }
+          } else if (decision.reason) {
+            // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'E2E_SCAFFOLD_SKIPPED',
+              message: `No end-to-end suite was added — ${decision.reason}.`,
+              autoResolved: true,
+            });
+          }
+        } catch { /* the net is additive — a failure here never touches the build result */ }
       }
 
       // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a

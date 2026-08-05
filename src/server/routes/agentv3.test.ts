@@ -2156,7 +2156,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //   1× the golden-scaffold pre-seed (starter-template apps, 2026-08-02) — gated on
     //      `intent === 'new_build' && !isImportTurn` plus an exact chip-prompt match and an EMPTY src/
     //      tree, so it never writes on a read-only import/survey turn (or any edit/rebuild turn). ✓.
-    expect(count).toBe(13);
+    //   1× the automatic E2E net (ROADMAP #1 Phase 4.3, 2026-08-05) — gated by `shouldAutoScaffoldE2e`,
+    //      which refuses outright when `isImportTurn` is true (its own test asserts that, with the
+    //      reason "your files were left untouched, as asked"). It also refuses a failed build, a
+    //      project with no UI, and any project that already has an E2E setup — and writes CREATE-ONLY,
+    //      so a file the user owns is never overwritten. Considered ✓.
+    expect(count).toBe(14);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

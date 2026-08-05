@@ -25708,3 +25708,42 @@ caches a SECOND copy of the module, so `import()` would still miss: the optimisa
 nothing while doubling traffic. If the two ever drift, CI fails.
 
 Verified: `tsc` both clean, 1067 files / 11849 tests pass, bundle within budget.
+
+---
+
+## 2026-08-05 (later) — The Mitrify class, killed at all three layers (admin tasks 1–3; PR #2133)
+
+The admin sent build `d5f0a2bc` (Mitrify import, "Cannot GET /customer/home") and then redirected the
+work from "fix the one repo" to "teach the engine the whole class" — three tasks, all shipped in
+PR #2133, all verified against the REAL repo first:
+
+**The proof came before the code.** Mitrify was cloned read-only into the scratchpad; the bug was
+reproduced live (dead DB → every page "Cannot GET", `/health` lying `"ok"`), and the guarded-boot fix
+was proven in the same repro (dead DB → pages serve, `/health` honestly `"database":"unavailable"`).
+That verified pattern is what the engine now teaches — not a guess.
+
+**What the build actually was:** the app's port opened, `await ensureSchema()` got ECONNREFUSED, an
+`unhandledRejection` handler kept the process alive, and client serving never mounted — a ZOMBIE
+server. Meanwhile OUR report said "Sandbox database provisioned in 21s" (false: the provision script's
+pg_isready poll had failed and the code FELL BACK to the canonical URL, which every caller printed as
+success) and the verdict guessed "only its API is serving" (wrong even about the API).
+
+1. **Provisioning is now verified with a real `SELECT 1`** over the exact URL the app is handed
+   (`dbProvisionVerify.ts`). The outcome travels as data (`dbVerified` on `BackendProvisionResult`);
+   the fallback URL still gets written (late-heal) but can no longer masquerade as success; one shared
+   `provisionOutcomeNote` feeds all three surfaces that used to compose their own success strings.
+2. **The verdict reads the boot log we already captured** (`halfBootCause` in ImportPreview): named
+   causes (db_unreachable half-boot story, missing_credential with the key) REPLACE the guess at both
+   consumers (import verdict + Diagnose reason); everything else returns null and the honest generic
+   line stands. The real Mitrify boot log is a test fixture.
+3. **The zombie class is taught + permission-gated** (`DbCoupledBootAnalysis.ts`): deterministic
+   detector (awaited DB call before the client-serving mount, unguarded, in the file that listens;
+   real brace-matching for "already guarded"), `DB_COUPLED_BOOT` report record with the proven fix as
+   an instruction, a one-line offer in the verdict — say "fix the boot guard" — where the USER'S REPLY
+   is the permission, and the builder prompt teaching both prevention and the repair recipe.
+
+69 new tests. Full gate: tsc clean ×2, 1069 files / 11,891 tests, exit 0.
+
+**Parked, deliberately:** the direct Mitrify PR (verified patch sits in the session scratchpad) — the
+admin's redirect supersedes it; after this deploy, re-importing the repo makes the engine itself offer
+the fix. Still open from earlier: 3.5 (VirusTotal licensing), 4.6 (infra), visual-editor multi-select.

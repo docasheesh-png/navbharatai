@@ -25625,3 +25625,55 @@ changed. Merged PRs: **#2110, #2114, #2115, #2117, #2118, #2119, #2120, #2121, #
 **Open, and honestly named:** 3.5 (blocked behind the VirusTotal licensing item), 4.5, 4.6 (infra),
 visual-editor multi-select, and the two autopsy items still unreproduced — the pre-kill/orphaned-corpse
 half of "Cannot GET", and attribution of the 238s event hole (now instrumentable).
+
+---
+
+## 2026-08-05 — The preview watchdog watched the clock instead of the app (PR #2131)
+
+**Report (admin, live):** a fully-built app reopened after some days showed *"Preview error: The preview
+did not start within 45 seconds. npm packages are still downloading (a slow network), or a module hung
+while loading."* Standing requirement attached to it: **"jo jo apps ban gayi hai, unko kitne bhi din baad
+open karo, preview pehle jaisa hi chalega."**
+
+**Root cause.** `bareLoadErrors` was **empty** — nothing had failed. A working preview was killed
+mid-load by a flat `setTimeout`. The decisive evidence was in the code's own comment: that timeout had
+**already been raised once**, 25s → 45s, after an identical report (autopsy 2026-07-31). A number that
+has to be raised is not a threshold, it is a guess. Any fixed ceiling is wrong for *some* app on *some*
+network, and the bigger the project the more certainly it is wrong — raising it to 90s only schedules
+the next report. This is the 50/50 law: the first 50% was the false verdict, the other 50% was that a
+clock was ever the thing being measured.
+
+**Fix (`ReactPreview.ts`).** The watchdog now measures **progress**. Every module that resolves — and
+every one that definitively fails — stamps `nbaiLastProgress`; only a *stall* raises an error. A large
+app on a slow phone may take as long as it needs; a genuinely hung one is reported FASTER than the old
+45s. `HARD_CEILING_MS` (10 min) remains purely so a pathological loop cannot spin forever.
+
+Two holes in a naive stall check were closed in the same pass rather than left to become the next
+report:
+- **Packages load in PARALLEL.** One big dependency (firebase, @mui) can still be streaming long after
+  every small one finished. That quiet gap is not a stall, and firing on it would reproduce the exact
+  false failure with a different number. A stall only counts while `nbaiPending === 0`.
+- **A CDN that accepts the connection and never answers** would hold a download pending forever and,
+  with that guard, suppress the watchdog entirely. All three CDN rungs now race a per-package deadline,
+  so the wait always terminates with an honest reason.
+
+The boot overlay also shows `12/34 packages · 15s` instead of a bare seconds counter, which on a slow
+network read exactly like a hang. The failure text points at the in-browser toolbar's reload control,
+which was verified to exist before the text was written.
+
+**Tests.** `ReactPreview.watchdog.test.ts` (new, 6) parses **every inline script with esbuild** — the
+page is JavaScript built inside a template string, where one mis-escaped character yields a blank
+preview in every browser and no `.ts` test would catch it — then pins the stall shape, the pending
+guard, all three per-rung deadlines and the progress stamps. Two older suites asserted the removed 45s
+string and now assert its absence, so a return to any flat deadline fails CI.
+
+**Verified on the right path:** an old app has no live sandbox, so it falls back to the in-browser
+preview, which renders from DURABLE workspace files via `renderPreview` → `buildReactPreview`. The fix
+is on exactly the path "kitne bhi din baad" takes.
+
+**OPEN ROOT CAUSE (rule 6) — old apps still open SLOWLY.** This kills the false failure, not the wait.
+Every open still re-resolves dependencies from the esm.sh CDN, so a 30-dependency app does 30 cold
+fetches on a phone that has never cached them. The durable answer is serving a finished app's **built
+artifact** from storage instead of re-bundling on every open — a real feature (vendoring the resolved
+dependency set at build completion), not a patch. It is NOT built, and is recorded here rather than
+implied as done.

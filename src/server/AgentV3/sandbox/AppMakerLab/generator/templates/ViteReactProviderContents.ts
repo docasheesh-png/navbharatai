@@ -414,4 +414,76 @@ small, .muted { color: var(--muted); }
 .nb-stat { padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
 .nb-stat-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
 .nb-stat-value { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   MOTION (ROADMAP #1 Phase 3.3)
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+   The difference between an app that feels built and one that feels generated is usually motion:
+   a button that responds, a panel that arrives instead of appearing. But bad motion is worse than
+   none, so three rules are enforced by what is written here rather than left to the model:
+
+   1. ONLY transform AND opacity ARE ANIMATED. Animating width/height/top/margin makes the browser
+      re-layout the page on every frame, which is what produces the janky, cheap-feeling animation
+      people associate with generated apps. transform and opacity are composited and stay smooth.
+
+   2. FAST, OR IT IS IN THE WAY. 120-220ms. Anything slower stops being feedback and becomes a
+      delay the user waits out on every single interaction, dozens of times an hour.
+
+   3. NOTHING MOVES FOR SOMEONE WHO ASKED IT NOT TO. The reduced-motion block at the end turns ALL
+      of it off — for many people this is a vestibular-illness accommodation, not a preference, and
+      an app that honours it only for the decorative shimmer has not honoured it at all. */
+
+:root {
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);   /* quick out, gentle in — reads as responsive, not floaty */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+}
+
+/* Interactive elements acknowledge a press. The lift is 1px: enough to feel, too small to nudge
+   the layout or distract. */
+button, .btn, .nb-nav-item, .nb-plan, .card {
+  transition: transform var(--dur-fast) var(--ease), background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+button:active, .btn:active { transform: translateY(1px); }
+/* Cards lift only when they are actually clickable — a static panel that moves under the cursor is
+   noise pretending to be feedback. */
+a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+
+/* Entrances. Content that fades AND rises slightly reads as "arrived"; content that only appears
+   reads as a page glitch. Applied by the app to panels and list items, never to the whole page —
+   an app whose every screen animates in feels slow. */
+@keyframes nb-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nb-rise    { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes nb-pop     { from { opacity: 0; transform: scale(0.97); }     to { opacity: 1; transform: none; } }
+.nb-fade { animation: nb-fade-in var(--dur) var(--ease) both; }
+.nb-rise { animation: nb-rise var(--dur) var(--ease) both; }
+
+/* A dialog arrives; it does not blink into existence. */
+.nb-modal-backdrop { animation: nb-fade-in var(--dur-fast) var(--ease) both; }
+.nb-modal { animation: nb-pop var(--dur) var(--ease) both; }
+
+/* Spinner — for the cases a skeleton cannot cover (a button mid-submit). */
+@keyframes nb-spin { to { transform: rotate(360deg); } }
+.nb-spinner {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: nb-spin 700ms linear infinite;
+  display: inline-block; vertical-align: -3px;
+}
+
+/* THE ACCOMMODATION. Everything above goes quiet — but the app stays fully usable, so states still
+   CHANGE, they just stop moving. A spinner is kept visible (removing it would hide that something is
+   loading); it simply stops rotating. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  button:active, .btn:active,
+  a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: none; }
+}
 `;

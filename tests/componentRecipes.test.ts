@@ -101,3 +101,59 @@ describe('the prompt says WHY, not just what — the part that changes model beh
     expect(prompt).toContain('never drop back to unstyled markup');
   });
 });
+
+/**
+ * Motion (Phase 3.3). Bad motion is worse than none: it is what makes an app feel generated rather
+ * than built. The three rules below are enforced by what is written in the stylesheet, not left to
+ * whatever the model decides to animate.
+ */
+describe('motion is fast, cheap to render, and optional', () => {
+  const motion = css.slice(css.indexOf('MOTION (ROADMAP'));
+
+  it('animates ONLY transform and opacity', () => {
+    // Animating width/height/top/margin re-lays-out the page every frame — the janky, cheap feel
+    // people associate with AI-built apps.
+    // Matched per LINE: every keyframe here is written on one line, and a greedy multi-line match
+    // would run past the closing brace into the next rule and test the wrong thing.
+    const keyframes = motion.split('\n').filter((l) => l.trimStart().startsWith('@keyframes'));
+    expect(keyframes.length).toBeGreaterThanOrEqual(4);
+    for (const frame of keyframes) {
+      expect(frame).not.toMatch(/\b(width|height|top|left|right|bottom|margin|padding)\s*:/);
+    }
+  });
+
+  it('keeps every duration in the 120–220ms feedback range', () => {
+    // Slower stops being feedback and becomes a delay the user sits through dozens of times an hour.
+    expect(motion).toContain('--dur-fast: 120ms');
+    expect(motion).toContain('--dur: 180ms');
+  });
+
+  it('turns EVERYTHING off for reduced motion, not just the decorative parts', () => {
+    // For many people this is a vestibular-illness accommodation, not a preference — honouring it
+    // only for the shimmer is not honouring it.
+    const reduced = motion.slice(motion.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(reduced).toContain('animation-duration: 0.01ms !important');
+    expect(reduced).toContain('transition-duration: 0.01ms !important');
+    // The press/lift transforms are explicitly neutralised too — a duration of 0 would still jump.
+    expect(reduced).toContain('transform: none');
+  });
+
+  it('lifts a card only when it is genuinely clickable', () => {
+    // A static panel that moves under the cursor is noise pretending to be feedback.
+    expect(motion).toContain('.card.nb-clickable:hover');
+    expect(motion).toContain('.card[role="button"]:hover');
+  });
+
+  it('the prompt states the rules, since the model writes the animations we did not', () => {
+    expect(prompt).toContain('Animate ONLY');
+    expect(prompt).toContain('120-220ms');
+    expect(prompt).toContain('do not add animations that');
+  });
+
+  it('the motion helpers the prompt hands out all exist', () => {
+    for (const cls of ['nb-rise', 'nb-fade', 'nb-spinner', 'nb-clickable']) {
+      expect(css, `.${cls} named in the prompt but missing from the stylesheet`).toContain(`.${cls}`);
+      expect(prompt).toContain(cls);
+    }
+  });
+});

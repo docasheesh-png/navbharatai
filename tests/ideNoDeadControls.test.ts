@@ -299,3 +299,62 @@ describe('Code Studio shows the SAME app the rest of the product does', () => {
     expect(shell).toContain('e instanceof Error');    // carries the browser's own reason
   });
 });
+
+/**
+ * UPLOAD ZIP in Code Studio (admin 2026-08-05). Destructive, so the wiring is pinned, not just the
+ * presence of a menu entry: the warning must come first, it must be readable by the user, and the
+ * upload must reuse the transport v5.0 already proved rather than a second one with its own limits.
+ */
+describe('Code Studio → Upload ZIP', () => {
+  it('lives in the More sheet with a LOCALIZED label', () => {
+    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
+    const block = studio.slice(i, i + 5200);
+    expect(block).toContain('zipText.menuLabel');
+    // An English menu entry above a Hindi warning is a seam the user notices first.
+    expect(block).not.toContain("label: 'Upload ZIP'");
+  });
+
+  it('warns BEFORE the picker — the destructive step is never one tap away', () => {
+    // Tapping the menu opens the confirm dialog; only the confirm button opens the device picker.
+    expect(studio).toContain('setZipConfirmOpen(true)');
+    const i = studio.indexOf('{zipText.confirm}');
+    expect(i).toBeGreaterThan(-1);
+    expect(studio.slice(Math.max(0, i - 500), i)).toContain('zipInputRef.current?.click()');
+    // The menu entry itself must NOT open the picker directly.
+    const menu = studio.slice(studio.indexOf('zipText.menuLabel'), studio.indexOf('zipText.menuLabel') + 200);
+    expect(menu).not.toContain('zipInputRef.current?.click()');
+  });
+
+  it('reuses the v5.0 chunked uploader — not a second transport with its own size cap', () => {
+    // A base64 request body is what capped the old import at ~18 MB; uploadZipProject chunks instead,
+    // so "kitni bhi badi file" is a property of the transport, not a hope.
+    expect(studio).toContain("import { uploadZipProject } from '../../lib/zipProjectUpload'");
+    expect(studio).toContain('await uploadZipProject(file, workspaceId');
+    // Progress is shown, because a large archive on a phone takes real time.
+    expect(studio).toContain('setZipProgress');
+  });
+
+  it('syncs the landed project everywhere through ONE bridge', () => {
+    // Same endpoint a build's own writes use → replace (not merge) → preview rebuilt in App.
+    expect(studio).toContain("'/api/agentv3/workspace-files'");
+    expect(studio).toContain('onReplaceProjectFiles?.(data.files)');
+    const app = read('src/App.tsx');
+    const i = app.indexOf('const replaceProjectFiles');
+    const fn = app.slice(i, i + 1400);
+    expect(fn).toContain('noteRemote(clean)');   // already durable — do not upload it straight back
+    expect(fn).toContain('setFiles(clean)');     // REPLACE, matching the consent given
+    expect(fn).toContain('updatePreview(clean)');
+  });
+
+  it('does not report a failed upload when only the read-back failed', () => {
+    // The archive IS on the server at that point; telling the user it failed would have them upload
+    // the whole thing again.
+    expect(studio).toContain('reload to see your project');
+  });
+
+  it('lets the same file be chosen again after an attempt', () => {
+    // Without clearing the input, re-picking the SAME archive fires no change event and the button
+    // looks broken.
+    expect(studio).toContain('zipInputRef.current.value = \'\'');
+  });
+});

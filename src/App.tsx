@@ -1890,6 +1890,31 @@ export default function App() {
    * Save says "Saved" only after this resolves — announcing success while a 1.2s debounce is still
    * pending would be a fake success message, and the user would trust it and close the tab.
    */
+  /**
+   * A project the user just UPLOADED has landed server-side — make it the app's file set.
+   *
+   * REPLACE, not merge. The warning the user agreed to says the old files are deleted, and a merge
+   * would leave orphans from the previous project sitting in their new one, which is both untrue to
+   * the consent given and a genuinely confusing result.
+   *
+   * Marked as REMOTE first: the archive is already durable on the server, so letting the edit syncer
+   * treat it as local typing would upload the whole project straight back — megabytes of pointless
+   * traffic on the phone connection that just finished sending it.
+   *
+   * Then the preview is rebuilt from the new files, so Code Studio, the Files view, the preview and
+   * v5.0 all show the uploaded project at the same moment rather than drifting apart.
+   */
+  const replaceProjectFiles = useCallback((incoming: Record<string, string>) => {
+    const clean = sanitizeFileMap(incoming);
+    if (Object.keys(clean).length === 0) return;
+    workspaceSyncerRef.current?.noteRemote(clean);
+    setFiles(clean);
+    updatePreview(clean);
+    // No need to touch the hydration guard: it only runs while the file set is EMPTY, and it is not
+    // empty any more — the uploaded project is now what is open.
+    addLog(`Project replaced — ${Object.keys(clean).length} files uploaded.`, 'success');
+  }, [updatePreview, addLog]);
+
   const flushIdeEdits = useCallback(
     () => workspaceSyncerRef.current?.flush() ?? Promise.resolve(),
     [],
@@ -3550,6 +3575,7 @@ export default function App() {
             setFiles={setFiles as any}
             onIdeFilesChange={applyIdeFileChange}
             onFlushIdeEdits={flushIdeEdits}
+            onReplaceProjectFiles={replaceProjectFiles}
             onFilesRemoved={handleFilesRemoved}
             hasGeneratedCode={hasGeneratedCode}
             setIsAppBuilt={setIsAppBuilt}

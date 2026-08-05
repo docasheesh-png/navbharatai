@@ -68,6 +68,8 @@ export interface ViewPanelsProps {
   onIdeFilesChange: (files: any) => void;
   /** Force pending edits to the durable store and resolve once stored — powers an honest "Saved". */
   onFlushIdeEdits: () => Promise<void>;
+  /** An uploaded ZIP landed server-side — REPLACE the app's file set with it (see App.tsx). */
+  onReplaceProjectFiles: (files: Record<string, string>) => void;
   /** Clear deleted paths from durable storage (IDE file-explorer multi-delete). */
   onFilesRemoved?: (paths: string[]) => void;
   hasGeneratedCode: boolean;
@@ -143,7 +145,7 @@ export interface ViewPanelsProps {
 }
 
 export function ViewPanels({
-  activeView, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onFilesRemoved,
+  activeView, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
@@ -174,6 +176,7 @@ export function ViewPanels({
                and the status bar said PREVIEW LIVE · 13 FILES. It now gets the same state the
                slide-menu Preview does, and renders the same PreviewSurface from it. */
             v3Preview={v3Preview}
+            onReplaceProjectFiles={onReplaceProjectFiles}
             onFilesRemoved={onFilesRemoved}
             onRun={(f: any) => updatePreview(f || files)}
             generatedCode={generatedCode}

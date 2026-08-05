@@ -13,6 +13,9 @@ import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
 import { PreviewPanel } from './PreviewPanel';
 import { PreviewSurface } from '../agentv3/PreviewSurface';
+import { uploadZipProject } from '../../lib/zipProjectUpload';
+import { zipReplaceWarningFor, looksLikeZip } from '../../lib/zipReplaceWarning';
+import { auth } from '../../App';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
@@ -26,9 +29,9 @@ import {
   Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
-  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
+  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck, UploadCloud,
   BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle,
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle, Loader2,
   Files as FilesIcon, GitBranch, Terminal as TerminalIcon
 } from 'lucide-react';
 
@@ -37,6 +40,8 @@ interface CodeStudioProps {
   onFilesChange: (files: Record<string, string>) => void;
   /** Force pending edits to the durable store and resolve once they are really stored (Save). */
   onFlushEdits?: () => Promise<void>;
+  /** An uploaded ZIP landed server-side — replace the app's file set with it. */
+  onReplaceProjectFiles?: (files: Record<string, string>) => void;
   /** Live v5.0 preview state — the SAME object the slide-menu Preview renders from. */
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
   /** Side-effect when files are deleted (clear durable storage; sync deletion to v5.0). */
@@ -97,6 +102,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onFilesChange,
   onFlushEdits,
   v3Preview,
+  onReplaceProjectFiles,
   onFilesRemoved,
   onRun,
   generatedCode,
@@ -173,6 +179,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
    * a bare string would be identical and the effect downstream would ignore it.
    */
   const [aiPrefill, setAiPrefill] = useState<{ text: string; nonce: number } | undefined>();
+  /** ZIP upload (More → Upload ZIP): confirm → device picker → chunked upload → replace + sync. */
+  const [zipConfirmOpen, setZipConfirmOpen] = useState(false);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipProgress, setZipProgress] = useState('');
+  const [zipError, setZipError] = useState('');
+  const zipInputRef = React.useRef<HTMLInputElement | null>(null);
+  /**
+   * The warning speaks the language the USER is writing in, taken from their own most recent words.
+   * Consent to delete a project is not real consent if the sentence cannot be read.
+   */
+  const zipText = zipReplaceWarningFor(
+    [...messages].reverse().find((m) => m.sender === 'user')?.text || chatInput,
+  );
   const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
   const [splitActive, setSplitActive] = useState<string>('');
   const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor
@@ -457,6 +476,60 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const handleSaveActiveFile = async (): Promise<void> => {
     handleShortcut([], 'base.action.save');
     if (onFlushEdits) await onFlushEdits();
+  };
+
+  /**
+   * Upload a .zip and make it THIS workspace's project.
+   *
+   * It reuses `uploadZipProject` — the exact transport NavBharatAI Pro v5.0 already uses. That matters
+   * for the size requirement: the archive is sent in CHUNKS and extracted server-side, so a large
+   * project is not capped the way a base64 request body would be. Building a second uploader here
+   * would have meant a second set of limits to discover the hard way.
+   *
+   * After it lands, the files are pulled back through the SAME /api/agentv3/workspace-files bridge a
+   * build's own writes use, and handed up as a REPLACE — so Code Studio, the Files view, the preview
+   * and v5.0 are all showing the uploaded project, from one source, at the same moment.
+   */
+  const handleZipUpload = async (file: File) => {
+    if (zipBusy) return;
+    setZipError('');
+    if (!looksLikeZip(file)) { setZipError(`${zipText.failed}: .zip`); return; }
+    const workspaceId = v3Preview?.workspaceId || v3WorkspaceId;
+    if (!workspaceId || !v3UserId) { setZipError(zipText.failed); return; }
+
+    setZipBusy(true);
+    setZipProgress(zipText.working);
+    try {
+      await uploadZipProject(file, workspaceId, (p) => {
+        // A large archive takes real time on a phone — always show where it is, never a bare spinner.
+        setZipProgress(p.phase === 'extracting'
+          ? zipText.working
+          : `${zipText.working} ${Math.round(p.fraction * 100)}%`);
+      });
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try { const tok = await auth.currentUser?.getIdToken(); if (tok) headers.Authorization = `Bearer ${tok}`; } catch { /* server rejects honestly */ }
+      const res = await fetch('/api/agentv3/workspace-files', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ workspaceId, userId: v3UserId, email: v3Email || '' }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.files && typeof data.files === 'object' && Object.keys(data.files).length > 0) {
+        onReplaceProjectFiles?.(data.files);
+        setActiveScreen('files');
+        setIsSidebarOpen(true);
+      } else {
+        // The archive IS on the server; only the read-back failed. Say exactly that rather than
+        // reporting a failed upload the user would then repeat.
+        setZipError(`${zipText.failed} — reload to see your project.`);
+      }
+    } catch (err) {
+      setZipError(`${zipText.failed}: ${err instanceof Error ? err.message : ''}`.trim());
+    } finally {
+      setZipBusy(false);
+      setZipProgress('');
+      if (zipInputRef.current) zipInputRef.current.value = '';   // same file can be picked again
+    }
   };
 
   /** Collapse the second group entirely, returning focus to the first. */
@@ -1001,6 +1074,67 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
   return (
     <div className="flex flex-col h-full bg-[var(--theme-bg)] transition-colors duration-500 overflow-hidden relative">
+      {/* ── Upload ZIP: the real device picker, and the warning that must precede it ────────────── */}
+      <input
+        ref={zipInputRef}
+        type="file"
+        accept=".zip,application/zip,application/x-zip-compressed"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleZipUpload(f); }}
+      />
+
+      <AnimatePresence>
+        {zipConfirmOpen && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => { if (!zipBusy) setZipConfirmOpen(false); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 8 }}
+              onClick={(e) => e.stopPropagation()}
+              role="alertdialog" aria-modal="true" aria-labelledby="zip-warn-title"
+              className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#161b22] p-6 shadow-2xl"
+            >
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-4.5 h-4.5 text-amber-400" />
+                </div>
+                <h3 id="zip-warn-title" className="text-white font-bold text-[15px] leading-snug">{zipText.title}</h3>
+              </div>
+              <p className="text-[13px] leading-relaxed text-[#c9d1d9] mb-5">{zipText.body}</p>
+
+              {zipBusy ? (
+                <div className="flex items-center gap-2 text-[12px] text-indigo-300 font-medium py-2">
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  {zipProgress || zipText.working}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setZipConfirmOpen(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-white/10 text-[#c9d1d9] text-[12px] font-bold hover:bg-white/5 transition-colors"
+                  >
+                    {zipText.cancel}
+                  </button>
+                  {/* Only THIS opens the picker. The destructive step is never one tap away. */}
+                  <button
+                    onClick={() => zipInputRef.current?.click()}
+                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[12px] font-bold transition-colors"
+                  >
+                    {zipText.confirm}
+                  </button>
+                </div>
+              )}
+
+              {zipError && (
+                <p className="mt-3 text-[11px] leading-relaxed text-rose-400 break-words">{zipError}</p>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <CommandPalette 
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
@@ -1722,6 +1856,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    { label: 'Search', Icon: Search, onTap: () => handleScreenChange('search') },
                    { label: 'Source Control', Icon: GitBranch, onTap: () => handleScreenChange('git') },
                    { label: 'Security', Icon: ShieldCheck, onTap: () => handleScreenChange('security') },
+                   // Label localized too — an English menu entry above a Hindi warning would be a
+                   // seam the user notices before the sentence that matters.
+                   { label: zipText.menuLabel, Icon: UploadCloud, onTap: () => { setZipError(''); setZipConfirmOpen(true); } },
                    { label: 'Shortcuts', Icon: Keyboard, onTap: () => setIsShortcutsOpen(true) },
                  ]).map(({ label, Icon, onTap }) => (
                    <button

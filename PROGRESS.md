@@ -25747,3 +25747,93 @@ success) and the verdict guessed "only its API is serving" (wrong even about the
 **Parked, deliberately:** the direct Mitrify PR (verified patch sits in the session scratchpad) — the
 admin's redirect supersedes it; after this deploy, re-importing the repo makes the engine itself offer
 the fix. Still open from earlier: 3.5 (VirusTotal licensing), 4.6 (infra), visual-editor multi-select.
+
+---
+
+## 2026-08-05 (evening) — Two real reports, five findings, two of them mine (PR #2135)
+
+The admin sent build reports `d5f0a2bc` and `15985d3b` (both Mitrify imports, both "Cannot GET
+/customer/home"). The second one was the first real test of the morning's three fixes.
+
+**What the reports PROVED worked** (tasks 1 and 2 from PR #2133):
+- `IMPORT_DB_PROVISION_FAILED` — "the real connection test FAILED after 21s (the server never
+  accepted connections)". It used to say "provisioned in 21s", which was false, and that lie is what
+  kept the real cause buried for weeks.
+- `IMPORT_PREVIEW_NOT_SERVING` — "could not reach its database … stopped booting half-way — its
+  pages were never mounted". It used to guess "only its API is serving", which was wrong even about
+  the API.
+
+**Finding 1 (MINE) — the zombie detector was silent on the exact repo it was built for.** No
+`DB_COUPLED_BOOT` in either report. Two causes, both proven against the real file before touching
+anything: (a) the serving pattern matched a bare NAME, and Mitrify's `server/index.ts` opens with
+`import { serveStatic } from "./static";` on line 11 — so the "serving" match landed on the IMPORT,
+which precedes `await ensureSchema()` on line 83, and the detector concluded "already decoupled";
+(b) the integrity-block copy runs on `integrityFiles`, which on an import turn is just the `.env` we
+wrote — that build's own POST_ANSWER_TIMING says "1 files". My fixture had used a DYNAMIC import
+inside the async block, so it had no top-level import line: I tested the shapes I thought of, not
+the shape that shipped. The real file's layout is now a fixture, verbatim.
+
+**Finding 2 — a failure that announced itself but would not explain itself.** The provisioning
+script threw away every reason (`pg_ctlcluster … | tail -3 || true`, the retry's error to
+/dev/null, no record of whether psql even existed). Truth without a cause is half of honest. It now
+emits psql presence, cluster version, current user, pg_ctlcluster's own error, pg_isready's reason
+and psql's SELECT-1 error — because "Insufficient privileges", "not installed", "database does not
+exist" and "password authentication failed" need four different responses. Deliberately did NOT
+raise the 20s poll: 21s-to-failure with psql already present says the cluster refuses to START, and
+a longer timeout would only make every build wait longer to fail identically.
+
+**Finding 3 (MINE, by measurement) — ~97 seconds wasted on every import/survey turn.** Both reports
+showed the SAME 97s between the answer and the post-answer pass. Identical durations on identical
+work is not noise. Cause: all four post-build CODE gates (tsc / missing-files / syntax /
+missing-export) gated on `writtenFiles.size > 0`, and the `.env` WE write on an import turn pushes
+that above zero — so a "do not change any files" survey ran a full `tsc --noEmit` over the user's
+untouched 165-file project (one component 402 KB) for no possible benefit, and the tsc gate's
+repair pass could then have edited files we promised not to touch. This is a SIBLING of the
+reviewer's already-fixed size-only guard (build 77bd487b), whose own comment claimed "every other
+post-build gate already checks !isImportTurn" — these four did not. Fixed as a CLASS: one exported,
+tested predicate every code gate goes through. Writing the test surfaced a FIFTH gate on the same
+guard (a late syntax re-parse, milder — it inspects only our own writes and never repairs); routed
+through too, because leaving one gate on the old shape is how someone later widens it.
+
+**Finding 4 — the report described our own `.env` as the user's architecture.** "0 frontend, 0
+backend, 0 shared, 1 other. No clean full-stack split" — about a plainly full-stack 165-file app.
+True about the one file it measured, false about the app: a confident, specific, misleading line in
+the admin's primary diagnostic. Silent on a survey turn now.
+
+**Also shipped (roadmap Phase 6.1 — regional languages).** Probed the live detector first: Marathi
+script returned "Hindi" (the table mapped all Devanagari to Hindi with a comment admitting it), and
+romanized Tamil/Marathi/Telugu returned nothing at all — which matters because Roman script is the
+majority input mode on a phone. Devanagari now separates Hindi from Marathi (ळ, आहे/नाही/मला);
+romanized detection covers Tamil, Telugu, Marathi, Kannada, Malayalam, Gujarati, Bengali, Punjabi.
+Deliberately timid — 2 distinct markers minimum, ties REFUSED, English lookalikes excluded — because
+building someone's app in the wrong language is worse than building it in English. The instruction
+states its own confidence: a script hit is asserted, a romanized hit says "appears to be" and tells
+the model to follow the user's words if the hint is wrong.
+
+**Still open:** WHY the sandbox Postgres will not start in 21s (now instrumented — the next report
+answers it), the ~230s between import completion and the agent's first call, 3.5 (VirusTotal
+licensing), 4.6 (headless-Chrome infra), visual-editor multi-select.
+
+**THE ROOT, FOUND AND FIXED (same evening, PR #2135).** The admin pushed back — "Cannot GET is still
+coming, fix it properly once" — and they were right: everything above made the engine HONEST about
+the failure without making the preview WORK. The actual cause: **root is not available in the
+sandbox**, and every command the provisioner relied on needs it (`apt-get install`,
+`pg_ctlcluster … start`, `su postgres -c createdb`). The build's own `ls -la` shows
+/home/user/workspace owned by "user user". So the database was never going to start, on any build,
+ever — and the old script discarded the very error that said so.
+
+Verified by RUNNING the emitted script as a non-root user, which is the sandbox's real condition:
+
+    DB_DIAG_START: Error: You must run this program as the cluster owner (postgres) or root
+    DB_DIAG_PGCTL: waiting for server to start.... done / server started
+    DB_URL:postgresql://postgres@localhost:5432/myapp        ← SELECT 1 passed
+
+Postgres now runs AS US — initdb into a directory we own, started with pg_ctl; no root, no Debian
+cluster wrapper, no /etc/postgresql, no su. `createdb` goes over TCP, because `su` was itself
+root-only, so even a running cluster could not create the app's database. The privileged path is
+still tried first (instant where it works). Idempotent and measured: the re-run took 0.2s, which is
+what keeps the keepalive/reprovision paths free. A refused start now captures the server's own log.
+
+This should end the "Cannot GET" chain at its source: DB up → ensureSchema succeeds → client serving
+mounts → pages serve. Proven in this container, NOT yet in a live E2B sandbox — the new PGBIN/INITDB/
+PGCTL/PGLOG diagnostics are there precisely so the next real report settles it either way.

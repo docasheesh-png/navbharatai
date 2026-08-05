@@ -6,6 +6,7 @@ import {
   PanelRightClose, ListTree
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { LAYOUT_MODES, isFlex, isLayoutMode } from './visualLayout';
 
 interface VisualEditorProps {
   html: string;
@@ -69,6 +70,10 @@ const EDITOR_SCRIPT = `
       paddingBottom:cs.paddingBottom,paddingLeft:cs.paddingLeft,
       borderRadius:cs.borderRadius,opacity:cs.opacity,
       display:cs.display,width:cs.width,height:cs.height,
+      marginTop:cs.marginTop,marginRight:cs.marginRight,
+      marginBottom:cs.marginBottom,marginLeft:cs.marginLeft,
+      flexDirection:cs.flexDirection,justifyContent:cs.justifyContent,
+      alignItems:cs.alignItems,flexWrap:cs.flexWrap,gap:cs.gap||cs.columnGap,
     };
   }
   function sendSel(el){
@@ -507,6 +512,123 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ html, onHtmlChange }
                   <span className="text-[10px] text-[#8b949e] w-10 text-right font-mono">{getNumericStyle(side)}px</span>
                 </PropertyRow>
               ))}
+
+              {(['marginTop', 'marginRight', 'marginBottom', 'marginLeft'] as const).map(side => (
+                <PropertyRow key={side} label={side.replace('margin', 'M-').replace('Top', 'T').replace('Right', 'R').replace('Bottom', 'B').replace('Left', 'L')}>
+                  <input
+                    type="range"
+                    min={0} max={80} step={2}
+                    value={getNumericStyle(side)}
+                    onChange={e => applyStyle(side, e.target.value + 'px')}
+                    className="flex-1 accent-indigo-500"
+                  />
+                  <span className="text-[10px] text-[#8b949e] w-10 text-right font-mono">{getNumericStyle(side)}px</span>
+                </PropertyRow>
+              ))}
+
+              {/* Layout — the most common thing a non-technical user wants to change and, until now,
+                  the one thing they had to ASK THE AI for: "put these side by side", "centre this",
+                  "add a gap". A round-trip through the builder for a flex-direction is slow and costs
+                  tokens; here it is instant and free. */}
+              <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] pt-3 pb-1">Layout</p>
+
+              <PropertyRow label="Arrange">
+                <div className="flex gap-1 flex-1 justify-end">
+                  {LAYOUT_MODES.map(mode => (
+                    <button
+                      key={mode.id}
+                      title={mode.title}
+                      onClick={() => mode.apply(applyStyle)}
+                      className={cn(
+                        'px-2 py-1 rounded-md text-[10px] transition-colors border',
+                        isLayoutMode(selectedEl.styles, mode.id)
+                          ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
+                          : 'border-white/10 bg-white/5 text-[#8b949e] hover:text-white',
+                      )}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </PropertyRow>
+
+              {/* The alignment and gap controls only mean anything once the element is a flex
+                  container — showing them on a plain block would offer settings that do nothing. */}
+              {isFlex(selectedEl.styles) && (
+                <>
+                  <PropertyRow label="Align">
+                    <div className="flex gap-1 flex-1 justify-end">
+                      {(['flex-start', 'center', 'flex-end', 'space-between'] as const).map(val => (
+                        <button
+                          key={val}
+                          title={`justify-content: ${val}`}
+                          onClick={() => applyStyle('justifyContent', val)}
+                          className={cn(
+                            'px-1.5 py-1 rounded-md text-[10px] transition-colors border',
+                            (selectedEl.styles.justifyContent || 'flex-start') === val
+                              ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
+                              : 'border-white/10 bg-white/5 text-[#8b949e] hover:text-white',
+                          )}
+                        >
+                          {val === 'space-between' ? '↔' : val === 'center' ? '‖' : val === 'flex-end' ? '⇥' : '⇤'}
+                        </button>
+                      ))}
+                    </div>
+                  </PropertyRow>
+
+                  <PropertyRow label="Cross">
+                    <div className="flex gap-1 flex-1 justify-end">
+                      {(['flex-start', 'center', 'flex-end', 'stretch'] as const).map(val => (
+                        <button
+                          key={val}
+                          title={`align-items: ${val}`}
+                          onClick={() => applyStyle('alignItems', val)}
+                          className={cn(
+                            'px-1.5 py-1 rounded-md text-[10px] transition-colors border',
+                            (selectedEl.styles.alignItems || 'stretch') === val
+                              ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
+                              : 'border-white/10 bg-white/5 text-[#8b949e] hover:text-white',
+                          )}
+                        >
+                          {val === 'stretch' ? '⇕' : val === 'center' ? '‖' : val === 'flex-end' ? '⇩' : '⇧'}
+                        </button>
+                      ))}
+                    </div>
+                  </PropertyRow>
+
+                  <PropertyRow label="Gap">
+                    <input
+                      type="range"
+                      min={0} max={48} step={2}
+                      value={getNumericStyle('gap')}
+                      onChange={e => applyStyle('gap', e.target.value + 'px')}
+                      className="flex-1 accent-indigo-500"
+                    />
+                    <span className="text-[10px] text-[#8b949e] w-10 text-right font-mono">{getNumericStyle('gap')}px</span>
+                  </PropertyRow>
+
+                  {/* Wrapping is what keeps a row from overflowing a phone — off by default in CSS,
+                      which is why a flex row built on a desktop so often breaks on mobile. */}
+                  <PropertyRow label="Wrap">
+                    <div className="flex gap-1 flex-1 justify-end">
+                      {(['nowrap', 'wrap'] as const).map(val => (
+                        <button
+                          key={val}
+                          onClick={() => applyStyle('flexWrap', val)}
+                          className={cn(
+                            'px-2 py-1 rounded-md text-[10px] transition-colors border',
+                            (selectedEl.styles.flexWrap || 'nowrap') === val
+                              ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
+                              : 'border-white/10 bg-white/5 text-[#8b949e] hover:text-white',
+                          )}
+                        >
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                  </PropertyRow>
+                </>
+              )}
 
               {/* Border */}
               <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] pt-3 pb-1">Border</p>

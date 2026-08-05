@@ -304,7 +304,15 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
       : `<script src="${babelPrimary}"></script>`;
 
   const payload = JSON.stringify({ entry, modules: compiled ?? modules }).replace(/<\//g, '<\\/');
-  const imports = buildImportmap(vfs);
+  // Serve dependencies from OUR origin when we know it (the /api/esm mirror): the browser then holds
+  // every version-pinned module as an immutable cache entry, so reopening an old app loads its deps
+  // from disk with zero network — and a CDN outage stops being a preview outage. Without an origin
+  // (unit tests, the origin-less static route) or with the kill switch off, this is plain esm.sh and
+  // the page is exactly what it was before.
+  const depBase = origin && process.env.AGENTV3_PREVIEW_DEP_PROXY !== 'off'
+    ? `${origin.replace(/\/$/, '')}/api/esm/`
+    : ESM;
+  const imports = buildImportmap(vfs, depBase);
   const importmap = JSON.stringify({ imports }).replace(/<\//g, '<\\/');
   // START THE DOWNLOADS NOW, not after the compiler finishes (admin 2026-08-05: "kitne bhi din baad
   // open karo, preview pehle jaisa hi chalega").
@@ -395,6 +403,9 @@ ${babelTag}
     return spec;
   }
   var ESM = '${ESM}';
+  // The base the importmap was BUILT with — the same-origin mirror when available, else esm.sh.
+  // specUrlAlt slices the version segment out of importmap entries, so it must know the real base.
+  var DEP_BASE = ${JSON.stringify(depBase)};
   // Fallback ESM CDN: if esm.sh flakes/times-out for a package, retry from jsdelivr's ESM (esm.run)
   // before giving up — one CDN hiccup should not blank the whole preview. (esm.run has no ?external
   // flag, so a React library loaded via the fallback may bundle its own React; acceptable only when
@@ -685,7 +696,7 @@ ${babelTag}
   // so the fallback matches package.json, e.g. react@18.3.1). Used only when specUrl() failed to load.
   function specUrlAlt(spec) {
     var root = spec.split('/')[0]; if (spec[0] === '@') root = spec.split('/').slice(0, 2).join('/');
-    if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(ESM.length + root.length); return ESM_ALT + root + verPart + spec.slice(root.length); }
+    if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(DEP_BASE.length + root.length); return ESM_ALT + root + verPart + spec.slice(root.length); }
     return ESM_ALT + spec;
   }
 
@@ -1094,8 +1105,16 @@ export function buildModulePreloads(imports: Record<string, string>): string {
     .join('\n');
 }
 
-/** Build an esm.sh importmap from package.json deps (+ always-needed React entries). */
-function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
+/**
+ * Build the dependency importmap from package.json deps (+ always-needed React entries).
+ *
+ * `depBase` is where packages are served FROM: the same-origin mirror (`<origin>/api/esm/`) when the
+ * caller's origin is known — the browser then caches every version-pinned module as immutable, which
+ * is what makes reopening an old app instant and CDN-independent — or esm.sh directly (tests, the
+ * origin-less static route, or kill switch `AGENTV3_PREVIEW_DEP_PROXY=off`). The URL SHAPE after the
+ * base is identical either way, so the loader's sub-path surgery and esm.run fallback work unchanged.
+ */
+function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM): Record<string, string> {
   const deps: Record<string, string> = {};
   try {
     const pkg = JSON.parse(vfs.readText('package.json') || '{}');
@@ -1108,11 +1127,11 @@ function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
   const reactVer = ver('react') || '@18.3.1';
   const rdVer = ver('react-dom') || '@18.3.1';
   const imap: Record<string, string> = {
-    react: ESM + 'react' + reactVer,
-    'react-dom': ESM + 'react-dom' + rdVer,
-    'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
-    'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
-    'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
+    react: depBase + 'react' + reactVer,
+    'react-dom': depBase + 'react-dom' + rdVer,
+    'react-dom/client': depBase + 'react-dom' + rdVer + '/client',
+    'react/jsx-runtime': depBase + 'react' + reactVer + '/jsx-runtime',
+    'react/jsx-dev-runtime': depBase + 'react' + reactVer + '/jsx-dev-runtime',
   };
   // CRITICAL for any React library (react-router-dom, @mui, framer-motion, …): externalize
   // react + react-dom (`?external=react,react-dom`) so those bare `import "react"` specifiers
@@ -1128,7 +1147,7 @@ function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
   // URLs while the single shared React is still preserved. React's own entries stay plain
   // (they ARE the shared copy).
   for (const name of Object.keys(deps)) {
-    if (!imap[name]) imap[name] = ESM + name + ver(name) + EXTERNAL_REACT_Q;
+    if (!imap[name]) imap[name] = depBase + name + ver(name) + EXTERNAL_REACT_Q;
   }
   return imap;
 }

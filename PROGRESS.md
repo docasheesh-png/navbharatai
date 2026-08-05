@@ -25677,3 +25677,34 @@ fetches on a phone that has never cached them. The durable answer is serving a f
 artifact** from storage instead of re-bundling on every open — a real feature (vendoring the resolved
 dependency set at build completion), not a patch. It is NOT built, and is recorded here rather than
 implied as done.
+
+## 2026-08-05 (cont.) — Dependency downloads no longer wait for the compiler (PR #2132)
+
+First bounded step against the open root cause recorded above. NOT the artifact-caching answer — that
+is still unbuilt and still open.
+
+**What was serialized.** The in-browser loader can only call `import()` after Babel has loaded AND
+`collectBare()` has scanned the sources. So on every open, package downloading began only once the
+~2.85 MB compiler had finished: two slow phases back to back on a phone with a cold cache. Nothing
+required that ordering — `specUrl()` returns the importmap entry verbatim for every package.json
+dependency, so the exact URLs are already known at RENDER time, on the server.
+
+**Change.** `buildModulePreloads()` emits `<link rel="modulepreload">` for those URLs, before the Babel
+tag. The browser now fetches packages in parallel with the compiler; by the time `import()` runs they
+are in the HTTP cache. A pure scheduling win with no new failure mode — a preload that 404s or goes
+unused is a console note, and the real `import()` still walks its full three-rung CDN fallback. It
+shortens the wait; it cannot change the outcome.
+
+**Bounds, because an unbounded version would slow what it speeds up.** A preload is a promise to the
+browser that the module WILL be used, so hundreds of them compete with the compiler for the same
+connections. Capped at `MAX_MODULE_PRELOADS` (24), React's entries emitted FIRST so a large dependency
+list can never crowd out what every React app needs. Deduplicated by URL (`react` and
+`react/jsx-runtime` can map to one URL). http(s) only, so a future map entry can never become a
+`javascript:` URL in the page head. `&` and `"` escaped.
+
+**The test that matters most** asserts the preloaded URL is byte-identical to the one the loader later
+imports — including the `?external=react,react-dom` query. Preloading a package without that query
+caches a SECOND copy of the module, so `import()` would still miss: the optimisation would silently do
+nothing while doubling traffic. If the two ever drift, CI fails.
+
+Verified: `tsc` both clean, 1067 files / 11849 tests pass, bundle within budget.

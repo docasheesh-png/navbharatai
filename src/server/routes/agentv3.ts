@@ -5711,6 +5711,21 @@ export function registerAgentV3Routes(app: Express): void {
                 phase: 'preview', severity: verdict.ok ? 'info' : 'warning', code: verdict.ok ? 'IMPORT_PREVIEW_SERVING' : 'IMPORT_PREVIEW_NOT_SERVING',
                 message: verdict.text.slice(0, 400), autoResolved: verdict.ok,
               });
+              // RECORD IT HERE TOO (2026-08-05, from report 15985d3b). The integrity-block copy of this
+              // check runs on `integrityFiles`, which on an IMPORT turn is just the `.env` we wrote —
+              // that build's own POST_ANSWER_TIMING says "1 files" — so the report carried no
+              // DB_COUPLED_BOOT for an imported app, which is precisely the case the check exists for.
+              // `importedFiles` is the real project map, and it is right here.
+              if (zombie) {
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'DB_COUPLED_BOOT',
+                  // An OBSERVATION, not our defect: this block only runs for an IMPORTED repo, so the
+                  // coupled boot is the user's own pre-existing code. Counting it among "problems v5.0
+                  // still owes" would make our own tally lie about what we did.
+                  ...importTurnObservation(true, `${zombie.message} ${dbCoupledBootFixOffer()}`),
+                  detail: dbCoupledBootFixInstruction(zombie),
+                });
+              }
             } else {
               // HONEST DB-AWARE FAILURE (admin 2026-07-24): a full-stack app that crashed on boot almost
               // always needs a real DB and/or external secrets — say so with the exact fix, instead of a

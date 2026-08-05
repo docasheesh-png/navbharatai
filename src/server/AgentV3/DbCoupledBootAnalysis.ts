@@ -36,8 +36,19 @@ export interface DbCoupledBootFinding {
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
 const LISTEN_RE = /\.listen\s*\(/;
 
-/** Client serving — the thing whose absence turns every page into "Cannot GET". */
-const SERVING_RE = /\b(setupVite|serveStatic|express\.static|vite\.middlewares|createViteServer)\b/;
+/**
+ * Client serving — the thing whose absence turns every page into "Cannot GET".
+ *
+ * A CALL, not a mention (fixed 2026-08-05 from the real report). The first version matched the bare
+ * name, and the real Mitrify file opens with `import { serveStatic } from "./static";` on line 11 —
+ * so the "serving" match landed on the IMPORT, which sits before `await ensureSchema()` on line 83,
+ * and the detector concluded "serving mounts first, already decoupled" and stayed silent on the
+ * exact repo it was written for. The synthetic fixture used a dynamic `await import(...)` inside the
+ * async block and therefore had no top-level import line, which is why the tests passed while
+ * reality failed. Import lines are also stripped before scanning (see stripNoise) — either guard
+ * alone would fix it; both are cheap and independently correct.
+ */
+const SERVING_RE = /\b(setupVite|serveStatic|createViteServer)\s*\(|\b(express\.static)\s*\(|\b(vite\.middlewares)\b/;
 
 /**
  * Boot-time database work people actually write. Deliberately NAMED patterns, not "any await":
@@ -45,13 +56,23 @@ const SERVING_RE = /\b(setupVite|serveStatic|express\.static|vite\.middlewares|c
  */
 const DB_CALL_RE = /\bawait\s+(?:[A-Za-z_$][\w$]*\.)?(ensureSchema|runMigrations?|migrate(?:Latest|Up)?|prisma\.\$connect|\$connect|sequelize\.(?:authenticate|sync)|mongoose\.connect|pool\.connect|client\.connect|connectD[bB]|initD[bB]|setupDatabase|initializeDatabase|dbConnect)\s*\(/;
 
-/** Strip comments and string bodies so a commented-out call or a log line cannot fire the check. */
+/**
+ * Blank out comments, string bodies and IMPORT statements, keeping every index aligned.
+ *
+ * Imports are blanked for the reason the real report exposed: `import { serveStatic } from "./static"`
+ * names the serving function without mounting anything, and treating that mention as the mount made
+ * the detector silent on the very file it was written for. What matters is where serving is CALLED.
+ * Comments and strings are blanked so a commented-out call or a log line cannot fire the check.
+ */
 function stripNoise(source: string): string {
+  const blank = (m: string) => m.replace(/[^\n]/g, ' ');
   return String(source ?? '')
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
     .replace(/(^|[^:\\])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
     // String literals become blanks of the same length so every index below stays aligned.
-    .replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, (m) => m[0] + ' '.repeat(Math.max(0, m.length - 2)) + m[0]);
+    .replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, (m) => m[0] + ' '.repeat(Math.max(0, m.length - 2)) + m[0])
+    // Static `import … from '…'` / `import '…'` lines — a declaration, never a mount.
+    .replace(/^[ \t]*import\b[^\n;]*;?/gm, blank);
 }
 
 /**
@@ -90,6 +111,8 @@ export function analyzeDbCoupledBoot(files: Record<string, string>): DbCoupledBo
     if (!LISTEN_RE.test(src)) continue;           // not the server entry
     const serving = SERVING_RE.exec(src);
     if (!serving) continue;                        // API-only — nothing here turns pages off
+    // The pattern has one alternative per serving form, so the matched name is whichever group hit.
+    const servingName = serving[1] ?? serving[2] ?? serving[3] ?? 'the client serving';
     const db = DB_CALL_RE.exec(src);
     if (!db) continue;                             // no boot-time DB work
     if (db.index > serving.index) continue;        // serving mounts first — already decoupled
@@ -98,8 +121,8 @@ export function analyzeDbCoupledBoot(files: Record<string, string>): DbCoupledBo
     return {
       file,
       dbCall,
-      servingCall: serving[1],
-      message: `${file} makes page serving depend on the database: \`await ${dbCall}(…)\` runs before ${serving[1]} with no guard, so if the database is down the boot dies half-way and EVERY page answers "Cannot GET /…" while the server looks up. Serving must never depend on the database.`,
+      servingCall: servingName,
+      message: `${file} makes page serving depend on the database: \`await ${dbCall}(…)\` runs before ${servingName} with no guard, so if the database is down the boot dies half-way and EVERY page answers "Cannot GET /…" while the server looks up. Serving must never depend on the database.`,
     };
   }
   return null;

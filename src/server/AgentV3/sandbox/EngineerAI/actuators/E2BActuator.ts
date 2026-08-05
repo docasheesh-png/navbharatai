@@ -7,7 +7,7 @@ import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
-import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
+import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
@@ -1507,6 +1507,7 @@ const {chromium}=require('playwright');
 
     let dbUrl = '';
     let dbOutcome: DbProvisionOutcome | undefined;
+    let dbDiagnostics = '';
     if (features.includes('db')) {
       // Install PostgreSQL if missing, start it, create the app database — then prove it with a REAL
       // `SELECT 1` over the exact URL the app is handed (admin task 1, 2026-08-05; script + parser in
@@ -1519,6 +1520,11 @@ const {chromium}=require('playwright');
       ).catch(() => null);
 
       dbOutcome = parseDbProvision(pgResult?.stdout);
+      // WHY it failed, carried to the caller (report 15985d3b): the previous version told the user
+      // the truth — "the server never accepted connections" — and still left us with no idea what to
+      // fix, because every reason had been swallowed. These lines are for the admin report's detail,
+      // never for the user's message.
+      dbDiagnostics = provisionDiagnostics(pgResult?.stdout);
       // The fallback URL is still written on failure — DELIBERATELY — so .env points at the local
       // Postgres and a late-starting server heals without a rewrite (the downstream P1001 detector
       // handles a genuinely-dead DB). What the fallback may no longer do is masquerade as success:
@@ -1547,6 +1553,7 @@ const {chromium}=require('playwright');
       dbUrl, envVars, scaffoldFiles,
       dbVerified: dbOutcome?.verified,
       dbVerifyFailure: dbOutcome ? dbOutcome.failure : undefined,
+      dbDiagnostics: dbDiagnostics || undefined,
     };
   }
 

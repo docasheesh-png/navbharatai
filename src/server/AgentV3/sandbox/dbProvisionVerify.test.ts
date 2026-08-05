@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  dbProvisionScript, parseDbProvision, provisionOutcomeNote, CANONICAL_DB_URL,
+  dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL,
 } from './dbProvisionVerify';
 
 /**
@@ -33,8 +33,12 @@ describe('dbProvisionScript — SELECT 1 decides, pg_isready only waits', () => 
   });
 
   it('still waits with the pg_isready poll — the right tool for "accepting yet?"', () => {
+    // Two shorter polls now instead of one 20s poll: the privileged cluster gets 8s (it either works
+    // instantly or fails instantly with a privileges error), and our own instance gets 15s after
+    // pg_ctl's own -w wait. The 20-count belonged to a path that could never succeed here.
     expect(script).toContain('pg_isready -h localhost -p 5432 -q');
-    expect(script).toContain('for i in $(seq 1 20)');
+    expect(script).toContain('for i in $(seq 1 8)');
+    expect(script).toContain('for i in $(seq 1 15)');
   });
 });
 
@@ -113,5 +117,139 @@ describe('every surface that claimed success now consumes the verification', () 
     // Keeping alive a server that never worked would guard the wrong thing.
     const src = read('server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts');
     expect(src).toContain('if (dbOutcome.verified) {');
+  });
+});
+
+/**
+ * WHY it failed, not just THAT it failed (report 15985d3b). That build reported the truth — "the
+ * server never accepted connections" — and still left us unable to say what to fix, because every
+ * reason had been thrown away inside the sandbox script: pg_ctlcluster's error went to `| tail -3
+ * || true`, the retry loop sent its own to /dev/null, and nothing recorded whether psql was even
+ * installed. Measuring first is the same move that already exonerated the integrity pass.
+ */
+describe('the script explains a failure instead of only announcing it', () => {
+  const script = dbProvisionScript();
+
+  it('captures pg_ctlcluster\'s own error rather than discarding it', () => {
+    expect(script).toContain('START_ERR=$(pg_ctlcluster');
+    expect(script).toContain('DB_DIAG_START:');
+    // The old form threw the error away entirely.
+    expect(script).not.toContain('pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true');
+  });
+
+  it('records the facts that decide the fix — psql present, version resolved, which user', () => {
+    // "Insufficient privileges" and "postgresql not installed" need completely different responses.
+    expect(script).toContain('DB_DIAG_PSQL:');
+    expect(script).toContain('DB_DIAG_PGVER:');
+    expect(script).toContain('DB_DIAG_WHOAMI:');
+  });
+
+  it('keeps psql\'s error when SELECT 1 fails — a missing DB and a refused password differ', () => {
+    expect(script).toContain('DB_DIAG_SELECT1:');
+    expect(script).toContain("SELECT1=$(psql");
+  });
+
+  it('records pg_isready\'s reason when the server never came up', () => {
+    expect(script).toContain('DB_DIAG_ISREADY:');
+  });
+
+  it('still emits exactly one outcome marker — the diagnostics do not change the verdict', () => {
+    expect(parseDbProvision('DB_DIAG_PSQL:none\nDB_DIAG_START:boom\nDB_NOT_READY'))
+      .toMatchObject({ verified: false, failure: 'not-ready' });
+    expect(parseDbProvision(`DB_DIAG_WHOAMI:user\nDB_URL:${CANONICAL_DB_URL}`))
+      .toMatchObject({ verified: true });
+  });
+});
+
+describe('provisionDiagnostics — for the admin report, never for the user', () => {
+  const raw = 'noise\nDB_DIAG_PSQL:/usr/bin/psql\nDB_DIAG_PGVER:16\nDB_DIAG_START:Insufficient privileges\nDB_NOT_READY';
+
+  it('collects the diagnostic lines and drops the marker prefix', () => {
+    expect(provisionDiagnostics(raw)).toBe('PSQL:/usr/bin/psql\nPGVER:16\nSTART:Insufficient privileges');
+  });
+
+  it('never picks up the outcome markers themselves', () => {
+    expect(provisionDiagnostics(raw)).not.toContain('DB_NOT_READY');
+  });
+
+  it('returns empty for junk, so a caller can skip an empty detail', () => {
+    expect(provisionDiagnostics('')).toBe('');
+    expect(provisionDiagnostics(null)).toBe('');
+    expect(provisionDiagnostics('DB_NOT_READY')).toBe('');
+  });
+
+  it('the report puts it in DETAIL, not in the message the user reads', () => {
+    const route = readFileSync(join(__dirname, '..', '..', 'routes', 'agentv3.ts'), 'utf8');
+    const at = route.indexOf("code: 'IMPORT_DB_PROVISION_FAILED'");
+    expect(at).toBeGreaterThan(-1);
+    const block = route.slice(at, at + 1400);
+    expect(block).toContain('detail: prov.dbDiagnostics');
+    // The user's sentence stays plain English about what happened, not a shell error.
+    expect(block).toContain('the app will likely fail to connect on boot');
+  });
+});
+
+/**
+ * ROOT WAS NEVER AVAILABLE — the actual reason the preview could not work (2026-08-05).
+ *
+ * Verified by RUNNING the emitted script as a non-root user, which is the sandbox's real condition
+ * (the build's own `ls -la` shows /home/user/workspace owned by "user user"):
+ *
+ *   DB_DIAG_START: Error: You must run this program as the cluster owner (postgres) or root
+ *   DB_DIAG_PGCTL: waiting for server to start.... done / server started
+ *   DB_URL:postgresql://postgres@localhost:5432/myapp        ← SELECT 1 passed
+ *
+ * That first line is the error the old script discarded, and it is why every provisioning attempt
+ * failed in ~21s on every build: pg_ctlcluster, apt-get install and `su postgres` are all root-only.
+ * The re-run took 0.2s, which is what makes the keepalive path free.
+ */
+describe('the database starts WITHOUT root — the fix that makes the preview work', () => {
+  const script = dbProvisionScript();
+
+  it('runs its own instance with initdb + pg_ctl, needing no privileges', () => {
+    expect(script).toContain('initdb');
+    expect(script).toContain('pg_ctl');
+    expect(script).toContain('--auth=trust');
+    // A directory we own, never /var/lib/postgresql.
+    expect(script).toContain('.nbai-pgdata');
+  });
+
+  it('drops every root-only command from the path that has to succeed', () => {
+    // `su postgres -c "createdb …"` was itself root-only, so even a running cluster could not get
+    // the app's database created. Checked against the COMMANDS only — the comment above explains why
+    // that command was removed and therefore names it, which is worth keeping.
+    const commands = script.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+    expect(commands).not.toContain('su postgres');
+    expect(commands).toContain('createdb -h 127.0.0.1');
+  });
+
+  it('still tries the privileged cluster FIRST — it is instant when the template allows it', () => {
+    const clusterAt = script.indexOf('pg_ctlcluster');
+    const ourAt = script.indexOf('initdb');
+    expect(clusterAt).toBeGreaterThan(-1);
+    expect(ourAt).toBeGreaterThan(clusterAt);
+  });
+
+  it('is idempotent — an initialised directory and a running server are both no-ops', () => {
+    // The keepalive/reprovision path re-runs this; measured at 0.2s on the second run.
+    expect(script).toContain('if [ ! -f "$PGDATA/PG_VERSION" ]');
+    expect(script).toContain('if ! pg_isready');
+  });
+
+  it('captures the server\'s OWN log when it still refuses to start', () => {
+    // A refused start explains itself in exactly one place.
+    expect(script).toContain('DB_DIAG_PGLOG:');
+    expect(script).toContain('server.log');
+  });
+
+  it('binds to loopback only — a preview database is not a public one', () => {
+    expect(script).toContain('-h 127.0.0.1');
+  });
+
+  it('keeps SELECT 1 as the only thing that declares success', () => {
+    const markerAt = script.indexOf('echo "DB_URL:');
+    const selectAt = script.indexOf("psql \"postgresql://postgres@localhost:5432/myapp\" -Atc 'SELECT 1'");
+    expect(selectAt).toBeGreaterThan(-1);
+    expect(markerAt).toBeGreaterThan(selectAt);
   });
 });

@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild,
+  postBuildCodeGateShouldRun,
+} from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -2211,5 +2213,64 @@ describe('zeroBillForFailedBuild — a failed build is never charged, import tur
     const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
     expect(SRC).toContain('zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0');
     expect(SRC).not.toContain('expectsArtifacts && !result.ok && effectiveBilledUsd > 0');
+  });
+});
+
+/**
+ * The post-build CODE gates and the import/survey turn (reports d5f0a2bc + 15985d3b, 2026-08-05).
+ *
+ * Found by measurement, not reading: the post-answer stretch showed the SAME ~97 seconds on two
+ * separate Mitrify builds. The cause was a sibling of the reviewer's already-fixed size-only guard —
+ * all four code gates ran when `writtenFiles.size > 0`, and the `.env` WE write on an import turn
+ * pushes that above zero. So a "do not change any files" survey spent ~97s type-checking the user's
+ * untouched 165-file project, and the tsc gate's repair pass could then have edited it.
+ */
+describe('post-build code gates never run on an import/survey turn', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+  const base = {
+    enabled: true, fastLaneGated: false, buildOk: true, wroteFiles: true,
+    isImportTurn: false, aborted: false,
+  };
+
+  it('runs for a normal build that wrote files', () => {
+    expect(postBuildCodeGateShouldRun(base)).toBe(true);
+  });
+
+  it('NEVER runs on an import turn, however many files infra wrote', () => {
+    // This is the whole bug: `.env` alone made wroteFiles true.
+    expect(postBuildCodeGateShouldRun({ ...base, isImportTurn: true })).toBe(false);
+  });
+
+  it('respects every other condition it always had', () => {
+    expect(postBuildCodeGateShouldRun({ ...base, enabled: false })).toBe(false);
+    expect(postBuildCodeGateShouldRun({ ...base, fastLaneGated: true })).toBe(false);
+    expect(postBuildCodeGateShouldRun({ ...base, buildOk: false })).toBe(false);
+    expect(postBuildCodeGateShouldRun({ ...base, wroteFiles: false })).toBe(false);
+    expect(postBuildCodeGateShouldRun({ ...base, aborted: true })).toBe(false);
+  });
+
+  it('EVERY code gate goes through the one predicate — a later one cannot repeat the bug', () => {
+    // Five, not four: writing this test surfaced a late syntax re-parse that shared the same guard.
+    // It is milder (it inspects only our own writtenFiles and never repairs), but leaving one gate
+    // on the old shape is how someone later widens it and rebuilds the bug.
+    expect((SRC.match(/postBuildCodeGateShouldRun\(\{/g) ?? []).length).toBe(5);
+    // Anchored on the ENABLED FIELD, not the bare env name: each gate's name also appears in its
+    // explanatory comment ("disable with …=off"), which sits above the call and would match first.
+    for (const env of ['AGENTV3_AGENTIC_TSC_GATE', 'AGENTV3_MISSING_FILES_GATE', 'AGENTV3_SYNTAX_GATE', 'AGENTV3_MISSING_EXPORT_GATE']) {
+      expect(SRC, env).toContain(`enabled: process.env.${env} !== 'off',`);
+    }
+  });
+
+  it('the FE/BE partition line stays silent on a survey turn, instead of describing our .env', () => {
+    // Report 15985d3b described a plainly full-stack 165-file app as "0 frontend, 0 backend, 0
+    // shared, 1 other. No clean full-stack split" — true about the one file it measured (`.env`)
+    // and false about the app. A confident, specific, misleading line in the admin's own diagnostic
+    // is worse than no line.
+    expect(SRC).toContain('if (result && result.ok && writtenFiles.size > 0 && !isImportTurn) {');
+  });
+
+  it('no code gate is left on the old size-only guard', () => {
+    // The exact shape that let infra writes through, in any of the four.
+    expect(SRC).not.toContain("&& result.ok && writtenFiles.size > 0 && !abort.signal.aborted");
   });
 });

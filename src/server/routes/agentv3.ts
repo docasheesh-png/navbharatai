@@ -122,6 +122,7 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from '../AgentV3/ImportPreview';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
+import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -949,6 +950,34 @@ export function reviewerShouldRun(opts: {
   return opts.wroteFiles
     && !opts.isImportTurn
     && (!opts.fastLaneGated || opts.reviewFastlaneForced || opts.startTierSonnet);
+}
+
+/**
+ * Whether a post-build CODE gate (tsc / missing-files / syntax / missing-export) should run.
+ *
+ * SIBLING OF THE REVIEWER BUG ABOVE, found by measurement (reports d5f0a2bc + 15985d3b, 2026-08-05).
+ * That fix's own comment claimed "every other post-build gate already checks `!isImportTurn`" — and
+ * these four did not. All of them gated on `writtenFiles.size > 0`, which the `.env` WE write on an
+ * import turn pushes above zero, exactly as the infra writes defeated the reviewer's size-only guard.
+ *
+ * The cost was measured, not guessed: the post-answer stretch showed the SAME ~97 seconds on two
+ * separate Mitrify builds. On an import/survey turn the tsc gate type-checks the user's entire
+ * untouched project (165 files, one component 402 KB) for no possible benefit — nothing of ours is
+ * in it — and its repair pass could then edit files the user explicitly said not to change.
+ *
+ * These gates verify what WE built. On a turn where we built nothing, there is nothing to verify.
+ * One predicate for all four, exported and tested, so a fifth gate cannot quietly repeat this.
+ */
+export function postBuildCodeGateShouldRun(opts: {
+  enabled: boolean;
+  fastLaneGated: boolean;
+  buildOk: boolean;
+  wroteFiles: boolean;
+  isImportTurn: boolean;
+  aborted: boolean;
+}): boolean {
+  return opts.enabled && !opts.fastLaneGated && opts.buildOk && opts.wroteFiles
+    && !opts.isImportTurn && !opts.aborted;
 }
 
 /**
@@ -5618,6 +5647,10 @@ export function registerAgentV3Routes(app: Express): void {
                     phase: 'preview', severity: 'warning', code: 'IMPORT_DB_PROVISION_FAILED',
                     message: `PostgreSQL was set up but the real connection test FAILED after ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${prov.dbVerifyFailure === 'not-ready' ? 'the server never accepted connections' : prov.dbVerifyFailure === 'select1-failed' ? 'the server accepted connections but SELECT 1 over the app\'s URL did not succeed' : 'provisioning returned no result'}). DATABASE_URL is written for a late heal, but the app will likely fail to connect on boot.`,
                     autoResolved: false,
+                    // WHY, for us — pg_ctlcluster's own error, whether psql exists, which user we
+                    // are. Report 15985d3b said this truthfully and still left the cause unknown,
+                    // because every reason had been swallowed inside the sandbox script.
+                    ...(prov.dbDiagnostics ? { detail: prov.dbDiagnostics.slice(0, 800) } : {}),
                   });
                 } else {
                   opts.diag?.record({
@@ -5710,6 +5743,21 @@ export function registerAgentV3Routes(app: Express): void {
                 phase: 'preview', severity: verdict.ok ? 'info' : 'warning', code: verdict.ok ? 'IMPORT_PREVIEW_SERVING' : 'IMPORT_PREVIEW_NOT_SERVING',
                 message: verdict.text.slice(0, 400), autoResolved: verdict.ok,
               });
+              // RECORD IT HERE TOO (2026-08-05, from report 15985d3b). The integrity-block copy of this
+              // check runs on `integrityFiles`, which on an IMPORT turn is just the `.env` we wrote —
+              // that build's own POST_ANSWER_TIMING says "1 files" — so the report carried no
+              // DB_COUPLED_BOOT for an imported app, which is precisely the case the check exists for.
+              // `importedFiles` is the real project map, and it is right here.
+              if (zombie) {
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'DB_COUPLED_BOOT',
+                  // An OBSERVATION, not our defect: this block only runs for an IMPORTED repo, so the
+                  // coupled boot is the user's own pre-existing code. Counting it among "problems v5.0
+                  // still owes" would make our own tally lie about what we did.
+                  ...importTurnObservation(true, `${zombie.message} ${dbCoupledBootFixOffer()}`),
+                  detail: dbCoupledBootFixInstruction(zombie),
+                });
+              }
             } else {
               // HONEST DB-AWARE FAILURE (admin 2026-07-24): a full-stack app that crashed on boot almost
               // always needs a real DB and/or external secrets — say so with the exact fix, instead of a
@@ -7686,8 +7734,12 @@ export function registerAgentV3Routes(app: Express): void {
       // language the request used. Best-effort — NEVER blocks a build.
       try {
         const hint = detectLanguageHint(prompt);
+        // Phase 6.1: the instruction now states its own CONFIDENCE. A distinctive script is proof and
+        // is asserted plainly; a romanized guess ("enakku … venum") says it is a guess and tells the
+        // model to follow the user's actual words if it is wrong — overstating a guess is how a
+        // mis-detection becomes an entire app the user cannot read.
         const langInstruction = hint
-          ? `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}. Keep code identifiers and comments in English.`
+          ? languageInstruction({ code: hint.code, name: hint.name, evidence: hint.evidence ?? 'script' })
           : `Language: generate all user-facing text in the app in the SAME language the user used in this request (default to English if it is English). Keep code identifiers and comments in English.`;
         buildPrompt = `${langInstruction}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
@@ -8580,8 +8632,13 @@ export function registerAgentV3Routes(app: Express): void {
       // effort, abortable, budget-capped); on persisting errors it records the honest OUTCOME so the
       // report/dashboard sees the true end-state (ship-with-warning, exactly like PREVIEW_FAILED).
       if (
-        process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         // Only with comfortable time left for install + tsc + one repair pass.
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
@@ -8647,8 +8704,13 @@ export function registerAgentV3Routes(app: Express): void {
       // records the HONEST end-state (never "fully functional" while a dangling import guarantees a crash).
       // Kill: AGENTV3_MISSING_FILES_GATE=off.
       if (
-        process.env.AGENTV3_MISSING_FILES_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_MISSING_FILES_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
@@ -8763,8 +8825,13 @@ export function registerAgentV3Routes(app: Express): void {
       // syntax error is an ERROR blocker → buildHealth becomes NOT READY (never a "READY" app that won't
       // compile). Kill: AGENTV3_SYNTAX_GATE=off.
       if (
-        process.env.AGENTV3_SYNTAX_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_SYNTAX_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
@@ -8822,8 +8889,13 @@ export function registerAgentV3Routes(app: Express): void {
       // target file(s) so the missing export exists again, re-checks, and records the honest end-state. Same
       // proven shape as the missing-files/syntax gates. Kill: AGENTV3_MISSING_EXPORT_GATE=off.
       if (
-        process.env.AGENTV3_MISSING_EXPORT_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_MISSING_EXPORT_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
@@ -10096,7 +10168,15 @@ export function registerAgentV3Routes(app: Express): void {
       // verdict: findSyntaxErrors flags ONLY files that genuinely do not parse, so a good build is never
       // falsely blocked. (It does not re-run a repair here — the app is saved and an honest follow-up fixes
       // it — so a late repair can never loop.)
-      if (process.env.AGENTV3_SYNTAX_GATE !== 'off' && result && result.ok && writtenFiles.size > 0 && !abort.signal.aborted) {
+      // Through the same predicate as the four above (2026-08-05). This one is MILDER — it re-parses
+      // only our own `writtenFiles` and never repairs, so on an import turn it merely parsed the
+      // `.env` and cost nothing. Routed through anyway: leaving one gate on the old size-only guard
+      // is how someone later widens it to the whole project and rebuilds the bug.
+      if (result && postBuildCodeGateShouldRun({
+        enabled: process.env.AGENTV3_SYNTAX_GATE !== 'off',
+        fastLaneGated: false, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+        isImportTurn, aborted: abort.signal.aborted,
+      })) {
         try {
           const finalSyntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
           if (finalSyntaxErrors.length > 0) {
@@ -10116,7 +10196,14 @@ export function registerAgentV3Routes(app: Express): void {
       // writes nothing and parallelizes nothing — it is the load-bearing evidence for a future, flag-gated
       // parallel FE/BE build (safe only when the two sides own DISJOINT files). Best-effort; never affects
       // the build. `partitionable` on real builds is the signal that unblocks the next slice.
-      if (result && result.ok && writtenFiles.size > 0) {
+      // NOT ON AN IMPORT/SURVEY TURN (reports d5f0a2bc + 15985d3b, 2026-08-05). This partitions
+      // `writtenFiles`, which on a survey turn is just the `.env` we wrote — so a plainly full-stack
+      // 165-file app was described in the report as "0 frontend, 0 backend, 0 shared, 1 other. No
+      // clean full-stack split". Every word of that was true about the one file it measured and
+      // false about the app, which is the worst kind of wrong: a confident, specific, misleading
+      // line in the admin's primary diagnostic. It measures what WE built, so on a turn where we
+      // built nothing it stays silent rather than describing our own `.env`.
+      if (result && result.ok && writtenFiles.size > 0 && !isImportTurn) {
         try {
           const fbPart = partitionFrontendBackend([...writtenFiles.keys()]);
           buildDiag.record({

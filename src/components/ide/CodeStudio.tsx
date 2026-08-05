@@ -34,6 +34,8 @@ import {
 interface CodeStudioProps {
   files: Record<string, string>;
   onFilesChange: (files: Record<string, string>) => void;
+  /** Force pending edits to the durable store and resolve once they are really stored (Save). */
+  onFlushEdits?: () => Promise<void>;
   /** Side-effect when files are deleted (clear durable storage; sync deletion to v5.0). */
   onFilesRemoved?: (paths: string[]) => void;
   onRun: (files: Record<string, string>) => void;
@@ -90,6 +92,7 @@ interface CodeStudioProps {
 export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   files,
   onFilesChange,
+  onFlushEdits,
   onFilesRemoved,
   onRun,
   generatedCode,
@@ -427,6 +430,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       if (next.length === 0) setFocusedPane('left');
       return next;
     });
+  };
+
+  /**
+   * Save the focused file for real, and only report success once it is REALLY saved.
+   *
+   * Two steps, both required. `base.action.save` does the editor-side work (trim, final newline,
+   * format-on-save, mark the tab clean). `onFlushEdits` then pushes the change to the durable
+   * workspace and resolves once it is stored — the edit sync is debounced by 1.2s, so a "Saved ✓"
+   * shown before that resolves would be a fake success message the user would trust and act on.
+   * If the flush rejects, this rethrows and the button stays un-confirmed rather than lying.
+   */
+  const handleSaveActiveFile = async (): Promise<void> => {
+    handleShortcut([], 'base.action.save');
+    if (onFlushEdits) await onFlushEdits();
   };
 
   /** Collapse the second group entirely, returning focus to the first. */
@@ -1337,6 +1354,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onBreakpointToggle={handleToggleBreakpoint}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsDebugPanelOpen(true)}
+                onSave={handleSaveActiveFile}
+                hideHeaderDebug={isMobile}
                 dirtyTabs={dirtyTabs}
                 editorTheme={editorTheme}
                 editorOptions={{
@@ -1403,6 +1422,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    onBreakpointToggle={handleToggleBreakpoint}
                    onRun={() => onRun(files)}
                    onDebug={() => setIsDebugPanelOpen(true)}
+                   onSave={handleSaveActiveFile}
+                   hideHeaderDebug={isMobile}
                    dirtyTabs={dirtyTabs}
                    editorTheme={editorTheme}
                    editorOptions={{
@@ -1567,7 +1588,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               )}
           </AnimatePresence>
 
-          {/* Panel Toggle Handle */}
+          {/* Panel toggle handle — DESKTOP ONLY. On a phone the terminal now has exactly one entrance,
+              the footer's Terminal tab (admin 2026-08-04: "ek jagah rakho, footer me only"). It used to
+              have three (this handle, the More sheet, and nothing in the footer), which is how a user
+              ends up unsure whether they opened the same terminal or a different one. Desktop has no
+              footer, so the handle stays its way in. The Problems button is unrelated and stays. */}
           {!isPanelOpen && activeScreen !== 'preview' && (
              <div className="absolute bottom-4 right-4 z-[45] flex items-center gap-2">
                {problems.length > 0 && !isProblemsPanelOpen && (
@@ -1581,13 +1606,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                     {problems.length}
                  </button>
                )}
-               <button
-                 onClick={() => setIsPanelOpen(true)}
-                 aria-label="Open terminal panel"
-                 className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
-               >
-                  <ChevronUp className="w-5 h-5" />
-               </button>
+               {!isMobile && (
+                 <button
+                   onClick={() => setIsPanelOpen(true)}
+                   aria-label="Open terminal panel"
+                   className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
+                 >
+                    <ChevronUp className="w-5 h-5" />
+                 </button>
+               )}
              </div>
           )}
         </div>
@@ -1595,11 +1622,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
       {/* Activity Bar (Mobile Position) */}
       {/* PHONE BOTTOM-TAB IDE (admin 2026-07-31): a native-app-style bottom bar with the essentials —
-          Code · Files · Preview · AI · More — instead of the shrunk desktop ActivityBar. Each tab reuses
-          the same proven state transitions the desktop uses; "More" holds the secondary dev tools so
-          nothing is lost. Hidden while the AI overlay is open (its own X returns), matching prior
-          behaviour so the chat input is never covered. Desktop is unaffected. */}
-      {isMobile && activeScreen !== 'ai' && (
+          Code · Files · Terminal · Debug · More — instead of the shrunk desktop ActivityBar. Each tab
+          reuses the same proven state transitions the desktop uses; "More" holds the secondary dev
+          tools so nothing is lost. Desktop is unaffected.
+
+          IT NEVER HIDES ITSELF (admin 2026-08-04: "yeh apne aap gayab ho jata hai"). It used to vanish
+          whenever the AI overlay opened — which was the ONE moment the user most needed a way back,
+          leaving the IDE with no visible navigation at all. A bottom bar that disappears is not a
+          bottom bar; it is a trapdoor.
+
+          AI and PREVIEW are deliberately NOT here: both already live as buttons in the top-right
+          header, and offering the same action in two places on a phone-sized screen just costs a tab
+          and makes the user wonder whether the two are different. Their slots went to TERMINAL and
+          DEBUG, which previously had no home in the footer at all. */}
+      {isMobile && (
          <>
            {mobileMoreOpen && (
              <>
@@ -1608,7 +1644,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  {([
                    { label: 'Search', Icon: Search, onTap: () => handleScreenChange('search') },
                    { label: 'Source Control', Icon: GitBranch, onTap: () => handleScreenChange('git') },
-                   { label: 'Terminal', Icon: TerminalIcon, onTap: () => setIsPanelOpen(true) },
                    { label: 'Security', Icon: ShieldCheck, onTap: () => handleScreenChange('security') },
                    { label: 'Shortcuts', Icon: Keyboard, onTap: () => setIsShortcutsOpen(true) },
                  ]).map(({ label, Icon, onTap }) => (
@@ -1635,8 +1670,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              {([
                { id: 'code', label: 'Code', Icon: Code2, active: !isSidebarOpen && activeScreen !== 'preview', onTap: () => { setMobileMoreOpen(false); if (activeScreen === 'preview') setActiveScreen('files'); setIsSidebarOpen(false); } },
                { id: 'files', label: 'Files', Icon: FilesIcon, active: isSidebarOpen && activeScreen === 'files', onTap: () => { setMobileMoreOpen(false); setActiveScreen('files'); setIsSidebarOpen(true); } },
-               { id: 'preview', label: 'Preview', Icon: Monitor, active: activeScreen === 'preview', onTap: () => { setMobileMoreOpen(false); setActiveScreen('preview'); setIsSidebarOpen(false); } },
-               { id: 'ai', label: 'AI', Icon: Bot, active: false, onTap: () => { setMobileMoreOpen(false); setActiveScreen('ai'); setIsSidebarOpen(true); } },
+               { id: 'terminal', label: 'Terminal', Icon: TerminalIcon, active: isPanelOpen, onTap: () => { setMobileMoreOpen(false); setIsPanelOpen(v => !v); } },
+               { id: 'debug', label: 'Debug', Icon: Bug, active: isDebugPanelOpen, onTap: () => { setMobileMoreOpen(false); setIsDebugPanelOpen(v => !v); } },
                { id: 'more', label: 'More', Icon: MenuIcon, active: mobileMoreOpen, onTap: () => setMobileMoreOpen(v => !v) },
              ]).map(({ id, label, Icon, active, onTap }) => (
                <button

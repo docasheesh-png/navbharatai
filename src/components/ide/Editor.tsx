@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
 import {
-  X, Play, Bug, Save, FileCode, Check,
-  ChevronRight, MoreVertical, Layout, RotateCcw, Search,
+  X, Bug, Save, FileCode, Check,
+  ChevronRight, MoreVertical, RotateCcw, Search,
   Globe, Paintbrush, Braces, FileText, Image, FolderOpen
 } from 'lucide-react';
 import type { FC, SVGProps } from 'react';
@@ -51,6 +51,14 @@ interface EditorProps {
   onMount?: (editor: any) => void;
   onRun?: () => void;
   onDebug?: () => void;
+  /**
+   * REAL save (admin 2026-08-04: "save button ko live karo, aur press karne par user ko dikhe ki file
+   * save ho gyi hai, likh kar aye"). Runs the same path Ctrl+S does — trim, final newline, format-on-
+   * save, mark the tab clean — so the button and the shortcut can never mean two different things.
+   */
+  onSave?: () => void | Promise<void>;
+  /** Hide the header's debug icon where the IDE footer already owns that action (mobile). */
+  hideHeaderDebug?: boolean;
   /** Tabs with unsaved changes (shows a dot indicator) */
   dirtyTabs?: Set<string>;
   /** A17: Monaco editor color theme */
@@ -81,6 +89,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onMount,
   onRun,
   onDebug,
+  onSave,
+  hideHeaderDebug,
   dirtyTabs,
   editorTheme = 'vs-dark',
   editorOptions = {},
@@ -112,6 +122,28 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   const useTextarea = isMobile || monacoFailed;
   // P-DEV.9 — runtime-selectable editor theme (persisted), defaulting to the saved choice or the prop.
   const [theme, setThemeState] = useState<EditorThemeId>(() => loadSavedTheme(editorTheme as EditorThemeId));
+
+  /**
+   * "Saved" confirmation. The admin asked for it in words, not a colour: a save button that changes
+   * nothing visible leaves the user tapping it again to be sure it worked. It clears itself, and the
+   * timer is cancelled on unmount and on the next save so a rapid double-tap cannot leave a stale
+   * "Saved" on screen after a later save quietly failed.
+   */
+  const [justSaved, setJustSaved] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); }, []);
+
+  const handleSave = async () => {
+    if (!onSave) return;
+    try {
+      await onSave();
+    } catch {
+      return;   // the save genuinely failed — never claim it succeeded
+    }
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    setJustSaved(true);
+    savedTimerRef.current = setTimeout(() => setJustSaved(false), 1800);
+  };
   const changeTheme = (id: EditorThemeId) => { setThemeState(id); saveTheme(id); };
 
   useEffect(() => {
@@ -315,7 +347,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                 ))}
               </select>
             )}
-            {onDebug && (
+            {/* DEBUG — desktop only. On a phone this action lives in the IDE footer, so keeping it here
+                too would be the same button twice on the smallest screen we have. */}
+            {onDebug && !hideHeaderDebug && (
                <button
                  onClick={onDebug}
                  aria-label="Preview debug"
@@ -325,17 +359,27 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                  <Bug className="w-3.5 h-3.5" />
                </button>
             )}
-            {onRun && (
+            {/* SAVE — the only genuinely missing action in this row, and now a real one. It reports
+                success in WORDS, not just a colour change: the whole point of pressing save is to be
+                told it happened, and a silent button leaves the user pressing it again to be sure. */}
+            {onSave && (
                <button
-                 onClick={onRun}
-                 aria-label="Run project"
-                 className="text-emerald-500 hover:text-emerald-400 transition-all flex items-center gap-1"
-                 title="Run Project"
+                 onClick={handleSave}
+                 aria-label="Save file"
+                 title="Save (Ctrl+S)"
+                 className={cn(
+                   'transition-all flex items-center gap-1 text-[10px] font-bold',
+                   justSaved ? 'text-emerald-400' : 'hover:text-white',
+                 )}
                >
-                 <Play className="w-3.5 h-3.5 fill-current" />
+                 {justSaved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                 {justSaved && <span>Saved</span>}
                </button>
             )}
-            <Layout className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
+            {/* REMOVED with the admin's screenshot (2026-08-04): a green ▶ that only re-ran the PREVIEW
+                — already a top-right header button and a footer tab — and a <Layout> icon that had no
+                onClick at all and never did anything. A control that does nothing is worse than a
+                missing one: it teaches the user the app is broken. */}
         </div>
       </div>
 
@@ -429,13 +473,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               <Icon className={cn('w-4 h-4', mirror && 'scale-x-[-1]')} />
             </button>
           ))}
-          {onRun && (
+          {/* SAVE, not Run. The green Run here re-ran the PREVIEW — which the header button and the
+              footer tab already do — while the one action a phone genuinely cannot reach was Ctrl+S.
+              It confirms in words so the user knows the tap registered. */}
+          {onSave && (
             <button
-              onClick={onRun}
-              aria-label="Run"
-              className="min-w-[40px] h-9 px-3 bg-emerald-600/90 active:bg-emerald-600 rounded-lg text-white flex items-center gap-1.5 font-bold text-xs ml-auto"
+              onClick={handleSave}
+              aria-label="Save file"
+              className={cn(
+                'min-w-[40px] h-9 px-3 rounded-lg text-white flex items-center gap-1.5 font-bold text-xs ml-auto transition-colors',
+                justSaved ? 'bg-emerald-600' : 'bg-white/10 active:bg-white/20',
+              )}
             >
-              <Play className="w-4 h-4" /> Run
+              {justSaved ? <><Check className="w-4 h-4" /> Saved</> : <><Save className="w-4 h-4" /> Save</>}
             </button>
           )}
       </div>

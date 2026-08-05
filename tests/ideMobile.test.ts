@@ -22,38 +22,109 @@ describe('Mobile editor is tuned for touch', () => {
 });
 
 describe('Mobile action toolbar (no Ctrl key on a phone)', () => {
-  it('the editor shows Undo / Redo / Find / Run as tap buttons on mobile only', () => {
-    // A mobile-only action row (md:hidden) with real editor actions.
+  it('shows Undo / Redo / Find / SAVE as tap buttons on mobile only', () => {
     expect(editor).toContain("editorRef.current?.trigger('mobile-toolbar', 'undo', {})");
     expect(editor).toContain("editorRef.current?.trigger('mobile-toolbar', 'redo', {})");
     expect(editor).toContain("editorRef.current?.getAction('actions.find')?.run()");
-    // It is a mobile-only surface (the action row has its own height class), with a Run button.
     expect(editor).toContain('md:hidden h-11');
-    const i = editor.indexOf('md:hidden h-11');
-    expect(editor.slice(i, i + 1400)).toContain('onRun');
+    const row = editor.slice(editor.indexOf('md:hidden h-11'), editor.indexOf('md:hidden h-11') + 1600);
+    // SAVE, not Run (admin 2026-08-04). The green Run only re-ran the PREVIEW — already reachable from
+    // the header button — while Ctrl+S, the one action a phone genuinely cannot perform, had no button.
+    expect(row).toContain('handleSave');
+    expect(row).not.toContain('onRun');
+  });
+
+  it('has NO dead controls left in the editor toolbar', () => {
+    // A control that does nothing is worse than a missing one: it teaches the user the app is broken.
+    // The old row shipped a <Layout/> icon with no onClick at all, and a ▶ that duplicated Preview.
+    expect(editor).not.toContain('<Layout className');
+    expect(editor).not.toContain("aria-label=\"Run project\"");
+  });
+});
+
+describe('Save is real, and says so honestly', () => {
+  it('confirms in WORDS, and only after the save resolves', () => {
+    expect(editor).toContain('justSaved');
+    expect(editor).toContain('Saved');
+    // `await onSave()` BEFORE the confirmation — the durable sync is debounced, so announcing success
+    // first would be a fake success message the user would trust and act on.
+    const i = editor.indexOf('const handleSave');
+    const fn = editor.slice(i, i + 700);
+    expect(fn).toContain('await onSave()');
+    expect(fn.indexOf('await onSave()')).toBeLessThan(fn.indexOf('setJustSaved(true)'));
+    // A failed save must NOT claim success.
+    expect(fn).toContain('return;');
+  });
+
+  it('Code Studio waits for the DURABLE flush before reporting saved', () => {
+    const i = studio.indexOf('const handleSaveActiveFile');
+    expect(i).toBeGreaterThan(-1);
+    const fn = studio.slice(i, i + 400);
+    expect(fn).toContain("handleShortcut([], 'base.action.save')");
+    expect(fn).toContain('await onFlushEdits()');
+  });
+
+  it('Code Studio edits go through the DURABLE edit seam, not raw setFiles', () => {
+    // ROOT CAUSE (2026-08-04): the syncer was wired into the Git panel only, so typing in the IDE
+    // never reached the durable workspace — the edit looked saved and did not survive a reload.
+    const app = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
+    expect(app).toContain('const applyIdeFileChange');
+    expect(app).toContain('onIdeFilesChange={applyIdeFileChange}');
+    const panels = readFileSync(join(__dirname, '../src/components/panels/ViewPanels.tsx'), 'utf8');
+    const i = panels.indexOf('<CodeStudio');
+    expect(panels.slice(i, i + 900)).toContain('onFilesChange={onIdeFilesChange}');
   });
 });
 
 describe('Phone bottom-tab IDE', () => {
-  it('has a bottom tab bar with Code / Files / Preview / AI / More (essentials, not the dev ActivityBar)', () => {
-    const studioSrc = readFileSync(join(__dirname, '../src/components/ide/CodeStudio.tsx'), 'utf8');
-    const i = studioSrc.indexOf('PHONE BOTTOM-TAB IDE');
+  it('has a bottom tab bar with Code / Files / Terminal / Debug / More', () => {
+    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
     expect(i).toBeGreaterThan(-1);
-    const block = studioSrc.slice(i, i + 3800);
-    for (const label of ["label: 'Code'", "label: 'Files'", "label: 'Preview'", "label: 'AI'", "label: 'More'"]) {
+    const block = studio.slice(i, i + 4200);
+    for (const label of ["label: 'Code'", "label: 'Files'", "label: 'Terminal'", "label: 'Debug'", "label: 'More'"]) {
       expect(block).toContain(label);
     }
-    // Reuses proven transitions, not new plumbing.
-    expect(block).toContain("setActiveScreen('preview')");
-    expect(block).toContain('setIsSidebarOpen(false)');
+    // AI and PREVIEW are NOT footer tabs — both are top-right header buttons, and offering the same
+    // action twice on the smallest screen costs a tab and makes the user wonder if they differ.
+    expect(block).not.toContain("label: 'Preview'");
+    expect(block).not.toContain("label: 'AI'");
   });
 
-  it('the More sheet keeps the secondary dev tools reachable', () => {
-    const studioSrc = readFileSync(join(__dirname, '../src/components/ide/CodeStudio.tsx'), 'utf8');
-    const i = studioSrc.indexOf('PHONE BOTTOM-TAB IDE');
-    const block = studioSrc.slice(i, i + 3800);
-    for (const label of ["label: 'Search'", "label: 'Source Control'", "label: 'Terminal'", "label: 'Security'", "label: 'Shortcuts'"]) {
+  it('NEVER hides itself — a bottom bar that vanishes is a trapdoor', () => {
+    // It used to disappear whenever the AI overlay opened — the one moment the user most needed a way
+    // back, leaving the IDE with no visible navigation at all (admin: "apne aap gayab ho jata hai").
+    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
+    const block = studio.slice(i, i + 4200);
+    expect(block).toContain('{isMobile && (');
+    expect(block).not.toContain("isMobile && activeScreen !== 'ai' && (");
+  });
+
+  it('the terminal has exactly ONE entrance on a phone', () => {
+    // It had three (a floating handle, the More sheet, and no footer tab), so a user could not tell
+    // whether they had opened the same terminal or a different one.
+    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
+    const block = studio.slice(i, i + 4200);
+    expect(block).toContain("label: 'Terminal', Icon: TerminalIcon");   // the footer tab
+    expect(block).not.toContain("{ label: 'Terminal', Icon: TerminalIcon, onTap:");  // gone from More
+    // The floating handle is desktop-only now.
+    const handle = studio.slice(studio.indexOf('Open terminal panel') - 400, studio.indexOf('Open terminal panel') + 200);
+    expect(handle).toContain('!isMobile');
+  });
+
+  it('the More sheet keeps the remaining secondary dev tools reachable', () => {
+    const i = studio.indexOf('PHONE BOTTOM-TAB IDE');
+    const block = studio.slice(i, i + 4200);
+    for (const label of ["label: 'Search'", "label: 'Source Control'", "label: 'Security'", "label: 'Shortcuts'"]) {
       expect(block).toContain(label);
     }
+  });
+
+  it('the global app nav and the space reserved for it read ONE flag', () => {
+    // They drifted twice: focus mode, then Code Studio — 56px held for a nav that was not rendered,
+    // floating the IDE's own footer off the screen edge with a dead strip beneath it.
+    const app = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
+    expect(app).toContain('const showsGlobalMobileNav');
+    expect(app).toContain('showsGlobalMobileNav ? "pb-14" : ""');
+    expect(app).toContain('{showsGlobalMobileNav && (');
   });
 });

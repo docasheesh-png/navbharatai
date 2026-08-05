@@ -64,6 +64,10 @@ export interface ViewPanelsProps {
   setGeneratedCode: (code: string) => void;
   files: FileSystem;
   setFiles: (files: any) => void;
+  /** THE shared hand-edit seam (App.applyIdeFileChange): local state + preview + DURABLE sync. */
+  onIdeFilesChange: (files: any) => void;
+  /** Force pending edits to the durable store and resolve once stored — powers an honest "Saved". */
+  onFlushIdeEdits: () => Promise<void>;
   /** Clear deleted paths from durable storage (IDE file-explorer multi-delete). */
   onFilesRemoved?: (paths: string[]) => void;
   hasGeneratedCode: boolean;
@@ -139,7 +143,7 @@ export interface ViewPanelsProps {
 }
 
 export function ViewPanels({
-  activeView, generatedCode, setGeneratedCode, files, setFiles, onFilesRemoved,
+  activeView, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
@@ -161,7 +165,8 @@ export function ViewPanels({
             activeAgent={activeAgent}
             onAgentChange={handleAgentChange}
             files={files}
-            onFilesChange={(newFiles: any) => setFiles(newFiles as any)}
+            onFilesChange={onIdeFilesChange}
+            onFlushEdits={onFlushIdeEdits}
             onFilesRemoved={onFilesRemoved}
             onRun={(f: any) => updatePreview(f || files)}
             generatedCode={generatedCode}

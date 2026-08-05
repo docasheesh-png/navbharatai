@@ -215,6 +215,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         );
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[31m${message}\x1b[0m\r\n`);
+        if (j?.detail) term.write(`\x1b[90m${String(j.detail).slice(0, 300)}\x1b[0m\r\n`);
         return;
       }
       if (j.available === false) {
@@ -225,6 +226,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
           : 'Sandbox not active yet — start a build in NavBharatAI Pro v5.0 chat to bring the terminal online.';
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[90m${message}\x1b[0m\r\n`);
+        // The exact precondition, dim and on its own line. It is meaningless to most users and
+        // everything to whoever debugs a report — and it is only ever shown to the person who owns
+        // this workspace, because the route that produced it is ownership-checked.
+        if (j.cause) term.write(`\x1b[90m[${j.cause}]\x1b[0m\r\n`);
         return;
       }
 

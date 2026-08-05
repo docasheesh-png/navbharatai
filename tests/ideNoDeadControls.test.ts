@@ -288,6 +288,23 @@ describe('Code Studio shows the SAME app the rest of the product does', () => {
     expect(block).toContain('hydratedWorkspaceRef.current === workspaceId');
   });
 
+  it('the terminal shows WHICH precondition failed, not just that one did', () => {
+    // "No sandbox" has three quite different causes needing three different actions: the workspace is
+    // not on this instance (a cold start — wake it), it is here with no runner, or its runner cannot
+    // open a TTY. Collapsing them into one sentence is what made a live report undiagnosable.
+    const routes = read('src/server/routes/agentv3.ts');
+    const i = routes.indexOf("const cause = !session ? 'no_session'");
+    expect(i).toBeGreaterThan(-1);
+    expect(routes.slice(i, i + 260)).toContain("'runner_not_pty'");
+    // Sent only on the ownership-checked route, so only the workspace's owner can ever read it.
+    const open = routes.slice(routes.indexOf("app.post('/api/agentv3/shell/open'"), routes.indexOf("app.get('/api/agentv3/shell/stream'"));
+    expect(open).toContain('assertVerifiedWorkspaceOwner');
+    expect(open).toContain('cause,');
+    const shell = read('src/components/ide/ShellTerminal.tsx');
+    expect(shell).toContain('if (j.cause)');
+    expect(shell).toContain('j?.detail');
+  });
+
   it('the terminal names the real reason it failed', () => {
     // "Could not reach the terminal service." on its own told nobody anything — including me, when a
     // live report arrived and I could not reproduce it. An error that hides its cause is a second bug.

@@ -75,6 +75,7 @@ import {
   restoreSession,
   gitStatusForSession,
   execInSession,
+  getSession,
   ptyHostForSession,
   agentLifecycle,
   getWorkspaceMemory,
@@ -3954,15 +3955,32 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     if (result.reason === 'failed') {
-      // A real sandbox that refused to start a TTY — say so, never pretend a shell exists.
-      res.status(502).json({ available: true, error: 'The sandbox could not start a shell. Try again in a moment.' });
+      // A real sandbox that refused to start a TTY — say so, never pretend a shell exists. `detail`
+      // carries the sandbox's OWN message: this route is already ownership-checked, so the only person
+      // who can read it is the person whose workspace it is, and a failure that will not name itself
+      // costs far more than it protects (2026-08-05: a live terminal fault I could not diagnose
+      // because every failure produced the same sentence).
+      res.status(502).json({
+        available: true,
+        error: 'The sandbox could not start a shell. Try again in a moment.',
+        detail: result.detail?.slice(0, 300),
+      });
       return;
     }
-    // no_sandbox — the same honest dormant answer /exec gives.
+    // no_sandbox — the same honest dormant answer /exec gives, plus WHICH precondition actually
+    // failed. "No sandbox" has three quite different causes and they need three different actions:
+    // the workspace is not on this instance at all (a Cloud Run cold start — send a message to wake
+    // it), it is here but holds no runner, or it has a runner that cannot open a TTY (LocalActuator
+    // in dev/CI). Collapsing them into one message is what made a live report undiagnosable.
+    const session = getSession(workspaceId);
+    const cause = !session ? 'no_session'
+      : !session.runner ? 'no_runner'
+      : 'runner_not_pty';
     const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
     res.json({
       available: false,
       reason: fileCount > 0 ? 'dormant' : 'not_started',
+      cause,
       savedFileCount: fileCount,
     });
   });

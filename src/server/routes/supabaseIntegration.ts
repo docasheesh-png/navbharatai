@@ -37,8 +37,9 @@ import {
 } from '../lib/supabaseConnectionStore';
 import {
   projectRefFromUrl, isSafeIdentifier, boundedInt, listTablesSql, listColumnsSql, readRowsSql,
-  runQuery, columnsOf, MAX_ROWS, DEFAULT_ROWS,
+  runQuery, columnsOf, MAX_ROWS, DEFAULT_ROWS, listForeignKeysSql, listIndexesSql,
 } from '../lib/supabaseData';
+import { readOnlyQuery, writeQuery, QUERY_ROW_CAP } from '../lib/sqlSafety';
 import {
   primaryKeySql, buildInsertSql, buildUpdateSql, buildDeleteSql, verifySingleRow,
 } from '../lib/supabaseWrite';
@@ -632,6 +633,69 @@ export function registerSupabaseIntegrationRoutes(
     const pk = await primaryKeyOf(access.token, access.projectRef, table);
     if (pk === null) { res.status(502).json({ error: 'Could not read that table just now.' }); return; }
     res.json({ table, primaryKey: pk, editable: pk.length > 0 });
+  });
+
+  // Phase 2.3 — the rest of the table's shape: what it points at, and what it is indexed on.
+  app.get('/api/integrations/supabase/relations', async (req: Request, res: Response) => {
+    const table = typeof req.query.table === 'string' ? req.query.table : '';
+    if (!isSafeIdentifier(table)) { res.status(400).json({ error: 'That table name is not one NavBharatAI can read.' }); return; }
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+    const [fks, indexes] = await Promise.all([
+      runQuery(access.token, access.projectRef, listForeignKeysSql(table)),
+      runQuery(access.token, access.projectRef, listIndexesSql(table)),
+    ]);
+    if (!fks.ok) { sendDataError(res, fks); return; }
+    res.json({
+      table,
+      foreignKeys: fks.rows.map((r) => ({
+        name: String(r.constraint_name ?? ''),
+        column: String(r.column_name ?? ''),
+        referencesTable: String(r.references_table ?? ''),
+        referencesColumn: String(r.references_column ?? ''),
+      })).filter((f) => f.column && f.referencesTable),
+      // Indexes are additive: losing them should not cost the user the relations they asked for.
+      indexes: indexes.ok ? indexes.rows.map((r) => ({
+        name: String(r.index_name ?? ''),
+        unique: r.is_unique === true,
+        primary: r.is_primary === true,
+        definition: String(r.definition ?? ''),
+      })).filter((i) => i.name) : [],
+    });
+  });
+
+  // Phase 2.4 — run the user's own SQL.
+  //
+  // Read-only is the DEFAULT and is enforced by Postgres, not by inspecting the text: the statement
+  // is wrapped as a subquery, where a write is not even grammatical and a data-modifying CTE is
+  // rejected outright (see sqlSafety.ts — a keyword check waves that CTE straight through).
+  //
+  // Writing is possible, because a data GUI that cannot run a migration is half a tool — but only
+  // when the caller explicitly says so, having confirmed it in the UI. Either way it is ONE
+  // statement: the user confirmed what they read, and they only read the first one.
+  app.post('/api/integrations/supabase/query', async (req: Request, res: Response) => {
+    const sql = typeof req.body?.sql === 'string' ? req.body.sql : '';
+    const wantsWrite = req.body?.allowWrite === true;
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+
+    const prepared = wantsWrite ? writeQuery(sql) : readOnlyQuery(sql);
+    if (!prepared.ok) { res.status(400).json({ error: prepared.message }); return; }
+
+    const started = Date.now();
+    const result = await runQuery(access.token, access.projectRef, prepared.sql);
+    if (!result.ok) { sendDataError(res, result); return; }
+    // A write reports what it did; a read reports what it found. Neither invents a number.
+    res.json({
+      ok: true,
+      readOnly: !wantsWrite,
+      rows: result.rows,
+      columns: columnsOf(result.rows),
+      rowCount: result.rows.length,
+      // Honest about the cap: a read that fills it may have had more behind it.
+      capped: !wantsWrite && result.rows.length >= QUERY_ROW_CAP,
+      elapsedMs: Date.now() - started,
+    });
   });
 
   // Forget our copy. Deliberately explicit that this does NOT revoke the grant on Supabase's side —

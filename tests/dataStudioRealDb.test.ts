@@ -165,3 +165,67 @@ describe('KB — the studio\'s entry tells the truth about what it shows', () =>
     expect(e!.keywords).toContain('database studio');
   });
 });
+
+/**
+ * The query runner (Phase 2.4). A SQL box is the feature most likely to become an accidental
+ * "delete everything" button, so read-only is enforced by Postgres, not by reading the text.
+ */
+describe('running your own SQL — read-only by construction', () => {
+  const safety = read('src/server/lib/sqlSafety.ts');
+
+  it('read-only is the DEFAULT: a write needs the caller to say so explicitly', () => {
+    expect(route).toContain('const wantsWrite = req.body?.allowWrite === true');
+    expect(route).toContain('wantsWrite ? writeQuery(sql) : readOnlyQuery(sql)');
+  });
+
+  it('the read path is WRAPPED, so the database refuses a write we never had to recognise', () => {
+    // A keyword check waves `WITH gone AS (DELETE ... RETURNING *) SELECT * FROM gone` straight
+    // through. Wrapped as a subquery, Postgres rejects it outright.
+    expect(safety).toContain('select * from (');
+    expect(safety).toContain('as nbai_q limit');
+  });
+
+  it('only ever one statement, on both paths', () => {
+    expect(safety.match(/statements\.length > 1/g)?.length ?? 0).toBe(2);
+  });
+
+  it('the splitter is a tokenizer, not a split on ";"', () => {
+    // Every interesting bypass lives exactly where a naive split gets it wrong.
+    for (const marker of ["ch === \"'\"", "ch === '\"'", "ch === '$'", "ch === '-' && next === '-'", "ch === '/' && next === '*'"]) {
+      expect(safety).toContain(marker);
+    }
+    expect(safety).not.toMatch(/sql\.split\(';'\)/);
+  });
+
+  it('the verb description is presentation, and says so — never a security control', () => {
+    expect(safety).toContain('NEVER a security control');
+  });
+
+  it('the UI asks before a write and does not keep a sticky toggle', () => {
+    // A toggle left on from ten minutes ago is how a read becomes a write nobody meant to run.
+    expect(studio).toContain('void runSql(false)');
+    expect(studio).toContain('void runSql(true)');
+    expect(studio).toContain('cannot be undone. Run it anyway?');
+  });
+
+  it('a capped result says there may be more, instead of implying that was everything', () => {
+    expect(route).toContain('capped: !wantsWrite && result.rows.length >= QUERY_ROW_CAP');
+    expect(studio).toContain('there may be more');
+  });
+});
+
+describe('the Schema view is complete (Phase 2.3)', () => {
+  it('serves relations and indexes', () => {
+    expect(route).toContain("app.get('/api/integrations/supabase/relations'");
+    expect(route).toContain('listForeignKeysSql(table)');
+    expect(route).toContain('listIndexesSql(table)');
+  });
+
+  it('indexes are additive — losing them does not cost the user the relations', () => {
+    expect(route).toContain('indexes: indexes.ok ?');
+  });
+
+  it('a relation is clickable, because "what does this point at" ends in opening that table', () => {
+    expect(studio).toContain("setSelected(fk.referencesTable)");
+  });
+});

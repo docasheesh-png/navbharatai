@@ -19,7 +19,7 @@
 // user's data is.
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns, Plus, Edit2, Trash2, X, Lock } from 'lucide-react';
+import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns, Plus, Edit2, Trash2, X, Lock, Link2, Play, Zap } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { Breadcrumb } from '../ui/Breadcrumb';
 import { authedFetch } from '../../lib/authedFetch';
@@ -43,6 +43,8 @@ const PAGE_SIZE = 50;
 
 interface TableInfo { name: string; rowEstimate: number }
 interface ColumnInfo { name: string; type: string; nullable: boolean; default: string | null }
+interface ForeignKey { name: string; column: string; referencesTable: string; referencesColumn: string }
+interface IndexInfo { name: string; unique: boolean; primary: boolean; definition: string }
 
 export function DatabaseStudio() {
   const [connected, setConnected] = useState(false);
@@ -63,7 +65,15 @@ export function DatabaseStudio() {
   const [sortField, setSortField] = useState('');
   const [sortDesc, setSortDesc] = useState(false);
   const [copied, setCopied] = useState('');
-  const [view, setView] = useState<'table' | 'json' | 'schema'>('table');
+  const [view, setView] = useState<'table' | 'json' | 'schema' | 'sql'>('table');
+  const [relations, setRelations] = useState<{ foreignKeys: ForeignKey[]; indexes: IndexInfo[] } | null>(null);
+
+  // SQL runner (2.4). `allowWrite` is off by default and resets after every run, so a write can never
+  // be the thing that happens because a toggle was left on from ten minutes ago.
+  const [sqlText, setSqlText] = useState('select * from ');
+  const [sqlRunning, setSqlRunning] = useState(false);
+  const [sqlResult, setSqlResult] = useState<{ rows: DBRow[]; columns: string[]; rowCount: number; capped: boolean; elapsedMs: number; readOnly: boolean } | null>(null);
+  const [sqlError, setSqlError] = useState('');
 
   // Editing (2.2). `primaryKey` is what makes a row addressable; an empty key means this table is
   // read-only and the UI says why rather than offering a Save that cannot work.
@@ -174,6 +184,14 @@ export function DatabaseStudio() {
         const res = await authedFetch(`/api/integrations/supabase/columns?table=${encodeURIComponent(selected)}`);
         const data = await res.json().catch(() => ({}));
         if (!cancelled && res.ok && Array.isArray(data.columns)) setSchema(data.columns);
+        const rel = await authedFetch(`/api/integrations/supabase/relations?table=${encodeURIComponent(selected)}`);
+        const rj = await rel.json().catch(() => ({}));
+        if (!cancelled && rel.ok) {
+          setRelations({
+            foreignKeys: Array.isArray(rj.foreignKeys) ? rj.foreignKeys : [],
+            indexes: Array.isArray(rj.indexes) ? rj.indexes : [],
+          });
+        }
       } catch { /* the schema panel is additive — a failure leaves the rows untouched */ }
     })();
     return () => { cancelled = true; };
@@ -254,6 +272,45 @@ export function DatabaseStudio() {
     await write('DELETE', { key: keyOf(row) });
   };
 
+  /**
+   * Run whatever the user typed.
+   *
+   * `allowWrite` is passed explicitly and only after they confirm, because the server's default is
+   * read-only — enforced by Postgres, not by us reading the text (see sqlSafety.ts). A confirmation
+   * that could be bypassed by a stale toggle would not be a confirmation at all, so it resets here.
+   */
+  const runSql = async (allowWrite: boolean) => {
+    if (sqlRunning || !sqlText.trim()) return;
+    if (allowWrite) {
+      if (!window.confirm('This will CHANGE your database and cannot be undone. Run it anyway?')) return;
+    }
+    setSqlRunning(true);
+    setSqlError('');
+    try {
+      const res = await authedFetch('/api/integrations/supabase/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: sqlText, allowWrite }),
+      }, 60_000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { setSqlError(data?.error || 'That query could not be run.'); setSqlResult(null); return; }
+      setSqlResult({
+        rows: Array.isArray(data.rows) ? data.rows : [],
+        columns: Array.isArray(data.columns) ? data.columns : [],
+        rowCount: Number(data.rowCount ?? 0),
+        capped: !!data.capped,
+        elapsedMs: Number(data.elapsedMs ?? 0),
+        readOnly: !!data.readOnly,
+      });
+      // A write can change what the table view is showing, so re-read it rather than leave a stale page.
+      if (allowWrite && selected) await loadRows(selected, offset);
+    } catch (e) {
+      setSqlError(e instanceof Error ? e.message : 'That query could not be run.');
+    } finally {
+      setSqlRunning(false);
+    }
+  };
+
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -285,8 +342,8 @@ export function DatabaseStudio() {
             {state.label}
           </div>
           <div className="flex items-center gap-1.5">
-            {(['table', 'json', 'schema'] as const).map((v) => (
-              <button key={v} onClick={() => setView(v)} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-all capitalize ${view === v ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-white/40'}`}>{v}</button>
+            {(['table', 'json', 'schema', 'sql'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-all capitalize ${view === v ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-white/40'}`}>{v === 'sql' ? 'SQL' : v}</button>
             ))}
           </div>
         </div>
@@ -524,7 +581,10 @@ export function DatabaseStudio() {
                   <tbody>
                     {schema.map((c) => (
                       <tr key={c.name} className="border-b border-white/3">
-                        <td className="px-3 py-2 text-white/70 flex items-center gap-1.5"><Columns className="w-3 h-3 text-white/20" />{c.name}</td>
+                        <td className="px-3 py-2 text-white/70 flex items-center gap-1.5">
+                          <Columns className="w-3 h-3 text-white/20" />{c.name}
+                          {primaryKey.includes(c.name) && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-cyan-300">PK</span>}
+                        </td>
                         <td className="px-3 py-2 text-cyan-300/70">{c.type}</td>
                         <td className="px-3 py-2 text-white/40">{c.nullable ? 'yes' : 'no'}</td>
                         <td className="px-3 py-2 text-white/30">{c.default ?? '—'}</td>
@@ -532,6 +592,134 @@ export function DatabaseStudio() {
                     ))}
                   </tbody>
                 </table>
+              )}
+
+              {/* Relations — outgoing only: "what does this user_id point at?" is the question a
+                  person browsing a row is actually asking. */}
+              {relations && relations.foreignKeys.length > 0 && (
+                <div className="mt-6">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Relations</p>
+                  {relations.foreignKeys.map((fk) => (
+                    <div key={`${fk.name}-${fk.column}`} className="flex items-center gap-2 py-1.5 text-xs border-b border-white/3">
+                      <Link2 className="w-3 h-3 text-white/20 shrink-0" />
+                      <span className="text-white/70">{fk.column}</span>
+                      <span className="text-white/25">→</span>
+                      <button
+                        onClick={() => { setSelected(fk.referencesTable); setView('table'); }}
+                        className="text-cyan-300/80 hover:text-cyan-200 hover:underline"
+                        title={`Open ${fk.referencesTable}`}
+                      >
+                        {fk.referencesTable}.{fk.referencesColumn}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Indexes — the usual reason a generated app slows down as it fills up is that the
+                  column the app filters by has none. */}
+              {relations && relations.indexes.length > 0 && (
+                <div className="mt-6">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Indexes</p>
+                  {relations.indexes.map((ix) => (
+                    <div key={ix.name} className="py-1.5 text-xs border-b border-white/3">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-3 h-3 text-white/20 shrink-0" />
+                        <span className="text-white/70">{ix.name}</span>
+                        {ix.primary && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-cyan-300">primary</span>}
+                        {ix.unique && !ix.primary && <span className="text-[9px] px-1 rounded bg-white/10 text-white/50">unique</span>}
+                      </div>
+                      <p className="pl-5 text-[10px] text-white/25 font-mono truncate" title={ix.definition}>{ix.definition}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === 'sql' && (
+            <div className="flex-1 overflow-auto p-4">
+              {!live ? (
+                <p className="text-xs text-white/30">Connect a database to run queries.</p>
+              ) : (
+                <>
+                  <textarea
+                    className="w-full bg-[#0d1117] border border-white/10 rounded-xl p-3 text-xs font-mono text-white/80 resize-y focus:outline-none focus:border-cyan-500/50"
+                    rows={6}
+                    value={sqlText}
+                    onChange={(e) => setSqlText(e.target.value)}
+                    spellCheck={false}
+                    placeholder="select * from users where created_at > now() - interval '7 days'"
+                  />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => void runSql(false)}
+                      disabled={sqlRunning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-all"
+                    >
+                      {sqlRunning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} Run
+                    </button>
+                    {/* A separate button, not a toggle: a toggle left on from ten minutes ago is how a
+                        read becomes a write nobody meant to run. This one always asks first. */}
+                    <button
+                      onClick={() => void runSql(true)}
+                      disabled={sqlRunning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/15 border border-red-500/30 text-red-300 hover:bg-red-600/25 disabled:opacity-40 rounded-lg text-xs transition-all"
+                      title="Run a statement that CHANGES your database. You will be asked to confirm."
+                    >
+                      Run as a change…
+                    </button>
+                    <p className="text-[10px] text-white/25 ml-1">
+                      Run is read-only — your database rejects anything that would change data.
+                    </p>
+                  </div>
+
+                  {sqlError && (
+                    <div className="mt-3 flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-300 leading-relaxed">{sqlError}</p>
+                    </div>
+                  )}
+
+                  {sqlResult && (
+                    <div className="mt-3">
+                      <p className="text-[10px] text-white/30 mb-2">
+                        {sqlResult.rowCount} row{sqlResult.rowCount === 1 ? '' : 's'} · {sqlResult.elapsedMs} ms
+                        {sqlResult.capped && <span className="text-amber-300/80"> · showing the first {sqlResult.rowCount} — there may be more</span>}
+                        {!sqlResult.readOnly && <span className="text-red-300/80"> · this changed your database</span>}
+                      </p>
+                      {sqlResult.rows.length === 0 ? (
+                        <p className="text-xs text-white/30">No rows returned.</p>
+                      ) : (
+                        <div className="overflow-auto border border-white/5 rounded-xl">
+                          <table className="w-full text-xs border-collapse min-w-max">
+                            <thead className="bg-[#161b22]">
+                              <tr className="border-b border-white/5">
+                                {sqlResult.columns.map((c) => (
+                                  <th key={c} className="text-left px-3 py-2 font-normal text-white/40 whitespace-nowrap">{c}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sqlResult.rows.map((row, ri) => (
+                                <tr key={ri} className="border-b border-white/3">
+                                  {sqlResult.columns.map((c) => {
+                                    const val = renderCell(row[c]);
+                                    return (
+                                      <td key={c} className="px-3 py-2 max-w-xs">
+                                        <span className={`truncate block ${row[c] === null || row[c] === undefined ? 'text-white/15 italic' : 'text-white/60'}`} title={val}>{val}</span>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

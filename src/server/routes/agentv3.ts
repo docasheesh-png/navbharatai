@@ -953,6 +953,34 @@ export function reviewerShouldRun(opts: {
 }
 
 /**
+ * Whether a post-build CODE gate (tsc / missing-files / syntax / missing-export) should run.
+ *
+ * SIBLING OF THE REVIEWER BUG ABOVE, found by measurement (reports d5f0a2bc + 15985d3b, 2026-08-05).
+ * That fix's own comment claimed "every other post-build gate already checks `!isImportTurn`" — and
+ * these four did not. All of them gated on `writtenFiles.size > 0`, which the `.env` WE write on an
+ * import turn pushes above zero, exactly as the infra writes defeated the reviewer's size-only guard.
+ *
+ * The cost was measured, not guessed: the post-answer stretch showed the SAME ~97 seconds on two
+ * separate Mitrify builds. On an import/survey turn the tsc gate type-checks the user's entire
+ * untouched project (165 files, one component 402 KB) for no possible benefit — nothing of ours is
+ * in it — and its repair pass could then edit files the user explicitly said not to change.
+ *
+ * These gates verify what WE built. On a turn where we built nothing, there is nothing to verify.
+ * One predicate for all four, exported and tested, so a fifth gate cannot quietly repeat this.
+ */
+export function postBuildCodeGateShouldRun(opts: {
+  enabled: boolean;
+  fastLaneGated: boolean;
+  buildOk: boolean;
+  wroteFiles: boolean;
+  isImportTurn: boolean;
+  aborted: boolean;
+}): boolean {
+  return opts.enabled && !opts.fastLaneGated && opts.buildOk && opts.wroteFiles
+    && !opts.isImportTurn && !opts.aborted;
+}
+
+/**
  * Requirement-aware build (admin-approved option A, 2026-07-20). Default OFF — when 'on', a fresh build of an
  * ambiguous DOMAIN prompt gets a bounded guidance block telling the builder to proactively INCLUDE the
  * features that domain almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital, …),
@@ -8604,8 +8632,13 @@ export function registerAgentV3Routes(app: Express): void {
       // effort, abortable, budget-capped); on persisting errors it records the honest OUTCOME so the
       // report/dashboard sees the true end-state (ship-with-warning, exactly like PREVIEW_FAILED).
       if (
-        process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         // Only with comfortable time left for install + tsc + one repair pass.
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
@@ -8671,8 +8704,13 @@ export function registerAgentV3Routes(app: Express): void {
       // records the HONEST end-state (never "fully functional" while a dangling import guarantees a crash).
       // Kill: AGENTV3_MISSING_FILES_GATE=off.
       if (
-        process.env.AGENTV3_MISSING_FILES_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_MISSING_FILES_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
@@ -8787,8 +8825,13 @@ export function registerAgentV3Routes(app: Express): void {
       // syntax error is an ERROR blocker → buildHealth becomes NOT READY (never a "READY" app that won't
       // compile). Kill: AGENTV3_SYNTAX_GATE=off.
       if (
-        process.env.AGENTV3_SYNTAX_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_SYNTAX_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
@@ -8846,8 +8889,13 @@ export function registerAgentV3Routes(app: Express): void {
       // target file(s) so the missing export exists again, re-checks, and records the honest end-state. Same
       // proven shape as the missing-files/syntax gates. Kill: AGENTV3_MISSING_EXPORT_GATE=off.
       if (
-        process.env.AGENTV3_MISSING_EXPORT_GATE !== 'off' && !fastLaneGated
-        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        postBuildCodeGateShouldRun({
+          enabled: process.env.AGENTV3_MISSING_EXPORT_GATE !== 'off',
+          fastLaneGated, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+          // !isImportTurn: this gate verifies what WE built; on a survey turn we built nothing, and
+          // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
+          isImportTurn, aborted: abort.signal.aborted,
+        })
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
@@ -10120,7 +10168,15 @@ export function registerAgentV3Routes(app: Express): void {
       // verdict: findSyntaxErrors flags ONLY files that genuinely do not parse, so a good build is never
       // falsely blocked. (It does not re-run a repair here — the app is saved and an honest follow-up fixes
       // it — so a late repair can never loop.)
-      if (process.env.AGENTV3_SYNTAX_GATE !== 'off' && result && result.ok && writtenFiles.size > 0 && !abort.signal.aborted) {
+      // Through the same predicate as the four above (2026-08-05). This one is MILDER — it re-parses
+      // only our own `writtenFiles` and never repairs, so on an import turn it merely parsed the
+      // `.env` and cost nothing. Routed through anyway: leaving one gate on the old size-only guard
+      // is how someone later widens it to the whole project and rebuilds the bug.
+      if (result && postBuildCodeGateShouldRun({
+        enabled: process.env.AGENTV3_SYNTAX_GATE !== 'off',
+        fastLaneGated: false, buildOk: result.ok, wroteFiles: writtenFiles.size > 0,
+        isImportTurn, aborted: abort.signal.aborted,
+      })) {
         try {
           const finalSyntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
           if (finalSyntaxErrors.length > 0) {

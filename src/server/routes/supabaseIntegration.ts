@@ -39,6 +39,9 @@ import {
   projectRefFromUrl, isSafeIdentifier, boundedInt, listTablesSql, listColumnsSql, readRowsSql,
   runQuery, columnsOf, MAX_ROWS, DEFAULT_ROWS,
 } from '../lib/supabaseData';
+import {
+  primaryKeySql, buildInsertSql, buildUpdateSql, buildDeleteSql, verifySingleRow,
+} from '../lib/supabaseWrite';
 import { audit } from '../lib/audit';
 import { getServerDb } from '../lib/serverDb';
 import { encrypt, loadUserVaultSecrets } from '../lib/secrets';
@@ -517,6 +520,118 @@ export function registerSupabaseIntegrationRoutes(
         default: c.column_default === null || c.column_default === undefined ? null : String(c.column_default),
       })).filter((c) => c.name),
     });
+  });
+
+  // ── Writing a row (ROADMAP #1 Phase 2.2) ───────────────────────────────────────────────────────
+  // Reading a table wrong shows the wrong screen; writing one wrong destroys data, with no undo. The
+  // guarantees live in supabaseWrite.ts (no primary key ⇒ no write; every value literalised by one
+  // encoder that throws rather than guesses); these routes add the two things only the server can do:
+  // ask the database what the key actually IS, and verify afterwards that exactly one row changed.
+
+  /** The table's real primary key, from the database's own catalogue — never inferred from a name. */
+  async function primaryKeyOf(token: string, projectRef: string, table: string): Promise<string[] | null> {
+    const result = await runQuery(token, projectRef, primaryKeySql(table));
+    if (!result.ok) return null;
+    return result.rows.map((r) => String(r.column_name ?? '')).filter(Boolean);
+  }
+
+  /** The table's declared columns, so a payload naming a column that does not exist is refused. */
+  async function columnNamesOf(token: string, projectRef: string, table: string): Promise<string[]> {
+    const result = await runQuery(token, projectRef, listColumnsSql(table));
+    if (!result.ok) return [];
+    return result.rows.map((r) => String(r.column_name ?? '')).filter(Boolean);
+  }
+
+  /**
+   * Everything the three write routes share: access, a valid table, its key and its columns.
+   *
+   * A table with NO primary key is refused here, once, with a message that explains the reason rather
+   * than a generic failure — "we can't identify a single row" is something the user can act on (add a
+   * primary key), while "write failed" sends them to support.
+   */
+  async function prepareWrite(req: Request, res: Response): Promise<
+    { ok: true; token: string; projectRef: string; table: string; pk: string[]; columns: string[] } | { ok: false }
+  > {
+    const table = typeof req.body?.table === 'string' ? req.body.table : '';
+    if (!isSafeIdentifier(table)) {
+      res.status(400).json({ error: 'That table name is not one NavBharatAI can write to.' });
+      return { ok: false };
+    }
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return { ok: false }; }
+    const [pk, columns] = await Promise.all([
+      primaryKeyOf(access.token, access.projectRef, table),
+      columnNamesOf(access.token, access.projectRef, table),
+    ]);
+    if (pk === null) {
+      res.status(502).json({ error: 'Could not read that table just now — please try again in a moment.' });
+      return { ok: false };
+    }
+    if (pk.length === 0) {
+      res.status(409).json({
+        error: `The table "${table}" has no primary key, so NavBharatAI cannot tell one row from another and will not risk changing the wrong one. Add a primary key to this table to edit it here.`,
+        failure: 'no-primary-key',
+      });
+      return { ok: false };
+    }
+    return { ok: true, token: access.token, projectRef: access.projectRef, table, pk, columns };
+  }
+
+  /** Run one write and report what genuinely changed. A builder's refusal is the user's answer. */
+  async function runWrite(res: Response, token: string, projectRef: string, build: () => string): Promise<void> {
+    let sql: string;
+    try {
+      sql = build();
+    } catch (e) {
+      // These throws are the guarantees doing their job (no key, unknown column, unstorable value),
+      // so the reason goes to the user — it is actionable, and never contains their data.
+      res.status(400).json({ error: e instanceof Error ? e.message : 'That change could not be saved.' });
+      return;
+    }
+    const result = await runQuery(token, projectRef, sql);
+    if (!result.ok) { sendDataError(res, result); return; }
+    const verified = verifySingleRow(result.rows);
+    if (!verified.ok) { res.status(409).json({ error: verified.message }); return; }
+    res.json({ ok: true, row: verified.row });
+  }
+
+  app.post('/api/integrations/supabase/row', async (req: Request, res: Response) => {
+    const prep = await prepareWrite(req, res);
+    if (!prep.ok) return;
+    const values = (req.body?.values ?? {}) as Record<string, unknown>;
+    await runWrite(res, prep.token, prep.projectRef, () =>
+      buildInsertSql({ table: prep.table, values, columns: prep.columns }));
+  });
+
+  app.patch('/api/integrations/supabase/row', async (req: Request, res: Response) => {
+    const prep = await prepareWrite(req, res);
+    if (!prep.ok) return;
+    const values = (req.body?.values ?? {}) as Record<string, unknown>;
+    const key = (req.body?.key ?? {}) as Record<string, unknown>;
+    await runWrite(res, prep.token, prep.projectRef, () =>
+      buildUpdateSql({ table: prep.table, values, key, pkColumns: prep.pk, columns: prep.columns }));
+  });
+
+  // DELETE with a body: the key identifies the row and can be composite, so it does not fit a path
+  // segment. Express parses a JSON body on DELETE the same as any other method.
+  app.delete('/api/integrations/supabase/row', async (req: Request, res: Response) => {
+    const prep = await prepareWrite(req, res);
+    if (!prep.ok) return;
+    const key = (req.body?.key ?? {}) as Record<string, unknown>;
+    await runWrite(res, prep.token, prep.projectRef, () =>
+      buildDeleteSql({ table: prep.table, key, pkColumns: prep.pk }));
+  });
+
+  // The UI needs the key BEFORE it offers an edit control, so a table it cannot safely write is shown
+  // read-only with the reason, instead of offering a Save that will fail.
+  app.get('/api/integrations/supabase/primary-key', async (req: Request, res: Response) => {
+    const table = typeof req.query.table === 'string' ? req.query.table : '';
+    if (!isSafeIdentifier(table)) { res.status(400).json({ error: 'That table name is not one NavBharatAI can read.' }); return; }
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+    const pk = await primaryKeyOf(access.token, access.projectRef, table);
+    if (pk === null) { res.status(502).json({ error: 'Could not read that table just now.' }); return; }
+    res.json({ table, primaryKey: pk, editable: pk.length > 0 });
   });
 
   // Forget our copy. Deliberately explicit that this does NOT revoke the grant on Supabase's side —

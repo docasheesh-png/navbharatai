@@ -49,20 +49,64 @@ describe('sample rows are labelled, and never pretend to be live', () => {
   });
 });
 
-describe('read-only in 2.1 — no half-built write controls', () => {
-  it('ships no edit / delete / add-row affordance', () => {
-    // A button that looks like it saves and does not is the half-done feature the constitution
-    // forbids. Writes arrive in 2.2, with confirmation, or not at all.
-    expect(studio).not.toContain('Add Row');
-    expect(studio).not.toContain('saveEdit');
-    expect(studio).not.toContain('deleteRow');
+/**
+ * Editing (Phase 2.2). Reading a table wrong shows the wrong screen; writing one wrong destroys data,
+ * with no undo. These lock the two structural guarantees rather than trusting a call site.
+ */
+describe('writes exist, and they are narrow on purpose', () => {
+  const write = read('src/server/lib/supabaseWrite.ts');
+
+  it('the three write routes are there', () => {
+    expect(route).toContain("app.post('/api/integrations/supabase/row'");
+    expect(route).toContain("app.patch('/api/integrations/supabase/row'");
+    expect(route).toContain("app.delete('/api/integrations/supabase/row'");
   });
 
-  it('the server exposes only reads for the data GUI', () => {
-    expect(route).toContain("app.get('/api/integrations/supabase/tables'");
-    expect(route).toContain("app.get('/api/integrations/supabase/rows'");
-    expect(route).toContain("app.get('/api/integrations/supabase/columns'");
-    expect(route).not.toMatch(/app\.(post|delete|put|patch)\('\/api\/integrations\/supabase\/rows'/);
+  it('a table with NO primary key is refused, with a reason the user can act on', () => {
+    // Not "handled carefully" — refused. Without a key nothing provably identifies a single row.
+    expect(route).toContain("failure: 'no-primary-key'");
+    expect(route).toContain('has no primary key');
+    expect(write).toContain("throw new Error('this table has no primary key')");
+  });
+
+  it('the key comes from the DATABASE catalogue, never inferred from a column name', () => {
+    expect(route).toContain('async function primaryKeyOf');
+    expect(route).toContain('primaryKeySql(table)');
+    expect(write).toContain('i.indisprimary');
+  });
+
+  it('every UPDATE and DELETE is built through whereFromKey, so neither can be unscoped', () => {
+    const upd = write.slice(write.indexOf('export function buildUpdateSql'), write.indexOf('export function buildDeleteSql'));
+    expect(upd).toContain('whereFromKey(opts.key, opts.pkColumns)');
+    const del = write.slice(write.indexOf('export function buildDeleteSql'));
+    expect(del).toContain('whereFromKey(opts.key, opts.pkColumns)');
+  });
+
+  it('the value encoder throws rather than falling back to String(value)', () => {
+    // A stringified surprise is how a value stops being a value and becomes syntax.
+    expect(write).toContain('throw new Error(`cannot store a value of type ${typeof value}`)');
+    expect(write).not.toMatch(/return String\(value\);\s*\/\/ fallback/);
+  });
+
+  it('every write is VERIFIED to have hit exactly one row before it is called saved', () => {
+    expect(route).toContain('verifySingleRow(result.rows)');
+    expect(write).toContain('export function verifySingleRow');
+  });
+
+  it('the UI only offers editing when a key exists, and says why when it does not', () => {
+    expect(studio).toContain('const editable = live && primaryKey.length > 0');
+    expect(studio).toContain('has no primary key');
+    expect(studio).toContain('/api/integrations/supabase/primary-key');
+  });
+
+  it('deleting asks first — it is the one action with no undo', () => {
+    expect(studio).toContain('window.confirm');
+    expect(studio).toContain('This cannot be undone');
+  });
+
+  it('the saved row is re-read from the server, not patched locally', () => {
+    // A database applies defaults, triggers and coercion; showing our guess would be a quiet lie.
+    expect(studio).toContain('await loadRows(selected, offset)');
   });
 });
 

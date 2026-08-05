@@ -1868,6 +1868,33 @@ export default function App() {
     return () => workspaceSyncerRef.current?.dispose();
   }, [syncFilesToV3]);
 
+  /**
+   * THE one edit seam for hand-edited files. Every surface where a human edits a file — Code Studio and
+   * the Git panel — must go through this, or its edits live only in React state and are lost on reload.
+   *
+   * ROOT CAUSE it fixes (admin 2026-08-04, "save button ko live karo"): the syncer above was wired into
+   * the Git panel only. Code Studio's own `onFilesChange` called the raw `setFiles`, so **typing in the
+   * IDE never reached the durable v5.0 workspace at all** — the comment above claimed "the IDE edit seam
+   * calls onLocalChange" while the IDE was the one seam that didn't. Saving looked fine, the preview
+   * updated, and the edit quietly did not survive a refresh. One shared handler makes that drift
+   * impossible instead of relying on each new surface remembering.
+   */
+  const applyIdeFileChange = useCallback((newFiles: FileSystem) => {
+    workspaceSyncerRef.current?.onLocalChange(files, newFiles);
+    setFiles(newFiles);
+    updatePreview(newFiles);
+  }, [files, updatePreview]);
+
+  /**
+   * Push any pending edits to the durable store NOW and resolve once they are actually stored.
+   * Save says "Saved" only after this resolves — announcing success while a 1.2s debounce is still
+   * pending would be a fake success message, and the user would trust it and close the tab.
+   */
+  const flushIdeEdits = useCallback(
+    () => workspaceSyncerRef.current?.flush() ?? Promise.resolve(),
+    [],
+  );
+
 
   const handleKeySave = (provider: string, value: string) => {
     setKeys(prev => ({ ...prev, [provider]: value }));
@@ -2470,6 +2497,21 @@ export default function App() {
 
   const themeClasses = getThemeClasses(theme);
 
+  /**
+   * Is the global mobile bottom-nav actually on screen?
+   *
+   * SINGLE SOURCE OF TRUTH, deliberately. This condition and the strip of padding that reserves space
+   * for it must never disagree — and they have drifted twice already. Focus mode was the first (56px
+   * held for a nav that wasn't rendered), and Code Studio was the second: the nav was hidden inside the
+   * IDE so it wouldn't stack two footers, but its reservation stayed, pushing Code Studio's own footer
+   * 56px off the screen edge with a dead strip beneath it (admin screenshot, 2026-08-04).
+   * Both the padding and the <nav> read THIS, so a future "hide the nav here too" cannot repeat it.
+   *
+   * Code Studio is excluded because it draws its OWN footer; botbuilder because it is full-bleed.
+   */
+  const showsGlobalMobileNav =
+    effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio';
+
   return (
     <div
       className={cn("h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500", themeClasses.bg, themeClasses.text)}
@@ -2569,7 +2611,12 @@ export default function App() {
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
           // rendered — leaving an empty dead strip under the v5.0 composer, above the phone browser bar.
-          effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' ? "pb-14" : ""
+          // Reserve the bottom-nav strip ONLY when that nav is really rendered. Both this padding and
+          // the <nav> itself now read the SAME flag, because they drifted apart twice: focus mode once
+          // (fixed below), and Code Studio again on 2026-08-04 — the global nav was hidden inside the
+          // IDE without dropping its 56px reservation, so Code Studio's own footer floated 56px above
+          // the screen edge with a dead strip beneath it. A shared boolean makes that drift impossible.
+          showsGlobalMobileNav ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
              <HomeView
@@ -3353,7 +3400,7 @@ export default function App() {
                 onPushToRepo={selectedRepo ? pushToRepo : null}
                 onConnectFirebase={connectFirebase}
                 onDisconnectFirebase={disconnectFirebase}
-                onFilesChange={(newFiles) => { workspaceSyncerRef.current?.onLocalChange(files, newFiles); setFiles(newFiles); updatePreview(newFiles); }}
+                onFilesChange={applyIdeFileChange}
                 onAgentChange={handleAgentChange}
                 onToggleView={toggleTab}
                 onActivatePreview={handleTriggerPreviewBuild}
@@ -3449,6 +3496,8 @@ export default function App() {
             setGeneratedCode={setGeneratedCode}
             files={files}
             setFiles={setFiles as any}
+            onIdeFilesChange={applyIdeFileChange}
+            onFlushIdeEdits={flushIdeEdits}
             onFilesRemoved={handleFilesRemoved}
             hasGeneratedCode={hasGeneratedCode}
             setIsAppBuilt={setIsAppBuilt}
@@ -3581,7 +3630,7 @@ export default function App() {
           and the two rows disagree about where you are (the IDE says CODE, the global bar says STUDIO).
           Inside the IDE, the IDE's own bar is the correct and only one. `botbuilder` is excluded here for
           the same reason and has been for a while. */}
-      {effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio' && (
+      {showsGlobalMobileNav && (
         <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.

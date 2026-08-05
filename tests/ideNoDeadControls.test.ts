@@ -111,6 +111,32 @@ describe('every advertised shortcut actually does something', () => {
   });
 });
 
+describe('every screen you can navigate to actually renders', () => {
+  it('no navigation target falls through to a blank panel', () => {
+    // THE BLIND SPOT IN THE EARLIER AUDIT. Checking "does a `case` exist for this command?" is not the
+    // same as "does that case lead anywhere". Ctrl+Shift+D (`workbench.view.debug`) was handled — it
+    // set activeScreen='debug' and opened the sidebar — but the sidebar renders from a switch with no
+    // 'debug' case, so it hit `default: return null` and the panel opened EMPTY.
+    const targets = new Set([
+      ...[...studio.matchAll(/handleScreenChange\('([^']+)'\)/g)].map((m) => m[1]),
+      ...[...studio.matchAll(/setActiveScreen\('([^']+)'\)/g)].map((m) => m[1]),
+    ]);
+    const rendered = new Set([
+      ...[...studio.matchAll(/case '([^']+)':/g)].map((m) => m[1]),
+      ...[...studio.matchAll(/activeScreen === '([^']+)'/g)].map((m) => m[1]),
+    ]);
+    expect([...targets].filter((t) => !rendered.has(t)).sort()).toEqual([]);
+  });
+
+  it('the Debug view shortcut opens the real debugger panel', () => {
+    const i = studio.indexOf("case 'workbench.view.debug'");
+    expect(i).toBeGreaterThan(-1);
+    const body = studio.slice(i, i + 700);
+    expect(body).toContain('setIsDebugPanelOpen(true)');
+    expect(body).not.toContain("setActiveScreen('debug')");
+  });
+});
+
 describe('nothing in the IDE invites a tap and then swallows it', () => {
   it('Tag Mode and Fix Bug reach the AI panel — they used to be dead ends', () => {
     // PreviewPanel is mounted ONLY by Code Studio, and Code Studio did not pass `onEditWithAI`. Tag

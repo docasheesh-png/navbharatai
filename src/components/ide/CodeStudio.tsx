@@ -588,8 +588,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           setIsSidebarOpen(true);
           break;
         case 'workbench.view.debug':
-          setActiveScreen('debug');
-          setIsSidebarOpen(true);
+          // Ctrl+Shift+D. This used to set activeScreen='debug' and open the sidebar — but the sidebar
+          // renders from a switch that has no 'debug' case, so it fell through to `default: null` and
+          // the panel opened EMPTY. The shortcut was "handled" and still went nowhere, which is the
+          // blind spot in checking only that a case exists. The Debugger lives in its own panel (the
+          // footer's Debug tab and F5 both open it) — so open THAT, the one real debugger surface.
+          setIsDebugPanelOpen(true);
           break;
         case 'workbench.view.extensions':
           setActiveScreen('extensions');

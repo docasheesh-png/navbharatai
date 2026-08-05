@@ -190,6 +190,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       return;
     }
 
+    // Opening a dormant workspace now WAKES it server-side, and resuming a sandbox takes real seconds.
+    // Say so, or the terminal looks frozen for the one moment it is doing the most work.
+    term.write('\x1b[90mStarting your workspace…\x1b[0m\r\n');
+
     let cols = 80;
     let rows = 24;
     try { const d = fit.proposeDimensions(); if (d) { cols = d.cols; rows = d.rows; } } catch { /* defaults */ }
@@ -215,6 +219,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         );
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[31m${message}\x1b[0m\r\n`);
+        if (j?.detail) term.write(`\x1b[90m${String(j.detail).slice(0, 300)}\x1b[0m\r\n`);
         return;
       }
       if (j.available === false) {
@@ -225,6 +230,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
           : 'Sandbox not active yet — start a build in NavBharatAI Pro v5.0 chat to bring the terminal online.';
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[90m${message}\x1b[0m\r\n`);
+        // The exact precondition, dim and on its own line. It is meaningless to most users and
+        // everything to whoever debugs a report — and it is only ever shown to the person who owns
+        // this workspace, because the route that produced it is ownership-checked.
+        if (j.cause) term.write(`\x1b[90m[${j.cause}]\x1b[0m\r\n`);
         return;
       }
 

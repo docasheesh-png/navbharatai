@@ -288,6 +288,50 @@ describe('Code Studio shows the SAME app the rest of the product does', () => {
     expect(block).toContain('hydratedWorkspaceRef.current === workspaceId');
   });
 
+  it('a dormant workspace is WOKEN for the terminal, not handed back as a chore', () => {
+    // The live report: opening the terminal on a project with 21 saved files said "send a message in
+    // v5.0 chat to bring the sandbox back online, then the terminal works again". Honest, and still
+    // the wrong answer — it hands the user a task and sends them to another screen to do it. We know
+    // the workspace, we hold the files, and the resume path was already proven; it was simply never
+    // wired to the terminal.
+    const routes = read('src/server/routes/agentv3.ts');
+    expect(routes).toContain('async function wakeWorkspaceForTerminal');
+    const i = routes.indexOf('async function wakeWorkspaceForTerminal');
+    const fn = routes.slice(i, i + 2200);
+    expect(fn).toContain('ensureWorkspace(workspaceId, undefined, resumeSandboxId)');
+    expect(fn).toContain('registerSession(workspaceId, git, userId, actuator)');
+    // Seeds the saved project back — a recreated sandbox comes back EMPTY, and a terminal opening onto
+    // an empty directory looks exactly like the data loss this path exists to prevent.
+    expect(fn).toContain('loadWorkspaceFiles(workspaceId)');
+    expect(fn).toContain('TERMINAL_WAKE_MAX_FILES');
+    // Best-effort by construction: any failure returns false and the caller falls through to today's
+    // honest dormant message. This can make the terminal work; it can never make it worse.
+    expect(fn).toContain('return false;');
+    expect(fn).toContain("AGENTV3_TERMINAL_AUTOWAKE === 'off'");
+    // Only attempted for a workspace that really holds a project.
+    const open = routes.slice(routes.indexOf("app.post('/api/agentv3/shell/open'"), routes.indexOf("app.get('/api/agentv3/shell/stream'"));
+    expect(open).toContain('hasProject > 0 && await wakeWorkspaceForTerminal');
+    // And the user is told it is happening — resuming a sandbox takes real seconds.
+    expect(read('src/components/ide/ShellTerminal.tsx')).toContain('Starting your workspace…');
+  });
+
+  it('the terminal shows WHICH precondition failed, not just that one did', () => {
+    // "No sandbox" has three quite different causes needing three different actions: the workspace is
+    // not on this instance (a cold start — wake it), it is here with no runner, or its runner cannot
+    // open a TTY. Collapsing them into one sentence is what made a live report undiagnosable.
+    const routes = read('src/server/routes/agentv3.ts');
+    const i = routes.indexOf("const cause = !session ? 'no_session'");
+    expect(i).toBeGreaterThan(-1);
+    expect(routes.slice(i, i + 260)).toContain("'runner_not_pty'");
+    // Sent only on the ownership-checked route, so only the workspace's owner can ever read it.
+    const open = routes.slice(routes.indexOf("app.post('/api/agentv3/shell/open'"), routes.indexOf("app.get('/api/agentv3/shell/stream'"));
+    expect(open).toContain('assertVerifiedWorkspaceOwner');
+    expect(open).toContain('cause,');
+    const shell = read('src/components/ide/ShellTerminal.tsx');
+    expect(shell).toContain('if (j.cause)');
+    expect(shell).toContain('j?.detail');
+  });
+
   it('the terminal names the real reason it failed', () => {
     // "Could not reach the terminal service." on its own told nobody anything — including me, when a
     // live report arrived and I could not reproduce it. An error that hides its cause is a second bug.

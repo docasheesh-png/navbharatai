@@ -54,21 +54,30 @@ describe('ReactPreview — non-Tailwind apps are byte-for-byte unaffected', () =
   });
 });
 
-// Preview boot-watchdog timeout (autopsy 2026-07-31): a large SaaS-dashboard build (600 KB+ bundle) loading
-// deps from the esm.sh CDN on a slow mobile network hit the OLD 25s in-browser watchdog and false-failed
-// with "did not start within 25 seconds", even though the production build succeeded. Bumped to 45s (the
-// server-side preview already allows 90s). Lock the more generous ceiling so a tighten can't re-break it.
-describe('ReactPreview — in-browser boot watchdog is generous enough for a large app', () => {
+// Preview boot-watchdog (autopsy 2026-07-31, ROOT-CAUSED 2026-08-05): a large build loading deps from the
+// esm.sh CDN on a slow network false-failed against a FLAT elapsed-time watchdog even though nothing had
+// actually gone wrong — the app was still downloading. Raising the number (25s → 45s) was the treadmill fix:
+// the next-bigger app on the next-slower network fails again. The watchdog now fires on a STALL (no module
+// resolved for STALL_MS) instead of on elapsed time, so a preview that is genuinely making progress is never
+// killed, however long it takes. This block locks that shape — a return to any flat deadline re-breaks it.
+// (The full watchdog invariants live in ReactPreview.watchdog.test.ts, which parses the real script.)
+describe('ReactPreview — in-browser boot watchdog measures progress, not elapsed time', () => {
   const html = buildReactPreview(VirtualFileSystem.fromRecord({
     'package.json': JSON.stringify({ name: 'app', dependencies: { react: '^18.0.0', 'react-dom': '^18.0.0' } }),
     'src/main.jsx': "import App from './App';\nexport default function boot(){ return App; }",
     'src/App.jsx': "export default function App(){ return <div>Hi</div>; }",
   }));
 
-  it('waits 45s (not the old 25s) before declaring a boot failure', () => {
-    expect(html).toContain('}, 45000);');
-    expect(html).toContain('did not start within 45 seconds');
-    expect(html).not.toContain('}, 25000);');
+  it('never declares failure on a fixed elapsed-time deadline', () => {
     expect(html).not.toContain('did not start within 25 seconds');
+    expect(html).not.toContain('did not start within 45 seconds');
+    expect(html).not.toContain('}, 25000);');
+    expect(html).not.toContain('}, 45000);');
+  });
+
+  it('tracks last-progress and stalls instead', () => {
+    expect(html).toContain('nbaiLastProgress');
+    expect(html).toContain('STALL_MS');
+    expect(html).toContain('HARD_CEILING_MS');
   });
 });

@@ -19,13 +19,17 @@
 // user's data is.
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns, Plus, Edit2, Trash2, X, Lock, Link2, Play, Zap } from 'lucide-react';
+import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns, Plus, Edit2, Trash2, X, Lock, Link2, Play, Zap, Upload } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { Breadcrumb } from '../ui/Breadcrumb';
 import { authedFetch } from '../../lib/authedFetch';
 import { studioState, renderCell, filterRows, pageSummary } from '../../lib/dataStudioSource';
+import { parseCsv, rowsToObjects } from '../../lib/csv';
 
 interface DBRow { [key: string]: unknown; }
+
+/** Small local glyph for the import/export notice — avoids widening the icon import for one use. */
+const FileSpreadsheetIcon = () => <Table className="w-4 h-4 text-white/30 shrink-0 mt-0.5" />;
 
 /** Shown only when no database is connected — and always labelled as a sample. */
 const SAMPLE_TABLES: Record<string, DBRow[]> = {
@@ -74,6 +78,12 @@ export function DatabaseStudio() {
   const [sqlRunning, setSqlRunning] = useState(false);
   const [sqlResult, setSqlResult] = useState<{ rows: DBRow[]; columns: string[]; rowCount: number; capped: boolean; elapsedMs: number; readOnly: boolean } | null>(null);
   const [sqlError, setSqlError] = useState('');
+
+  // CSV import (2.5). The file is parsed IN THE BROWSER first so the user sees what was understood —
+  // how many rows, which columns matched — before anything reaches their database.
+  const [importPreview, setImportPreview] = useState<{ rows: Record<string, unknown>[]; headers: string[]; adjusted: number } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState('');
 
   // Editing (2.2). `primaryKey` is what makes a row addressable; an empty key means this table is
   // read-only and the UI says why rather than offering a Save that cannot work.
@@ -311,6 +321,77 @@ export function DatabaseStudio() {
     }
   };
 
+  /** Download the table as CSV, and say plainly when the file is only part of it. */
+  const exportCsv = async () => {
+    if (!live || !selected) return;
+    try {
+      const res = await authedFetch(`/api/integrations/supabase/export?table=${encodeURIComponent(selected)}`, {}, 120_000);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error || 'Could not export that table.');
+        return;
+      }
+      const text = await res.text();
+      const count = res.headers.get('X-Nbai-Row-Count') ?? '';
+      const truncated = res.headers.get('X-Nbai-Truncated') === '1';
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${selected}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      // The file itself stays clean CSV — a warning inside it would corrupt the data for every other
+      // tool — so the partial-export warning is said here instead.
+      if (truncated) setImportNote(`Exported the first ${count} rows — this table has more.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not export that table.');
+    }
+  };
+
+  /** Read a chosen CSV, in the browser, so the user sees what was understood before it is sent. */
+  const pickCsv = async (file: File | null | undefined) => {
+    setImportNote('');
+    if (!file) return;
+    const text = await file.text();
+    const parsed = parseCsv(text);
+    const { rows, adjusted } = rowsToObjects(parsed);
+    if (rows.length === 0) { setImportNote('That file has no data rows.'); return; }
+    setImportPreview({ rows, headers: parsed.headers, adjusted });
+  };
+
+  /**
+   * Send the parsed rows.
+   *
+   * The result is reported exactly as it happened, including a PARTIAL import: rows go in batches and
+   * each batch is atomic, so a failure can leave earlier ones applied. Saying "import failed" then
+   * would send the user to re-run the whole file and duplicate everything that did land.
+   */
+  const runImport = async () => {
+    if (!importPreview || importing) return;
+    setImporting(true);
+    setImportNote('');
+    try {
+      const res = await authedFetch('/api/integrations/supabase/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ table: selected, rows: importPreview.rows }),
+      }, 120_000);
+      const data = await res.json().catch(() => ({}));
+      const imported = Number(data?.imported ?? 0);
+      const total = Number(data?.total ?? importPreview.rows.length);
+      if (!res.ok && imported === 0) { setImportNote(data?.error || 'Nothing could be imported.'); return; }
+      const unknown = Array.isArray(data?.unknownColumns) ? data.unknownColumns : [];
+      const parts = [`Imported ${imported} of ${total} rows.`];
+      if (data?.error) parts.push(`Stopped: ${data.error}`);
+      if (unknown.length) parts.push(`Ignored ${unknown.length} column${unknown.length === 1 ? '' : 's'} the table does not have: ${unknown.join(', ')}.`);
+      setImportNote(parts.join(' '));
+      if (imported > 0) { setImportPreview(null); await loadRows(selected, offset); }
+    } catch (e) {
+      setImportNote(e instanceof Error ? e.message : 'That import could not be completed.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -382,8 +463,26 @@ export function DatabaseStudio() {
               <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
             </button>
             <button onClick={exportJson} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all">
-              <Download className="w-3 h-3" /> Export page
+              <Download className="w-3 h-3" /> Export page (JSON)
             </button>
+            {live && (
+              <>
+                <button onClick={() => void exportCsv()} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all">
+                  <Download className="w-3 h-3" /> Export table (CSV)
+                </button>
+                {editable && (
+                  <label className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all cursor-pointer">
+                    <Upload className="w-3 h-3" /> Import CSV
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => { void pickCsv(e.target.files?.[0]); e.target.value = ''; }}
+                    />
+                  </label>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -452,6 +551,38 @@ export function DatabaseStudio() {
             <div className="mx-3 mt-2 flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
               <p className="text-xs text-red-300">{error || writeError}</p>
+            </div>
+          )}
+
+          {/* CSV import preview — what was understood, before anything reaches their database. */}
+          {importPreview && (
+            <div className="mx-3 mt-2 bg-[#161b22] border border-cyan-500/20 rounded-xl p-3">
+              <p className="text-xs text-white/70 mb-1">
+                Import {importPreview.rows.length} row{importPreview.rows.length === 1 ? '' : 's'} into "{selected}"
+              </p>
+              <p className="text-[10px] text-white/40 mb-2">
+                Columns in the file: {importPreview.headers.join(', ')}
+                {/* Said up front, because a padded row is a row that will import with fields empty. */}
+                {importPreview.adjusted > 0 && (
+                  <span className="text-amber-300/80"> · {importPreview.adjusted} row{importPreview.adjusted === 1 ? ' has' : 's have'} a different number of columns and will be padded</span>
+                )}
+              </p>
+              <p className="text-[10px] text-white/30 mb-2">
+                Columns your table does not have are skipped, and NavBharatAI will name them afterwards.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => void runImport()} disabled={importing} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all">
+                  {importing ? <TirangaLoader className="w-3 h-3" /> : <Upload className="w-3 h-3" />} Import
+                </button>
+                <button onClick={() => { setImportPreview(null); setImportNote(''); }} className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/40">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {importNote && (
+            <div className="mx-3 mt-2 flex items-start gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+              <FileSpreadsheetIcon />
+              <p className="text-xs text-white/60 leading-relaxed">{importNote}</p>
             </div>
           )}
 

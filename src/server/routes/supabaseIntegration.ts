@@ -37,11 +37,12 @@ import {
 } from '../lib/supabaseConnectionStore';
 import {
   projectRefFromUrl, isSafeIdentifier, boundedInt, listTablesSql, listColumnsSql, readRowsSql,
-  runQuery, columnsOf, MAX_ROWS, DEFAULT_ROWS, listForeignKeysSql, listIndexesSql,
+  runQuery, columnsOf, MAX_ROWS, DEFAULT_ROWS, listForeignKeysSql, listIndexesSql, quoteIdent,
 } from '../lib/supabaseData';
+import { toCsv, matchColumns } from '../../lib/csv';
 import { readOnlyQuery, writeQuery, QUERY_ROW_CAP } from '../lib/sqlSafety';
 import {
-  primaryKeySql, buildInsertSql, buildUpdateSql, buildDeleteSql, verifySingleRow,
+  primaryKeySql, buildInsertSql, buildUpdateSql, buildDeleteSql, buildBulkInsertSql, verifySingleRow,
 } from '../lib/supabaseWrite';
 import { audit } from '../lib/audit';
 import { getServerDb } from '../lib/serverDb';
@@ -695,6 +696,107 @@ export function registerSupabaseIntegrationRoutes(
       // Honest about the cap: a read that fills it may have had more behind it.
       capped: !wantsWrite && result.rows.length >= QUERY_ROW_CAP,
       elapsedMs: Date.now() - started,
+    });
+  });
+
+  // ── CSV import / export (ROADMAP #1 Phase 2.5) ─────────────────────────────────────────────────
+
+  /** One export pull. Bounded: an unbounded "export everything" is a way to fall over on a big table. */
+  const EXPORT_MAX_ROWS = 5000;
+  /** Rows per INSERT. Large enough to be quick, small enough that one statement stays sane. */
+  const IMPORT_BATCH = 200;
+
+  // Export a table as CSV. Honest about the cap: the header says how many rows came out, and whether
+  // there were more behind them, instead of implying the file is the whole table.
+  app.get('/api/integrations/supabase/export', async (req: Request, res: Response) => {
+    const table = typeof req.query.table === 'string' ? req.query.table : '';
+    if (!isSafeIdentifier(table)) { res.status(400).json({ error: 'That table name is not one NavBharatAI can read.' }); return; }
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+
+    const limit = boundedInt(req.query.limit, EXPORT_MAX_ROWS, 1, EXPORT_MAX_ROWS);
+    // Ask for one more than we will emit, so "there is more" is something we OBSERVED rather than guessed.
+    const probe = await runQuery(access.token, access.projectRef,
+      `select * from public.${quoteIdent(table)} limit ${limit + 1}`);
+    if (!probe.ok) { sendDataError(res, probe); return; }
+    const truncated = probe.rows.length > limit;
+    const rows = truncated ? probe.rows.slice(0, limit) : probe.rows;
+
+    const columnsResult = await runQuery(access.token, access.projectRef, listColumnsSql(table));
+    const columns = columnsResult.ok
+      ? columnsResult.rows.map((c) => String(c.column_name ?? '')).filter(Boolean)
+      : columnsOf(rows);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${table}.csv"`);
+    // A header the client reads to tell the user the file is partial — the file itself stays clean CSV,
+    // because a warning comment inside it would corrupt the data for every other tool.
+    res.setHeader('X-Nbai-Row-Count', String(rows.length));
+    res.setHeader('X-Nbai-Truncated', truncated ? '1' : '0');
+    res.send(toCsv(rows, columns));
+  });
+
+  /**
+   * Import rows into a table.
+   *
+   * PARTIAL IMPORTS ARE REPORTED, NOT HIDDEN. Rows go in batches, and each batch is atomic — so a
+   * failure leaves earlier batches applied. Pretending otherwise ("import failed") would send the
+   * user to re-run the whole file and duplicate everything that did land. The response says exactly
+   * how many rows were written and where it stopped.
+   */
+  app.post('/api/integrations/supabase/import', async (req: Request, res: Response) => {
+    const table = typeof req.body?.table === 'string' ? req.body.table : '';
+    if (!isSafeIdentifier(table)) { res.status(400).json({ error: 'That table name is not one NavBharatAI can write to.' }); return; }
+    const incoming = Array.isArray(req.body?.rows) ? req.body.rows as Array<Record<string, unknown>> : [];
+    if (incoming.length === 0) { res.status(400).json({ error: 'There are no rows to import.' }); return; }
+
+    const access = await resolveDataAccess(req);
+    if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
+
+    const tableColumns = await columnNamesOf(access.token, access.projectRef, table);
+    if (tableColumns.length === 0) {
+      res.status(502).json({ error: 'Could not read that table just now — please try again in a moment.' });
+      return;
+    }
+    // Only columns the table actually has. The UNKNOWN ones are named back to the user rather than
+    // dropped in silence: a file whose header is "e-mail" against a column "email" would otherwise
+    // import every row with that field empty and call it a success.
+    const headers = [...new Set(incoming.flatMap((r) => Object.keys(r ?? {})))];
+    const { usable, unknown } = matchColumns(headers, tableColumns);
+    if (usable.length === 0) {
+      res.status(400).json({
+        error: `None of the columns in this file match "${table}". The table has: ${tableColumns.join(', ')}.`,
+        unknownColumns: unknown,
+      });
+      return;
+    }
+
+    let imported = 0;
+    let failure: string | null = null;
+    for (let i = 0; i < incoming.length; i += IMPORT_BATCH) {
+      const batch = incoming.slice(i, i + IMPORT_BATCH);
+      let sql: string;
+      try {
+        sql = buildBulkInsertSql({ table, columns: usable, rows: batch });
+      } catch (e) {
+        failure = e instanceof Error ? e.message : 'Some rows could not be imported.';
+        break;
+      }
+      const result = await runQuery(access.token, access.projectRef, sql);
+      if (!result.ok) {
+        if (result.detail) console.error(`[SUPABASE-IMPORT] ${result.failure}: ${result.detail}`);
+        failure = result.message;
+        break;
+      }
+      imported += result.rows.length;
+    }
+
+    res.json({
+      ok: failure === null,
+      imported,
+      total: incoming.length,
+      unknownColumns: unknown,
+      ...(failure ? { error: failure } : {}),
     });
   });
 

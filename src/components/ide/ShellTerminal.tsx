@@ -93,6 +93,19 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   const cursorRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   /**
+   * Keystrokes typed while the shell is still OPENING. They used to be silently discarded —
+   * `sendInput` returned early on a null shellId — which is exactly what a live report showed
+   * (admin screenshot 2026-08-05): the terminal said "Starting your workspace…", the user typed,
+   * and nothing happened, ever. Waking a dormant sandbox takes real seconds, and typing into a
+   * terminal that is still starting is what everyone does at an ssh prompt: a real terminal
+   * BUFFERS those keys and runs them when the shell arrives. So do we. Bounded so a stuck open
+   * can never hoard unbounded memory; the PTY's own input cap is 8192 (ShellSessions.ts).
+   */
+  const pendingInputRef = useRef('');
+  const connectingRef = useRef(false);
+  const queueHintShownRef = useRef(false);
+  const PENDING_INPUT_CAP = 2048;
+  /**
    * Generation counter, not a boolean "disposed" flag. React StrictMode mounts, unmounts and remounts
    * an effect, so a shared boolean is set back to false by the second run while the FIRST run's async
    * work is still suspended on an await — and it then happily builds a second terminal into the same
@@ -193,16 +206,29 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     // Opening a dormant workspace now WAKES it server-side, and resuming a sandbox takes real seconds.
     // Say so, or the terminal looks frozen for the one moment it is doing the most work.
     term.write('\x1b[90mStarting your workspace…\x1b[0m\r\n');
+    connectingRef.current = true;
+    queueHintShownRef.current = false;
+    // A cold E2B resume can genuinely take tens of seconds. One more line at 15s keeps a slow wake
+    // distinguishable from a dead one — silence past the first message reads as a hang.
+    const slowNote = setTimeout(() => {
+      if (alive() && connectingRef.current) term.write('\x1b[90mStill waking the sandbox — a cold start can take up to a minute…\x1b[0m\r\n');
+    }, 15000);
 
     let cols = 80;
     let rows = 24;
     try { const d = fit.proposeDimensions(); if (d) { cols = d.cols; rows = d.rows; } } catch { /* defaults */ }
 
     try {
+      // Bounded. Without a deadline, a server that never answers left the terminal on
+      // "Starting your workspace…" FOREVER, silently eating every keystroke (admin screenshot
+      // 2026-08-05) — the user cannot tell an open that is slow from one that is dead. 90s covers
+      // the slowest real E2B wake we have seen; past that, an honest failure with a retry beats
+      // an eternal spinner.
       const res = await fetch('/api/agentv3/shell/open', {
         method: 'POST',
         headers: await authHeaders(),
         body: JSON.stringify({ workspaceId, userId, email: email || '', cols, rows }),
+        signal: AbortSignal.timeout(90_000),
       });
       const j = await res.json().catch(() => null);
       if (!alive()) return;
@@ -241,20 +267,34 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       cursorRef.current = typeof j.cursor === 'number' ? j.cursor : 0;
       attachedShells.set(sessionKey, j.shellId);
       setStatus({ kind: 'live' });
+      // The shell is here — release everything typed while it was waking, in order. The PTY echoes
+      // it back through the stream, so the user sees their held keystrokes appear and run.
+      const held = pendingInputRef.current;
+      pendingInputRef.current = '';
+      connectingRef.current = false;
+      if (held) void sendInput(held);
       void stream(term, alive);
     } catch (e) {
       if (!alive()) return;
-      // The request never completed at all — offline, a dropped connection, or the server closing it.
-      // Carry the browser's own reason: "Could not reach the terminal service." on its own told
-      // nobody anything, including me when a live report arrived and I could not reproduce it
-      // (admin screenshot 2026-08-05). An error that does not name its cause is a second bug.
+      // The request never completed at all — timed out, offline, a dropped connection, or the
+      // server closing it. Carry the browser's own reason: "Could not reach the terminal service."
+      // on its own told nobody anything, including me when a live report arrived and I could not
+      // reproduce it (admin screenshot 2026-08-05). An error that does not name its cause is a
+      // second bug.
+      const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
       const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       const message = offline
         ? 'You appear to be offline — the terminal needs a connection.'
-        : `Could not reach the terminal service${detail}. Check your connection, then reopen the terminal.`;
+        : timedOut
+          ? 'The workspace took too long to wake (90s). It may still be starting — tap "Try again" in a moment.'
+          : `Could not reach the terminal service${detail}. Check your connection, then reopen the terminal.`;
       setStatus({ kind: 'unavailable', message });
       term.write(`\x1b[31m${message}\x1b[0m\r\n`);
+    } finally {
+      clearTimeout(slowNote);
+      connectingRef.current = false;
+      pendingInputRef.current = '';
     }
   }
 
@@ -343,7 +383,20 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
 
   async function sendInput(data: string): Promise<void> {
     const shellId = shellIdRef.current;
-    if (!shellId || !workspaceId) return;
+    if (!shellId || !workspaceId) {
+      // No shell YET. If one is on its way, hold the keys instead of dropping them — they are
+      // flushed to the PTY the moment it opens (echo appears then; a local echo here would
+      // duplicate every character once the real one arrives). Tell the user ONCE, or their
+      // first keystrokes into a waking workspace look like a broken keyboard.
+      if (connectingRef.current && workspaceId) {
+        pendingInputRef.current = (pendingInputRef.current + data).slice(0, PENDING_INPUT_CAP);
+        if (!queueHintShownRef.current) {
+          queueHintShownRef.current = true;
+          termRef.current?.write('\x1b[90m(your typing is saved — it will run as soon as the workspace is ready)\x1b[0m\r\n');
+        }
+      }
+      return;
+    }
     try {
       await fetch('/api/agentv3/shell/input', {
         method: 'POST',
@@ -372,6 +425,9 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     attachedShells.delete(sessionKey);
     shellIdRef.current = null;
     cursorRef.current = 0;
+    pendingInputRef.current = '';
+    connectingRef.current = false;
+    queueHintShownRef.current = false;
     term.reset();
     setStatus({ kind: 'connecting' });
     const gen = genRef.current;
@@ -381,12 +437,15 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   return (
     <div className="relative h-full w-full bg-[#0d1117]">
       <div ref={hostRef} className="absolute inset-0 p-2" />
-      {status.kind === 'exited' && (
+      {(status.kind === 'exited' || status.kind === 'unavailable') && (
+        // Both terminal states get a way BACK. 'unavailable' used to be a dead end — after a
+        // timed-out or failed open, the only recovery was closing the tab and opening a new one,
+        // which nobody discovers from an error message.
         <button
           onClick={restart}
           className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-widest shadow-lg"
         >
-          Restart terminal
+          {status.kind === 'exited' ? 'Restart terminal' : 'Try again'}
         </button>
       )}
     </div>

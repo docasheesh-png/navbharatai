@@ -25837,3 +25837,34 @@ what keeps the keepalive/reprovision paths free. A refused start now captures th
 This should end the "Cannot GET" chain at its source: DB up → ensureSchema succeeds → client serving
 mounts → pages serve. Proven in this container, NOT yet in a live E2B sandbox — the new PGBIN/INITDB/
 PGCTL/PGLOG diagnostics are there precisely so the next real report settles it either way.
+
+## 2026-08-05 — Terminal ate every keystroke while "Starting your workspace…" (PR #2133)
+
+**Report (admin screenshot, live iPhone):** Code Studio terminal on "Starting your workspace…", iOS
+keyboard open, "kuch cammand type hi nahi ho rahi hai — type aur send hi nahi ho raha".
+
+**Root cause — structural, not mobile.** `sendInput()` returned early while `shellIdRef` was null, so
+every keystroke typed during the wake — which takes real seconds on a cold E2B resume — was silently
+discarded. A PTY terminal has no local echo (echo comes back from the remote), so dropped input shows
+NOTHING: an input black hole is indistinguishable from a broken keyboard. Two siblings found in the
+same trace: `/shell/open` had NO deadline, so a server that never answered left "Starting…" up forever
+(exactly the screenshot); and the `unavailable` state had no retry control — the only recovery was
+closing the tab, which no error message teaches.
+
+**Fix (`ShellTerminal.tsx`).** (1) Keys typed while the open is in flight are QUEUED (bounded,
+2048 chars) and flushed to the PTY the moment the shell opens — the ssh behaviour everyone already
+expects — with a one-time dim notice ("your typing is saved…") so held keys never look like a dead
+keyboard. (2) The open request carries `AbortSignal.timeout(90s)` and a distinct honest message on
+timeout; a 15s "Still waking the sandbox…" line keeps slow distinguishable from dead. (3) `unavailable`
+now renders "Try again" (same restart path as `exited`). A `finally` clears the connecting flag and the
+queue on every outcome, so held keys can never leak into a later session.
+
+**Tests:** `tests/shellTerminalInput.test.ts` (9) pins all three invariants plus the bounds, the flush,
+the finally-cleanup and the restart reset. Full gate: 1068 files / 11858 tests green, both tsc clean,
+bundle within budget.
+
+**Honest limit:** if iOS itself ever fails to deliver keys to xterm's hidden textarea (an IME/keyboard
+class of bug), that is a SEPARATE failure this change does not address — but the screenshot's keyboard
+was open (= the textarea had focus), so the evidence points at the input black hole, which is now
+closed. If the admin still cannot type after this deploys WITH a live shell prompt visible, report
+again — that would be new evidence, not this bug.

@@ -34,15 +34,22 @@ describe('buildReactPreview', () => {
     expect(html).toContain('src/App.jsx');
   });
 
-  it('loads the self-hosted compiler via an ABSOLUTE same-origin URL when an origin is given', () => {
+  it('loads the self-hosted compiler via an ABSOLUTE same-origin URL when an origin is given (fallback path)', () => {
+    // The DEFAULT page is now server-precompiled and ships no compiler at all — this invariant
+    // protects the browser-Babel FALLBACK page (kill switch, or a module that fails to compile).
     // Inside a sandboxed <iframe srcDoc> a root-relative "/vendor/babel.min.js" does not resolve to
     // the app origin → "Could not load the preview compiler". An absolute URL fixes it.
-    const rel = buildReactPreview(reactVfs());
-    expect(rel).toContain('src="/vendor/babel.min.js"'); // no origin → relative (back-compat)
-    const abs = buildReactPreview(reactVfs(), 'https://navbharatai.com');
-    expect(abs).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
-    // a trailing slash on the origin is normalised (no double slash)
-    expect(buildReactPreview(reactVfs(), 'https://navbharatai.com/')).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
+    process.env.AGENTV3_PREVIEW_PRECOMPILE = 'off';
+    try {
+      const rel = buildReactPreview(reactVfs());
+      expect(rel).toContain('src="/vendor/babel.min.js"'); // no origin → relative (back-compat)
+      const abs = buildReactPreview(reactVfs(), 'https://navbharatai.com');
+      expect(abs).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
+      // a trailing slash on the origin is normalised (no double slash)
+      expect(buildReactPreview(reactVfs(), 'https://navbharatai.com/')).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
+    } finally {
+      delete process.env.AGENTV3_PREVIEW_PRECOMPILE;
+    }
   });
 
   it('embeds the entry from index.html script src', () => {
@@ -297,9 +304,17 @@ describe('buildReactPreview — the compiler is CACHEABLE, not a multi-megabyte 
     return buildReactPreview(vfs, 'https://navbharatai.com');
   };
 
-  afterEach(() => { delete process.env.AGENTV3_INLINE_BABEL; });
+  afterEach(() => { delete process.env.AGENTV3_INLINE_BABEL; delete process.env.AGENTV3_PREVIEW_PRECOMPILE; });
 
-  it('ships the compiler as a same-origin <script src>, so the browser can cache it', () => {
+  it('the DEFAULT page ships no compiler at all — precompiled on the server', () => {
+    // The strongest form of "cacheable": the compiler is not sent in any form. The device executes
+    // already-compiled modules; the <script src> invariant below now guards the fallback page.
+    expect(bigApp()).toContain('var PRECOMPILED = true');
+    expect(bigApp()).not.toMatch(/<script src="[^"]*babel[^"]*"><\/script>/);
+  });
+
+  it('ships the compiler as a same-origin <script src> on the FALLBACK page, so the browser can cache it', () => {
+    process.env.AGENTV3_PREVIEW_PRECOMPILE = 'off';
     expect(bigApp()).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
   });
 

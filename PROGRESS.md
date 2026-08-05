@@ -25868,3 +25868,38 @@ class of bug), that is a SEPARATE failure this change does not address — but t
 was open (= the textarea had focus), so the evidence points at the input black hole, which is now
 closed. If the admin still cannot type after this deploys WITH a live shell prompt visible, report
 again — that would be new evidence, not this bug.
+
+## 2026-08-05 — Bolt-parity slice 1: the preview compiler moved to the server (PR #2138)
+
+**Admin: "hamare in-browser preview ko Bolt ke preview jaisa banao."** What actually makes Bolt's
+preview FEEL fast is that the user's device never runs a compiler. Ours shipped ~2.85 MB of Babel to
+the browser and transpiled every module on the phone's main thread, on every full reload — on a budget
+Android that is seconds of jank before first paint. WebContainer itself was evaluated and rejected
+earlier today (paid commercial licence, Chromium-first SharedArrayBuffer requirement, npm-on-the-phone
+weight — wrong for our mobile-first users); this closes the felt gap our way instead.
+
+**Change (`PreviewPrecompile.ts` + `ReactPreview.ts`).** Every module is compiled ON THE SERVER with
+the SAME @babel/standalone pipeline the browser loader uses — same presets (development:true for the
+Visual Editor's _debugSource, allowDeclareFields), the same data-nbai-src stamping plugin, the same
+CommonJS transform. The page ships compiled modules and NO compiler in any form; the loader executes
+directly (`PRECOMPILED = true` skips the Babel branch and the Babel boot rungs). Boot is now: fetch
+deps (parallel-preloaded since #2132) + execute. Same compiler + same options = identical semantics by
+construction — deliberately Babel, not esbuild, so there is no second implementation to keep in
+lockstep.
+
+**Safety story.** ALL-OR-NOTHING: any module failing to compile falls the whole page back to today's
+browser-Babel path, where the SAME compiler reports the SAME error in-preview — no mixed pages, no new
+failure mode. Kill switch `AGENTV3_PREVIEW_PRECOMPILE=off` forces the fallback without a deploy. The
+render cache means the server pays the compile once per file-change, not per open.
+
+**Tests (9 new + 2 relocated).** Compiled payload parses as real JS (its own esbuild parse gate — the
+inline-script test deliberately skips JSON payloads), Visual-Editor stamps survive, CSS passes through,
+kill switch and broken-module fallbacks restore the exact old page, and the two stamping
+implementations (server plugin + inline browser fallback) are marker-locked so they cannot drift
+silently. The two old "compiler is cacheable" tests now guard the FALLBACK page explicitly. Full gate:
+1072 files / 11955 tests green, both tsc clean, bundle within budget.
+
+**Still open toward "Bolt jaisa", honestly named:** (1) dependency re-resolution from the CDN on every
+open — the artifact/vendoring root cause recorded earlier today stays open; #2132's preload only
+parallelises it; (2) HMR-style state-preserving edits (Bolt keeps app state across an edit; our reload
+re-imports) — a separate slice, not started.

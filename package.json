@@ -53,6 +53,8 @@
     "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
     "@types/dockerode": "^4.0.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "@zip.js/zip.js": "^2.8.34",
     "axios": "^1.18.1",
     "cashfree-pg": "^6.0.4",
     "cheerio": "^1.2.0",

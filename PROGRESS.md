@@ -25140,6 +25140,83 @@ inside its estimate behaves exactly as before.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,317 tests, 0 failures**.
 
+## 2026-08-04 — ONE WALLET: every AI now spends the same balance, and the money is exact
+
+**Admin: "user unhin 50,000 token se kharch kare, har jagah."** Shipped as five merged PRs.
+
+**The gap.** The gifted balance was spent by v5 BUILDS only. The 70+ professionals, Doctor AI and the
+AI-backed Other-AI tools ran on a daily MESSAGE/ACTION COUNT instead — not the same limit, not the same
+promise. Ten cheap questions and ten expensive ones cost a user the same while costing us completely
+different amounts, and someone holding ₹600 of gifted credit could exhaust ten free messages and be
+told to buy a Pass **while their balance sat untouched**.
+
+**#1998 — the cost was not untracked, it was UNOBSERVABLE.** `AIProviderResponse` carried content,
+latency, provider and model — and no token usage. Every adapter had the real numbers in the API
+response and threw them away, so nothing anywhere could answer "what does Professional AI cost us?".
+All five adapters (GLM, Grok, Anthropic, Gemini, Vertex) now report usage through one shared reader
+covering the three field conventions in use. `chatSpend.ts` prices a turn with the SAME rate card and
+tiered markup a build uses — one money model, nothing to hand-sync.
+**Honesty line, deliberate:** a provider that reports no usage ⇒ `measured: false` ⇒ charge ZERO, never
+an estimate. Guessing from string length would produce a number that LOOKS like a measurement and land
+on a real user's bill. "Free because the model is free" and "unknown because the provider told us
+nothing" stay SEPARATE outcomes — only the second is costing us money silently.
+
+**#1941 — the debit was overcharging AND the wallet was drifting.** `inrToDebitTokens` ceiled, so every
+build charged up to ₹0.01 more than it cost. Worse: the ceil went into `tokenBalance` while
+`remaining_balance` moved by the paisa-rounded ₹ — two views of one balance moving by different amounts,
+drifting further apart on EVERY build. Now exact, with the sub-token remainder CARRIED to the next
+charge (no margin given away, only deferred ≤ ₹0.01), and the ₹ DERIVED from the tokens actually
+debited so the two can never disagree again. This is also what makes per-message charging honest:
+ceiling a ₹0.002 chat turn would bill 5×. `computeDebitedWallet` now returns `applied`, because a
+sub-token charge debits 0 tokens but still moves the carry.
+
+**#2086 / #2091 — the wiring.** Professionals + Doctor AI, then the Other-AI tools. An empty wallet is
+refused BEFORE any provider is called (a build may overdraw because the next pre-flight gate catches it;
+nothing catches a chat turn afterwards). Never charged: anonymous, free-list, and a **Pass holder** —
+the Pass IS the payment, so charging the wallet too bills them twice for one thing. The charge runs
+AFTER the answer and is never awaited into the response. Small charges roll into ONE ledger row per day
+(`NavBharatAI assistants`) — a row per turn would fill the 500-entry ledger in a fortnight and push the
+user's PURCHASE history off the end.
+For the tools, threading the cost back out would have meant six call sites of six different shapes, one
+of which (App Debugger) fans out over BATCHES. That is the fragility `noClaudeZone` was built to remove,
+so `aiSpendZone.ts` uses the same AsyncLocalStorage mechanism: the route opens a zone, the shared
+routing layer records each call, the route charges once. Batched tools bill ALL their calls, calls are
+SUMMED before the decision, and a new tool inherits billing for free.
+Image generation stays on its quota cap — per-image cost, nothing honest to price it with.
+**All of it is OFF until `AI_WALLET_SPEND=on`.**
+
+## 2026-08-04 — Two money leaks found while measuring cost
+
+**#1940 — E2B sandboxes nobody could see.** The idle sweep read an IN-MEMORY map on ONE Cloud Run
+instance. Cloud Run recycles instances and we redeploy on every merge, so the moment the creating
+instance vanished, its sandboxes were invisible to every sweep and billed until E2B's own 60-minute
+lifetime expired — **every deploy orphaned whatever was running.** The sweep now reads the DURABLE
+record, so an orphan is reachable from any instance. The idle limit also dropped 45 → 15 minutes (a
+~5-minute build was followed by 45 idle billed minutes). Root cause behind the danger in fixing it: the
+durable record was written only at build END, so `updatedAt` meant "last released" and a RUNNING build
+looked identical to an abandoned one; it is now stamped when the sandbox is taken and refreshed every
+~5 min. The cut-off is still held a whole max-build + 10 min past last activity. Sibling found:
+`ProEngineRunner` builds a NEW actuator per run and the constructor started a sweep timer that captured
+`this` forever — `unref()` stops a timer holding the process open, not the object.
+
+**#2024 — a user could pay and simply lose the money.** A Cashfree payment reached the wallet by two
+routes and BOTH can miss: the webhook is rejected outright without `CASHFREE_WEBHOOK_SECRET` (not set,
+so that route delivers nothing), and the client redirect only fires if the user returns carrying
+`?payment=success`. A user who pays by UPI and closes the app — the normal thing on a phone, since the
+UPI app is a different app — satisfied neither. Their order sat at PENDING forever and **nothing in the
+codebase ever revisited a pending order.** There is now a third path: on sign-in the server settles
+that user's own unfinished orders against Cashfree. Needs no webhook secret, filtered by the VERIFIED
+uid, settled by the same `verifyPaymentInternal` the redirect uses (Cashfree decides, not us),
+idempotent, bounded, and SILENT unless money actually arrived. **Open admin item:** setting
+`CASHFREE_WEBHOOK_SECRET` is still worth doing — it credits in seconds instead of on the next visit.
+
+**Correction to an earlier note:** CLAUDE.md's "Fix 68 open" line was already marked DONE by a previous
+session; a redundant-work check caught it before anything was rebuilt.
+
+**Verification (final PR):** frontend + server tsc clean; `npx vitest run` = **1036 files / 11,220
+tests, 0 failures**; `npm run build`, `boot:check` and the bundle budget all green.
+
+---
 ## 2026-08-04 — The File Guardian could DESTROY newer work while claiming to protect it
 
 **From the mitrify autopsy's open list ("sandbox lost 9 files").** Investigating WHY those 9 files went
@@ -25168,6 +25245,65 @@ Test-locked: skipped files are never overwritten, a genuinely absent file is sti
 recycled sandbox is still restored whole, and omitting the argument is byte-identical to before.
 
 **Verification:** server tsc clean; `npx vitest run` = **11,324 tests, 0 failures**.
+---
+
+## 2026-08-04 (later still) — master import handler, part 1: read the zip in the BROWSER
+
+**Admin decision:** *"1-2-3 teeno ko aise banao ki ham har ek file chahe kitni bhi badi kyu na ho …
+sab handle kar paye — sabhi 3 mila kar ek master zip handler banao"*, with the honesty fix first (done,
+PR #2089). This is part 1 of that handler.
+
+### The reframe that made the earlier work obsolete
+Every fix before this asked *how do we carry a 1 GB zip to the server* — chunking, then a signed-URL
+direct upload. The admin's "VS Code jaisa" question exposed the better one: **why carry it at all?** The
+server already discards `node_modules`, `.git`, `dist`, media and junk the instant it unpacks the
+archive — its own module comment says *"a 5 GB app zip is node_modules, media and .git history"*. So the
+user was uploading a gigabyte for us to throw ~95% of it away on arrival, and `node_modules` was never
+needed in the first place because the sandbox runs `npm install`.
+
+Measured on a real archive built for the purpose (12 entries, source + node_modules + a 2 MB video +
+`.env` + a logo): **2.2 MB archive → 30 KB kept**. A 74× reduction on a toy project; far larger on a
+media-heavy one.
+
+### What shipped
+- **`src/lib/importRules.ts`** — the filter rules MOVED here (not copied) from
+  `ProjectImport.ts`, which now imports and re-exports every name it used to own, so no server call site
+  changed. The browser was about to become a second caller, and this repo has been bitten by drifted
+  copies before (four `safeRelPath`s; model ids in five files). A client-side copy would drift silently:
+  the browser keeping a file the server refuses, or dropping one it would keep.
+- **`src/lib/browserZipImport.ts`** — `keepVerdict()` decides from the CENTRAL DIRECTORY alone, so a
+  900 MB video is refused without ever being decompressed; `readZipInBrowser()` inflates only survivors.
+- **`@zip.js/zip.js`** added, and a correction to my own earlier advice recorded in the module comment:
+  **jszip is wrong here** — its `loadAsync` materializes the whole archive in memory, so a 1 GB zip
+  would need 1-2 GB in the tab and crash a phone, i.e. exactly the users this is meant to help. zip.js
+  reads the central directory first and pulls kept entries through `Blob.slice`, so peak memory is
+  bounded by what is kept, not by the archive.
+
+### Two real bugs the tests caught (not theory — they failed first)
+1. **A password-protected zip imported "successfully" with zero files.** Zip encryption covers content,
+   not the central directory, so names read fine and every `getData` fails one at a time — each counted
+   as a drop. The result was a green, empty import: the same silent-loss class eliminated hours earlier
+   in PR #2089, reappearing in new code. Now detected from the `encrypted` flag before any work.
+2. **An unreadable archive returned an empty map instead of failing.** Added a backstop keyed on READ
+   FAILURE, not emptiness — an archive that legitimately holds only `node_modules` keeps nothing and is
+   still perfectly readable, and the caller has an accurate message for that case.
+
+Also: `strictNullChecks: false` silently defeats zip.js's boolean-literal union narrowing, so
+`if (e.directory)` did not narrow and `getData` appeared missing. Fixed with an explicit type guard
+rather than an `as FileEntry` cast — a cast would compile today and hide a real API change tomorrow.
+
+### Verification
+21 tests in `browserZipImport.test.ts`, including three that build a real archive in-process and read it
+back (the pure-decision tests alone would have passed while `getData` was called on the wrong writer).
+113 existing `ProjectImport` tests still green, proving the rule MOVE changed no behaviour.
+`tsc` (frontend + server) clean; full suite green.
+
+### Still to come in the handler
+Part 2 — wire this into the panel with the server upload kept as an honest fallback (old browsers, an
+unreadable archive). Part 3 — File System Access "Open Folder", two-way, no upload at all on desktop
+Chrome/Edge. Part 4 — the connect-time audit.
+
+---
 
 ## 2026-08-04 — The completeness reviewer was budgeted for the wrong app (last mitrify ledger item)
 

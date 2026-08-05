@@ -387,6 +387,21 @@ the code (it is actually read somewhere) on 2026-07-11.
   = more user trust); Storage can be added when Phase 1.4 needs it. ⚠️ Supabase FREE plan allows only
   **2 projects per org** — a user already at the cap must get an honest "no room in your Supabase account"
   message, never a silent failure.)
+- **One-wallet AI spending (shipped 2026-08-04, default OFF):** `AI_WALLET_SPEND` (`on` makes every
+  assistant/tool spend the SAME wallet as a build — see THE ONE-WALLET LAW). Related tunables:
+  `AI_TOOL_FREE_DAILY_LIMIT`, `AI_IMAGE_FREE_DAILY_LIMIT`, `AI_IMAGE_PASS_DAILY_LIMIT`.
+- **E2B sandbox cost control (shipped 2026-08-04):** `AGENTV3_SANDBOX_IDLE_MINUTES` (default 15, was a
+  hardcoded 45 — a 5-minute build was followed by 45 idle billed minutes), `AGENTV3_SANDBOX_TOUCH_MINUTES`
+  (default 5 — how often a LIVE build refreshes its durable stamp so the cross-instance orphan reaper can
+  tell it apart from an abandoned VM). The reaper reads the DURABLE record, so a sandbox orphaned by a
+  Cloud Run instance recycle (i.e. by every deploy) is finally pausable; its cut-off is held a whole
+  `AGENTV3_MAX_BUILD_SECONDS` + 10 min past last activity so it can never reach a running build.
+- **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
+  `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
+  the user's own unfinished orders against Cashfree. ⚠️ This exists because `CASHFREE_WEBHOOK_SECRET` is
+  NOT set, so every webhook is rejected (the signature cannot be verified) — a user who paid by UPI and
+  closed the app satisfied neither delivery route and was never credited. Setting the webhook secret is
+  still worth doing (credit in seconds instead of on the next visit), but the money no longer depends on it.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
@@ -888,6 +903,63 @@ FAILED build ₹811). The Opus tiers are untouched.
 - HONESTY: cache-hit input tokens are not yet tracked separately, so cached input is priced at the full
   cache-miss rate → real cost is a slight OVER-estimate (margin-safe). A later slice can capture
   `cache_read` usage to bill even lower.
+
+### THE ONE-WALLET LAW — every AI spends the SAME balance (admin-mandated 2026-08-01, shipped 2026-08-04)
+
+**Admin verbatim: "user unhin 50,000 token se kharch kare, har jagah."** The gifted balance used to be
+spent by v5 BUILDS only; the Professionals, Doctor AI and the AI-backed Other-AI tools were bounded by a
+daily MESSAGE/ACTION COUNT instead. That is neither the same limit nor the same promise — ten cheap
+questions and ten expensive ones cost the user the same while costing NavBharatAI completely different
+amounts, and a user holding ₹600 of gifted credit could exhaust ten free messages and be told to buy a
+Pass **while their balance sat untouched**.
+
+**The rule now: anything that costs NavBharatAI money draws the ONE wallet down; anything that costs
+nothing draws nothing. There are no per-feature quotas left to tune — the price of the thing IS the
+limit.** (The deterministic tools — Minifier, Diff, Versioning, Test Runner, APK, CI/CD, SEO, … — cost
+nothing to run and stay free and unmetered; metering them would be friction with no saving behind it.)
+
+- **Master switch `AI_WALLET_SPEND`** (default OFF — set `on` in Cloud Run to make it real). While off,
+  behaviour is byte-identical to before, with not even an extra Firestore read.
+- **Cost comes from REAL reported tokens**, priced by the SAME rate card + tiered markup a build uses
+  (`chatSpend.ts` → `providerRates.ts`) — one money model, nothing to keep in sync by hand.
+- **🔒 NEVER INVENT A COST.** A provider that reports no usage ⇒ `measured: false` ⇒ **charge ZERO**.
+  Estimating tokens from string length would produce a number that LOOKS like a measurement and would
+  land on a real user's bill. We eat it. Keep `free-model` (measured, genuinely ₹0) and `unmeasured`
+  (we do not know) as SEPARATE outcomes — only the second is costing us money silently.
+- **Never charged:** an anonymous caller (no wallet), the admin free-list, and a **Professional Pass
+  holder** (the Pass IS the payment — charging the wallet on top bills them twice for one thing).
+- **Charge AFTER the answer, never awaited into the response.** A money-path failure must not cost the
+  user their reply; charging first would risk billing a turn that then failed. A FAILED action is never
+  charged (same "working result or free" law as builds).
+- **Empty wallet ⇒ refused BEFORE any provider is called** (`walletTooEmptyForTurn`). A build may
+  overdraw because the next pre-flight gate catches it; nothing catches a chat turn afterwards. A
+  balance that cannot be READ is allowed through (fail-open, like the build gate).
+- **Ledger rollup:** small charges group into ONE row per user per DAY (`computeRolledUpDebit`, label
+  `NavBharatAI assistants` — never a vendor name). A row per turn would fill the 500-entry ledger in a
+  fortnight and push the user's PURCHASE history off the end. The BALANCE still moves per charge; only
+  the row accumulates. The bucket is dated on the SERVER clock (a device clock cannot move it).
+- **Exact money:** the debit carries the sub-token remainder (`TOKEN_CARRY_FIELD`) instead of rounding
+  up — see the exactness note below.
+- **How a tool inherits billing:** `aiSpendZone.ts` (AsyncLocalStorage, same mechanism as
+  `noClaudeZone`). The route opens a zone (`inAiSpendZone`), the shared routing layer records each model
+  call, the route charges once beside its existing `burnToolAction`. A BATCHED tool is billed for ALL
+  its calls, calls are SUMMED before the decision (so ten sub-token calls are one honest charge, and the
+  markup applies to the request's real total), and a NEW tool is billed correctly for free. **Do not
+  re-thread costs through call sites by hand — that is the fragility this replaced.**
+- **Image generation stays on its quota cap**: its cost is per-image, not per-token, so there is nothing
+  honest to price it with. An invented number would be worse than the cap.
+
+### Debit exactness — the remainder is CARRIED, never rounded up (shipped 2026-08-04)
+
+`inrToDebitTokens` used to **ceil**. Two costs: the user was charged up to ₹0.01 more than the work
+really cost on EVERY build, and — worse — the ceil went into `tokenBalance` while `remaining_balance`
+moved by the paisa-rounded ₹, so the wallet's TWO views of one balance drifted further apart on every
+single build. Now the charge is exact, the ₹ is DERIVED from the tokens actually debited (so the two can
+never disagree), and the sub-token remainder is carried to the user's next charge — no margin is given
+away, it is only deferred by at most ₹0.01. This is also what makes per-message charging honest: ceiling
+a ₹0.002 chat turn would bill **5×** the real cost. `computeDebitedWallet` returns `applied` — a charge
+under one whole token debits 0 tokens but still moves the carry, so `tokensDebited > 0` is NOT a safe
+test for "did anything change".
 
 ## User-facing Billing + Provider Anonymization — the White-Label Law (admin-mandated 2026-07-15) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
 

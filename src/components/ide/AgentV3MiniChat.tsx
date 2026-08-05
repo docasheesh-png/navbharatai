@@ -26,10 +26,24 @@ interface MiniMsg {
  * it writes appears everywhere else (Files, Code Studio's own editor, Git) exactly like a v5.0-panel
  * edit does — this widget is a second window onto the same brain, not a separate agent.
  */
-export function AgentV3MiniChat({ userId, email }: { userId?: string; email?: string }) {
+export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; email?: string; prefill?: { text: string; nonce: number } }) {
   const { state, running, start, checkRunning, resume, loadConversation, reset, serverBuildRunning } = useAgentV3Build();
   const [userMsgs, setUserMsgs] = useState<MiniMsg[]>([]);
   const [input, setInput] = useState('');
+  /**
+   * Text handed in from another surface — today the preview's Tag Mode ("edit THIS element") and the
+   * error overlay's Fix Bug button. It APPENDS to whatever is already typed rather than replacing it,
+   * because clobbering a half-written message to insert an element reference would lose the user's
+   * words at the exact moment they were describing the change they wanted.
+   */
+  useEffect(() => {
+    const text = prefill?.text;
+    if (!text) return;
+    setInput((cur) => (cur ? (cur.endsWith(' ') ? cur : cur + ' ') + text : text));
+    // Keyed on the NONCE, not the text: tapping the same element twice must register both times, and
+    // the nonce keeps that out of the message itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce]);
   const loadedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 

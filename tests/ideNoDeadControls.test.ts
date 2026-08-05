@@ -111,6 +111,46 @@ describe('every advertised shortcut actually does something', () => {
   });
 });
 
+describe('nothing in the IDE invites a tap and then swallows it', () => {
+  it('Tag Mode and Fix Bug reach the AI panel — they used to be dead ends', () => {
+    // PreviewPanel is mounted ONLY by Code Studio, and Code Studio did not pass `onEditWithAI`. Tag
+    // Mode was gated on `generatedCode` alone, so you could switch it on, see a badge on every
+    // element, tap one — and `onEditWithAI?.(hint)` was undefined. Worse than an inert button, because
+    // it invites the interaction first. Same for the error overlay's Fix Bug button.
+    const i = studio.indexOf('<PreviewPanel');
+    const mount = studio.slice(i, i + 1200);
+    expect(mount).toContain('onEditWithAI=');
+    expect(mount).toContain("setActiveScreen('ai')");
+    // The hint must actually reach the chat box.
+    expect(studio).toContain('prefill={aiPrefill}');
+    const chat = read('src/components/ide/AgentV3MiniChat.tsx');
+    expect(chat).toContain('prefill');
+    expect(chat).toContain('setInput(');
+  });
+
+  it('a repeated tap on the SAME element still registers, without polluting the message', () => {
+    // Keyed on a nonce, not the text — otherwise React sees an identical value and ignores the second
+    // tap, and stuffing a timestamp into the text would put it in the user's message.
+    const chat = read('src/components/ide/AgentV3MiniChat.tsx');
+    expect(chat).toContain('prefill?.nonce');
+    expect(studio).toContain('nonce: Date.now()');
+  });
+
+  it('the prefill APPENDS — it never clobbers what the user was typing', () => {
+    // Replacing a half-written message to insert an element reference would lose the user's words at
+    // the exact moment they were describing the change they wanted.
+    const chat = read('src/components/ide/AgentV3MiniChat.tsx');
+    const i = chat.indexOf('const text = prefill?.text');
+    expect(chat.slice(i, i + 400)).toContain('setInput((cur) =>');
+  });
+
+  it('the IDE Settings screen has no fake navigation rows', () => {
+    // General / Editor / Terminal / Extensions were rendered `cursor-pointer` with a chevron and no
+    // onClick — they looked like doors into sub-screens that were never built.
+    expect(stripComments(studio)).not.toMatch(/\['General', 'Editor', 'Terminal', 'Extensions'\]/);
+  });
+});
+
 describe('no inert icons in the editor toolbar', () => {
   it('every clickable-looking icon in the toolbar row has a handler', () => {
     // The <Layout/> icon sat here styled `cursor-pointer` with no onClick at all.

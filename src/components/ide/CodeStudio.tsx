@@ -163,6 +163,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   /** Recently closed tab paths, newest last — powers a REAL Reopen Closed Tab (Ctrl+Shift+T).
    *  Bounded to 10: this is an undo for a misclick, not a session history. */
   const [closedTabs, setClosedTabs] = useState<string[]>([]);
+  /**
+   * Text the PREVIEW wants to hand to the AI panel — Tag Mode's element reference, or the error
+   * overlay's Fix Bug prompt. Carries a nonce so tapping the SAME element twice still registers;
+   * a bare string would be identical and the effect downstream would ignore it.
+   */
+  const [aiPrefill, setAiPrefill] = useState<{ text: string; nonce: number } | undefined>();
   const [splitTabs, setSplitTabs] = useState<Tab[]>([]);
   const [splitActive, setSplitActive] = useState<string>('');
   const splitOpen = splitTabs.length > 0;   // desktop-only; see handleSplitEditor
@@ -947,18 +953,16 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for the terminal below)
         // give it the same identity; getAgentV3SessionId/getAgentV3WorkspaceId (shared with
         // AgentV3Panel via the same localStorage key) put it on the exact same workspace.
-        return <AgentV3MiniChat userId={v3UserId} email={v3Email} />;
+        return <AgentV3MiniChat userId={v3UserId} email={v3Email} prefill={aiPrefill} />;
       case 'settings':
         return (
           <div className="p-6 h-full bg-[#161b22] space-y-6">
              <h3 className="text-white font-black uppercase tracking-widest text-[10px]">User Preferences</h3>
              <div className="space-y-4">
-                 {['General', 'Editor', 'Terminal', 'Extensions'].map(s => (
-                    <div key={s} className="flex items-center justify-between p-3 bg-black/20 rounded-xl border border-white/5 hover:border-white/10 cursor-pointer">
-                       <span className="text-xs font-medium text-[#c9d1d9]">{s}</span>
-                       <ChevronDown className="w-3.5 h-3.5 text-[#484f58]" />
-                    </div>
-                 ))}
+                 {/* REMOVED (2026-08-04): four rows — General / Editor / Terminal / Extensions —
+                     styled `cursor-pointer` with a chevron, and no onClick at all. They looked like
+                     navigation into sub-screens that were never built, so every tap did nothing. The
+                     real, working settings are directly below. */}
                  <div className="space-y-2">
                     <label className="text-[9px] font-black text-[#8b949e] uppercase">Interface Theme</label>
                     <select 
@@ -1337,7 +1341,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         {/* Dynamic Main Workspace */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
           {activeScreen === 'preview' ? (
-             <PreviewPanel files={files} generatedCode={generatedCode} onRun={() => onRun(files)} />
+             <PreviewPanel
+               files={files}
+               generatedCode={generatedCode}
+               onRun={() => onRun(files)}
+               /* Tag Mode and the error overlay's Fix Bug button both call this. Without it they were
+                  DEAD ENDS here — badges appeared on every element, you tapped one, and the handler
+                  was undefined. Worse than an inert button, because it invites the interaction first.
+                  Now the tap opens the AI panel with the element reference already in the box. */
+               onEditWithAI={(hint) => {
+                 if (hint) setAiPrefill({ text: hint, nonce: Date.now() });
+                 setActiveScreen('ai');
+                 setIsSidebarOpen(true);
+               }}
+             />
           ) : activeScreen === 'security' ? (
              <SecurityScan files={files} />
           ) : Object.keys(files).length === 0 ? (

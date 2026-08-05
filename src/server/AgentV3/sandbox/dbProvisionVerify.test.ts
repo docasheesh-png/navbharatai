@@ -33,8 +33,12 @@ describe('dbProvisionScript — SELECT 1 decides, pg_isready only waits', () => 
   });
 
   it('still waits with the pg_isready poll — the right tool for "accepting yet?"', () => {
+    // Two shorter polls now instead of one 20s poll: the privileged cluster gets 8s (it either works
+    // instantly or fails instantly with a privileges error), and our own instance gets 15s after
+    // pg_ctl's own -w wait. The 20-count belonged to a path that could never succeed here.
     expect(script).toContain('pg_isready -h localhost -p 5432 -q');
-    expect(script).toContain('for i in $(seq 1 20)');
+    expect(script).toContain('for i in $(seq 1 8)');
+    expect(script).toContain('for i in $(seq 1 15)');
   });
 });
 
@@ -182,5 +186,70 @@ describe('provisionDiagnostics — for the admin report, never for the user', ()
     expect(block).toContain('detail: prov.dbDiagnostics');
     // The user's sentence stays plain English about what happened, not a shell error.
     expect(block).toContain('the app will likely fail to connect on boot');
+  });
+});
+
+/**
+ * ROOT WAS NEVER AVAILABLE — the actual reason the preview could not work (2026-08-05).
+ *
+ * Verified by RUNNING the emitted script as a non-root user, which is the sandbox's real condition
+ * (the build's own `ls -la` shows /home/user/workspace owned by "user user"):
+ *
+ *   DB_DIAG_START: Error: You must run this program as the cluster owner (postgres) or root
+ *   DB_DIAG_PGCTL: waiting for server to start.... done / server started
+ *   DB_URL:postgresql://postgres@localhost:5432/myapp        ← SELECT 1 passed
+ *
+ * That first line is the error the old script discarded, and it is why every provisioning attempt
+ * failed in ~21s on every build: pg_ctlcluster, apt-get install and `su postgres` are all root-only.
+ * The re-run took 0.2s, which is what makes the keepalive path free.
+ */
+describe('the database starts WITHOUT root — the fix that makes the preview work', () => {
+  const script = dbProvisionScript();
+
+  it('runs its own instance with initdb + pg_ctl, needing no privileges', () => {
+    expect(script).toContain('initdb');
+    expect(script).toContain('pg_ctl');
+    expect(script).toContain('--auth=trust');
+    // A directory we own, never /var/lib/postgresql.
+    expect(script).toContain('.nbai-pgdata');
+  });
+
+  it('drops every root-only command from the path that has to succeed', () => {
+    // `su postgres -c "createdb …"` was itself root-only, so even a running cluster could not get
+    // the app's database created. Checked against the COMMANDS only — the comment above explains why
+    // that command was removed and therefore names it, which is worth keeping.
+    const commands = script.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+    expect(commands).not.toContain('su postgres');
+    expect(commands).toContain('createdb -h 127.0.0.1');
+  });
+
+  it('still tries the privileged cluster FIRST — it is instant when the template allows it', () => {
+    const clusterAt = script.indexOf('pg_ctlcluster');
+    const ourAt = script.indexOf('initdb');
+    expect(clusterAt).toBeGreaterThan(-1);
+    expect(ourAt).toBeGreaterThan(clusterAt);
+  });
+
+  it('is idempotent — an initialised directory and a running server are both no-ops', () => {
+    // The keepalive/reprovision path re-runs this; measured at 0.2s on the second run.
+    expect(script).toContain('if [ ! -f "$PGDATA/PG_VERSION" ]');
+    expect(script).toContain('if ! pg_isready');
+  });
+
+  it('captures the server\'s OWN log when it still refuses to start', () => {
+    // A refused start explains itself in exactly one place.
+    expect(script).toContain('DB_DIAG_PGLOG:');
+    expect(script).toContain('server.log');
+  });
+
+  it('binds to loopback only — a preview database is not a public one', () => {
+    expect(script).toContain('-h 127.0.0.1');
+  });
+
+  it('keeps SELECT 1 as the only thing that declares success', () => {
+    const markerAt = script.indexOf('echo "DB_URL:');
+    const selectAt = script.indexOf("psql \"postgresql://postgres@localhost:5432/myapp\" -Atc 'SELECT 1'");
+    expect(selectAt).toBeGreaterThan(-1);
+    expect(markerAt).toBeGreaterThan(selectAt);
   });
 });

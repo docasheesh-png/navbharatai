@@ -34,7 +34,20 @@ export const CANONICAL_DB_URL = 'postgresql://postgres@localhost:5432/myapp';
  *   DB_NOT_READY       — the server never accepted connections at all.
  */
 export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL): string {
-  return `if ! which psql > /dev/null 2>&1; then
+  return `# ROOT IS NOT AVAILABLE HERE — and every command this script used to rely on needs it.
+#
+# The sandbox runs as \`user\` (the build's own \`ls -la\` shows /home/user/workspace owned by
+# "user user"), while \`apt-get install\`, \`pg_ctlcluster … start\` and \`su postgres -c …\` are all
+# root-only. That explains the reported failure exactly: psql IS present in the template, so no
+# install was attempted; pg_ctlcluster then failed INSTANTLY with a privileges error that the old
+# script discarded; the 20×1s retry repeated the same failure; total ≈21s, reported as "the server
+# never accepted connections". The database was never going to start, on any build, ever.
+#
+# So Postgres now runs AS US: initdb into a directory we own, started with pg_ctl. No root, no
+# Debian cluster wrapper, no /etc/postgresql, no su. The privileged path is still tried FIRST — it is
+# faster when it works (a template that pre-creates the cluster) — and this is the fallback that
+# makes the difference between a preview that works and one that cannot.
+if ! which psql > /dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq 2>&1 | tail -2
   apt-get install -y -qq postgresql 2>&1 | tail -5
@@ -49,15 +62,46 @@ PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
 echo "DB_DIAG_PSQL:$(which psql 2>/dev/null || echo none)"
 echo "DB_DIAG_PGVER:\${PG_VER:-none}"
 echo "DB_DIAG_WHOAMI:$(id -un 2>/dev/null || echo unknown)"
+# PATH 1 — the privileged cluster, tried first because it is instant when the template allows it.
 START_ERR=$(pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3)
 echo "DB_DIAG_START:\${START_ERR:-ok}"
-for i in $(seq 1 20); do
+for i in $(seq 1 8); do
   if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
-  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
   sleep 1
 done
-if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
-  su postgres -c "createdb myapp 2>/dev/null || true"
+
+# PATH 2 — OUR OWN INSTANCE, as the current user. This is the one that actually works here.
+# initdb creates a data directory we own; pg_ctl starts a server with no root, no cluster wrapper and
+# no /etc/postgresql. \`--auth=trust\` is correct for a throwaway preview database that only listens on
+# loopback inside a single-tenant sandbox, and it is what lets the app's own URL connect with no
+# password. Idempotent: an already-initialised directory is reused, and an already-running server
+# makes pg_ctl a no-op, so a re-provision (the keepalive path) costs nothing.
+if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+  PGBIN=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)
+  echo "DB_DIAG_PGBIN:\${PGBIN:-none}"
+  if [ -n "$PGBIN" ]; then
+    export PGDATA="\${HOME:-/tmp}/.nbai-pgdata"
+    if [ ! -f "$PGDATA/PG_VERSION" ]; then
+      INITDB_ERR=$("$PGBIN/initdb" -D "$PGDATA" -U postgres --auth=trust --encoding=UTF8 2>&1 | tail -3)
+      echo "DB_DIAG_INITDB:\${INITDB_ERR:-ok}"
+    fi
+    # -k /tmp puts the unix socket somewhere writable; -h 127.0.0.1 keeps it on loopback only.
+    PGCTL_ERR=$("$PGBIN/pg_ctl" -D "$PGDATA" -o "-p 5432 -h 127.0.0.1 -k /tmp" -l "$PGDATA/server.log" -w -t 25 start 2>&1 | tail -3)
+    echo "DB_DIAG_PGCTL:\${PGCTL_ERR:-ok}"
+    for i in $(seq 1 15); do
+      if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null; then break; fi
+      sleep 1
+    done
+    # The server's own log is the only place a refused start explains itself.
+    if ! pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null; then
+      echo "DB_DIAG_PGLOG:$(tail -3 "$PGDATA/server.log" 2>/dev/null | tr '\\n' ' ')"
+    fi
+  fi
+fi
+
+if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+  # Over TCP as postgres — no \`su\`, which was itself a root-only command.
+  createdb -h 127.0.0.1 -p 5432 -U postgres myapp 2>/dev/null || true
   SELECT1=$(psql "${dbUrl}" -Atc 'SELECT 1' 2>&1)
   if [ "$SELECT1" = "1" ]; then
     echo "DB_URL:${dbUrl}"
@@ -68,7 +112,7 @@ if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
     echo "DB_SELECT1_FAILED"
   fi
 else
-  echo "DB_DIAG_ISREADY:$(pg_isready -h localhost -p 5432 2>&1 | tail -1)"
+  echo "DB_DIAG_ISREADY:$(pg_isready -h 127.0.0.1 -p 5432 2>&1 | tail -1)"
   echo "DB_NOT_READY"
 fi`;
 }

@@ -16,6 +16,10 @@ interface DnsRecord { type: string; name: string; value: string; note?: string; 
 interface DomainStatus {
   /** Server capability: the zero-copy-paste nameserver-delegation path is available. */
   autoDns?: boolean;
+  /** Server capability: Domain Connect one-click check is worth offering. */
+  domainConnect?: boolean;
+  /** Server capability: Hostinger token-based setup is enabled. */
+  hostingerDns?: boolean;
   domain: string;
   active: boolean;
   ownershipState: string;
@@ -54,6 +58,10 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [autoZoneStatus, setAutoZoneStatus] = useState<string | null>(null);
   const [autoApplied, setAutoApplied] = useState<number | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
+  // Domain Connect one-click (registrar-approved template) + Hostinger token flow (Slice B/C).
+  const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
+  const [hostingerToken, setHostingerToken] = useState('');
+  const [hostingerDone, setHostingerDone] = useState<number | null>(null);
 
   const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const domainValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(cleanDomain);
@@ -128,6 +136,35 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
       if (Array.isArray(data?.nameServers)) setAutoNs(data.nameServers);
       if (typeof data?.applied === 'number') setAutoApplied(data.applied);
       if (data?.domain) setResult((prev) => (prev ? { ...prev, ...data.domain } : prev));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error.');
+    } finally { setAutoBusy(false); }
+  };
+
+  const domainConnectCheck = async () => {
+    setAutoBusy(true); setError(null); setErrorDetail(null);
+    try {
+      const params = new URLSearchParams({ workspaceId, domain: cleanDomain });
+      const res = await fetch(`/api/domains/nbai/domain-connect/check?${params.toString()}`, { headers: await authHeaders() });
+      const data = await res.json().catch(() => null);
+      setDcCheck(data && typeof data.supported === 'boolean' ? data : { supported: false, reason: 'Could not check one-click support.' });
+    } catch {
+      setDcCheck({ supported: false, reason: 'Could not check one-click support.' });
+    } finally { setAutoBusy(false); }
+  };
+
+  const hostingerApply = async () => {
+    setAutoBusy(true); setError(null); setErrorDetail(null);
+    try {
+      const res = await fetch('/api/domains/nbai/hostinger/apply', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ workspaceId, domain: cleanDomain, apiToken: hostingerToken }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error || 'Hostinger setup failed.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      setHostingerDone(typeof data?.applied === 'number' ? data.applied : 0);
+      setHostingerToken('');   // the token's job is done — it never lingers, not even in state
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
     } finally { setAutoBusy(false); }
@@ -234,6 +271,52 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                     </span>
                   </div>
                 </>
+              )}
+            </div>
+          )}
+
+          {result.domainConnect && (
+            <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 flex flex-col gap-2">
+              <span className="text-[10px] font-black text-sky-300 uppercase tracking-widest">Or: one-click at your registrar</span>
+              {!dcCheck && (
+                <button onClick={domainConnectCheck} disabled={autoBusy}
+                  className="self-start px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-xs font-bold">
+                  {autoBusy ? 'Checking…' : 'Check if my registrar supports one-click'}
+                </button>
+              )}
+              {dcCheck && dcCheck.supported && dcCheck.applyUrl && (
+                <a href={dcCheck.applyUrl} target="_blank" rel="noreferrer"
+                  className="self-start px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold">
+                  Approve at {dcCheck.providerName || 'your registrar'} →
+                </a>
+              )}
+              {dcCheck && !dcCheck.supported && (
+                <p className="text-[11px] text-zinc-400">{dcCheck.reason}</p>
+              )}
+            </div>
+          )}
+
+          {result.hostingerDns && (
+            <div className="px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-500/20 flex flex-col gap-2">
+              <span className="text-[10px] font-black text-violet-300 uppercase tracking-widest">Or: I'm on Hostinger</span>
+              {hostingerDone === null ? (
+                <>
+                  <p className="text-[11px] text-zinc-300">
+                    Paste an API token from Hostinger hPanel (Account → API). It is used once to add these
+                    records to your zone and never stored.
+                  </p>
+                  <div className="flex gap-2">
+                    <input value={hostingerToken} onChange={(e) => setHostingerToken(e.target.value)}
+                      placeholder="Hostinger API token" type="password" autoComplete="off"
+                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-violet-500/60" />
+                    <button onClick={hostingerApply} disabled={autoBusy || !hostingerToken.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-bold shrink-0">
+                      {autoBusy ? 'Applying…' : 'Apply records'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-[11px] text-green-300">✓ {hostingerDone} record{hostingerDone === 1 ? '' : 's'} sent to Hostinger — tap "Check" below once DNS refreshes.</p>
               )}
             </div>
           )}

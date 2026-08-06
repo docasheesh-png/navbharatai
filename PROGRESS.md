@@ -26486,6 +26486,36 @@ Domain Connect support is absent per training knowledge; flag-gated until one li
 D — in-app domain purchase: NOT built; needs the admin's reseller account (ResellerClub/GoDaddy
 reseller), real money + KYC — no fake Buy button before that exists (second absolute rule).
 
+## 2026-08-06 — Auto-DNS Slices B + C: Domain Connect one-click + Hostinger direct (PR #2155)
+
+**Slice B — Domain Connect** (`domainConnect.ts`): real protocol discovery (`_domainconnect.<domain>`
+TXT → registrar settings API → sync-UX apply link for OUR template, records carried as bounded
+template variables a1/a2/aaaa1/aaaa2/txt1/txt2). HONESTY GATE: the apply button exists ONLY behind
+`AGENTV3_DOMAIN_CONNECT=on`, because the link 404s at the registrar until our template is REGISTERED
+with them — the UI never shows a button that cannot work. Unsupported registrars get an honest
+pointer to the other two paths. **ADMIN EXTERNAL STEP (required before flag-on): submit the
+NavBharatAI template to the Domain Connect template registry (github.com/Domain-Connect/Templates —
+GoDaddy consumes it); template must declare exactly the variable names above.**
+
+**Slice C — Hostinger direct** (`hostingerDns.ts`): Hostinger is not in the Domain Connect ecosystem;
+their public API (developers.hostinger.com) is. Flow: user pastes an hPanel API token ONCE → we PUT
+the attach records into THEIR zone (`overwrite:false` — the rest of their zone untouched, mail safe)
+→ **token used for that single call and never stored/logged/echoed** (server passes it straight
+through; client clears state on success; both test-pinned). 401/403 get the one hint that helps
+(fresh token in hPanel). **HONEST STATUS: endpoint shapes follow Hostinger's public API per this
+build's knowledge and were NOT live-verifiable from the dev sandbox — hence default-OFF flag
+`AGENTV3_HOSTINGER_DNS`; the first live attempt either works or names exactly what to fix. Needs ONE
+live verification before wide exposure.**
+
+Both routes ownership-checked; capabilities ride the connect response so nothing renders that the
+server cannot deliver. 15 new tests (discovery incl. NXDOMAIN, apply-URL bounds, flag gates, zone
+mapping @-apex/relative, overwrite:false, token honesty, route/client invariants). Full gate: 1078
+files / 12147 tests green, both tsc clean, bundle within budget.
+
+**Slice D (domain selling) — NOT built, deliberately:** needs the admin's reseller account
+(ResellerClub is the India-first option) + KYC + payment wiring. A Buy button before that exists
+would be a fake (second absolute rule). Admin prerequisites recorded; build starts when they exist.
+
 ## 2026-08-06 (6) — correcting the record on the no-root Postgres, and closing the gap it left
 
 The admin asked whether the plan I described was done. Two corrections, both mine, both tested rather

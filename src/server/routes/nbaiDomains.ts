@@ -14,6 +14,8 @@ import { linkWorkspaceDomain } from '../lib/firebaseDomainLink';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
 } from '../lib/cloudflareManagedDns';
+import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
+import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -70,7 +72,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
       // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
       // this server — the UI offers it only when a tap can actually deliver it.
-      res.json({ ...status, autoDns: managedDnsConfigured() });
+      res.json({ ...status, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
     } catch (err: any) {
       // HONEST failure (admin 2026-08-02): a permanent problem (server not permitted, domain taken)
       // must NOT tell the user to "try again" — that loops them forever on something a retry can
@@ -174,6 +176,65 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     } catch (err) {
       console.error(`[HTTP 500] auto-dns sync: ${err instanceof Error ? err.stack || err.message : String(err)}`);
       res.status(500).json({ error: 'Could not apply the DNS records automatically.', detail: sanitizeManagedDnsError(err) });
+    }
+  });
+
+  /**
+   * ONE-CLICK via Domain Connect (Slice B): is the user's registrar in the protocol, and if so,
+   * where does the Approve button go? Flag-gated until our template is registered with the
+   * registrars — the UI never shows a button that would 404 at GoDaddy.
+   */
+  app.get('/api/domains/nbai/domain-connect/check', buildRateLimiter(), async (req: Request, res: Response) => {
+    const verifiedUid = await verifyFirebaseToken(req);
+    const workspaceId = req.query?.workspaceId;
+    if (!ownsWorkspace(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'You can only set up your own app.' });
+      return;
+    }
+    const host = normalizeDomain(req.query?.domain);
+    if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
+    try {
+      const fb = await customDomainStatusLive(workspaceId, host);
+      const check = await checkDomainConnect(host, fb?.records ?? []);
+      res.json(check);
+    } catch (err) {
+      // Discovery failing is never fatal to the flow — the other two paths remain.
+      res.json({ supported: false, reason: 'Could not check one-click support right now — use automatic (nameservers) or the manual records.' });
+    }
+  });
+
+  /**
+   * HOSTINGER direct apply (Slice C): the user's own hPanel API token writes the records into their
+   * own zone, once — the token is used for this single call and NEVER stored, logged, or echoed.
+   */
+  app.post('/api/domains/nbai/hostinger/apply', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    if (!hostingerDnsEnabled()) {
+      res.status(503).json({ error: 'Hostinger automatic setup is not enabled on this server yet.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    if (!verifiedUid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const workspaceId = req.body?.workspaceId;
+    if (!ownsWorkspace(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'You can only set up your own app.' });
+      return;
+    }
+    const host = normalizeDomain(req.body?.domain);
+    if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
+    const apiToken = typeof req.body?.apiToken === 'string' ? req.body.apiToken.trim() : '';
+    if (!apiToken || apiToken.length > 512) {
+      res.status(400).json({ error: 'Paste the API token from Hostinger hPanel (Account → API).' });
+      return;
+    }
+    try {
+      const fb = await customDomainStatusLive(workspaceId, host);
+      if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run Hostinger setup.' }); return; }
+      const result = await applyHostingerRecords(apiToken, host, fb.records);
+      if (!result.ok) { res.status(502).json({ error: 'Hostinger did not accept the records.', detail: result.error }); return; }
+      res.json({ ok: true, applied: fb.records.length });
+    } catch (err) {
+      console.error(`[HTTP 500] hostinger apply: ${err instanceof Error ? err.message : String(err)}`);
+      res.status(500).json({ error: 'Could not apply the records at Hostinger.' });
     }
   });
 }

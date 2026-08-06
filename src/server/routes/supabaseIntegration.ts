@@ -31,6 +31,7 @@ import {
 import {
   listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
   projectNameFor, envForProject, refreshAccessToken, applySchemaToProject, schemaSqlFromFiles,
+  fetchPoolerConnection, databaseEnvFor,
 } from '../lib/supabaseProvision';
 import {
   saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh, updateTokens,
@@ -328,15 +329,20 @@ export function registerSupabaseIntegrationRoutes(
       ? (req.body as { region: string }).region
       : DEFAULT_REGION;
 
-    // The database password is generated here, used once, and never shown or stored by us. The user
-    // can reset it in their own Supabase dashboard; keeping a copy would be a credential we have no
-    // reason to hold.
+    // The database password is generated here and then KEPT — encrypted, in this user's own vault,
+    // beside the keys they add by hand (admin question 2026-08-06). It used to be discarded on the
+    // reasoning that we had no reason to hold it. We did: Supabase never hands the password back, so
+    // without it no Postgres connection string can EVER be composed, and a one-click database was
+    // therefore usable only by browser-only supabase-js apps. Every server-side app — Prisma, Drizzle,
+    // `pg` — got a real database in the user's account that its own code could not connect to.
+    // It is the user's password, in the user's vault, written only into the user's app.
+    const dbPass = crypto.randomBytes(24).toString('base64url');
     const created = await createProject({
       token: accessToken,
       orgId: conn.orgId,
       name: projectNameFor(appLabel),
       region,
-      dbPass: crypto.randomBytes(24).toString('base64url'),
+      dbPass,
     });
     if (!created.ok) {
       res.status(created.failure === 'plan-limit' ? 409 : 502)
@@ -384,9 +390,16 @@ export function registerSupabaseIntegrationRoutes(
       }
     }
 
+    // Ask Supabase where this project's pooler is, rather than inventing the hostname — see
+    // fetchPoolerConnection. A missing pooler is a DOWNGRADE (we write the direct URL instead), never a
+    // failed provision: the database exists either way and saying otherwise would send the user to
+    // create a second one and burn a free-plan slot.
+    const pooler = await fetchPoolerConnection(accessToken, created.project.id);
+
     const saved = await saveUserSecrets(uid, {
       ENGINEER_DB_PROVIDER: 'supabase',
       ...envForProject(creds.credentials),
+      ...databaseEnvFor(created.project.id, dbPass, pooler),
     });
     if (!saved) {
       // The project EXISTS in their account even though we could not record it — say so, so they do
@@ -406,6 +419,11 @@ export function registerSupabaseIntegrationRoutes(
       projectName: created.project.name,
       url: creds.credentials.url,
       schemaApplied,
+      // What the app can actually DO with this database, stated plainly. `pooled: false` means we could
+      // not read the pooler endpoint and wrote the direct connection instead — that host is IPv6-only
+      // on new Supabase projects, so a container-hosted app may not reach it. The client can say so
+      // rather than the user discovering it as a connection error later.
+      serverConnection: pooler ? 'pooled' : 'direct',
       ...(schemaNote ? { schemaNote } : {}),
     });
   });

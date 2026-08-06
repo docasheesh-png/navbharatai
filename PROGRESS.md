@@ -26225,3 +26225,39 @@ proposed to the admin with the cost caveat, awaiting their call. Recorded as the
 Tests: resume-skip invariants (probe gated on resumeSandboxId, honest counter jump, gated seed loop)
 on comment-stripped source; three stale slice-windows widened. Full gate: 1075 files / 12054 tests
 green, both tsc clean, bundle within budget.
+
+## 2026-08-06 (2) — the build now ASKS for a database when the sandbox cannot give it one
+
+Admin: "user se puchona chahiye na! ... nahi dega to ham apna db use kar sakte hai?" Asking was only
+worth building once both database paths actually worked (previous entry). They do now, so:
+
+**The sequence became callable from outside a request handler.** Provisioning lived inside
+`POST /provision`, so the only way to create a database was for the user to walk to Settings. A build
+that discovers mid-flight that the app needs one — the moment the user is actually thinking about it —
+could only print a sentence pointing at a screen. Extracted to `src/server/lib/supabaseProvisionFlow.ts`
+(`provisionDatabaseForUser`, plus `freshAccessToken` / `saveUserSecrets` moved with it); the route is now
+a thin adapter mapping the outcome onto status codes. Order of operations and every honesty property
+unchanged — readiness polled not assumed, created-but-unrecorded reported as EXISTING, schema reported
+separately. `dataStudioRealDb`'s "one token-refresh implementation" test re-anchored to the new home
+rather than deleted.
+
+**The ask itself.** The sandbox's own Postgres is free and instant, so it is still tried FIRST and
+nothing is asked when it works. Only when it fails to verify (or throws) does `rescueDatabase()` run —
+a real blocking `permission_request`, at most once per build:
+- Wired ONLY when the user's Supabase account is already connected, because consent needs a browser
+  popup a running build cannot open. Without a grant we stay silent; an offer we cannot fulfil is worse
+  than none.
+- It names the real cost, not just the benefit: a new project uses one of the 2 a free Supabase plan
+  allows. Deny (or the 10-minute approval timeout) continues the build honestly.
+- On approve, the returned env is written into the app's `.env` — the vault is only read at the START of
+  a build, so a build already in flight would otherwise finish against a database it was never told
+  about. Written last, so it beats the sandbox-local URL merged moments earlier; `.gitignore` hardened
+  the same way the vault write does.
+- A rescue that returns no `DATABASE_URL` is NOT reported as a rescue, and the old "will retry it"
+  warning now prints only when the rescue genuinely did not happen.
+
+This is what closes the Mitrify class end-to-end WITHOUT the E2B template rebuild: sandbox Postgres
+missing → the build offers a real database in the user's own account → the app connects instead of
+serving "Cannot GET /".
+
+Gate: tsc clean both projects, 1075 files / 12,063 tests, exit 0.

@@ -51,6 +51,8 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [error, setError] = useState<string | null>(null);
   // The sanitized REAL reason from the ownership-checked route — dim, owner-only, diagnosis-grade.
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Server said 402 needsPlan: the Custom Domain plan is required — an upgrade note, not a red error.
+  const [needsPlan, setNeedsPlan] = useState(false);
   const [result, setResult] = useState<DomainStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   // Auto-DNS (nameserver delegation): the zero-copy-paste path. Offered only when the server says a
@@ -114,7 +116,15 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
         body: JSON.stringify({ workspaceId, domain: cleanDomain }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data?.error || 'Could not start the connection.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      if (!res.ok) {
+        // 402 needsPlan is not a failure — it is the plan pitch (Custom Domain plan). Rendered as an
+        // upgrade note, not a red error: nothing is broken, one purchase away.
+        setNeedsPlan(data?.needsPlan === true);
+        setError(data?.error || 'Could not start the connection.');
+        setErrorDetail(typeof data?.detail === 'string' ? data.detail : null);
+        return;
+      }
+      setNeedsPlan(false);
       setResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
@@ -255,7 +265,16 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
         <p className="text-[10px] text-red-400">Enter a valid domain like myshop.com (no https://, no slashes).</p>
       )}
 
-      {error && (
+      {error && needsPlan && (
+        <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
+          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-[11px] text-amber-100/90">{error}</p>
+            <p className="mt-1 text-[10px] text-amber-200/60">Open the Billing panel → Plans to activate it, then come back and tap Connect.</p>
+          </div>
+        </div>
+      )}
+      {error && !needsPlan && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
           <Info className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
           <div className="min-w-0">

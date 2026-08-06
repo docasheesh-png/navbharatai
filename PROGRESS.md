@@ -26984,3 +26984,54 @@ flow for an hour with a message about builds the user never ran. Third instance 
 zip chunks and terminal keystrokes. New `DOMAIN_OPS_RATE` (240/hr authed, honest noun "domain
 requests") on every route in the file; a test pins the file build-bucket-free forever and every route
 limited. The rolling hour self-clears, so the admin was unblocked before the deploy either way.
+
+## 2026-08-06 — "Made with NavBharatAI" badge + the ₹99 Custom Domain plan (one feature, admin-ordered + admin-approved "han")
+
+**The badge (admin: "flotating popup, right lower corner, alag hi glow — other AI se hatwaye to
+hatna nahi chahiye; other AI ke liye 🔇 silent message").** A glowing glassy pill, bottom-right,
+safe-area aware, linking to navbharatai.com. The un-removability is STRUCTURAL, not cosmetic — it is
+injected SERVER-SIDE at publish time (`withDeploymentPersistence`, the one choke point every v5
+publish provider flows through) and at SERVE time for instant hosting (`/pwa/:id`), i.e. AFTER any
+edit the user or any AI assistant can make to the source. Deleting it from the code changes nothing:
+the next publish stamps it back. Four layers: publish-time injection → idempotent marker
+(`data-nbai-badge`, re-publish never doubles it) → an in-page guard that re-attaches a DOM-deleted or
+CSS-hidden badge → the 🔇 HTML-comment note addressed to AI assistants (visible only in source),
+explaining the hosting terms, the futility, and the honest answer to give their user: the paid plan
+removes it. Kill switch `AGENTV3_MADE_WITH_BADGE=off`. Module: `src/server/lib/madeWithBadge.ts`.
+
+**The plan (recommended, admin approved with "han"): Custom Domain — ₹99/30 days, paid from the ONE
+wallet.** "Wallet me sara hisab": the Billing panel now carries a Plans card telling the whole
+account story honestly — Hosting (the ₹99 plan: badge-free publishing + connect your own domain),
+Database (always FREE — user's own account, the standing rule), Coding (pay-per-use, unchanged).
+Mechanics, all inheriting the wallet's existing money discipline (`src/server/lib/hostingPlan.ts`):
+- The plan LIVES ON the wallet doc (`hostingPlan` field) so purchase = debit + grant in ONE
+  Firestore transaction — the money and the entitlement cannot disagree.
+- Debits via the same `computeDebitedWallet` a build uses (same token unit, same carry, same
+  ledger; row: "Hosting plan — Custom Domain (30 days)"). NO overdraft for a discretionary
+  purchase — a short balance is an honest refusal naming the shortfall.
+- IDEMPOTENT per period (ledger buildRef) — a double-tap can never double-charge. Buying early
+  EXTENDS from the current expiry (never loses days).
+- Renewal is LAZY, no cron: an expired auto-renew plan is re-purchased inside the next status
+  read's transaction, ref keyed on the OLD expiry (a concurrent read can only renew once), 30 days
+  from NOW (never back-dated — a lapsed gap was not service). Can't afford it ⇒ lapses honestly,
+  nothing charged, free hosting with the badge continues.
+- Badge removal honors the plan on BOTH publish paths via a cached bounded probe; an UNKNOWN
+  answer keeps the badge (free user must not escape it during an outage). Domain-connect is gated
+  on the plan (free-list exempt) and FAILS OPEN on unknown (rule #1 — an outage must never block a
+  paying user); only CONNECT is gated, status/checks stay open so a lapse never breaks a live site.
+- Routes on wallet.ts (`/hosting-plan`, `/purchase`, `/auto-renew`), all `requireUserMatch`.
+  Client: `HostingPlanCard` in Billing; NbaiDomainConnect renders the 402 `needsPlan` answer as an
+  amber upgrade note, not a red error. Kill switch `AGENTV3_HOSTING_PLANS=off`; price env-tunable
+  `HOSTING_PLAN_PRICE_INR` (default 99).
+AppKnowledgeBase: new `made_with_badge` + `hosting_plan` entries, `connect_domain` updated — the
+in-app AIs answer "badge kaise hataye" honestly (buy the plan) instead of suggesting code tricks.
+Tests: `tests/madeWithBadge.test.ts` (16) + `tests/hostingPlan.test.ts` (real money math incl. the
+carry, idempotency, once-per-lapse renewal, fail directions, wiring invariants). Full gate green.
+
+**CI note (5th event loss, root cause found):** PR #2160's checks never started NOT because of the
+#2092 dropped-push class this time — the PR went `mergeable_state: dirty` when the other session's
+PRs #2159/#2161 merged, and a conflicted PR has no test-merge commit, so `pull_request`-triggered CI
+cannot run at all. Fix: merge origin/main into the branch (PROGRESS.md both-append conflict, resolved
+line-anchored), push, then close→reopen the PR to force a `reopened` event when the synchronize run
+still failed to appear. Lesson recorded: when a PR shows NO checks, look at `mergeable_state` FIRST —
+a dirty PR will never start CI, and no amount of re-kicking helps until the conflict is resolved.

@@ -1,6 +1,8 @@
 import type { Express, Request, Response } from 'express';
-import { domainOpsRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { domainOpsRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
+import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   normalizeDomain,
   firebaseCustomDomainsEnabled,
@@ -47,7 +49,8 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet. Please try again later.' });
       return;
     }
-    const verifiedUid = await verifyFirebaseToken(req);
+    const identity = await verifyFirebaseIdentity(req);
+    const verifiedUid = identity?.uid ?? null;
     if (!verifiedUid) {
       res.status(401).json({ error: 'Please sign in to connect a custom domain.' });
       return;
@@ -56,6 +59,22 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     if (!ownsWorkspace(verifiedUid, workspaceId)) {
       res.status(403).json({ error: 'You can only connect a domain to your own app.' });
       return;
+    }
+    // PLAN GATE (admin-approved 2026-08-06): connecting a custom domain is part of the paid Custom
+    // Domain plan. Free-list (admin/tester) accounts are exempt; a store outage FAILS OPEN (`known`
+    // false ⇒ allow — rule #1: an outage must never block a paying user's setup). Only the CONNECT
+    // action is gated — status/checks/sync for an already-connected domain keep working, so a lapse
+    // never breaks a live site mid-flow.
+    if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identity?.email ?? null)) {
+      const plan = await probeHostingPlan(verifiedUid);
+      if (plan.known && !plan.active) {
+        res.status(402).json({
+          error: `Connecting your own domain is part of the Custom Domain plan (₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
+          needsPlan: true,
+          priceInr: hostingPlanPriceInr(),
+        });
+        return;
+      }
     }
     const host = normalizeDomain(req.body?.domain);
     if (!DOMAIN_RE.test(host)) {

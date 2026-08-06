@@ -7,6 +7,7 @@ import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
+import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
 import { sendSafeError } from '../lib/httpError';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
@@ -185,6 +186,42 @@ export function registerWalletRoutes(app: Express): void {
       console.error('[API WALLET GET ERROR]:', err);
       return sendSafeError(res, 500, 'Unable to load your wallet right now. Please try again.', err, 'wallet get');
     }
+  });
+
+  // ---------- Hosting plan (₹99/30d Custom Domain — admin-approved 2026-08-06) ----------
+  // The plan lives ON the wallet doc; purchase debits the SAME wallet in the SAME transaction.
+  // Lazy auto-renewal happens inside the status read (readHostingPlanStatus), so no cron exists.
+
+  app.get('/api/wallet/:userId/hosting-plan', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const status = await readHostingPlanStatus(getDb() as any, req.params.userId);
+      return res.json(status);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Unable to load your plan right now. Please try again.', err, 'hosting plan status');
+    }
+  });
+
+  app.post('/api/wallet/:userId/hosting-plan/purchase', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const result = await purchaseHostingPlan(getDb() as any, req.params.userId);
+      if (!result.ok) {
+        // insufficient → 402 (recharge first); disabled/unavailable → 503. Nothing was charged.
+        return res.status(result.reason === 'insufficient' ? 402 : 503).json(result);
+      }
+      return res.json(result);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Could not complete the purchase — nothing was charged. Please try again.', err, 'hosting plan purchase');
+    }
+  });
+
+  app.post('/api/wallet/:userId/hosting-plan/auto-renew', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    const autoRenew = req.body?.autoRenew;
+    if (typeof autoRenew !== 'boolean') {
+      return res.status(400).json({ error: 'autoRenew must be true or false.' });
+    }
+    const ok = await setHostingPlanAutoRenew(getDb() as any, req.params.userId, autoRenew);
+    if (!ok) return res.status(404).json({ error: 'No hosting plan found on this account yet.' });
+    return res.json({ ok: true, autoRenew });
   });
 
   app.get('/api/wallet/:userId/logs', requireUserMatch('userId'), async (req: Request, res: Response) => {

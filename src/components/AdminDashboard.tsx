@@ -29,6 +29,9 @@ type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 interface AdminBuildReportRow {
   /** True when the build had not finished at the moment Report was pressed — see AdminBuildReportStore. */
   inFlight?: boolean;
+  /** The whole-SESSION view: the wait the user actually lived, and any workspace wipes. */
+  sessionLine?: string | null;
+  sessionDataLoss?: number | null;
   id: string;
   reportedAt: number;
   userId: string | null;

@@ -68,6 +68,16 @@ export interface AdminBuildReportMeta {
    * build with no result is not. So the record now SAYS which one it is.
    */
   inFlight: boolean;
+  /**
+   * What the user lived through across the WHOLE session, when there is more than one turn.
+   *
+   * The per-turn `buildMs` is honest about what it measures and useless for the question actually being
+   * asked — "how long did this take me?". A 58-minute session reported 18.8 minutes because that was
+   * the last turn. See sessionSummary.
+   */
+  sessionLine: string | null;
+  /** Workspace wipes repaired across the session — zero unless the guardian had to restore. */
+  sessionDataLoss: number | null;
   /** A short, human label for the app — the first line of the build prompt. */
   appLabel: string;
   /** The raw billing tier string from the build (admin-only detail). */
@@ -163,6 +173,8 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       buildId: ctx.buildId ?? trimmed.buildId ?? null,
       ok: typeof trimmed.ok === 'boolean' ? trimmed.ok : null,
       inFlight,
+      sessionLine: trimmed.session?.line ? cap(trimmed.session.line, 400) : null,
+      sessionDataLoss: typeof trimmed.session?.dataLossTotal === 'number' ? trimmed.session.dataLossTotal : null,
       appLabel: appLabelFromPrompt(trimmed.prompt),
       userTier,
       tier: classifyReportTier(userTier),

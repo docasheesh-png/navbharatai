@@ -27380,3 +27380,39 @@ Three open root causes recorded (rule 6), none silently patched: per-session ela
 an alarm when a workspace empties; and per-app scoping plus format validation for injected secrets.
 
 Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,411 tests, exit 0.
+
+## 2026-08-06 (20) — the session, not the turn: two complaints, one root cause
+
+The admin's "58 minutes, not 18" and "files wiped three times and nothing said so" turned out to be the
+SAME defect, found by checking rather than assuming:
+
+- `startedAt`/`endedAt` are **per turn**, so a session of several `continue` turns reports only its last
+  slice. The number that decides whether this product feels fast — the one the user actually waited —
+  appeared nowhere.
+- The File Guardian **does** record every workspace wipe it repairs (`recordDataLoss`), and
+  `trimReportForStorage` preserves it. Those three wipes belonged to earlier TURNS, so all three reports
+  were silent, each being a different turn. **The data existed; only its scope was wrong.**
+
+`sessionSummary.ts` folds the durable per-workspace history into one view — turns, elapsed from the FIRST
+turn, wipes across the whole session, and earlier failed turns — built from the **same read that already
+fed `priorFailedBuilds`**, so it costs no extra query. `DiagnosticsHistoryEntry` gained `dataLossCount`,
+read straight off the stored report.
+
+Honesty details that matter:
+- **A capped history is a FLOOR and says "at least"** — a floor presented as a total is the same
+  understatement this exists to fix.
+- **A first turn produces no line at all.** There is no session to summarise yet, and inventing one is
+  noise.
+- **It stays quiet about things that did not happen** — no failed turns, no wipes, no mention.
+- A clock going backwards yields 0, never a negative duration.
+
+The sentence reaches the admin inbox as `meta.sessionLine` + `meta.sessionDataLoss`, so the two questions
+are answerable from the list without opening the JSON:
+*"This is turn 3 of this session, which has been running for 58m 0s in total. 1 earlier turn ended
+without success. The workspace was found empty or missing files 3 times and was restored from the
+durable store."*
+
+Gate: tsc clean both projects, SHUFFLED full run 1098 files / 12,423 tests, exit 0.
+
+**Still open from the three:** per-app scoping and format validation for injected secrets (the vault is
+per-USER, so every app receives every key the user ever saved, unvalidated).

@@ -395,6 +395,15 @@ export interface DiagnosticsHistoryEntry {
   /** The build's own id (the history doc is keyed by `startedAt`, which is not the same thing). */
   buildId?: string;
   /**
+   * How many data-loss events that build recorded.
+   *
+   * Carried so a SESSION summary can be built from the history we already read. The File Guardian
+   * records every workspace wipe it repairs, but each report shows ONE TURN — so the admin watched a
+   * workspace empty three times across a session and all three reports were silent about it, each
+   * being a different turn. The number exists; only its scope was wrong.
+   */
+  dataLossCount?: number;
+  /**
    * The user's OWN build request. Carried so the report picker can label each past build with what
    * the user asked for — the only field on this entry a non-admin is ever shown, because it is the
    * one field the user wrote themselves (`summary`/`rootCause` are our analysis, and admin-only).
@@ -513,6 +522,10 @@ export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HI
       return {
         id: d.id, buildId: r.buildId, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok,
         summary: r.summary, rootCause: r.rootCause, counts: r.counts,
+        // Carried so a SESSION summary can be built from the history we already read (admin 2026-08-06):
+        // the guardian records every workspace wipe, but each report shows one TURN, so three wipes
+        // across a session were invisible in all three of them.
+        dataLossCount: Array.isArray(r.dataLossEvents) ? r.dataLossEvents.length : 0,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
       };
     });

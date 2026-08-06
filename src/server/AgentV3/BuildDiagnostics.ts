@@ -252,6 +252,14 @@ export interface BuildDiagnosticsReport {
    *  THIS workspace's durable history ended not-ok before this one started. Makes repeat failure
    *  visible in every report instead of each report looking like the first attempt. */
   priorFailedBuilds?: number;
+  /**
+   * What the USER lived through across this whole session — not what this one turn saw.
+   *
+   * Two admin complaints shared one root cause: a 58-minute session reported as 18 minutes, and three
+   * workspace wipes that no report mentioned. Both because `startedAt`/`endedAt` and the data-loss
+   * events are PER TURN. See sessionSummary.
+   */
+  session?: { turns: number; elapsedMs: number; dataLossTotal: number; failedTurns: number; truncated: boolean; line: string };
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
@@ -347,6 +355,7 @@ export class BuildDiagnostics {
   private reviewText?: string;
   private manifest?: BuildManifestV1;
   private priorFailedBuilds: number | undefined;
+  private session: BuildDiagnosticsReport['session'];
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
@@ -839,6 +848,11 @@ export class BuildDiagnostics {
     if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
   }
 
+  /** Stamp the whole-session view (see sessionSummary). Best-effort; a bad value is ignored. */
+  setSession(session: BuildDiagnosticsReport['session']): void {
+    if (session && Number.isFinite(session.turns)) this.session = session;
+  }
+
   /** Fix 37c — record a data-loss/recovery event WITH its observed cause ("data kyu udha"). */
   recordDataLoss(cause: string, detail: string): void {
     this.dataLossEvents.push({ ts: this.now(), cause: String(cause).slice(0, 120), detail: String(detail).slice(0, 400) });
@@ -933,6 +947,7 @@ export class BuildDiagnostics {
       billing: this.billing,
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
+      session: this.session,
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
     };
   }

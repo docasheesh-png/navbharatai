@@ -28,3 +28,32 @@ describe('custom-domain error honesty', () => {
     expect(client).toContain('setError(null); setErrorDetail(null);');
   });
 });
+
+/**
+ * REHYDRATION (admin 2026-08-06: a tab switch reloaded the page mid-flow and "sab chala gaya").
+ * Every fact was durable server-side the whole time; only component memory died. The state route +
+ * mount hydration make a reload land exactly where the user left off.
+ */
+describe('domain state rehydration', () => {
+  it('the state route is ownership-checked and assembles domain + status + zone in one answer', () => {
+    const seg = route.slice(route.indexOf("'/api/domains/nbai/state'"), route.indexOf("'/api/domains/nbai/state'") + 2200);
+    expect(seg).toContain('ownsWorkspace');
+    expect(seg).toContain('firebaseDomainsForWorkspace');
+    expect(seg).toContain('customDomainStatusLive');
+    expect(seg).toContain('zoneStatus(domain)');
+  });
+
+  it('a missing zone never hides the rest of the state — best-effort by construction', () => {
+    const seg = route.slice(route.indexOf("'/api/domains/nbai/state'"), route.indexOf("'/api/domains/nbai/state'") + 2200);
+    expect(seg).toContain('.catch(() => null)');
+  });
+
+  it('the client hydrates on mount and never clobbers what the user is typing', () => {
+    const freshClient = readFileSync(join(__dirname, '..', 'src/components/agentv3/NbaiDomainConnect.tsx'), 'utf8');
+    expect(freshClient).toContain("fetch(`/api/domains/nbai/state?");
+    expect(freshClient).toContain('setDomain((prev) => prev || data.domain)');
+    expect(freshClient).toContain('setResult((prev) => prev ?? data.status)');
+    // unmount-safe: a late response after navigation must not set state
+    expect(freshClient).toContain('cancelled = true');
+  });
+});

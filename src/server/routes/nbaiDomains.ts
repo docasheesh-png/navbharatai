@@ -10,7 +10,7 @@ import {
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
 } from '../lib/firebaseCustomDomain';
-import { linkWorkspaceDomain } from '../lib/firebaseDomainLink';
+import { linkWorkspaceDomain, firebaseDomainsForWorkspace } from '../lib/firebaseDomainLink';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
 } from '../lib/cloudflareManagedDns';
@@ -176,6 +176,45 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     } catch (err) {
       console.error(`[HTTP 500] auto-dns sync: ${err instanceof Error ? err.stack || err.message : String(err)}`);
       res.status(500).json({ error: 'Could not apply the DNS records automatically.', detail: sanitizeManagedDnsError(err) });
+    }
+  });
+
+  /**
+   * REHYDRATE (admin 2026-08-06: "tab badalne se reload hua, aur sab chala gaya — permanent DNA
+   * level par fix karo"). The connect flow's every fact already lives durably server-side — the
+   * domain↔workspace link in Firestore, the attach status at the hosting API, the zone +
+   * nameservers at the DNS service. Only the SCREEN forgot, because its state lived in component
+   * memory. This route answers "where was I?" in one round-trip, so a reload, a tab switch, or a
+   * different device lands the user exactly where they left off — nothing to re-type, ever.
+   */
+  app.get('/api/domains/nbai/state', buildRateLimiter(), async (req: Request, res: Response) => {
+    if (!firebaseCustomDomainsEnabled()) {
+      res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    const workspaceId = req.query?.workspaceId;
+    if (!ownsWorkspace(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'You can only view your own app’s domain.' });
+      return;
+    }
+    try {
+      const domains = await firebaseDomainsForWorkspace(workspaceId as string);
+      const domain = domains[0] ?? null;
+      if (!domain) {
+        res.json({ domain: null });
+        return;
+      }
+      const status = await customDomainStatusLive(workspaceId as string, domain).catch(() => null);
+      // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
+      const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;
+      res.json({
+        domain,
+        status: status ? { ...status, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() } : null,
+        zone: zone ? { nameServers: zone.nameServers, status: zone.status } : null,
+      });
+    } catch (err) {
+      sendSafeError(res, 500, 'Could not load the saved domain state.', err, 'nbai domain state');
     }
   });
 

@@ -8,7 +8,7 @@
 // throughout: it shows the real pending/active state and never claims a domain is connected when it
 // isn't. Gated by the server flag (the caller only renders this when custom domains are enabled).
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
@@ -62,6 +62,35 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
   const [hostingerToken, setHostingerToken] = useState('');
   const [hostingerDone, setHostingerDone] = useState<number | null>(null);
+
+  /**
+   * REHYDRATE ON MOUNT (admin 2026-08-06: a tab switch reloaded the page and "sab chala gaya").
+   * Every fact was safe server-side the whole time — only this component's memory died. One request
+   * restores the domain, its live status + records, and the automatic-setup state (nameservers +
+   * zone), so a reload lands the user exactly where they left off. Guarded so it never clobbers a
+   * domain the user is actively typing.
+   */
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ workspaceId });
+        const res = await fetch(`/api/domains/nbai/state?${params.toString()}`, { headers: await authHeaders() });
+        if (!res.ok) return;                              // no saved state / not enabled — a fresh form is correct
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data?.domain) return;
+        setDomain((prev) => prev || data.domain);
+        if (data.status) setResult((prev) => prev ?? data.status);
+        if (data.zone?.nameServers?.length) {
+          setAutoNs((prev) => prev ?? data.zone.nameServers);
+          setAutoZoneStatus((prev) => prev ?? data.zone.status);
+        }
+      } catch { /* offline — the manual flow still works from scratch */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
 
   const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const domainValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(cleanDomain);

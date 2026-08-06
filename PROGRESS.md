@@ -26740,3 +26740,25 @@ Gate: tsc clean both projects, SHUFFLED full run 1085 files / 12,216 tests, exit
 catalogue SQL — `information_schema` differs and identifiers are backtick-quoted) and MongoDB (not SQL
 at all; collections/documents is a different browsing model, so a real UI change). Both are named
 honestly on screen today rather than silently showing sample data.
+
+## 2026-08-06 — Domain flow survives a reload: rehydrate from the durable truth (PR #2158)
+
+**Report (admin, mid-flow):** switching to the Cloudflare tab and back reloaded the page — "sab chala
+gaya" — the whole connect screen reset while they were one tap from applying records. **Nothing was
+actually lost** (the attach, zone and nameservers all live server-side); only the component's memory
+died, and the DNA-level fix is to stop keeping the only copy of "where am I?" in component memory.
+
+**Fix.** New ownership-checked `GET /api/domains/nbai/state`: one round-trip assembling the durable
+truth — the workspace's linked domain (Firestore), its live attach status + records (hosting API),
+and the managed-zone state (nameservers + active/pending; best-effort — a zone lookup failure never
+hides the rest). The client hydrates on mount: reload, tab-kill, or a DIFFERENT DEVICE lands exactly
+where the user left off, nothing re-typed. Guards: never clobbers a domain being typed
+(`prev || data.domain`), unmount-safe (`cancelled`).
+
+Also this session: the live walk-through with the admin closed the whole chain end-to-end —
+attach fix proven → new CF Account-token with the right groups (the zone-create permission hides in
+"Account Settings", not "Zone" — recorded for the next soul) → Cloud Run env updated → zone created →
+nameservers changed at Hostinger → zone ACTIVE at Cloudflare. Remaining at time of writing: tap
+"Check & apply records" on the active zone, wait for cert → Live → one Publish.
+
+Full gate: 1085 files / 12219 tests green, both tsc clean, bundle within budget.

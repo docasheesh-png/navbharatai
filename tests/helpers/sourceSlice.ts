@@ -51,3 +51,20 @@ export function enclosingBlock(src: string, marker: string): string {
   if (start < 0) return '';
   return braceBlock(src.slice(start), '{');
 }
+
+/**
+ * Everything between `marker` and the next `stop`, or to the end when `stop` is absent.
+ *
+ * `braceBlock` matches the FIRST `{` after its marker, which for a function whose return type is an
+ * object literal — `async function f(): Promise<{ ok: true } | { ok: false }> { … }` — is the return
+ * TYPE, not the body. Rather than teach brace matching to parse TypeScript signatures, name the next
+ * thing in the file: it reads better in the test and it fails loudly if that thing is renamed, which is
+ * exactly when the test's assumption stopped holding.
+ */
+export function sectionUntil(src: string, marker: string, stop?: string): string {
+  const at = src.indexOf(marker);
+  if (at < 0) return '';
+  if (!stop) return src.slice(at);
+  const end = src.indexOf(stop, at + marker.length);
+  return end < 0 ? src.slice(at) : src.slice(at, end);
+}

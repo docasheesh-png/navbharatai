@@ -53,6 +53,8 @@ interface IndexInfo { name: string; unique: boolean; primary: boolean; definitio
 export function DatabaseStudio() {
   const [connected, setConnected] = useState(false);
   const [hasDatabase, setHasDatabase] = useState(false);
+  /** The server's own reason it cannot browse this database — shown verbatim instead of a guess. */
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
 
   const [tables, setTables] = useState<TableInfo[]>([]);
@@ -93,7 +95,7 @@ export function DatabaseStudio() {
   const [writeError, setWriteError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const state = studioState({ connected, hasDatabase });
+  const state = studioState({ connected, hasDatabase, blockedReason });
   const live = state.isRealData;
 
   // Is there a database to read? Both facts come from the server: whether the account is connected,
@@ -104,24 +106,30 @@ export function DatabaseStudio() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await authedFetch('/api/integrations/supabase/status');
-        const data = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        const isConnected = !!data?.connected;
-        setConnected(isConnected);
-        if (!isConnected) { setBooting(false); return; }
+        // ASK THE SERVER WHETHER IT CAN READ THE DATABASE, rather than whether ONE provider is linked.
+        // This used to gate on the Supabase OAuth status, so a user whose database is a Neon/Render/own
+        // Postgres connection string was told "connect a database" while they had connected one — and
+        // then shown sample rows. The server now owns that decision (it knows both transports), so the
+        // honest probe is simply to try.
         const t = await authedFetch('/api/integrations/supabase/tables');
         const tj = await t.json().catch(() => ({}));
         if (cancelled) return;
         if (t.ok && Array.isArray(tj?.tables)) {
+          setConnected(true);
           setHasDatabase(true);
           setTables(tj.tables);
           if (tj.tables.length > 0) setSelected(tj.tables[0].name);
         } else {
           setHasDatabase(false);
-          // A failure here is not necessarily an error the user must act on — most often it just
-          // means no project exists yet, which the sample-data hint already explains.
-          if (t.status >= 500) setError(tj?.error || 'Could not read your database just now.');
+          // The server's 400 says WHICH database it found and that the app still uses it normally —
+          // far more useful than a generic "connect a database" to someone who already did.
+          if (t.status === 400 && typeof tj?.error === 'string') setBlockedReason(tj.error);
+          else if (t.status >= 500) setError(tj?.error || 'Could not read your database just now.');
+          // Fall back to the Supabase status ONLY to distinguish "linked but no project yet" from
+          // "nothing connected at all" — the two deserve different hints.
+          const res = await authedFetch('/api/integrations/supabase/status');
+          const data = await res.json().catch(() => ({}));
+          if (!cancelled) setConnected(!!data?.connected);
         }
       } catch {
         if (!cancelled) setConnected(false);

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { braceBlock, sectionUntil } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
@@ -38,7 +39,9 @@ describe('the studio no longer browses NavBharatAI\'s own database', () => {
 describe('sample rows are labelled, and never pretend to be live', () => {
   it('uses the tested state helper rather than an ad-hoc flag', () => {
     expect(studio).toContain("from '../../lib/dataStudioSource'");
-    expect(studio).toContain('studioState({ connected, hasDatabase })');
+    // `blockedReason` joined the input (2026-08-06): Studio now reads any PostgreSQL, and where it
+    // still cannot help the SERVER'S own reason is shown instead of a guess.
+    expect(studio).toContain('studioState({ connected, hasDatabase, blockedReason })');
   });
 
   it('connected alone does not count as having a database', () => {
@@ -288,5 +291,55 @@ describe('CSV import and export', () => {
     const at = studio.indexOf('Import CSV');
     expect(at).toBeGreaterThan(-1);
     expect(studio.slice(Math.max(0, at - 400), at)).toContain('editable &&');
+  });
+});
+/**
+ * EVERY POSTGRES, NOT JUST SUPABASE (admin 2026-08-06).
+ *
+ * The whole Data GUI ran on Supabase's Management API, so Studio could read exactly one of the eleven
+ * providers a user can connect. Everyone else opened it, saw "Sample data", and reasonably concluded
+ * the feature was broken. The SQL needed no changes — every builder is ordinary PostgreSQL against
+ * information_schema/pg_catalog, and sqlSafety enforces read-only by WRAPPING the statement rather than
+ * by guessing at keywords. Only the transport was Supabase-shaped.
+ */
+describe('Studio reads any PostgreSQL, through one executor', () => {
+  it('resolveDataAccess returns a TRANSPORT, not a Supabase-shaped pair', () => {
+    const fn = sectionUntil(route, 'async function resolveDataAccess', 'async function execSql');
+    expect(fn).toContain("kind: 'supabase-api'");
+    expect(fn).toContain("kind: 'postgres-url'");
+    expect(fn).toContain('isPostgresUrl(secrets.DATABASE_URL)');
+  });
+
+  it('the Supabase API is PREFERRED where available — no driver, no outbound connection', () => {
+    const fn = sectionUntil(route, 'async function resolveDataAccess', 'async function execSql');
+    expect(fn.indexOf("kind: 'supabase-api'")).toBeLessThan(fn.indexOf("kind: 'postgres-url'"));
+  });
+
+  it('every route runs SQL through the ONE executor, so none can be forgotten', () => {
+    // Ten routes each called runQuery(token, projectRef, …) directly, which hard-wired the Supabase
+    // transport into all of them. A new transport is now added once.
+    expect(route).toContain('async function execSql(access: SqlAccess');
+    expect(route.match(/runQuery\(access\.token/g)?.length ?? 0).toBe(1); // only inside execSql itself
+    expect(route).not.toContain('runQuery(access.token, access.projectRef, listTablesSql');
+  });
+
+  it('a database it genuinely cannot browse gets a SPECIFIC answer, not "connect a database"', () => {
+    // Useless advice to someone who already connected a MySQL one.
+    const fn = sectionUntil(route, 'async function resolveDataAccess', 'async function execSql');
+    expect(fn).toContain('It cannot browse ${label} yet');
+    expect(fn).toContain('your app still uses it normally');
+  });
+
+  it('the write path carries the transport too — not just the reads', () => {
+    expect(route).toContain('async function runWrite(res: Response, access: SqlAccess');
+    expect(route).toContain('async function primaryKeyOf(access: SqlAccess');
+    expect(route).toContain('async function columnNamesOf(access: SqlAccess');
+  });
+
+  it('the client asks the SERVER whether it can read, not whether ONE provider is linked', () => {
+    // The old probe gated on the Supabase OAuth status, so a Neon user was told to connect a database
+    // they had already connected — and then shown sample rows.
+    expect(studio).toContain('setBlockedReason(tj.error)');
+    expect(studio).toContain('const t = await authedFetch(\'/api/integrations/supabase/tables\');');
   });
 });

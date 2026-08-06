@@ -1,5 +1,6 @@
 import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
+import { provisionOutcomeNote } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ReActAction, EngineerAgentEvent, EngineerTask, SharedLoopState } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
 import { PlannerAgent } from './PlannerAgent';
@@ -936,6 +937,21 @@ export class EngineerAgentLoop {
         yield { type: 'status', message: `Step ${step}: provisioning backend (${features.join(', ')})…` };
         try {
           const result = await this.actuator.provisionBackend(workspaceId, features);
+
+          // SAY WHAT ACTUALLY HAPPENED (rule 3 sibling, 2026-08-06). The database step used to be
+          // reported purely from "the call returned" — and it returned a DATABASE_URL even when the
+          // server never started, so the user read "backend provisioned" while their app was about to
+          // meet ECONNREFUSED on boot. `dbVerified` is earned by a real SELECT 1 over the exact URL the
+          // app is handed; the wording is the shared one, so this can never drift from AgentV3's.
+          if (features.includes('db') && result.dbVerified !== undefined) {
+            yield {
+              type: 'status',
+              message: `Step ${step}: database — ${provisionOutcomeNote({
+                verified: result.dbVerified === true,
+                failure: (result.dbVerifyFailure as 'not-ready' | 'select1-failed' | 'no-output' | null) ?? 'no-output',
+              })}`,
+            };
+          }
 
           const envLines = Object.entries(result.envVars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
           try {

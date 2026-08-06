@@ -2,6 +2,7 @@ import { Sandbox } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
+import { dbProvisionScript, parseDbProvision, CANONICAL_DB_URL } from '../../AgentV3/sandbox/dbProvisionVerify';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding } from './devServerHost';
 import { scanPackageJson, formatPackageScanReport } from '../../AgentV3/PackageSafetyScanner';
@@ -817,36 +818,32 @@ const {chromium}=require('playwright');
     const sandbox = await this.getSandbox(workspaceId);
 
     let dbUrl = '';
+    let dbVerified = false;
+    let dbVerifyFailure: string | null = null;
     if (features.includes('db')) {
-      // Install PostgreSQL if missing, then start it and create the app database.
-      // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
-      // SIBLING of the AgentV3 provisioner (last-5-reports gap analysis 2026-07-20): poll pg_isready
-      // instead of a flat `sleep 2`, so a slow start is waited for and the DB_URL marker is emitted only
-      // when the server genuinely accepts connections — a failed start is not masked as ready.
-      const pgResult = await sandbox.commands.run(
-        `if ! which psql > /dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq 2>&1 | tail -2
-  apt-get install -y -qq postgresql 2>&1 | tail -5
-fi
-PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
-for i in $(seq 1 20); do
-  if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
-  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
-  sleep 1
-done
-if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
-  su postgres -c "createdb myapp 2>/dev/null || true"
-  echo "DB_URL:postgresql://postgres@localhost:5432/myapp"
-else
-  echo "DB_NOT_READY"
-fi`,
-        { timeoutMs: 120_000 },
-      ).catch(() => null);
-
-      const match = pgResult?.stdout?.match(/DB_URL:(postgresql:\/\/\S+)/);
-      dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
+      // SIBLING FIX (rule 3, 2026-08-06). This was an independent COPY of the AgentV3 provisioner as it
+      // stood before the Mitrify autopsies, and it carried every defect they killed — plus the worst
+      // one of its own:
+      //   • `apt-get install`, `pg_ctlcluster` and `su postgres` are ALL root-only, and the sandbox runs
+      //     unprivileged, so this could never start a database on any build, ever;
+      //   • the image ships no PostgreSQL at all (measured: PSQL:none PGBIN:none), so there was nothing
+      //     to start either way;
+      //   • and on failure it printed DB_NOT_READY and then handed the caller a DATABASE_URL anyway
+      //     (`?? 'postgresql://…/myapp'`), which the loop wrote straight into `.env`. The app then met
+      //     ECONNREFUSED on boot while every status line said the backend was provisioned. That is the
+      //     exact false success the shared provisioner exists to kill.
+      // It now runs the SAME script, parses the SAME markers and reports the SAME honest outcome as
+      // AgentV3. Two copies of this is how one of them silently rots; there is one.
+      const pgResult = await sandbox.commands
+        .run(dbProvisionScript(), { timeoutMs: 180_000 })
+        .catch(() => null);
+      const outcome = parseDbProvision(pgResult?.stdout);
+      dbVerified = outcome.verified;
+      dbVerifyFailure = outcome.failure;
+      // The URL is still written when unverified — .env must point at the local server so a late start
+      // heals without a rewrite — but it can no longer masquerade as success: `dbVerified` travels with
+      // it, and the honest note is the shared one.
+      dbUrl = outcome.url ?? CANONICAL_DB_URL;
     }
 
     const jwtSecret = `jwt_${Math.random().toString(36).slice(2)}_${Date.now()}`;
@@ -856,7 +853,7 @@ fi`,
     if (features.includes('storage')) envVars.STORAGE_DIR  = './uploads';
 
     const scaffoldFiles = BackendProvisioner.getScaffoldFiles(features);
-    return { dbUrl, envVars, scaffoldFiles };
+    return { dbUrl, envVars, scaffoldFiles, dbVerified, dbVerifyFailure };
   }
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {

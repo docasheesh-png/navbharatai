@@ -26563,3 +26563,28 @@ the shared start revives it; server running → PG_UP (the case that was broken)
 picks ours.
 
 Gate: tsc clean both projects, 1079 files / 12,141 tests, exit 0.
+
+## 2026-08-06 (8) — the sibling: Engineer AI had a rotted COPY of the same provisioner
+
+Rule 3 (hunt the siblings) applied to the rock-solid pass. `src/server/EngineerAI/actuators/E2BActuator.ts`
+held an independent COPY of the AgentV3 provisioner as it stood BEFORE the Mitrify autopsies, so it
+carried every defect they killed — plus the worst one of its own:
+
+- `apt-get install`, `pg_ctlcluster` and `su postgres` are ALL root-only, and the sandbox runs
+  unprivileged, so it could never start a database on any build, ever;
+- the image ships no PostgreSQL at all (measured: `PSQL:none PGBIN:none`), so there was nothing to start
+  either way;
+- and on failure it printed `DB_NOT_READY` and then handed the caller a `DATABASE_URL` **anyway**
+  (`?? 'postgresql://…/myapp'`), which `EngineerAgentLoop` wrote straight into `.env`. The app met
+  ECONNREFUSED on boot while every status line said the backend was provisioned. That is precisely the
+  false success the shared provisioner exists to kill — alive in a second copy the whole time.
+
+Now it runs the SAME `dbProvisionScript()`, parses the SAME markers, and returns `dbVerified` /
+`dbVerifyFailure` as part of the `BackendProvisionResult` CONTRACT (not a private detail). The loop
+reports the outcome through the SAME `provisionOutcomeNote()` wording, so the two engines can never
+drift on what "provisioned" means. A URL is still written when unverified — `.env` must point at the
+local server so a late start heals without a rewrite — it simply can no longer masquerade as success.
+
+Two copies of this is how one of them silently rots. There is one.
+
+Gate: tsc clean both projects, 1080 files / 12,147 tests, exit 0.

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { apkChargeInr, isChargeableApk, apkChargeRef } from '../src/server/lib/apkCharge';
+import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../src/server/lib/apkCharge';
 
 /**
  * ₹1-per-APK (admin 2026-08-06: "1₹ per apk — jitni baar apk bana utne ₹"). The contract under
@@ -26,17 +26,28 @@ describe('apkChargeInr', () => {
 });
 
 describe('isChargeableApk', () => {
-  it('charges .apk only — .aab/.ipa stay unmetered until the admin prices them', () => {
+  it('charges EVERY built mobile file — .apk, .aab, .ipa (admin: "sabhi kuch 1₹ par file")', () => {
     expect(isChargeableApk('app-release.apk')).toBe(true);
     expect(isChargeableApk('APP.APK')).toBe(true);
-    expect(isChargeableApk('app-release.aab')).toBe(false);
-    expect(isChargeableApk('NavBharat.ipa')).toBe(false);
+    expect(isChargeableApk('app-release.aab')).toBe(true);
+    expect(isChargeableApk('NavBharat.ipa')).toBe(true);
+    expect(isChargeableApk('archive.zip')).toBe(false); // never a non-binary
     expect(isChargeableApk(null)).toBe(false);
   });
 
   it('price 0 ⇒ nothing is chargeable (instant kill switch)', () => {
     process.env.APK_CHARGE_INR = '0';
     expect(isChargeableApk('app-release.apk')).toBe(false);
+    expect(isChargeableApk('app-release.aab')).toBe(false);
+  });
+});
+
+describe('chargeDescription', () => {
+  it('names the file kind for the ledger — never a vendor', () => {
+    expect(chargeDescription('app-release.apk')).toBe('App build (.apk)');
+    expect(chargeDescription('app-release.aab')).toBe('App build (.aab)');
+    expect(chargeDescription('My.IPA')).toBe('App build (.ipa)');
+    expect(chargeDescription(null)).toBe('App build');
   });
 });
 
@@ -66,14 +77,14 @@ describe('download-route wiring', () => {
     expect(seg).toContain('verifyFirebaseIdentity(req)');            // only a real signed-in wallet
     expect(seg).toContain('isAgentV3FreeUser(identity.uid, identity.email)'); // admin/tester exempt
     expect(seg).toContain('apkChargeRef(owner, repo, artifactId)');  // idempotent per artifact
-    expect(seg).toContain("description: 'APK build'");               // white-label ledger line
+    expect(seg).toContain('description: chargeDescription(got.fileName)'); // white-label ledger line
     expect(seg).toContain('void debitWalletForBuild');               // never blocks/delays the bytes
   });
 
   it('the price is DISCLOSED before the user builds (no surprise charges — the bill they pay is real)', () => {
     const panel = readFileSync(join(__dirname, '..', 'src/components/ide/StoreBuildPanel.tsx'), 'utf8');
-    expect(panel).toContain('₹1 per built APK');
+    expect(panel).toContain('₹1 per built app file');
     const kb = readFileSync(join(__dirname, '..', 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
-    expect(kb).toContain('each built .apk costs ₹1');
+    expect(kb).toContain('costs ₹1');
   });
 });

@@ -27115,3 +27115,11 @@ exactly that; .aab/.ipa stay unmetered until priced. Env `APK_CHARGE_INR` (defau
 copy under "Build my APK now") and the in-app AIs know it (apk_builder KB entry) — no surprise
 charges, ledger line "APK build — … (₹1.00)". 6 tests incl. the delivery-point and disclosure
 invariants. Pure module `src/server/lib/apkCharge.ts`.
+
+## 2026-08-06 — pricing extended the same hour (admin: "sabhi kuch 1₹ par file 😂 — yahi to paise kamane ka rasta hai")
+
+The ₹1 charge now covers EVERY built mobile file — .apk, Play Store .aab, iOS .ipa — not .apk alone
+(supersedes the "aab/ipa unmetered" line above, by direct admin order). Same contract, one choke
+point: delivery-time, idempotent per artifact, free-list/anon exempt, never blocks the bytes, env
+`APK_CHARGE_INR` (name kept — it now prices every built file). Ledger names the kind honestly
+("App build (.aab)"), disclosure copy + KB updated so the user knows the price BEFORE building.

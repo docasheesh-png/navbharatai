@@ -4,7 +4,7 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 import {
   dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL,
-  pgBinariesVersion, pgBinariesUrl, PG_BINARIES_VERSION_DEFAULT,
+  pgBinariesVersion, pgBinariesUrl, pgBinariesMirrorUrl, PG_BINARIES_VERSION_DEFAULT,
 } from './dbProvisionVerify';
 
 /**
@@ -304,7 +304,10 @@ describe('The script survives an image with NO postgres and NO client tools', ()
     // Guarded on an empty PGBIN, so a template that already ships Postgres never pays for the download.
     expect(script).toContain('if [ -z "$PGBIN" ] && [ ! -x "$NBAI_PG/bin/initdb" ]; then');
     // And re-uses what it already unpacked, so a re-provision costs nothing.
-    expect(script).toContain('if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then PGBIN="$NBAI_PG/bin"; fi');
+    // (The re-use branch now also PROVES the binary runs before adopting it — see "Downloaded is not
+    // the same as runnable" below. The property asserted here is unchanged: what was already unpacked
+    // is re-used rather than downloaded again.)
+    expect(script).toContain('if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then');
   });
 
   it('has a fallback for every tool the unpack needs', () => {
@@ -317,7 +320,11 @@ describe('The script survives an image with NO postgres and NO client tools', ()
 
   it('readiness never depends on pg_isready, which that build does not ship', () => {
     expect(script).toContain('nbai_pg_up() {');
-    expect(script).toContain('pg_ctl" -D "$PGDATA" status');
+    // The up-check MOVED into the shared pgShell builder (2026-08-06) so the watchdog and the
+    // pre-flight probe cannot drift from it — they had, and both broke on a client-tool-less Postgres.
+    // The property is unchanged: readiness never depends on pg_isready alone.
+    expect(script).toContain('pg_ctl" -D "${HOME:-/tmp}/.nbai-pgdata" status');
+    expect(script).toContain('command -v pg_isready');
     // The final gate asks the helper, not the binary directly — the bug this prevents is a running
     // server reported as "never accepted connections" purely because a client tool was missing.
     expect(script).toContain('if nbai_pg_up; then');
@@ -373,5 +380,63 @@ describe('The script survives an image with NO postgres and NO client tools', ()
   it('the fetched build lands in $HOME — no root, no apt, no template change', () => {
     expect(script).toContain('${HOME:-/tmp}/.nbai-pg');
     expect(script).not.toContain('sudo ');
+  });
+});
+
+
+/**
+ * ROCK-SOLID (admin 2026-08-06, "pura rocksolid banao"). Everything below was found by RUNNING the
+ * thing, as an unprivileged user, against real binaries — not by reading it.
+ */
+describe('Two independent hosts, because one is one outage away from no database', () => {
+  const script = dbProvisionScript();
+
+  it('falls over to a second host serving the byte-identical artifact', () => {
+    expect(script).toContain(pgBinariesUrl(PG_BINARIES_VERSION_DEFAULT));
+    expect(script).toContain(pgBinariesMirrorUrl(PG_BINARIES_VERSION_DEFAULT));
+    expect(script).toContain('DB_DIAG_PGFETCH2:');
+    // The mirror is only fetched when the primary produced nothing.
+    expect(script).toContain('if [ ! -s "$NBAI_PG/pg.jar" ]; then');
+  });
+
+  it('the two hosts are genuinely different failure domains', () => {
+    const a = new URL(pgBinariesUrl('16.4.0')).hostname;
+    const b = new URL(pgBinariesMirrorUrl('16.4.0')).hostname;
+    expect(a).not.toBe(b);
+    // …and the same artifact path, so nothing about the unpack or the binaries changes.
+    expect(pgBinariesUrl('16.4.0')).toContain('embedded-postgres-binaries-linux-amd64-16.4.0.jar');
+    expect(pgBinariesMirrorUrl('16.4.0')).toContain('embedded-postgres-binaries-linux-amd64-16.4.0.jar');
+  });
+
+  it('does NOT use the npm package — it downloads 23 MB of Postgres that cannot start', () => {
+    // Every version tested, 16.4.0-beta.14 through 18.4.0-beta.17, dies with
+    // "libicuuc.so.60: cannot open shared object file" on any modern image. Recorded so it is not
+    // re-proposed as the obvious fallback it looks like.
+    expect(script).not.toContain('registry.npmjs.org/@embedded-postgres');
+  });
+});
+
+describe('Downloaded is not the same as runnable', () => {
+  const script = dbProvisionScript();
+
+  it('asks the binary itself before trusting it', () => {
+    expect(script).toContain('"$NBAI_PG/bin/initdb" --version');
+    expect(script).toContain('DB_DIAG_PGEXEC:');
+  });
+
+  it('matches the VERSION BANNER, not the word "initdb"', () => {
+    // The first version matched *initdb*, and a loader failure prints the BINARY PATH —
+    // ".../bin/initdb: error while loading shared libraries" — which contains that word. The broken
+    // build was ACCEPTED. Verified against a working AND a deliberately broken build.
+    expect(script).toContain('0:*"(PostgreSQL)"*)');
+    expect(script).not.toContain('*initdb*)');
+  });
+
+  it('a rejected build leaves PGBIN empty, so the outcome is an honest DB_NOT_READY', () => {
+    const at = script.indexOf('DB_DIAG_PGEXEC:');
+    expect(at).toBeGreaterThan(-1);
+    // PGBIN is only assigned in the accepted branch.
+    const branch = script.slice(script.indexOf('RUN_RC=$?'), at);
+    expect(branch).toContain('PGBIN="$NBAI_PG/bin"');
   });
 });

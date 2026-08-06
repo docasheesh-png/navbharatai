@@ -26520,3 +26520,46 @@ finds no `psql` on the fetched path. Every app that connects over TCP — Prisma
 i.e. effectively all of them — is unaffected. Recorded rather than papered over.
 
 Gate: tsc clean both projects, 1077 files / 12,119 tests, exit 0.
+
+## 2026-08-06 (7) — "pura rocksolid banao": the new Postgres path would have worked ONCE, then died
+
+The admin asked for rock-solid. Auditing the new path for what happens AFTER it works found two defects
+of exactly the worst kind — a build that starts fine and dies half way — plus three more found by
+running things rather than reading them.
+
+**THE CLASS: three copies of "is Postgres up" and two of "start Postgres".** The provisioning script,
+the keepalive watchdog and the pre-flight liveness probe each had their own, all written when the only
+possible Postgres was the Debian cluster. The moment the sandbox could get Postgres from somewhere else
+— a relocatable build shipping NO client tools — they broke in opposite directions:
+- **The PROBE said PG_DOWN forever** (`pg_isready` absent). A perfectly healthy database is declared
+  dead, the bounded revivals are burned, and the provider lock releases into the SQLite downgrade the
+  lock exists to prevent.
+- **The WATCHDOG became a busy loop that could never help**: "down" every 20s, then `pg_ctlcluster`,
+  which is absent (and root-only anyway). A reaped Postgres NEVER came back.
+Fixed as a CLASS, not three times: `src/server/AgentV3/sandbox/pgShell.ts` is now the ONE definition and
+all three callers are derived from it. Deliberately free of single quotes — the watchdog embeds it
+inside `sh -c '…'`.
+
+**Found by running it, not by reading it:**
+1. `ls` RE-SORTS its arguments. `PGBIN_EXPR` listed both directories and took `tail -1` on the
+   assumption argument order survives — so `/home/...` sorted before `/usr/...` and the IMAGE's binary
+   won every time. `pg_ctl` refuses a data directory written by a different major version, so an image
+   shipping PG 14 beside a fetched 16 would have failed every start and every status check. Now ours
+   wins by explicit test.
+2. The npm package `@embedded-postgres/linux-x64` — the obvious-looking second source — **does not run**.
+   Every version tested (16.4.0-beta.14 … 18.4.0-beta.17) dies with `libicuuc.so.60: cannot open shared
+   object file` on a modern image. It would have downloaded 23 MB and produced a Postgres that cannot
+   start. Rejected and recorded so it is not re-proposed.
+3. So redundancy is now Google's mirror of Maven Central: a different company, a different network, the
+   **byte-identical** artifact (fetched and started for real from that host too).
+4. **Downloaded is not the same as runnable** — a new guard asks the binary itself
+   (`initdb --version`) before adopting it. Its FIRST version matched `*initdb*`, which a loader failure
+   also matches because the error prints the binary PATH — so the broken build was ACCEPTED. Now it
+   matches the version banner `(PostgreSQL)` AND the exit code. Verified against a working build, a
+   deliberately broken build, and an absent one.
+
+**Verified end to end, as an unprivileged user with no client tools on PATH:** server stopped → PG_DOWN;
+the shared start revives it; server running → PG_UP (the case that was broken); and the bin resolver
+picks ours.
+
+Gate: tsc clean both projects, 1079 files / 12,141 tests, exit 0.

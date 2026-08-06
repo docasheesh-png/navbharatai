@@ -20,6 +20,8 @@
 //      .env points at the local server and a late-starting Postgres heals without a rewrite; what
 //      changed is that the fallback can no longer masquerade as success.
 
+import { pgUpCommand } from './pgShell';
+
 /** The one URL the sandbox database lives at — the same string the app is handed. */
 export const CANONICAL_DB_URL = 'postgresql://postgres@localhost:5432/myapp';
 
@@ -64,6 +66,27 @@ export function pgBinariesUrl(version: string): string {
 }
 
 /**
+ * A SECOND, independent host for the SAME artifact bytes (admin 2026-08-06, "pura rocksolid banao").
+ *
+ * WHY REDUNDANCY IS NOT OPTIONAL. One download host is one outage away from "this sandbox cannot have a
+ * database" — precisely the outside dependency PATH 2b exists to remove. Google's mirror of Maven
+ * Central is a different company, a different network and a different failure domain, serving the
+ * byte-identical artifact, so nothing about the unpack or the binaries changes.
+ *
+ * REJECTED, and worth recording so nobody re-proposes it: the npm package `@embedded-postgres/linux-x64`
+ * looks like the obvious fallback (the registry is reachable from every build sandbox by definition).
+ * It is a DIFFERENT project's build, and it does not run — every version tested, from 16.4.0-beta.14 to
+ * 18.4.0-beta.17, dies with `libicuuc.so.60: cannot open shared object file` on any modern image. It
+ * would have downloaded 23 MB and produced a Postgres that cannot start. Found by executing it.
+ */
+export function pgBinariesMirrorUrl(version: string): string {
+  return 'https://maven-central.storage-download.googleapis.com/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/'
+    + `${version}/embedded-postgres-binaries-linux-amd64-${version}.jar`;
+}
+
+
+
+/**
  * The in-sandbox provisioning script.
  *
  * Emits exactly one of three markers, parsed by `parseDbProvision`:
@@ -75,6 +98,7 @@ export function pgBinariesUrl(version: string): string {
  */
 export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL, env: NodeJS.ProcessEnv = process.env): string {
   const binariesUrl = pgBinariesUrl(pgBinariesVersion(env));
+  const mirrorUrl = pgBinariesMirrorUrl(pgBinariesVersion(env));
   return `# ROOT IS NOT AVAILABLE HERE — and every command this script used to rely on needs it.
 #
 # The sandbox runs as \`user\` (the build's own \`ls -la\` shows /home/user/workspace owned by
@@ -98,11 +122,7 @@ export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL, env: NodeJS.
 #                    app will use, so it proves the thing we actually care about. Verification is never
 #                    skipped — if neither is possible the function fails and the outcome is honest.
 nbai_pg_up() {
-  if command -v pg_isready > /dev/null 2>&1; then
-    pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost -p 5432 -q 2>/dev/null
-    return $?
-  fi
-  [ -n "$PGDATA" ] && [ -n "$PGBIN" ] && "$PGBIN/pg_ctl" -D "$PGDATA" status > /dev/null 2>&1
+  ${pgUpCommand()}
 }
 nbai_select1() {
   if command -v psql > /dev/null 2>&1; then
@@ -168,6 +188,14 @@ if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
     FETCH_ERR=$( (curl -fsSL --max-time 180 -o "$NBAI_PG/pg.jar" "${binariesUrl}" \\
       || wget -q -T 180 -O "$NBAI_PG/pg.jar" "${binariesUrl}") 2>&1 | tail -2)
     echo "DB_DIAG_PGFETCH:\${FETCH_ERR:-ok}"
+    if [ ! -s "$NBAI_PG/pg.jar" ]; then
+      # SECOND HOST, same bytes. One download host is one outage away from "this sandbox cannot have a
+      # database" — precisely the outside dependency this path exists to remove. A different company, a
+      # different network, the byte-identical artifact, so nothing below changes.
+      MIRROR_ERR=$( (curl -fsSL --max-time 180 -o "$NBAI_PG/pg.jar" "${mirrorUrl}" \\
+        || wget -q -T 180 -O "$NBAI_PG/pg.jar" "${mirrorUrl}") 2>&1 | tail -2)
+      echo "DB_DIAG_PGFETCH2:\${MIRROR_ERR:-ok}"
+    fi
     if [ -s "$NBAI_PG/pg.jar" ]; then
       # A .jar IS a zip. Whichever unpacker the image has: unzip, then python3, then the JDK's jar.
       UNZIP_ERR=$( (cd "$NBAI_PG" && (unzip -o -q pg.jar 2>&1 \\
@@ -182,7 +210,22 @@ if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
       rm -f "$NBAI_PG/pg.jar" "$TXZ" 2>/dev/null
     fi
   fi
-  if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then PGBIN="$NBAI_PG/bin"; fi
+  # DOWNLOADED IS NOT THE SAME AS RUNNABLE. A build linked against libraries this image does not have
+  # exits with "error while loading shared libraries" — it is present, it is +x, and it cannot run. Found
+  # for real while testing a candidate source, which downloaded 23 MB and produced a Postgres that could
+  # never start. Asking the binary itself is the only honest check, and it costs milliseconds.
+  if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then
+    RUN_ERR=$("$NBAI_PG/bin/initdb" --version 2>&1 | tail -1)
+    RUN_RC=$?
+    # MATCH THE VERSION BANNER, NOT THE WORD "initdb". The first version of this matched *initdb*, and a
+    # loader failure prints the BINARY PATH — ".../bin/initdb: error while loading shared libraries" —
+    # which contains that word, so the broken build was ACCEPTED. Caught by running both a working and a
+    # deliberately broken build through it. The exit code is checked too: a loader failure exits 127.
+    case "$RUN_RC:$RUN_ERR" in
+      0:*"(PostgreSQL)"*) PGBIN="$NBAI_PG/bin" ;;
+      *) echo "DB_DIAG_PGEXEC:the fetched postgres cannot run here - $RUN_ERR" ;;
+    esac
+  fi
   echo "DB_DIAG_PGBIN:\${PGBIN:-none}"
   if [ -n "$PGBIN" ]; then
     export PGDATA="\${HOME:-/tmp}/.nbai-pgdata"

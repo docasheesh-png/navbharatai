@@ -392,3 +392,115 @@ export function schemaSqlFromFiles(files: Record<string, string>): string {
 export function envForProject(c: ProjectCredentials): Record<string, string> {
   return { VITE_SUPABASE_URL: c.url, VITE_SUPABASE_ANON_KEY: c.anonKey };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE CONNECTION STRING (admin question 2026-08-06: "mitrify me db hai, is liye preview nahi chal raha")
+//
+// Until now a one-click database stored exactly two values: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
+// Those only work through supabase-js, from the browser. Every SERVER-side app — Prisma, Drizzle, `pg`,
+// which is most real apps and specifically the one the admin was debugging — needs a Postgres connection
+// string, and we wrote none. So the user could click "create my database", genuinely get a real Postgres
+// in their own account, and their app still could not connect to it. The feature was only ever finished
+// for frontend-only apps.
+//
+// That also means the generated password can no longer be thrown away. It is the user's own project
+// password, kept in the user's own encrypted vault beside their other keys, and written only into their
+// own app's `.env`. Without it no connection string can ever be composed — Supabase does not hand the
+// password back — so discarding it did not protect the user, it just made the database unusable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The connection pooler in front of a project's Postgres, as Supabase reports it. */
+export interface PoolerConnection {
+  host: string;
+  /** Session-mode port. See databaseUrlsFor for why we do not use transaction mode. */
+  port: number;
+  user: string;
+  database: string;
+}
+
+/** Session-mode pooler port — a drop-in Postgres connection for every client and every migration tool. */
+export const POOLER_SESSION_PORT = 5432;
+
+/**
+ * Read the project's pooler endpoint.
+ *
+ * WHY ASK INSTEAD OF DERIVING IT: the pooler host is region-specific
+ * (`aws-0-<region>.pooler.supabase.com`), and a hostname we invent is a hostname that silently stops
+ * resolving the day the provider changes it — shipping a `DATABASE_URL` that looks right and connects
+ * to nothing. The API knows; we ask. When it cannot tell us, the caller falls back to the DIRECT host,
+ * which needs only the project ref and has been stable for years.
+ *
+ * Returns null rather than an error: no pooler is a downgrade, never a failed provision.
+ */
+export async function fetchPoolerConnection(
+  token: string,
+  projectRef: string,
+  fetchImpl: Fetch = globalThis.fetch,
+): Promise<PoolerConnection | null> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`${SUPABASE_API}/v1/projects/${projectRef}/config/database/pooler`, { headers: authHeaders(token) });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const raw = (await res.json().catch(() => null)) as unknown;
+  return parsePoolerConfig(raw, projectRef);
+}
+
+/**
+ * Pull a usable pooler endpoint out of whatever shape the API returned.
+ *
+ * Deliberately shape-tolerant: this endpoint has been documented as both a single object and a list of
+ * per-database entries, and a strict parser would turn a working pooler into a silent fallback. We take
+ * the first entry that names a host and fill the rest from Supabase's own conventions. PURE.
+ */
+export function parsePoolerConfig(raw: unknown, projectRef: string): PoolerConnection | null {
+  const entries = Array.isArray(raw) ? raw : [raw];
+  for (const e of entries) {
+    const o = (e ?? {}) as Record<string, unknown>;
+    const host = typeof o.db_host === 'string' ? o.db_host.trim() : '';
+    if (!host) continue;
+    const user = typeof o.db_user === 'string' && o.db_user.trim() ? o.db_user.trim() : `postgres.${projectRef}`;
+    const database = typeof o.db_name === 'string' && o.db_name.trim() ? o.db_name.trim() : 'postgres';
+    return { host, port: POOLER_SESSION_PORT, user, database };
+  }
+  return null;
+}
+
+/** The direct (non-pooled) host for a project. Derived from the ref alone, so it always exists. */
+export function directDatabaseUrl(projectRef: string, password: string): string {
+  return `postgresql://postgres:${encodeURIComponent(password)}@db.${projectRef}.supabase.co:5432/postgres`;
+}
+
+/** The pooled connection string. */
+export function pooledDatabaseUrl(pooler: PoolerConnection, password: string): string {
+  return `postgresql://${encodeURIComponent(pooler.user)}:${encodeURIComponent(password)}`
+    + `@${pooler.host}:${pooler.port}/${pooler.database}`;
+}
+
+/**
+ * The env pairs a SERVER-side app needs to talk to this database.
+ *
+ * `DATABASE_URL` prefers the POOLER, for one reason that decides it: a direct Supabase connection is
+ * IPv6-only on new projects, and the build sandbox — like most container networks — is IPv4. The
+ * pooler answers on IPv4, which is precisely why Supabase documents it for containerised and serverless
+ * apps. Falling back to direct when no pooler is reported is still better than writing nothing, and the
+ * app's own connection error then says so honestly.
+ *
+ * We take SESSION mode (port 5432), never transaction mode (6543). Transaction mode needs
+ * `?pgbouncer=true` for Prisma and breaks prepared statements for some drivers, so it would make the
+ * URL correct for one stack and wrong for another. Session mode behaves like plain Postgres for every
+ * client, which is the only sane default when we do not know what the app will use.
+ *
+ * `DIRECT_URL` is always the unpooled one — it is Prisma's convention for running migrations while the
+ * runtime uses the pooler, and it is inert for every app that does not read it. PURE.
+ */
+export function databaseEnvFor(projectRef: string, password: string, pooler: PoolerConnection | null): Record<string, string> {
+  if (!projectRef || !password) return {};
+  const direct = directDatabaseUrl(projectRef, password);
+  return {
+    DATABASE_URL: pooler ? pooledDatabaseUrl(pooler, password) : direct,
+    DIRECT_URL: direct,
+  };
+}

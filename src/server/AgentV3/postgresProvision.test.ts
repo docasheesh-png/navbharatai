@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sandboxPostgresEnabled,
+  isUserOwnedDatabaseUrl,
   commandNeedsLiveDatabase,
   schemaTargetsPostgres,
   postgresEnvLines,
@@ -173,5 +174,47 @@ describe('Postgres liveness — watchdog + preflight + bounded revival (last-5-r
     expect(canAttemptPostgresRevival(POSTGRES_MAX_REVIVALS)).toBe(false); // budget spent → honest SQLite degrade
     expect(canAttemptPostgresRevival(-1)).toBe(false);
     expect(canAttemptPostgresRevival(NaN)).toBe(false);
+  });
+});
+
+/**
+ * THE USER'S OWN DATABASE MUST WIN (admin question 2026-08-06: "user apna db ka link credentials dega").
+ * A user CAN connect their own database in Settings → App Settings → Database, and the build injects it
+ * into the app's `.env`. `ensureSandboxPostgres` then provisioned a sandbox-local Postgres and merged
+ * `postgresql://postgres@localhost:5432/myapp` OVER it, so the app silently pointed at a throwaway
+ * database instead of the one the user chose — and nothing said so.
+ */
+describe('isUserOwnedDatabaseUrl', () => {
+  it('recognises a real remote database as the user\'s', () => {
+    expect(isUserOwnedDatabaseUrl('postgresql://postgres.abcdefgh:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres')).toBe(true);
+    expect(isUserOwnedDatabaseUrl('postgresql://postgres:pw@db.abcdefgh.supabase.co:5432/postgres')).toBe(true);
+    expect(isUserOwnedDatabaseUrl('postgres://user:pw@ep-cool-name.eu-central-1.aws.neon.tech/neondb?sslmode=require')).toBe(true);
+  });
+
+  it('recognises the sandbox\'s OWN local Postgres as not the user\'s', () => {
+    expect(isUserOwnedDatabaseUrl('postgresql://postgres@localhost:5432/myapp')).toBe(false);
+    expect(isUserOwnedDatabaseUrl('postgresql://postgres:postgres@127.0.0.1:5432/app')).toBe(false);
+    expect(isUserOwnedDatabaseUrl('postgresql://postgres@[::1]:5432/app')).toBe(false);
+    // docker-compose service names a scaffold writes — there is no docker in the sandbox, so these are
+    // template defaults, never a database the user chose.
+    expect(isUserOwnedDatabaseUrl('postgresql://postgres:postgres@db:5432/app')).toBe(false);
+  });
+
+  it('is false for anything that is not a live remote connection', () => {
+    expect(isUserOwnedDatabaseUrl('')).toBe(false);
+    expect(isUserOwnedDatabaseUrl(null)).toBe(false);
+    expect(isUserOwnedDatabaseUrl(undefined)).toBe(false);
+    expect(isUserOwnedDatabaseUrl('file:./dev.db')).toBe(false);      // SQLite — no server at all
+    expect(isUserOwnedDatabaseUrl('your_database_url_here')).toBe(false); // generated placeholder
+  });
+
+  it('still finds the host when the password contains characters URL parsing rejects', () => {
+    // Treating a real remote database as "unknown" is the failure that clobbers a user's choice.
+    expect(isUserOwnedDatabaseUrl('postgresql://user:p@ss w0rd@my-db.example.com:5432/app')).toBe(true);
+  });
+
+  it('quoted .env values are handled (the file keeps the quotes, the URL does not)', () => {
+    expect(isUserOwnedDatabaseUrl('"postgresql://u:p@db.example.com:5432/app"')).toBe(true);
+    expect(isUserOwnedDatabaseUrl("'postgresql://postgres@localhost:5432/myapp'")).toBe(false);
   });
 });

@@ -111,6 +111,15 @@ function buildEnvKeys(provider: DbProvider, credentials: Record<string, string>)
 
 interface DatabaseSettingsProps {
   userId: string;
+  /**
+   * The workspace the one-tap database should be given the schema of.
+   *
+   * Without it the provisioner's schema step is unreachable and every one-tap database is created
+   * EMPTY — the app is wired to a real database in which none of its tables exist, so the first query
+   * fails on a table that was never created. The card has always accepted this; the screen simply
+   * never passed it (see SupabaseConnectCard).
+   */
+  workspaceId?: string;
 }
 
 // The ONLY thing kept in localStorage now (SECURITY): the chosen provider marker — never the
@@ -127,7 +136,7 @@ function readMarker(userId: string): DbMarker | null {
   } catch { return null; }
 }
 
-export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
+export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps) {
   const [provider, setProvider] = useState<DbProvider>(() => readMarker(userId)?.provider ?? 'supabase');
   // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & Keys.
   const [formCreds, setFormCreds] = useState<Record<string, string>>({});
@@ -210,7 +219,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
       {/* ONE-TAP path (ROADMAP #1 Phase 1). Renders nothing when this deployment has no Supabase OAuth
           app configured, so the manual form below stays the whole screen rather than sitting under a
           button that cannot work. Users who already have a project keep using the form unchanged. */}
-      <SupabaseConnectCard onProvisioned={() => setActiveMarker({ provider: 'supabase' })} />
+      <SupabaseConnectCard workspaceId={workspaceId} onProvisioned={() => setActiveMarker({ provider: 'supabase' })} />
 
       <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl">
         <div className="flex items-center gap-4">

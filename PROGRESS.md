@@ -26127,3 +26127,50 @@ Regression tests use the admin's log verbatim, including the assertion that the 
 contain 3000 — the exact wrong number the old scrape produced.
 
 Gate: tsc clean both projects, 1074 files / 12,021 tests, exit 0.
+
+## 2026-08-06 — the user's database never actually won (both options were broken)
+
+Admin question: two database options were designed — NavBharatAI provides one, or the user brings their
+own — and Mitrify's preview was down because it has a database. Auditing what actually shipped found
+both options broken in the same direction: **the user's real database never won.**
+
+**1. A connected database was silently replaced.** Settings → App Settings → Database encrypts the
+user's `DATABASE_URL` into their vault, and the build injects it into the app's `.env` — that part
+worked. Then `ensureSandboxPostgres` provisioned a sandbox-local Postgres and merged
+`postgresql://postgres@localhost:5432/myapp` straight over it (`mergeDotEnv` lets the newer value win).
+The user connected their database, we pointed their app somewhere else, and nothing said so.
+Fixed: the dispatcher now reads the `.env` and skips provisioning when `isUserOwnedDatabaseUrl` says a
+real remote database is already configured, narrating that it is using theirs. It reads the FILE rather
+than `this.userSecretsEnv` because only the composition root calls `setUserSecrets` — the second
+dispatcher and every sub-agent share the file, not the field.
+
+**2. The one-tap database was unusable by any backend.** Provisioning stored only `VITE_SUPABASE_URL` +
+`VITE_SUPABASE_ANON_KEY` — values that work only through supabase-js, in a browser. The generated DB
+password was deliberately discarded ("a credential we have no reason to hold"), and Supabase never hands
+it back, so no Postgres connection string could ever be composed. Every server-side app — Prisma,
+Drizzle, `pg`, i.e. Mitrify's whole class — got a real database in the user's own account that its own
+code could not connect to. Fixed: the password is kept in the user's own encrypted vault, and
+`databaseEnvFor` writes a real `DATABASE_URL` (+ `DIRECT_URL` for Prisma migrations).
+- The pooler host is READ from the Management API (`fetchPoolerConnection`), never invented — a
+  hostname we guess is one that silently stops resolving the day the provider changes it.
+- `DATABASE_URL` prefers the pooler because a direct Supabase connection is IPv6-only on new projects
+  and a build sandbox is IPv4. SESSION mode (5432), never transaction mode (6543): transaction mode
+  needs `?pgbouncer=true` for Prisma and breaks prepared statements for other drivers, so it would be
+  correct for one stack and wrong for another.
+- No pooler reported is a DOWNGRADE (direct URL), never a failed provision, and the response says which
+  one the app got (`serverConnection`) instead of letting the user find out as a connection error.
+
+**3. Every one-tap database was created EMPTY.** `SupabaseConnectCard` accepts a `workspaceId` and
+applies the app's `migrations/*.sql`, but `DatabaseSettings` mounted it without one, so that branch was
+unreachable. Threaded `getAgentV3WorkspaceId(user.uid)` through — the same id Code Studio, Files and
+Preview already use.
+
+Gate: tsc clean both projects, 1075 files / 12,051 tests, exit 0.
+
+**Still open (honest, per rule 6):**
+- The E2B template ships no PostgreSQL and the sandbox has no root, so the *free* sandbox-local database
+  path cannot work until the template is rebuilt (admin-only). The Supabase route above is now a real
+  way around it rather than the only theoretical one.
+- Nothing yet ASKS the user which database they want. The `permission_request` / `awaitApproval`
+  primitive exists but is wired only to rebuild-vs-edit and plan approval. Designed position: never ask
+  for preview (a throwaway database, no question), ask once at deploy.

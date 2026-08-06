@@ -70,3 +70,27 @@ export function gitignoreWithEnv(existing: string | null | undefined): string {
   const prefix = content && !content.endsWith('\n') ? content + '\n' : content;
   return `${prefix}${prefix ? '' : ''}.env\n`;
 }
+
+/**
+ * Read one variable's value out of a `.env` file's text, or null when it is absent/empty.
+ *
+ * Needed because the engine must sometimes ASK what the app is currently configured with before
+ * changing it — specifically, whether `DATABASE_URL` already points at a database the user owns (see
+ * isUserOwnedDatabaseUrl). Reading the file is the right source of truth rather than any one code
+ * path's in-memory copy: every dispatcher and sub-agent in a build shares the same `.env`.
+ *
+ * The LAST definition wins, matching dotenv's own parse (it assigns key by key as it walks the file).
+ * Surrounding quotes are stripped, as dotenv does. PURE.
+ */
+export function dotEnvValue(envContent: string | null | undefined, key: string): string | null {
+  if (!isValidEnvName(key)) return null;
+  let found: string | null = null;
+  for (const line of String(envContent ?? '').split('\n')) {
+    if (parseEnvKey(line) !== key) continue;
+    const raw = line.slice(line.indexOf('=') + 1).trim();
+    const unquoted = /^(["'])(.*)\1$/.exec(raw);
+    const value = (unquoted ? unquoted[2] : raw).trim();
+    if (value) found = value;
+  }
+  return found;
+}

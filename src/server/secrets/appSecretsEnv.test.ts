@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeDotEnv, gitignoreWithEnv, isValidEnvName } from './appSecretsEnv';
+import { mergeDotEnv, gitignoreWithEnv, isValidEnvName, dotEnvValue } from './appSecretsEnv';
 
 describe('isValidEnvName', () => {
   it('accepts POSIX env names and rejects injection-y names', () => {
@@ -73,5 +73,35 @@ describe('gitignoreWithEnv', () => {
   it('handles an empty/absent gitignore', () => {
     expect(gitignoreWithEnv('')).toBe('.env\n');
     expect(gitignoreWithEnv(null)).toBe('.env\n');
+  });
+});
+
+describe('dotEnvValue — read what the app is CURRENTLY configured with', () => {
+  it('reads a plain value, ignoring surrounding lines and comments', () => {
+    const env = '# comment\nAPI_KEY=abc\nDATABASE_URL=postgresql://u:p@host:5432/db\n\nOTHER=1\n';
+    expect(dotEnvValue(env, 'DATABASE_URL')).toBe('postgresql://u:p@host:5432/db');
+    expect(dotEnvValue(env, 'API_KEY')).toBe('abc');
+  });
+
+  it('handles `export ` prefixes, padding and quotes, like dotenv does', () => {
+    expect(dotEnvValue('export DATABASE_URL = "postgres://x" ', 'DATABASE_URL')).toBe('postgres://x');
+    expect(dotEnvValue("DATABASE_URL='postgres://y'", 'DATABASE_URL')).toBe('postgres://y');
+  });
+
+  it('returns null when absent, empty, or the name is not a valid env name', () => {
+    expect(dotEnvValue('A=1', 'DATABASE_URL')).toBeNull();
+    expect(dotEnvValue('DATABASE_URL=\nA=1', 'DATABASE_URL')).toBeNull();
+    expect(dotEnvValue('', 'DATABASE_URL')).toBeNull();
+    expect(dotEnvValue(null, 'DATABASE_URL')).toBeNull();
+    expect(dotEnvValue('X=1', 'not a name')).toBeNull();
+  });
+
+  it('the LAST definition wins, matching dotenv\'s own parse', () => {
+    expect(dotEnvValue('DATABASE_URL=first\nDATABASE_URL=second', 'DATABASE_URL')).toBe('second');
+  });
+
+  it('round-trips with mergeDotEnv — what we write is what we read back', () => {
+    const merged = mergeDotEnv('A=1\n', { DATABASE_URL: 'postgresql://u:p@remote.example.com:5432/db' });
+    expect(dotEnvValue(merged, 'DATABASE_URL')).toBe('postgresql://u:p@remote.example.com:5432/db');
   });
 });

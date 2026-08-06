@@ -47,7 +47,7 @@ import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } fro
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
-import { mergeDotEnv, gitignoreWithEnv } from '../secrets/appSecretsEnv';
+import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
@@ -104,7 +104,7 @@ import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingD
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
-import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival } from './postgresProvision';
+import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival, isUserOwnedDatabaseUrl } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -572,6 +572,22 @@ export class ToolDispatcher {
     try { schema = await withTimeout(this.actuator.readFile(this.workspaceId, 'prisma/schema.prisma'), 5_000, 'schema-read'); } catch { schema = ''; }
     if (!schemaTargetsPostgres(schema)) return;
     this.postgresIntended = true;    // lock the datasource against a later silent SQLite downgrade
+    // THE USER'S OWN DATABASE ALWAYS WINS (admin question 2026-08-06: "user apna db ka link credentials
+    // dega"). A user who connected their database in Settings → App Settings → Database has their
+    // DATABASE_URL injected into this app's `.env` before the build runs. Provisioning a sandbox-local
+    // Postgres here would merge `postgresql://postgres@localhost:5432/myapp` OVER it — the newer value
+    // wins in mergeDotEnv — so the app would silently point at a throwaway database instead of the one
+    // the user chose, and nothing would say so. Read the `.env` rather than this dispatcher's in-memory
+    // copy: only the composition root calls setUserSecrets, while every dispatcher and sub-agent in the
+    // build shares the same file, so the file is the one source of truth all of them agree on.
+    let envNow = '';
+    try { envNow = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { envNow = ''; }
+    const connectedUrl = dotEnvValue(envNow, 'DATABASE_URL') ?? this.userSecretsEnv?.DATABASE_URL ?? '';
+    if (isUserOwnedDatabaseUrl(connectedUrl)) {
+      this.postgresProvisioned = true; // decided — never reconsider mid-build
+      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Using the database you connected in Settings — your app will read and write your own data, so no temporary sandbox database is needed.', ts: Date.now() });
+      return;
+    }
     this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
     this.postgresProvisionedAt = Date.now();
     try {

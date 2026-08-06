@@ -873,7 +873,7 @@ export function SettingsPanel({
                 className="space-y-6"
               >
                 {user ? (
-                  <Suspense fallback={null}><DatabaseSettings userId={user.uid} /></Suspense>
+                  <Suspense fallback={null}><DatabaseSettings userId={user.uid} workspaceId={getAgentV3WorkspaceId(user.uid)} /></Suspense>
                 ) : (
                   <div className="p-6 text-white text-center">Please log in to configure your database</div>
                 )}

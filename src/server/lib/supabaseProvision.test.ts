@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyStatus, listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
+  parsePoolerConfig, databaseEnvFor, fetchPoolerConnection, POOLER_SESSION_PORT,
   projectNameFor, envForProject, refreshAccessToken, applySchemaToProject, schemaSqlFromFiles, PROJECT_READY_STATUS,
 } from './supabaseProvision';
 
@@ -326,5 +327,88 @@ describe('schemaSqlFromFiles — find the schema the build already wrote', () =>
 
   it('an empty workspace yields nothing rather than throwing', () => {
     expect(schemaSqlFromFiles({})).toBe('');
+  });
+});
+
+/**
+ * THE CONNECTION STRING (admin question 2026-08-06). A one-click database used to store only
+ * VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY — values that work only through supabase-js, in a browser.
+ * Every server-side app (Prisma, Drizzle, `pg`) got a real database in the user's own account that its
+ * own code had no way to connect to, because we generated the password and threw it away.
+ */
+describe('parsePoolerConfig — shape-tolerant on purpose', () => {
+  it('reads the documented single-object shape', () => {
+    const p = parsePoolerConfig({ db_host: 'aws-0-ap-south-1.pooler.supabase.com', db_name: 'postgres', db_port: 6543, db_user: 'postgres.abcdefgh' }, 'abcdefgh');
+    expect(p).toEqual({ host: 'aws-0-ap-south-1.pooler.supabase.com', port: POOLER_SESSION_PORT, user: 'postgres.abcdefgh', database: 'postgres' });
+  });
+
+  it('reads the list shape, taking the first entry that names a host', () => {
+    const p = parsePoolerConfig([{ db_name: 'x' }, { db_host: 'aws-0-eu-west-1.pooler.supabase.com' }], 'refref12');
+    expect(p?.host).toBe('aws-0-eu-west-1.pooler.supabase.com');
+  });
+
+  it('fills user and database from Supabase\'s conventions when they are absent', () => {
+    const p = parsePoolerConfig({ db_host: 'h.pooler.supabase.com' }, 'refref12');
+    expect(p?.user).toBe('postgres.refref12');
+    expect(p?.database).toBe('postgres');
+  });
+
+  it('pins SESSION mode regardless of the port reported', () => {
+    // Transaction mode (6543) needs ?pgbouncer=true for Prisma and breaks prepared statements for some
+    // drivers — correct for one stack, wrong for another. We do not know what the app will use.
+    expect(parsePoolerConfig({ db_host: 'h', db_port: 6543 }, 'r')?.port).toBe(5432);
+  });
+
+  it('returns null for anything with no host — a missing pooler is a downgrade, not a crash', () => {
+    expect(parsePoolerConfig(null, 'r')).toBeNull();
+    expect(parsePoolerConfig({}, 'r')).toBeNull();
+    expect(parsePoolerConfig([], 'r')).toBeNull();
+    expect(parsePoolerConfig({ db_host: '   ' }, 'r')).toBeNull();
+  });
+});
+
+describe('databaseEnvFor — what a SERVER-side app actually needs', () => {
+  const pooler = { host: 'aws-0-ap-south-1.pooler.supabase.com', port: 5432, user: 'postgres.abcdefgh', database: 'postgres' };
+
+  it('prefers the pooler for DATABASE_URL and keeps the direct one as DIRECT_URL', () => {
+    const env = databaseEnvFor('abcdefgh', 'pw-123', pooler);
+    // The direct host is IPv6-only on new projects; a build sandbox is IPv4. The pooler answers on IPv4.
+    expect(env.DATABASE_URL).toBe('postgresql://postgres.abcdefgh:pw-123@aws-0-ap-south-1.pooler.supabase.com:5432/postgres');
+    expect(env.DIRECT_URL).toBe('postgresql://postgres:pw-123@db.abcdefgh.supabase.co:5432/postgres');
+  });
+
+  it('falls back to the direct connection when no pooler was reported', () => {
+    const env = databaseEnvFor('abcdefgh', 'pw-123', null);
+    expect(env.DATABASE_URL).toBe(env.DIRECT_URL);
+    expect(env.DATABASE_URL).toContain('db.abcdefgh.supabase.co');
+  });
+
+  it('percent-encodes the password so a generated character can never break the URL', () => {
+    const env = databaseEnvFor('abcdefgh', 'p@ss:w/rd?x#y', null);
+    expect(env.DATABASE_URL).toContain('p%40ss%3Aw%2Frd%3Fx%23y');
+    expect(new URL(env.DATABASE_URL).hostname).toBe('db.abcdefgh.supabase.co');
+  });
+
+  it('writes NOTHING rather than a half-formed URL when the password or ref is missing', () => {
+    expect(databaseEnvFor('abcdefgh', '', pooler)).toEqual({});
+    expect(databaseEnvFor('', 'pw', pooler)).toEqual({});
+  });
+});
+
+describe('fetchPoolerConnection — a missing pooler never fails the provision', () => {
+  const ok = (body: unknown) => (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+
+  it('returns the parsed endpoint on success', async () => {
+    const p = await fetchPoolerConnection('tok', 'abcdefgh', ok({ db_host: 'h.pooler.supabase.com' }));
+    expect(p?.host).toBe('h.pooler.supabase.com');
+  });
+
+  it('returns null — never throws — on a non-OK status, bad JSON, or a network error', async () => {
+    const fail = (async () => new Response('nope', { status: 404 })) as unknown as typeof fetch;
+    expect(await fetchPoolerConnection('tok', 'r', fail)).toBeNull();
+    const garbage = (async () => new Response('not json', { status: 200 })) as unknown as typeof fetch;
+    expect(await fetchPoolerConnection('tok', 'r', garbage)).toBeNull();
+    const boom = (async () => { throw new Error('network'); }) as unknown as typeof fetch;
+    expect(await fetchPoolerConnection('tok', 'r', boom)).toBeNull();
   });
 });

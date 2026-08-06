@@ -174,3 +174,42 @@ export function revertSqliteToPostgres(content: string): { content: string; reve
   );
   return { content: out, reverted: out !== content };
 }
+
+/**
+ * Hosts that mean "the sandbox's own throwaway Postgres" rather than a database the user owns.
+ * `db`/`postgres` are the docker-compose service names a generated `docker-compose.yml` uses; there is
+ * no docker in the sandbox, so such a URL is a scaffold default, never a real user database.
+ */
+const LOCAL_DB_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'db', 'postgres', 'database']);
+
+/**
+ * Is this `DATABASE_URL` a REAL database the user owns, rather than the sandbox-local one we provision?
+ *
+ * ROOT CAUSE (admin question 2026-08-06, "user apna db ka link credentials dega"): a user CAN connect
+ * their own database (Settings → App Settings → Database writes `DATABASE_URL` into their encrypted
+ * vault, and the build injects it into the app's `.env`). But `ensureSandboxPostgres` then provisioned a
+ * sandbox-local Postgres and merged `postgresql://postgres@localhost:5432/myapp` OVER it — the vault
+ * value loses because the merge lets the newer value win. So the user connected their database, we
+ * silently pointed their app somewhere else, and nothing said so. Their explicit choice was discarded.
+ *
+ * The safe direction is deliberate: an UNRECOGNISED host counts as the user's, so at worst we skip
+ * provisioning and the app reports an honest connection error — never "we quietly replaced the database
+ * you chose". A `file:` URL is SQLite and names no server at all. PURE.
+ */
+export function isUserOwnedDatabaseUrl(url: string | null | undefined): boolean {
+  const raw = String(url ?? '').trim().replace(/^["']|["']$/g, '');
+  if (!raw) return false;
+  if (/^file:/i.test(raw)) return false; // SQLite — a local file, not a server we could point elsewhere
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return false; // not a connection URL (e.g. a placeholder)
+  let host = '';
+  try {
+    host = new URL(raw).hostname;
+  } catch {
+    // Some Postgres URLs carry characters Node's URL parser rejects (an unencoded password). Fall back
+    // to reading the authority directly rather than treating a real remote database as unknown.
+    host = /@([^/:?#]+)/.exec(raw)?.[1] ?? '';
+  }
+  host = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  return !LOCAL_DB_HOSTS.has(host);
+}

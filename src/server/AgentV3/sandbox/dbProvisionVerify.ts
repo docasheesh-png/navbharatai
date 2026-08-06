@@ -24,6 +24,46 @@
 export const CANONICAL_DB_URL = 'postgresql://postgres@localhost:5432/myapp';
 
 /**
+ * A relocatable PostgreSQL build, fetched when the sandbox image has none (admin 2026-08-06).
+ *
+ * THE BLOCKER THIS REMOVES. Report 26a8e81c measured the truth: `PSQL:none PGBIN:none` — the E2B image
+ * ships no PostgreSQL AT ALL, and the sandbox has no root, so `apt-get install` cannot add one. Both
+ * existing paths therefore had nothing to run, every database app's boot died on ECONNREFUSED, and the
+ * honest conclusion was "the template must be rebuilt", which only the admin can do. That is a whole
+ * class of app blocked on an action outside this codebase.
+ *
+ * These are the binaries the JVM world has used for embedded Postgres for years: an ordinary `.jar`
+ * (a zip) on Maven Central holding a `.txz` of a self-contained Postgres that runs from any directory
+ * as any user. One HTTPS GET, no root, no package manager, no template change.
+ *
+ * PINNED, never "latest" — the same discipline as the model ladders. A provisioner is not a place to
+ * discover that a new upstream release changed a flag. `AGENTV3_PG_BINARIES_VERSION` overrides it
+ * without a deploy if a pin ever needs moving.
+ *
+ * KNOWN LIMIT, handled rather than hidden: this build ships ONLY `initdb`, `pg_ctl` and `postgres` —
+ * no `psql`, no `createdb`, no `pg_isready`. So on this path the script waits with `pg_ctl -w`, uses
+ * the `postgres` database `initdb` already creates instead of creating `myapp`, and proves the
+ * connection through Node's `pg` driver — which is a BETTER gate than psql here, because it is the
+ * exact client the app itself will use.
+ */
+export const PG_BINARIES_VERSION_DEFAULT = '16.4.0';
+
+/** Where the fetched build is unpacked. Inside $HOME so it needs no privileges and survives a re-provision. */
+export const PG_BINARIES_HOME = '${HOME:-/tmp}/.nbai-pg';
+
+/** The pinned version actually used, env-overridable. Rejects anything that is not a plain x.y.z. */
+export function pgBinariesVersion(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = String(env.AGENTV3_PG_BINARIES_VERSION ?? '').trim();
+  return /^\d+\.\d+\.\d+$/.test(raw) ? raw : PG_BINARIES_VERSION_DEFAULT;
+}
+
+/** The exact artifact URL for a version. Pure, so the pin is visible and testable without a network. */
+export function pgBinariesUrl(version: string): string {
+  return 'https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/'
+    + `${version}/embedded-postgres-binaries-linux-amd64-${version}.jar`;
+}
+
+/**
  * The in-sandbox provisioning script.
  *
  * Emits exactly one of three markers, parsed by `parseDbProvision`:
@@ -33,7 +73,8 @@ export const CANONICAL_DB_URL = 'postgresql://postgres@localhost:5432/myapp';
  *                        this "ready"; the app would have called it broken.
  *   DB_NOT_READY       — the server never accepted connections at all.
  */
-export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL): string {
+export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL, env: NodeJS.ProcessEnv = process.env): string {
+  const binariesUrl = pgBinariesUrl(pgBinariesVersion(env));
   return `# ROOT IS NOT AVAILABLE HERE — and every command this script used to rely on needs it.
 #
 # The sandbox runs as \`user\` (the build's own \`ls -la\` shows /home/user/workspace owned by
@@ -47,6 +88,45 @@ export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL): string {
 # Debian cluster wrapper, no /etc/postgresql, no su. The privileged path is still tried FIRST — it is
 # faster when it works (a template that pre-creates the cluster) — and this is the fallback that
 # makes the difference between a preview that works and one that cannot.
+# TWO HELPERS, because the client tools are no longer guaranteed. A relocatable Postgres build ships
+# the SERVER only (no psql, no createdb, no pg_isready), so every check written in terms of those
+# tools would silently report "not ready" against a server that is running perfectly.
+#
+# nbai_pg_up      — is the server accepting connections? pg_isready when it exists, else pg_ctl status.
+# nbai_select1 URL — does a REAL query succeed over the exact URL the app gets? psql when it exists,
+#                    else Node's \`pg\` driver, which is a BETTER gate here: it is the very client the
+#                    app will use, so it proves the thing we actually care about. Verification is never
+#                    skipped — if neither is possible the function fails and the outcome is honest.
+nbai_pg_up() {
+  if command -v pg_isready > /dev/null 2>&1; then
+    pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost -p 5432 -q 2>/dev/null
+    return $?
+  fi
+  [ -n "$PGDATA" ] && [ -n "$PGBIN" ] && "$PGBIN/pg_ctl" -D "$PGDATA" status > /dev/null 2>&1
+}
+nbai_select1() {
+  if command -v psql > /dev/null 2>&1; then
+    OUT=$(psql "$1" -Atc 'SELECT 1' 2>&1)
+    if [ "$OUT" = "1" ]; then return 0; fi
+    # The client's own error — a missing database and a refused password need different fixes, and
+    # "SELECT 1 failed" alone cannot tell them apart.
+    echo "DB_DIAG_SELECT1:$OUT"
+    return 1
+  fi
+  if ! command -v node > /dev/null 2>&1; then
+    echo "DB_DIAG_SELECT1:no psql and no node in the sandbox — the connection could not be verified"
+    return 1
+  fi
+  npm install --prefix "${PG_BINARIES_HOME}/client" pg --no-save --no-audit --no-fund --silent > /dev/null 2>&1
+  # THE ANSWER IS A MARKED LINE, NOT THE LAST LINE. Caught by running this for real: when the driver is
+  # missing, node dies with a stack trace whose last line is "Node.js v22.22.2" — so \`tail -1\` read a
+  # crash as the query result. A crash must never be able to look like an answer, so success is an exact
+  # match on a marker only our own code can print, and everything else is a failure with its real output.
+  OUT=$(NODE_PATH="${PG_BINARIES_HOME}/client/node_modules" node -e 'const{Client}=require("pg");const c=new Client({connectionString:process.argv[1]});c.connect().then(()=>c.query("SELECT 1 AS ok")).then(r=>{console.log("NBAI_SELECT1="+String(r.rows[0].ok));return c.end();}).catch(e=>{console.log("NBAI_SELECT1_ERR "+e.message);process.exit(0);});' "$1" 2>&1)
+  if echo "$OUT" | grep -qx 'NBAI_SELECT1=1'; then return 0; fi
+  echo "DB_DIAG_SELECT1:$(echo "\${OUT:-node pg check produced no output}" | tail -3 | tr '\\n' ' ')"
+  return 1
+}
 if ! which psql > /dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq 2>&1 | tail -2
@@ -78,6 +158,31 @@ done
 # makes pg_ctl a no-op, so a re-provision (the keepalive path) costs nothing.
 if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
   PGBIN=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)
+  # PATH 2b — NO POSTGRES IN THE IMAGE AT ALL (report 26a8e81c: PSQL:none PGBIN:none). Fetch a
+  # relocatable build over plain HTTPS and unpack it into $HOME. No root, no apt, no template change —
+  # see PG_BINARIES_VERSION_DEFAULT. Only runs when the image genuinely has nothing, so a template that
+  # already ships Postgres never pays for this, and a failure here leaves the old outcome untouched.
+  NBAI_PG="${PG_BINARIES_HOME}"
+  if [ -z "$PGBIN" ] && [ ! -x "$NBAI_PG/bin/initdb" ]; then
+    mkdir -p "$NBAI_PG" 2>/dev/null
+    FETCH_ERR=$( (curl -fsSL --max-time 180 -o "$NBAI_PG/pg.jar" "${binariesUrl}" \\
+      || wget -q -T 180 -O "$NBAI_PG/pg.jar" "${binariesUrl}") 2>&1 | tail -2)
+    echo "DB_DIAG_PGFETCH:\${FETCH_ERR:-ok}"
+    if [ -s "$NBAI_PG/pg.jar" ]; then
+      # A .jar IS a zip. Whichever unpacker the image has: unzip, then python3, then the JDK's jar.
+      UNZIP_ERR=$( (cd "$NBAI_PG" && (unzip -o -q pg.jar 2>&1 \\
+        || python3 -c 'import zipfile;zipfile.ZipFile("pg.jar").extractall(".")' 2>&1 \\
+        || jar xf pg.jar 2>&1)) | tail -2)
+      TXZ=$(ls "$NBAI_PG"/postgres-linux-*.txz 2>/dev/null | head -1)
+      echo "DB_DIAG_PGUNPACK:\${UNZIP_ERR:-ok} txz=\${TXZ:-none}"
+      if [ -n "$TXZ" ]; then
+        TAR_ERR=$(tar -xJf "$TXZ" -C "$NBAI_PG" 2>&1 | tail -2)
+        echo "DB_DIAG_PGEXTRACT:\${TAR_ERR:-ok}"
+      fi
+      rm -f "$NBAI_PG/pg.jar" "$TXZ" 2>/dev/null
+    fi
+  fi
+  if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then PGBIN="$NBAI_PG/bin"; fi
   echo "DB_DIAG_PGBIN:\${PGBIN:-none}"
   if [ -n "$PGBIN" ]; then
     export PGDATA="\${HOME:-/tmp}/.nbai-pgdata"
@@ -88,31 +193,39 @@ if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
     # -k /tmp puts the unix socket somewhere writable; -h 127.0.0.1 keeps it on loopback only.
     PGCTL_ERR=$("$PGBIN/pg_ctl" -D "$PGDATA" -o "-p 5432 -h 127.0.0.1 -k /tmp" -l "$PGDATA/server.log" -w -t 25 start 2>&1 | tail -3)
     echo "DB_DIAG_PGCTL:\${PGCTL_ERR:-ok}"
+    # \`pg_ctl -w\` above already blocks until the server accepts connections, so this loop is only a
+    # safety net — and it must NOT depend on pg_isready, which the fetched build does not ship. When it
+    # is absent, pg_ctl's own status is the authority (both are checked by nbai_pg_up).
     for i in $(seq 1 15); do
-      if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null; then break; fi
+      if nbai_pg_up; then break; fi
       sleep 1
     done
     # The server's own log is the only place a refused start explains itself.
-    if ! pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null; then
+    if ! nbai_pg_up; then
       echo "DB_DIAG_PGLOG:$(tail -3 "$PGDATA/server.log" 2>/dev/null | tr '\\n' ' ')"
     fi
   fi
 fi
 
-if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost -p 5432 -q 2>/dev/null; then
-  # Over TCP as postgres — no \`su\`, which was itself a root-only command.
-  createdb -h 127.0.0.1 -p 5432 -U postgres myapp 2>/dev/null || true
-  SELECT1=$(psql "${dbUrl}" -Atc 'SELECT 1' 2>&1)
-  if [ "$SELECT1" = "1" ]; then
-    echo "DB_URL:${dbUrl}"
+if nbai_pg_up; then
+  # THE DATABASE NAME IS NOT ALWAYS OURS TO CHOOSE. \`createdb\` is a client tool, and the fetched
+  # build ships only the server — so when it is missing we use the \`postgres\` database that initdb
+  # creates unconditionally, and REPORT THAT URL. The URL is read back from this marker by
+  # parseDbProvision, so a caller always gets the database that was actually proven, never an assumed one.
+  APP_URL="${dbUrl}"
+  if command -v createdb > /dev/null 2>&1; then
+    createdb -h 127.0.0.1 -p 5432 -U postgres myapp 2>/dev/null || true
   else
-    # The psql error itself — a missing database and a refused password need different fixes, and
-    # "SELECT 1 failed" alone cannot tell them apart.
-    echo "DB_DIAG_SELECT1:$SELECT1"
+    APP_URL=$(echo "${dbUrl}" | sed 's|/[^/]*$|/postgres|')
+    echo "DB_DIAG_DBNAME:createdb absent — using the built-in postgres database"
+  fi
+  if nbai_select1 "$APP_URL"; then
+    echo "DB_URL:$APP_URL"
+  else
     echo "DB_SELECT1_FAILED"
   fi
 else
-  echo "DB_DIAG_ISREADY:$(pg_isready -h 127.0.0.1 -p 5432 2>&1 | tail -1)"
+  echo "DB_DIAG_ISREADY:$(pg_isready -h 127.0.0.1 -p 5432 2>&1 | tail -1 || echo 'pg_isready absent')"
   echo "DB_NOT_READY"
 fi`;
 }

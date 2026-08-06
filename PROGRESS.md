@@ -26309,3 +26309,53 @@ infra blocker — it is a code fix, and it is the next slice. PGlite (WASM Postg
 rejected for the sandbox: our in-browser preview runs only the FRONTEND, so a server-side app has
 nothing running there to connect to it. (Bolt does not run Postgres in the browser either —
 WebContainers run Node, and Bolt's own docs send users to Supabase for a database.)
+
+## 2026-08-06 (4) — the sandbox can now install PostgreSQL itself, with no root and no template rebuild
+
+This closes the item that had been recorded as an admin-only infra blocker three times.
+
+**The measurement that framed it** (report 26a8e81c): `PSQL:none PGBIN:none` — the E2B image ships no
+PostgreSQL at all, and the sandbox has no root, so `apt-get install` cannot add one. Both existing
+provisioning paths had nothing to run. Every database app's boot therefore died on ECONNREFUSED, which
+is the "Cannot GET /" the admin kept hitting, and the only honest conclusion was "the template must be
+rebuilt" — an action outside this codebase, with a whole class of app stuck behind it.
+
+**PATH 2b.** When `PGBIN` is empty, fetch a relocatable PostgreSQL over plain HTTPS (the Maven artifact
+the JVM world has used for embedded Postgres for years — an ordinary zip holding a `.txz` of a
+self-contained build) and unpack it into `$HOME`. No root, no apt, no template change. Guarded on an
+empty `PGBIN`, so an image that already ships Postgres never pays for the download, and re-uses what it
+already unpacked, so a re-provision costs nothing. Version PINNED (`AGENTV3_PG_BINARIES_VERSION`
+overrides) — a provisioner is not a place to discover that a new upstream release changed a flag.
+
+**VERIFIED FOR REAL before shipping,** as a non-root user in this container: downloads, unpacks,
+`initdb`s, `pg_ctl start`s, and answers `SELECT 1`. Not inferred from documentation.
+
+**The knock-on that mattered more than the download.** That build ships the SERVER ONLY — no `psql`, no
+`createdb`, no `pg_isready` — so every check written in terms of those tools would have reported "not
+ready" against a server running perfectly. Two helpers now absorb it:
+- `nbai_pg_up` — `pg_isready` when it exists, else `pg_ctl status`.
+- `nbai_select1 URL` — `psql` when it exists, else Node's `pg` driver, which is a BETTER gate here: it
+  is the exact client the app will use. If neither is possible it FAILS honestly; verification is never
+  skipped.
+- No `createdb` ⇒ use the `postgres` database `initdb` creates anyway, and REPORT that URL. The URL is
+  read back from the `DB_URL:` marker, so a caller always gets the database that was proven.
+
+**A real bug the real test caught.** The first Node gate took `tail -1` of the output. With the driver
+missing, node dies with a stack trace whose last line is `Node.js v22.22.2` — so a CRASH was being read
+as the query result. Success is now an exact match on a marker only our own code prints
+(`NBAI_SELECT1=1`). This is precisely the false-success class this module exists to kill, nearly
+reintroduced by the fix for it. A `bash -n` syntax test now also guards the generated script: nothing
+else would catch an unbalanced quote in composed text until a real build.
+
+Three earlier assertions were RE-ANCHORED, not deleted — the invariant ("SELECT 1 over the exact URL the
+app gets is the only thing that declares success") is unchanged; it moved into `nbai_select1`.
+
+Gate: tsc clean both projects, 1076 files / 12,097 tests, exit 0.
+NOTE (honest): one full run in this session reported a single failure that two subsequent full runs did
+not reproduce, and the failing name scrolled out of the captured output. Recorded rather than ignored;
+if it recurs in CI it becomes the next thing to chase.
+
+**Still open:** whether PATH 2b fires in the real E2B sandbox — it needs one real build report to show
+`DB_DIAG_PGFETCH:ok` and `DB_DIAG_PGBIN:<home>/.nbai-pg/bin`. The mechanics are proven here; the
+sandbox's outbound access to Maven Central is not something this session can test. The diagnostics were
+written so that report answers it in one line either way.

@@ -26359,3 +26359,46 @@ if it recurs in CI it becomes the next thing to chase.
 `DB_DIAG_PGFETCH:ok` and `DB_DIAG_PGBIN:<home>/.nbai-pg/bin`. The mechanics are proven here; the
 sandbox's outbound access to Maven Central is not something this session can test. The diagnostics were
 written so that report answers it in one line either way.
+
+## 2026-08-06 (5) — the deploy-time database question (the third of the admin's three tasks)
+
+Never at preview, once at deploy — the position stated on 2026-08-05 and now built, because both
+database paths finally work (entries 1–3 above) and an offer is only worth making if a "yes" can be
+honoured.
+
+**Why deploy is the right moment and preview is the wrong one.** A preview database is a throwaway: the
+sandbox makes one, the data dies with it, and asking a user to open a database account before they have
+even SEEN their app is friction with nothing behind it. Publishing is the opposite — the sandbox does
+not come along, so an app that saves data and has no database becomes a LIVE site whose pages load
+perfectly while every signup, order and booking fails for real users.
+
+**`appNeedsDatabase`** (pure, `src/server/AgentV3/databaseNeed.ts`) decides from the app's own files: a
+driver in package.json (nobody installs `pg` by accident), a Prisma/Drizzle/Knex config, SQL migrations,
+or — last resort — code that reads a database env var. Deliberately conservative in ONE direction: we
+would rather miss an exotic setup than nag a static site. Lockfiles and `node_modules` are excluded, so
+a hoisted transitive dependency is not mistaken for the app's own choice.
+
+**`GET /api/agentv3/database-readiness`** is owner-gated, read-only, and answers facts only:
+`needsDatabase`, the `signals` behind it, `connected`, `provider`, `canProvision`. `connected` accepts
+EITHER the provider marker or any real credential, because a user who pasted a `DATABASE_URL` into
+Secrets & Keys never opened the Database screen and must not be told they have no database.
+
+**The Publish screen** shows the gate only when the app really stores data and really has nowhere to put
+it, and it:
+- says WHY, naming the app's own signals — a generic warning gets clicked past;
+- offers "Create one free in my account" ONLY when `canProvision` (their Supabase account is already
+  connected) — consent needs a browser popup, and an offer we cannot fulfil is worse than none;
+- offers "Connect my own database", landing on the database FORM (the `navbharat:navigate` listener now
+  carries `settingsScreen`) — sending a user to a settings menu mid-publish is how a helpful button
+  becomes a dead end;
+- always allows "Publish without a database — I know data won't be saved". **A question the user cannot
+  answer "no" to is not a question**, it is a wall;
+- never blocks on our own outage: a readiness check that fails leaves the gate off entirely.
+
+Gate: tsc clean both projects, 1077 files / 12,118 tests, exit 0. `AppKnowledgeBase` updated per the
+sync rule.
+
+All three of the admin's 2026-08-05 tasks are now closed, plus the 2026-08-06 "every database" request:
+DB provision verified with a real SELECT 1 (entry 2026-08-05), the boot-log diagnoser (same day), the
+build-time offer, the deploy-time ask, 11 providers from one definition, and the no-root PostgreSQL that
+removed the template-rebuild blocker.

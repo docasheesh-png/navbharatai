@@ -20,8 +20,8 @@
 // so a deploy can never target a host that isn't set up. Pricing here is intentionally simple + honest
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
-import { useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 
@@ -58,20 +58,88 @@ export interface HostingChooserProps {
   githubConnected?: boolean;
   /** Start the GitHub connect flow (reuses the panel's existing OAuth redirect). */
   onConnectGitHub?: () => void;
+  /** Authenticated fetch, so the data gate can ask the server about THIS user's workspace. */
+  authedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** Open Settings → App Settings → Database, for the "connect my own" answer. */
+  onOpenDatabaseSettings?: () => void;
+}
+
+/** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
+interface DatabaseReadiness {
+  needsDatabase: boolean;
+  signals: string[];
+  connected: boolean;
+  provider: string | null;
+  canProvision: boolean;
 }
 
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, workspaceId, customDomainsEnabled,
-  ownRepo, githubConnected, onConnectGitHub,
+  ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
   // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
   // A publish that cannot run must SAY SO here — never a button that silently does nothing.
   const [blocked, setBlocked] = useState<string | null>(null);
+
+  // THE ONE DATABASE QUESTION, ASKED AT THE ONE MOMENT IT MATTERS (admin 2026-08-06).
+  //
+  // Never at preview — a preview database is a throwaway and asking then is friction with nothing
+  // behind it. Here it is different: the sandbox does not come along, so publishing an app that saves
+  // data with no database produces a LIVE site where every signup, order and booking fails. So we ask
+  // once, we say WHY (the server returns the real signals from their own files), and we let them
+  // proceed anyway with their eyes open — a wall the user cannot pass is not a question.
+  const [dataGate, setDataGate] = useState<DatabaseReadiness | null>(null);
+  const [dbBusy, setDbBusy] = useState(false);
+  const [dbNote, setDbNote] = useState<string | null>(null);
+  const [proceedAnyway, setProceedAnyway] = useState(false);
+
+  useEffect(() => {
+    if (!authedFetch || !workspaceId) return;
+    let live = true;
+    authedFetch(`/api/agentv3/database-readiness?workspaceId=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (live && d && typeof d.needsDatabase === 'boolean') setDataGate(d as DatabaseReadiness); })
+      // A readiness check that cannot run must never BLOCK a publish — it is an advisory, and a user
+      // whose app is fine would otherwise be stuck behind our own outage.
+      .catch(() => { /* stays null → no gate */ });
+    return () => { live = false; };
+  }, [authedFetch, workspaceId]);
+
+  const needsAnswer = !!dataGate?.needsDatabase && !dataGate.connected && !proceedAnyway;
+
+  const createDatabase = async () => {
+    if (!authedFetch) return;
+    setDbBusy(true); setDbNote(null);
+    try {
+      const res = await authedFetch('/api/integrations/supabase/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceId ?? '' }),
+      });
+      const data = await res.json().catch(() => null);
+      // The server words these to tell the user what to do next (plan full, still starting up,
+      // reconnect); passing them through unchanged is more useful than any generic line here.
+      if (!res.ok) { setDbNote(data?.error || 'Your database could not be created just now.'); return; }
+      setDataGate((g) => (g ? { ...g, connected: true, provider: 'Supabase' } : g));
+      setDbNote(data?.schemaApplied === false
+        ? 'Database created and connected — its tables could not be set up yet, so ask me to run your migrations after publishing.'
+        : 'Database created in your own account and connected. You can publish now.');
+    } catch {
+      setDbNote('Could not reach NavBharatAI. Check your connection and try again.');
+    } finally {
+      setDbBusy(false);
+    }
+  };
+
   const publish = (providerId: string) => {
     setBlocked(null);
+    if (needsAnswer) {
+      setBlocked('Your app saves data but has no database yet — choose one below, or publish without it.');
+      return;
+    }
     const reason = onDeploy(providerId);
     if (typeof reason === 'string' && reason) setBlocked(reason); // stays open, explains itself
   };
@@ -179,6 +247,49 @@ export function HostingChooser({
           <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-[11.5px] text-rose-200">
             <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>{blocked}</span>
+          </div>
+        )}
+
+        {/* The data gate. Shown only when the app REALLY stores data and REALLY has nowhere to put it. */}
+        {dataGate?.needsDatabase && !dataGate.connected && (
+          <div className="mx-4 mt-4 rounded-xl border border-amber-800/50 bg-amber-950/20 p-3.5 flex flex-col gap-2.5">
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4 text-amber-300" />
+              <span className="text-[13px] font-bold text-white">Your app needs a database</span>
+            </div>
+            <p className="text-[11.5px] text-zinc-300 leading-relaxed">
+              It uses {dataGate.signals.join(', ')}, so it saves data — but no database is connected yet.
+              Publish without one and the live site will load, while anything that saves (signups, orders,
+              bookings) will fail for real users.
+            </p>
+            {dbNote && <p className="text-[11.5px] text-amber-200 leading-relaxed">{dbNote}</p>}
+            <div className="flex flex-col sm:flex-row gap-2">
+              {dataGate.canProvision && (
+                <button
+                  onClick={() => void createDatabase()}
+                  disabled={dbBusy}
+                  className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors"
+                >
+                  {dbBusy ? <TirangaLoader size={14} /> : <Database className="w-3.5 h-3.5" />}
+                  {dbBusy ? 'Creating…' : 'Create one free in my account'}
+                </button>
+              )}
+              <button
+                onClick={() => onOpenDatabaseSettings?.()}
+                className="flex-1 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 text-zinc-200 text-[11.5px] font-semibold transition-colors"
+              >
+                Connect my own database
+              </button>
+            </div>
+            {/* A question the user cannot answer "no" to is not a question. */}
+            {!proceedAnyway && (
+              <button
+                onClick={() => { setProceedAnyway(true); setBlocked(null); }}
+                className="text-[11px] text-zinc-500 hover:text-zinc-300 self-start underline underline-offset-2"
+              >
+                Publish without a database — I know data won&apos;t be saved
+              </button>
+            )}
           </div>
         )}
         <div className="p-4 grid gap-3 sm:grid-cols-3">

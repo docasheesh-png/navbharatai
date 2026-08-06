@@ -101,6 +101,8 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
+import { databaseReadiness } from '../AgentV3/databaseNeed';
+import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
 import { summarizeFileTree } from '../AgentV3/systemPrompt';
@@ -2792,6 +2794,40 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try { audit('AGENTV3_REPORT_TO_ADMIN', { userId: verifiedUid ?? undefined, workspaceId: record.meta.workspaceId ?? undefined, ok: record.meta.ok ?? undefined }); } catch { /* never throws */ }
     res.json({ ok: true });
+  });
+
+  /**
+   * Is this app ready to be PUBLISHED, as far as data is concerned? (admin 2026-08-06)
+   *
+   * WHY AT DEPLOY AND NOWHERE ELSE. A preview database is a throwaway — the sandbox makes one, the data
+   * dies with it, and asking a user to go and open a database account before they have even seen their
+   * app is friction with nothing behind it. Publishing is the opposite: the sandbox does not come along,
+   * so an app that saves data and has no database becomes a LIVE site where every signup, order and
+   * booking fails. That is the one moment the question is worth interrupting for — once.
+   *
+   * Read-only and owner-gated. It answers with facts (does the app store data, is a database connected,
+   * could we create one right now) and NEVER acts; the acting is the user's next click.
+   */
+  app.get('/api/agentv3/database-readiness', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required' }); return; }
+    if (!await assertVerifiedWorkspaceOwner(req, workspaceId)) {
+      res.status(403).json({ error: 'Not your workspace.' });
+      return;
+    }
+    const uid = await verifyFirebaseToken(req);
+    const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+    // A signed-out user has no vault and no Supabase grant — the honest answer is "not connected, and
+    // we cannot create one either", which the client turns into "sign in / connect your own".
+    const vaultSecrets = uid ? await loadUserVaultSecrets(uid).catch(() => ({} as Record<string, string>)) : {};
+    const supabaseConnected = uid ? !!(await getConnection(uid).catch(() => null))?.orgId : false;
+    res.json(databaseReadiness({
+      files,
+      vaultSecrets,
+      dbEnvNames: ALL_DB_ENV_VARS,
+      providerLabel: (id) => dbProvider(id)?.label ?? null,
+      supabaseConnected,
+    }));
   });
 
   app.get('/api/agentv3/diagnostics', async (req: Request, res: Response) => {

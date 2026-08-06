@@ -1286,12 +1286,16 @@ export default function App() {
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const view = (e as CustomEvent<{ view?: ViewType }>).detail?.view;
-      if (view) toggleTab(view);
+      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string }>).detail;
+      if (detail?.view) toggleTab(detail.view);
+      // Landing on Settings' ROOT when the caller meant a specific screen is a dead end: the user is
+      // sent away mid-task and has to find their way back. Carrying the screen makes "connect my own
+      // database" land on the database form itself.
+      if (detail?.settingsScreen) setSettingsScreen(detail.settingsScreen as SettingsScreen);
     };
     window.addEventListener('navbharat:navigate', onNavigate as EventListener);
     return () => window.removeEventListener('navbharat:navigate', onNavigate as EventListener);
-  }, [toggleTab]);
+  }, [toggleTab, setSettingsScreen]);
 
   // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
   // view clears the flag, so leaving v5.0 and reloading correctly returns to Home.

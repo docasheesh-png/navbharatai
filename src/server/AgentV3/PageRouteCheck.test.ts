@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractPageRoutes, pageCheckScript, parsePageCheck, classifyPage, summarizePageCheck,
-  MAX_PAGE_ROUTES, TOOLS_DIR, PAGE_LOAD_TIMEOUT_MS,
+  MAX_PAGE_ROUTES, TOOLS_DIR, PAGE_LOAD_TIMEOUT_MS, SETTLE_TIMEOUT_MS, vitalsVerdict,
 } from './PageRouteCheck';
 
 /**
@@ -171,5 +171,108 @@ describe('summarizePageCheck — says how many were CHECKED, not just how many p
 
   it('nothing to check is honest, not a pass with a false claim', () => {
     expect(summarizePageCheck([]).summary).toContain('No additional page routes');
+  });
+});
+
+/**
+ * REAL WEB VITALS, ON PAGES WE ALREADY OPEN (admin 2026-08-06).
+ *
+ * The roadmap listed "Lighthouse / Web-Vitals + axe-core over the LIVE preview" as BLOCKED — "needs
+ * headless Chrome" — and called it the app's weakest measured category. Chromium is pre-baked in the
+ * E2B image, and these pages are already being loaded, so LCP and CLS cost one extra in-page read and
+ * no dependency at all.
+ *
+ * The danger is the measurement being WRONG rather than absent, so both honesty rules are locked here.
+ */
+describe('the observation window is what makes the numbers honest', () => {
+  it('waits for the page to go QUIET rather than a fixed guess', () => {
+    // A fixed short window can only ever observe an LCP smaller than itself, so every page would score
+    // "good" — the slowest pages most confidently of all. That is a false pass, worse than no number.
+    const script = pageCheckScript('https://x.e2b.app', ['/a']);
+    expect(script).toContain("waitForLoadState('networkidle'");
+    expect(script).toContain(`timeout: ${SETTLE_TIMEOUT_MS}`);
+    expect(script).toContain('out.settled =');
+  });
+
+  it('reads real Web Vitals from the page, with no library', () => {
+    const script = pageCheckScript('https://x.e2b.app', ['/a']);
+    expect(script).toContain('largest-contentful-paint');
+    expect(script).toContain('layout-shift');
+    expect(script).toContain('buffered: true');
+    expect(script).toContain('hadRecentInput'); // a shift the USER caused is not a layout problem
+  });
+
+  it('the generated JavaScript is valid — it is composed text, like the shell around it', () => {
+    const script = pageCheckScript('https://x.e2b.app', ['/a', "/it's"]);
+    const body = script.slice(script.indexOf('\n') + 1, script.indexOf('\nNBAI_EOF'));
+    expect(() => new Function(`return (async () => {${body.replace(/^import .*$/m, '')}})`)).not.toThrow();
+  });
+});
+
+describe('vitalsVerdict — refuses to grade what it could not see', () => {
+  it('an UNSETTLED page is not graded, and says the value is only a floor', () => {
+    const v = vitalsVerdict({ settled: false, vitals: { lcp: 2900, cls: 0.02, ttfb: 100 } });
+    expect(v.graded).toBe(false);
+    expect(v.poor).toEqual([]);
+    expect(v.note).toContain('at least 2900ms');
+    expect(v.note).toContain('not graded');
+  });
+
+  it('grades a settled page against Google\'s own thresholds', () => {
+    expect(vitalsVerdict({ settled: true, vitals: { lcp: 1200, cls: 0.01, ttfb: 50 } }).poor).toEqual([]);
+    expect(vitalsVerdict({ settled: true, vitals: { lcp: 5200, cls: 0.01, ttfb: 50 } }).poor[0]).toContain('LCP 5200ms');
+    expect(vitalsVerdict({ settled: true, vitals: { lcp: 900, cls: 0.4, ttfb: 50 } }).poor[0]).toContain('CLS 0.4');
+  });
+
+  it('only CLEARLY-BAD values are flagged — a middling number is not an alarm', () => {
+    // These are measured on a 2-vCPU sandbox against a cold dev server. Treating "needs improvement"
+    // as a finding would frighten people about an app that is fine on their users' devices.
+    expect(vitalsVerdict({ settled: true, vitals: { lcp: 3200, cls: 0.15, ttfb: 50 } }).poor).toEqual([]);
+  });
+
+  it('no measurement at all is silence, not a pass', () => {
+    expect(vitalsVerdict({ settled: true, vitals: null }).note).toBe('');
+    expect(vitalsVerdict({ settled: true }).graded).toBe(false);
+  });
+});
+
+describe('performance is reported ALONGSIDE the render verdict, never as one', () => {
+  it('a slow page still counts as rendered', () => {
+    const r = { ...classifyPage({ route: '/a', status: 200, text: 50, errors: [] }), settled: true, vitals: { lcp: 6000, cls: 0, ttfb: 10 } };
+    const s = summarizePageCheck([r]);
+    expect(s.ok).toBe(true);                       // failing a build over a sandbox number is a false alarm
+    expect(s.summary).toContain('rendered');
+    expect(s.summary).toContain('LCP 6000ms');
+  });
+
+  it('says WHERE it was measured, so a sandbox number is not read as the user\'s experience', () => {
+    const r = { ...classifyPage({ route: '/a', status: 200, text: 50, errors: [] }), settled: true, vitals: { lcp: 6000, cls: 0, ttfb: 10 } };
+    expect(summarizePageCheck([r]).summary).toContain("preview sandbox (not your users' devices)");
+  });
+
+  it('a healthy page adds no performance noise at all', () => {
+    const r = { ...classifyPage({ route: '/a', status: 200, text: 50, errors: [] }), settled: true, vitals: { lcp: 800, cls: 0, ttfb: 10 } };
+    expect(summarizePageCheck([r]).summary).not.toContain('sandbox');
+  });
+});
+
+describe('parsePageCheck carries the measurement, and refuses a partial one', () => {
+  it('reads settled and vitals', () => {
+    const line = 'NBAI_PAGE:{"route":"/a","status":200,"text":9,"errors":[],"settled":true,"vitals":{"lcp":1200,"cls":0.02,"ttfb":40}}';
+    const [r] = parsePageCheck(line);
+    expect(r.settled).toBe(true);
+    expect(r.vitals).toEqual({ lcp: 1200, cls: 0.02, ttfb: 40 });
+  });
+
+  it('a half-filled vitals object is not a measurement', () => {
+    const line = 'NBAI_PAGE:{"route":"/a","status":200,"text":9,"errors":[],"settled":true,"vitals":{"lcp":1200}}';
+    expect(parsePageCheck(line)[0].vitals).toBeNull();
+  });
+
+  it('an older line without the new fields still parses', () => {
+    const [r] = parsePageCheck('NBAI_PAGE:{"route":"/a","status":200,"text":9,"errors":[]}');
+    expect(r.verdict).toBe('ok');
+    expect(r.settled).toBe(false);
+    expect(r.vitals).toBeNull();
   });
 });

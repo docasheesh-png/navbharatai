@@ -33,6 +33,16 @@ export const TOOLS_DIR = '/home/user/.e-tools';
 export const PAGE_LOAD_TIMEOUT_MS = 12_000;
 
 /**
+ * How long to let a page go QUIET before measuring it.
+ *
+ * This is the number that decides whether the vitals below are honest. A fixed short window can only
+ * ever observe an LCP smaller than itself, so every page would score "good" — a false pass, which is
+ * worse than no measurement at all. Waiting for network idle (capped here) lets most pages settle, and
+ * when one does not, we record that and refuse to grade it.
+ */
+export const SETTLE_TIMEOUT_MS = 3_000;
+
+/**
  * The app's own PAGE routes, read from its source.
  *
  * Covers the three conventions a generated app actually uses: React Router's `<Route path>`, Next's App
@@ -109,16 +119,35 @@ const base = ${JSON.stringify(base)};
 const routes = ${list};
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 for (const route of routes) {
-  const out = { route, status: null, text: 0, errors: [] };
+  const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null };
   const page = await browser.newPage();
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
   try {
     const res = await page.goto(base + route, { waitUntil: 'domcontentloaded', timeout: ${PAGE_LOAD_TIMEOUT_MS} });
     out.status = res ? res.status() : null;
-    // A client-rendered app paints AFTER domcontentloaded; give it a moment before judging it blank.
-    await page.waitForTimeout(1200);
+    // A client-rendered app paints AFTER domcontentloaded, so wait for the page to go QUIET rather than
+    // for a fixed guess. This is also what makes the numbers below honest: a fixed 1.2s window could
+    // only ever observe an LCP under 1.2s, so every page would score "good" — a false pass. When the
+    // page does NOT settle in time we say so, and refuse to grade it, instead of reporting a floor as
+    // if it were the real value. On a quick preview networkidle usually resolves well under the cap,
+    // so in practice this is often FASTER than the fixed wait it replaced.
+    out.settled = await page.waitForLoadState('networkidle', { timeout: ${SETTLE_TIMEOUT_MS} }).then(() => true).catch(() => false);
+    await page.waitForTimeout(300);
     out.text = await page.evaluate(() => (document.body ? document.body.innerText.trim().length : 0));
+    // Real Web Vitals, read from the page itself — no Lighthouse, no extra navigation, no dependency.
+    // buffered:true hands us the entries that already happened before we started observing.
+    out.vitals = await page.evaluate(() => new Promise((resolve) => {
+      let lcp = 0; let cls = 0;
+      try {
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) lcp = Math.max(lcp, e.startTime); })
+          .observe({ type: 'largest-contentful-paint', buffered: true });
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) cls += e.value; })
+          .observe({ type: 'layout-shift', buffered: true });
+      } catch (err) { /* an engine without these entry types reports nothing rather than a wrong number */ }
+      const nav = performance.getEntriesByType('navigation')[0];
+      setTimeout(() => resolve({ lcp: Math.round(lcp), cls: Math.round(cls * 1000) / 1000, ttfb: nav ? Math.round(nav.responseStart) : null }), 200);
+    }));
   } catch (e) {
     out.errors.push(String(e && e.message ? e.message : e).slice(0, 200));
   }
@@ -132,10 +161,23 @@ NODE_PATH=${TOOLS_DIR}/node_modules PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.brows
 
 export type PageVerdict = 'ok' | 'blank' | 'server-error' | 'script-error' | 'unreachable';
 
+/** What the page reported about itself. Absent when the browser could not measure it. */
+export interface PageVitals {
+  /** Largest Contentful Paint, ms. */
+  lcp: number;
+  /** Cumulative Layout Shift, unitless. */
+  cls: number;
+  /** Time to first byte, ms — null when the navigation entry was unavailable. */
+  ttfb: number | null;
+}
+
 export interface PageResult {
   route: string;
   status: number | null;
   text: number;
+  /** Did the page go quiet before we measured it? When false, the vitals are NOT graded. */
+  settled?: boolean;
+  vitals?: PageVitals | null;
   errors: string[];
   verdict: PageVerdict;
   /** What this means, in the words the report should use. */
@@ -168,6 +210,37 @@ export function classifyPage(r: { route: string; status: number | null; text: nu
   return { ...base, verdict: 'ok', note: `${r.route} rendered` };
 }
 
+/**
+ * Grade the vitals — or honestly refuse to.
+ *
+ * TWO RULES, BOTH HONESTY RATHER THAN TASTE:
+ *
+ *  1. AN UNSETTLED PAGE IS NOT GRADED. The observation window can only ever see an LCP smaller than
+ *     itself, so grading a page that never went quiet would report "good" for the slowest pages in the
+ *     app — precisely backwards, and a false pass is worse than no measurement.
+ *
+ *  2. ONLY CLEARLY-BAD VALUES ARE FLAGGED, and the numbers are labelled as what they are: a measurement
+ *     taken inside a 2-vCPU sandbox on a cold dev server, not the user's machine on a production build.
+ *     Reporting a sandbox LCP as if it were someone's real experience would frighten people about an app
+ *     that is fine. So the thresholds are Google's own, applied only to call out the genuinely poor.
+ * PURE.
+ */
+export function vitalsVerdict(r: { settled?: boolean; vitals?: PageVitals | null }): { graded: boolean; poor: string[]; note: string } {
+  const v = r.vitals;
+  if (!v) return { graded: false, poor: [], note: '' };
+  if (!r.settled) {
+    return { graded: false, poor: [], note: `still loading when the check ended — LCP was at least ${Math.round(v.lcp)}ms, so it was not graded` };
+  }
+  const poor: string[] = [];
+  if (v.lcp > 4000) poor.push(`slow to show its main content (LCP ${Math.round(v.lcp)}ms)`);
+  if (v.cls > 0.25) poor.push(`content jumps around while loading (CLS ${v.cls})`);
+  return {
+    graded: true,
+    poor,
+    note: poor.length > 0 ? poor.join(', ') : `LCP ${Math.round(v.lcp)}ms, CLS ${v.cls}`,
+  };
+}
+
 /** Read the script's marker lines. Anything unparseable is dropped rather than guessed at. PURE. */
 export function parsePageCheck(stdout: string | null | undefined): PageResult[] {
   const out: PageResult[] = [];
@@ -175,14 +248,22 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
     const at = line.indexOf('NBAI_PAGE:');
     if (at < 0) continue;
     try {
-      const raw = JSON.parse(line.slice(at + 'NBAI_PAGE:'.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown };
+      const raw = JSON.parse(line.slice(at + 'NBAI_PAGE:'.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown };
       if (typeof raw.route !== 'string' || !raw.route) continue;
-      out.push(classifyPage({
-        route: raw.route,
-        status: typeof raw.status === 'number' ? raw.status : null,
-        text: typeof raw.text === 'number' ? raw.text : 0,
-        errors: Array.isArray(raw.errors) ? raw.errors.filter((e): e is string => typeof e === 'string') : [],
-      }));
+      const rv = raw.vitals as { lcp?: unknown; cls?: unknown; ttfb?: unknown } | null | undefined;
+      out.push({
+        ...classifyPage({
+          route: raw.route,
+          status: typeof raw.status === 'number' ? raw.status : null,
+          text: typeof raw.text === 'number' ? raw.text : 0,
+          errors: Array.isArray(raw.errors) ? raw.errors.filter((e): e is string => typeof e === 'string') : [],
+        }),
+        settled: raw.settled === true,
+        // A partial vitals object is not a measurement — take it only when both numbers are real.
+        vitals: rv && typeof rv.lcp === 'number' && typeof rv.cls === 'number'
+          ? { lcp: rv.lcp, cls: rv.cls, ttfb: typeof rv.ttfb === 'number' ? rv.ttfb : null }
+          : null,
+      });
     } catch { /* a truncated line is not evidence — dropping it is honest, inventing a verdict is not */ }
   }
   return out;
@@ -197,11 +278,17 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
 export function summarizePageCheck(results: PageResult[]): { ok: boolean; summary: string } {
   if (results.length === 0) return { ok: true, summary: 'No additional page routes were found to check.' };
   const bad = results.filter((r) => r.verdict !== 'ok');
+  // Performance is reported ALONGSIDE the render verdict, never as one: a slow page still renders, and
+  // failing a build over a number measured on a 2-vCPU sandbox would be a false alarm about a fine app.
+  const slow = results.map((r) => ({ route: r.route, v: vitalsVerdict(r) })).filter((x) => x.v.poor.length > 0);
+  const perf = slow.length > 0
+    ? ` Measured in the preview sandbox (not your users' devices): ${slow.map((x) => `${x.route} is ${x.v.poor.join(' and ')}`).join('; ')}.`
+    : '';
   if (bad.length === 0) {
-    return { ok: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.` };
+    return { ok: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.${perf}` };
   }
   return {
     ok: false,
-    summary: `${bad.length} of ${results.length} page route${results.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}`,
+    summary: `${bad.length} of ${results.length} page route${results.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}.${perf}`,
   };
 }

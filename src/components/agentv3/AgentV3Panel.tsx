@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import { authedFetch } from '../../lib/authedFetch';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
@@ -2770,6 +2771,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           ownRepo={state.ownRepo}
           githubConnected={!!ghToken()}
           onConnectGitHub={() => void connectGitHub()}
+          authedFetch={authedFetch}
+          // Lands on the database FORM, not the settings root — sending the user to a menu mid-publish
+          // is how a helpful button becomes a dead end.
+          onOpenDatabaseSettings={() => {
+            setShowHostingChooser(false);
+            window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
+          }}
           onClose={() => setShowHostingChooser(false)}
           // Close ONLY when the publish genuinely started; otherwise hand the reason back so the
           // chooser shows it inline (never a modal that vanishes with nothing happening).

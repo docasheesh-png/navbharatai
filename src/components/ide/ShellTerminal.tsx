@@ -424,7 +424,49 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     if (typeof payload.cursor === 'number') cursorRef.current = payload.cursor;
   }
 
-  async function sendInput(data: string): Promise<void> {
+  /**
+   * ORDERED, COALESCED input pipeline (admin 2026-08-05, "terminal bahut slow hai — rocksolid banao").
+   *
+   * The old sendInput fired one POST per keystroke, unawaited. Two defects, one of them CORRECTNESS:
+   * two POSTs in flight can arrive out of order, so fast-typing "ls" could reach the PTY as "sl";
+   * and a phone paid a full network round-trip per character, which read as lag and burned a rate-
+   * limit slot per key. Now everything funnels into ONE buffer with ONE request in flight: keys
+   * arriving while a batch is airborne coalesce into the next batch. Arrival order is guaranteed by
+   * construction, a typing burst costs one or two requests instead of a dozen, and echo latency is
+   * one round-trip for the whole burst. A failed batch retries once (a keystroke is not droppable),
+   * then surfaces on the terminal instead of vanishing.
+   */
+  const outBufRef = useRef('');
+  const pumpingRef = useRef(false);
+  const OUT_BUF_CAP = 8192;                    // the PTY's own per-write input cap (ShellSessions.ts)
+
+  async function postInputBatch(batch: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/agentv3/shell/input', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ workspaceId, userId, email: email || '', shellId: shellIdRef.current, data: batch }),
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async function pumpInput(): Promise<void> {
+    if (pumpingRef.current) return;            // single flight — this IS the ordering guarantee
+    pumpingRef.current = true;
+    try {
+      while (outBufRef.current && shellIdRef.current) {
+        const batch = outBufRef.current;
+        outBufRef.current = '';
+        if (!(await postInputBatch(batch)) && !(await postInputBatch(batch))) {
+          termRef.current?.write('\r\n\x1b[31m[input did not reach the terminal — check your connection]\x1b[0m\r\n');
+          return;
+        }
+      }
+    } finally { pumpingRef.current = false; }
+  }
+
+  function sendInput(data: string): void {
     const shellId = shellIdRef.current;
     if (!shellId || !workspaceId) {
       // No shell YET. If one is on its way, hold the keys instead of dropping them — they are
@@ -440,25 +482,35 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       }
       return;
     }
-    try {
-      await fetch('/api/agentv3/shell/input', {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({ workspaceId, userId, email: email || '', shellId, data }),
-      });
-    } catch { /* the stream's own reconnect surfaces a real outage */ }
+    outBufRef.current = (outBufRef.current + data).slice(0, OUT_BUF_CAP);
+    void pumpInput();
   }
 
-  async function sendResize(cols: number, rows: number): Promise<void> {
-    const shellId = shellIdRef.current;
-    if (!shellId || !workspaceId) return;
-    try {
-      await fetch('/api/agentv3/shell/resize', {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({ workspaceId, userId, email: email || '', shellId, cols, rows }),
-      });
-    } catch { /* cosmetic until the next resize */ }
+  /**
+   * Resize is DEBOUNCED and deduplicated: a panel drag or phone rotation fires ResizeObserver dozens
+   * of times a second, and each used to be its own POST from the same shared rate bucket. Only the
+   * settled size matters to the PTY — send that one, and only when it actually changed.
+   */
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSizeRef = useRef('');
+  function sendResize(cols: number, rows: number): void {
+    if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+    resizeTimerRef.current = setTimeout(() => {
+      const shellId = shellIdRef.current;
+      if (!shellId || !workspaceId) return;
+      const key = cols + 'x' + rows;
+      if (key === lastSizeRef.current) return;
+      lastSizeRef.current = key;
+      void (async () => {
+        try {
+          await fetch('/api/agentv3/shell/resize', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ workspaceId, userId, email: email || '', shellId, cols, rows }),
+          });
+        } catch { /* cosmetic until the next resize */ }
+      })();
+    }, 200);
   }
 
   const restart = () => {
@@ -469,6 +521,8 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     shellIdRef.current = null;
     cursorRef.current = 0;
     pendingInputRef.current = '';
+    outBufRef.current = '';
+    lastSizeRef.current = '';
     connectingRef.current = false;
     queueHintShownRef.current = false;
     term.reset();

@@ -26006,3 +26006,36 @@ while the sandbox wakes now WORKS — the exact scenario of the admin's screensh
 no Backspace double-handling, pointer/layout neutrality, dead-shell disarm) → suite 1073 files /
 11983 tests green, tsc clean, bundle within budget. The command bar STAYS — it is the better tool for
 long commands and the honest fallback if any device surprises us again.
+
+## 2026-08-06 — Terminal rock-solid pass: the 60-keystrokes-per-hour fiction + the ordering hole (PR #2142)
+
+**Admin: "terminal ko jitna ho sake maximum polish karo, rocksolid banao — bahut slow hai."** Measured
+before touching anything; three real roots found, all fixed in one pass:
+
+**1. THE SHOWSTOPPER — keystrokes on a 60/hour budget.** `/shell/input` and `/shell/resize` sat on the
+shared `workspaceRateLimiter` (60 requests/hour authed, shared with ~44 other workspace routes). A
+keystroke is one request: the "real Replit-style shell" died 429 after roughly ONE MINUTE of typing,
+and every phone rotation spent more of the bucket on resize events. Identical bug class to the zip-
+chunk 5 GB fiction — a ceiling that makes the advertised feature impossible is fiction, not
+protection. Now on their own honest bucket (`SHELL_INPUT_RATE`: 7200/hr authed — 2 batched
+requests/second sustained — 1800 anon; the real resource guards are MAX_SHELLS_PER_WORKSPACE and the
+PTY input cap). `/shell/open` + `/close` deliberately STAY on the strict shared bucket.
+
+**2. CORRECTNESS, not just speed — input could arrive OUT OF ORDER.** The client fired one unawaited
+POST per keystroke; two in flight can land reversed, so fast-typed "ls" could reach the PTY as "sl".
+Replaced with a single-flight coalescing pipeline: one buffer, one request airborne at a time, keys
+arriving mid-flight coalesce into the next batch. Ordering is guaranteed BY CONSTRUCTION, a typing
+burst costs 1–2 requests instead of a dozen (this is also what makes the 7200/hr budget generous),
+echo latency is one round-trip per burst, and a failed batch retries once then surfaces on the
+terminal — a keystroke never vanishes silently. Resize is debounced (200 ms) + deduplicated: a drag
+or rotation is one settled POST, not dozens.
+
+**3. The wake seeded files ONE ROUND-TRIP AT A TIME.** Each E2B write is a network hop; a 30-file
+project seeded serially added many seconds to every "Starting your workspace…". Now parallel batches
+of 8 — roughly the slowest file per batch instead of the sum of all.
+
+**Tests:** `tests/shellRateLimit.test.ts` (new, 4 — pins input/resize OFF the 60/hr bucket forever,
+the budget floor, open/close staying strict, and the parallel wake) + 6 pipeline invariants in
+`shellTerminalInput.test.ts` (single-flight, coalescing, cap, retry-once + honest failure, resize
+debounce/dedupe, restart drain). Full gate: 1073 files / 11993 tests green, both tsc clean, bundle
+within budget, real boot smoke (health 200; unauth shell input correctly gated).

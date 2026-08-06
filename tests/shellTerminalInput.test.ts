@@ -174,3 +174,49 @@ describe('ShellTerminal in-box typing bridge', () => {
     expect(fb).toMatch(/status\.kind === 'exited' \|\| status\.kind === 'unavailable'\) return/);
   });
 });
+
+/**
+ * THE ORDERED INPUT PIPELINE (admin 2026-08-05: "terminal bahut slow hai — rocksolid banao").
+ *
+ * One POST per keystroke had a correctness hole, not just a speed one: two requests in flight can
+ * arrive out of order, so fast-typed "ls" could reach the PTY as "sl". A single-flight coalescing
+ * buffer fixes ordering BY CONSTRUCTION and collapses a typing burst into one or two requests.
+ */
+describe('ShellTerminal input pipeline', () => {
+  it('exactly one batch in flight at a time — the ordering guarantee', () => {
+    const pump = code.slice(code.indexOf('async function pumpInput'));
+    expect(pump).toContain('if (pumpingRef.current) return;');
+    expect(pump.slice(0, 700)).toContain('pumpingRef.current = true;');
+    expect(pump).toContain('finally { pumpingRef.current = false; }');
+  });
+
+  it('keys arriving mid-flight coalesce into the NEXT batch instead of racing it', () => {
+    const send = code.slice(code.indexOf('function sendInput'));
+    expect(send).toContain('outBufRef.current = (outBufRef.current + data)');
+    expect(send).toContain('void pumpInput()');
+  });
+
+  it('the buffer is capped at the PTY input limit', () => {
+    expect(code).toContain('OUT_BUF_CAP = 8192');
+    expect(code).toMatch(/\.slice\(0, OUT_BUF_CAP\)/);
+  });
+
+  it('a failed batch retries once, then tells the user — a keystroke must never vanish silently', () => {
+    const pump = code.slice(code.indexOf('async function pumpInput'));
+    expect(pump).toContain('await postInputBatch(batch)) && !(await postInputBatch(batch))');
+    expect(pump).toContain('input did not reach the terminal');
+  });
+
+  it('resize is debounced and deduplicated — a drag or rotation is one settled POST, not dozens', () => {
+    const rs = code.slice(code.indexOf('function sendResize'));
+    expect(rs).toContain('clearTimeout(resizeTimerRef.current)');
+    expect(rs).toContain('if (key === lastSizeRef.current) return;');
+    expect(rs).toContain('200');
+  });
+
+  it('restart clears the pipeline so a stale batch cannot leak into the new shell', () => {
+    const restart = code.slice(code.indexOf('const restart = ()'));
+    expect(restart).toContain("outBufRef.current = ''");
+    expect(restart).toContain("lastSizeRef.current = ''");
+  });
+});

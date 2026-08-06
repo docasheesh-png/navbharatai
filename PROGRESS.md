@@ -26618,3 +26618,25 @@ local server so a late start heals without a rewrite — it simply can no longer
 Two copies of this is how one of them silently rots. There is one.
 
 Gate: tsc clean both projects, 1080 files / 12,147 tests, exit 0.
+
+## 2026-08-06 — THE DOMAIN BUG, CAUGHT BY ITS OWN CONFESSION (PR #2156)
+
+**The #2152 detail line paid for itself on its first screenshot.** The admin retried `mitrify.in` and
+the bracket line read: `Custom Domain "projects/[project]/sites/nbai-…/customDomains/mitrify.in" not
+found.` — one look, exact root cause.
+
+**Root cause.** `attachCustomDomain` probes whether the domain already exists BEFORE creating it. For
+a NEW domain, Google answers with a not-found — the completely normal starting state. But the probe's
+404-detection regex looked for `HTTP 404|NOT_FOUND` while Google's real prose says `… not found.`
+(lowercase, spaced). Match failed ⇒ the normal answer was rethrown as a fatal error ⇒
+`customDomains.create` NEVER RAN — for every domain, every time. "Sabhi website ke liye" explained in
+one line.
+
+**Fix (class, not instance).** `api()` now throws `HostingApiError` carrying the STRUCTURED
+`httpStatus` + Google's `error.status` enum; `isNotFound(err)` judges by those first, prose only as a
+last resort (and that fallback now also matches the spaced spelling). Sibling hunt: `ensureSite`'s
+409/already-exists detection had the same prose-matching fragility — upgraded to structured status
+the same way. Regression tests encode the LITERAL message from the admin's screenshot, the structured
+paths, and that real errors (permission, quota) are never swallowed as not-found.
+
+Full gate: 1082 files / 12175 tests green, both tsc clean, bundle within budget.

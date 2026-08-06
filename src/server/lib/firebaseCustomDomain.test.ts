@@ -241,3 +241,26 @@ describe('customDomainErrorMessage — the right answer per failure class (never
     expect(m).not.toContain('nbai-abc123');
   });
 });
+
+describe('isNotFound — the exact live failure of 2026-08-06, encoded', () => {
+  it("recognizes Google's real prose: `Custom Domain \"…\" not found.` — lowercase, spaced", async () => {
+    const { isNotFound } = await import('./firebaseCustomDomain');
+    // The literal message from the admin's screenshot. The old regex (`HTTP 404|NOT_FOUND`) missed
+    // it, so the pre-attach existence probe treated the NORMAL "new domain" answer as fatal and
+    // customDomains.create never ran — for every domain, every time.
+    expect(isNotFound(new Error('Custom Domain "projects/p/sites/s/customDomains/mitrify.in" not found.'))).toBe(true);
+  });
+
+  it('judges by STRUCTURED status first — prose spelling can never break it again', async () => {
+    const { isNotFound, HostingApiError } = await import('./firebaseCustomDomain');
+    expect(isNotFound(new HostingApiError('anything at all', 404))).toBe(true);
+    expect(isNotFound(new HostingApiError('anything at all', 400, 'NOT_FOUND'))).toBe(true);
+    expect(isNotFound(new HostingApiError('permission denied', 403, 'PERMISSION_DENIED'))).toBe(false);
+  });
+
+  it('a real error is never swallowed as a not-found', async () => {
+    const { isNotFound } = await import('./firebaseCustomDomain');
+    expect(isNotFound(new Error('The caller does not have permission'))).toBe(false);
+    expect(isNotFound(new Error('quota exceeded'))).toBe(false);
+  });
+});

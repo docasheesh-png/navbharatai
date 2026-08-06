@@ -26486,6 +26486,36 @@ Domain Connect support is absent per training knowledge; flag-gated until one li
 D — in-app domain purchase: NOT built; needs the admin's reseller account (ResellerClub/GoDaddy
 reseller), real money + KYC — no fake Buy button before that exists (second absolute rule).
 
+## 2026-08-06 — Auto-DNS Slices B + C: Domain Connect one-click + Hostinger direct (PR #2155)
+
+**Slice B — Domain Connect** (`domainConnect.ts`): real protocol discovery (`_domainconnect.<domain>`
+TXT → registrar settings API → sync-UX apply link for OUR template, records carried as bounded
+template variables a1/a2/aaaa1/aaaa2/txt1/txt2). HONESTY GATE: the apply button exists ONLY behind
+`AGENTV3_DOMAIN_CONNECT=on`, because the link 404s at the registrar until our template is REGISTERED
+with them — the UI never shows a button that cannot work. Unsupported registrars get an honest
+pointer to the other two paths. **ADMIN EXTERNAL STEP (required before flag-on): submit the
+NavBharatAI template to the Domain Connect template registry (github.com/Domain-Connect/Templates —
+GoDaddy consumes it); template must declare exactly the variable names above.**
+
+**Slice C — Hostinger direct** (`hostingerDns.ts`): Hostinger is not in the Domain Connect ecosystem;
+their public API (developers.hostinger.com) is. Flow: user pastes an hPanel API token ONCE → we PUT
+the attach records into THEIR zone (`overwrite:false` — the rest of their zone untouched, mail safe)
+→ **token used for that single call and never stored/logged/echoed** (server passes it straight
+through; client clears state on success; both test-pinned). 401/403 get the one hint that helps
+(fresh token in hPanel). **HONEST STATUS: endpoint shapes follow Hostinger's public API per this
+build's knowledge and were NOT live-verifiable from the dev sandbox — hence default-OFF flag
+`AGENTV3_HOSTINGER_DNS`; the first live attempt either works or names exactly what to fix. Needs ONE
+live verification before wide exposure.**
+
+Both routes ownership-checked; capabilities ride the connect response so nothing renders that the
+server cannot deliver. 15 new tests (discovery incl. NXDOMAIN, apply-URL bounds, flag gates, zone
+mapping @-apex/relative, overwrite:false, token honesty, route/client invariants). Full gate: 1078
+files / 12147 tests green, both tsc clean, bundle within budget.
+
+**Slice D (domain selling) — NOT built, deliberately:** needs the admin's reseller account
+(ResellerClub is the India-first option) + KYC + payment wiring. A Buy button before that exists
+would be a fake (second absolute rule). Admin prerequisites recorded; build starts when they exist.
+
 ## 2026-08-06 (6) — correcting the record on the no-root Postgres, and closing the gap it left
 
 The admin asked whether the plan I described was done. Two corrections, both mine, both tested rather
@@ -26588,3 +26618,25 @@ local server so a late start heals without a rewrite — it simply can no longer
 Two copies of this is how one of them silently rots. There is one.
 
 Gate: tsc clean both projects, 1080 files / 12,147 tests, exit 0.
+
+## 2026-08-06 — THE DOMAIN BUG, CAUGHT BY ITS OWN CONFESSION (PR #2156)
+
+**The #2152 detail line paid for itself on its first screenshot.** The admin retried `mitrify.in` and
+the bracket line read: `Custom Domain "projects/[project]/sites/nbai-…/customDomains/mitrify.in" not
+found.` — one look, exact root cause.
+
+**Root cause.** `attachCustomDomain` probes whether the domain already exists BEFORE creating it. For
+a NEW domain, Google answers with a not-found — the completely normal starting state. But the probe's
+404-detection regex looked for `HTTP 404|NOT_FOUND` while Google's real prose says `… not found.`
+(lowercase, spaced). Match failed ⇒ the normal answer was rethrown as a fatal error ⇒
+`customDomains.create` NEVER RAN — for every domain, every time. "Sabhi website ke liye" explained in
+one line.
+
+**Fix (class, not instance).** `api()` now throws `HostingApiError` carrying the STRUCTURED
+`httpStatus` + Google's `error.status` enum; `isNotFound(err)` judges by those first, prose only as a
+last resort (and that fallback now also matches the spaced spelling). Sibling hunt: `ensureSite`'s
+409/already-exists detection had the same prose-matching fragility — upgraded to structured status
+the same way. Regression tests encode the LITERAL message from the admin's screenshot, the structured
+paths, and that real errors (permission, quota) are never swallowed as not-found.
+
+Full gate: 1082 files / 12175 tests green, both tsc clean, bundle within budget.

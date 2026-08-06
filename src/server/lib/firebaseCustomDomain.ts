@@ -166,6 +166,11 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
+/** An api() failure carrying the STRUCTURED status, so callers never string-match prose. */
+export class HostingApiError extends Error {
+  constructor(message: string, public httpStatus: number, public apiStatus?: string) { super(message); }
+}
+
 async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const headers = await authHeaders();
   const res = await fetch(`${HOSTING_API}${path}`, {
@@ -176,7 +181,12 @@ async function api<T>(path: string, init?: { method?: string; body?: unknown }):
   const data = await res.json().catch(() => ({} as any));
   if (!res.ok) {
     const msg = (data as any)?.error?.message || `Firebase Hosting API error (HTTP ${res.status})`;
-    throw new Error(msg);
+    // ROOT CAUSE of "sabhi website ke liye" (admin screenshots 2026-08-06, closed BY the detail line
+    // this same incident added): callers used to regex the MESSAGE for 'HTTP 404|NOT_FOUND', but
+    // Google's real text reads `Custom Domain "…" not found.` — lowercase, spaced — so the pre-attach
+    // existence probe treated its perfectly NORMAL "new domain, nothing here yet" answer as a fatal
+    // error and aborted before customDomains.create ever ran. Status is now carried as DATA.
+    throw new HostingApiError(msg, res.status, (data as any)?.error?.status);
   }
   return data as T;
 }
@@ -193,9 +203,11 @@ export async function ensureSite(workspaceId: string): Promise<string> {
       body: {},
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Already exists → idempotent success. Anything else is a real failure.
-    if (!/already exists|HTTP 409|ALREADY_EXISTS/i.test(msg)) throw err;
+    // Already exists → idempotent success. Structured status first (the not-found lesson: Google's
+    // prose and its status enums do not spell things the same way); prose only as a fallback.
+    const dup = (err instanceof HostingApiError && (err.httpStatus === 409 || err.apiStatus === 'ALREADY_EXISTS'))
+      || /already exists|HTTP 409|ALREADY_EXISTS/i.test(err instanceof Error ? err.message : String(err));
+    if (!dup) throw err;
   }
   return siteId;
 }
@@ -226,10 +238,22 @@ async function getCustomDomainRaw(siteId: string, domain: string): Promise<ApiCu
       `/projects/${FIREBASE_PROJECT}/sites/${siteId}/customDomains/${encodeURIComponent(domain)}`,
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/HTTP 404|NOT_FOUND/i.test(msg)) return null;
+    if (isNotFound(err)) return null;   // a domain not attached YET is the normal starting state
     throw err;
   }
+}
+
+/**
+ * "This resource does not exist" — judged by structured status first, prose only as a last resort.
+ * Pure, exported for tests: the exact live failure was Google's `… not found.` message slipping past
+ * a `NOT_FOUND` regex, which made every fresh domain look like a fatal error.
+ */
+export function isNotFound(err: unknown): boolean {
+  if (err instanceof HostingApiError) {
+    return err.httpStatus === 404 || err.apiStatus === 'NOT_FOUND';
+  }
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /HTTP 404|NOT_FOUND|not\s+found/i.test(msg);
 }
 
 /** Poll the current status of a workspace's custom domain (null if never attached). */

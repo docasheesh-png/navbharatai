@@ -27164,3 +27164,49 @@ was OUR bug, not the imported app's.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **12,350 tests, 0 failures**
 (11 new, including the verbatim reported case: port up + "Cannot GET" body ⇒ never `live`).
+
+## 2026-08-06 — Learning from mistakes: the loop existed, but the recall key was wrong
+
+**Admin ask:** *"app kam se kam galti kare — galtiyon se seekhne wala system, ek baar wali galti wapas
+repeat na ho. Agar hai to 100x rocksolid karo."*
+
+**AUDIT FIRST (it does exist, and it is genuinely wired).** `Reflection` distils each build's
+errors/fixes into lessons; `BuildLessons` turns the build report's root cause into one concrete lesson;
+`buildRetrospective` captures failed builds; `UserLessonBrain` promotes proven fixes across a user's
+projects; `RecalledLessons` (with `KnowledgeEvolution` dedup/conflict/confidence) injects them into the
+next build. All real, all called. So the honest answer was "yes it exists" — and then the audit found
+the one broken link.
+
+**THE BROKEN LINK — the recall KEY:**
+```js
+const hits = lessonsMem.recall(prompt, 8);   // matched against the USER'S PROMPT
+```
+A lesson is about a **mistake** ("the dev server bound its port before wiring page routes, so every
+page 404'd"). A prompt is about a **wish** ("home page par green dot hatao"). They share almost no
+words, so similarity search cannot connect them. The lesson was stored, deduped, ranked and formatted
+beautifully — and then never surfaced at the one moment it mattered: when the same failure recurred.
+
+**THE FIX — `MistakeLedger.ts` (pure, 22 tests), deterministic instead of similarity-based:**
+- A mistake is keyed by its normalized SIGNATURE, reusing `Reflection.errorSignature` — so "the same
+  error" has exactly ONE definition across Reflection, the recurring-error detector and the ledger. A
+  second definition would drift, and a drifted signature silently breaks the only thing this exists for.
+- A fix is recorded as PROVEN **only when the build actually succeeded**. A fix harvested from a
+  still-failing build is a guess, and a learning system that stores guesses starts confidently teaching
+  wrong answers — that would be worse than having no system.
+- `knownFixFor` is an EXACT key lookup: it cannot miss because the wording differs (the port number in
+  `EADDRINUSE :::5173` vs `:::3000` is normalized away), and cannot fire on an unrelated lesson that
+  merely ranked well.
+- **It measures itself.** `repeatsAfterFix` is incremented at the moment a solved mistake comes back,
+  and `repeatStats` reports the repeat RATE. A learning system that cannot show its repeat rate is
+  faith, not engineering; `worstRepeats` names what to harden next.
+- Bounded (120 mistakes, 4 guards per prompt); a solved mistake outranks an unsolved one in the trim,
+  because the proven fix is the valuable part.
+
+**WIRED, not just built** (source-contract tested — a module nobody calls is dead code):
+- READ at build start, keyed by the ERROR EPISODES this project actually hit (never the prompt);
+- WRITTEN at build end from the report's real unresolved errors, next to the existing brain promotion;
+- both call sites best-effort, so the ledger can never affect a build result;
+- per USER (`user_mistakes_v3/{userId}`), mirroring UserLessonBrainStore — a mistake solved in project A
+  must not be re-made in project B.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **12,378 tests, 0 failures**.

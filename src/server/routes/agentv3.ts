@@ -220,6 +220,7 @@ import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHea
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
+import { mistakeLedgerStore } from '../AgentV3/MistakeLedger';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -7973,6 +7974,23 @@ export function registerAgentV3Routes(app: Express): void {
         if (lessons) buildPrompt = `${lessons}\n\n---\n\n${buildPrompt}`;
       } catch { /* recall is best-effort — never blocks a build */ }
 
+      // KNOWN-MISTAKE GUARD (admin ask 2026-08-06: "ek baar wali galti wapas repeat na ho").
+      //
+      // The recall above matches lessons against the user's PROMPT. A lesson is about a MISTAKE, and a
+      // prompt is about a WISH — "green dot hatao" shares no words with "the dev server bound its port
+      // before wiring page routes", so the lesson that would prevent the repeat could never surface.
+      // This lookup is keyed by the ERROR SIGNATURES this project has actually hit, so a proven fix is
+      // recalled by IDENTITY rather than by similarity, and cannot be missed because the wording
+      // differs. '' when nothing matches ⇒ a project with no such history is byte-identical to today.
+      try {
+        const pastErrors = getWorkspaceMemory(workspaceId).snapshot().episodes
+          .filter((e) => e.kind === 'error')
+          .slice(-25)
+          .map((e) => e.text);
+        const guard = await mistakeLedgerStore.guardFor(userId, pastErrors);
+        if (guard) buildPrompt = `${guard}\n\n---\n\n${buildPrompt}`;
+      } catch { /* the guard is best-effort — never blocks a build */ }
+
       // Cross-Project Lesson Brain watermark: capture the time BEFORE the build runs. On a resumed
       // build, restoreWorkspaceMemory replays every PRIOR build's episodes into memory (re-stamped
       // with a fresh ts), so promoting the whole snapshot later would re-promote old lessons and
@@ -10611,6 +10629,20 @@ export function registerAgentV3Routes(app: Express): void {
           const promotable = result.ok ? episodes : episodes.filter((e) => (e as { kind?: string }).kind === 'note');
           userLessonBrainStore.recordBuildLessons(userId, promotable, new Date().toISOString()).catch(() => {});
         } catch { /* brain promotion is best-effort */ }
+        // MISTAKE LEDGER: fold THIS build's real failures in, keyed by signature. The proven-fix rule
+        // lives in the store — a fix is recorded only when the build actually SUCCEEDED, because a
+        // "fix" harvested from a still-failing build is a guess, and a learning system that stores
+        // guesses starts confidently teaching wrong answers.
+        try {
+          const d = buildDiag.report();
+          const errs = (d.problems ?? [])
+            .filter((p) => p.severity === 'error' && p.autoResolved !== true)
+            .map((p) => p.message)
+            .slice(0, 10);
+          if (errs.length > 0) {
+            void mistakeLedgerStore.recordBuild(userId, { ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
+          }
+        } catch { /* the ledger is best-effort — never affects the build result */ }
       }
 
       // Level 9: Persist workspace memory to Firestore so the NEXT session (or build)

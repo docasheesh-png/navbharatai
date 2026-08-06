@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { braceBlock } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
@@ -175,8 +176,12 @@ describe('The build asks — but only when it can honour a yes', () => {
 
 describe('An accepted database reaches the build that is still running', () => {
   it('the sandbox database is tried first, and only its FAILURE triggers the ask', () => {
-    const at = dispatcher.indexOf('private async ensureSandboxPostgres');
-    const fn = dispatcher.slice(at, at + 5000);
+    // The real method body, not a guessed 5000 characters. The fixed window stopped containing
+    // rescueDatabase() the moment the method grew, so indexOf returned -1 and the ordering assertion
+    // failed while the ordering itself was correct. The explicit `toContain` below now makes a missing
+    // call fail as a MISSING CALL rather than as a confusing ordering error. See helpers/sourceSlice.
+    const fn = braceBlock(dispatcher, 'private async ensureSandboxPostgres');
+    expect(fn).toContain('this.rescueDatabase()');
     expect(fn.indexOf('sandbox-postgres-provision')).toBeLessThan(fn.indexOf('this.rescueDatabase()'));
     expect(fn).toContain("if (prov?.dbVerified === false) {");
   });

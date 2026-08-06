@@ -306,6 +306,40 @@ export function provisionDiagnostics(stdout: string | null | undefined): string 
   return lines.join('\n');
 }
 
+/**
+ * WHICH ROUTE the sandbox actually got its PostgreSQL from, in one line.
+ *
+ * WHY THIS EXISTS (admin 2026-08-06). The diagnostics were recorded ONLY on failure, so a build that
+ * WORKED told us nothing about how — and the single open question about the whole fetched-Postgres path
+ * is "does it fire in the real sandbox?". Answering it needed someone to notice the right markers among
+ * a dozen and interpret them. Now the report says the answer, and a build that succeeds is evidence
+ * rather than silence.
+ *
+ * Reads only what the script actually emitted; anything it cannot see, it does not claim. PURE.
+ */
+export function provisionPathSummary(stdoutOrDiagnostics: string | null | undefined): string {
+  const text = String(stdoutOrDiagnostics ?? '');
+  const read = (key: string): string | null => {
+    const m = new RegExp(`(?:^|\\n)(?:DB_DIAG_)?${key}:([^\\n]*)`).exec(text);
+    return m ? m[1].trim() : null;
+  };
+  const pgbin = read('PGBIN');
+  if (!pgbin || pgbin === 'none') {
+    const exec = read('PGEXEC');
+    // A fetched build that downloaded but cannot RUN is a completely different problem from one that
+    // never downloaded, and the fix differs — so never collapse them into "no postgres found".
+    if (exec) return `no usable PostgreSQL — the fetched build could not run here (${exec})`;
+    return 'no PostgreSQL found or fetched';
+  }
+  const fetched = pgbin.includes('.nbai-pg');
+  if (!fetched) return `the sandbox image's own PostgreSQL (${pgbin})`;
+  const mirror = read('PGFETCH2');
+  const via = mirror === null ? 'primary host' : (mirror === 'ok' ? 'MIRROR (the primary host failed)' : `mirror attempted: ${mirror}`);
+  const client = read('PSQL');
+  const tools = !client || client === 'none' ? 'server-only build, no client tools' : `client tools present (${client})`;
+  return `FETCHED PostgreSQL via the ${via} — ${tools}`;
+}
+
 export type DbProvisionFailure = 'not-ready' | 'select1-failed' | 'no-output';
 
 export interface DbProvisionOutcome {

@@ -104,6 +104,7 @@ import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingD
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
+import { provisionPathSummary } from './sandbox/dbProvisionVerify';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival, isUserOwnedDatabaseUrl } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
@@ -629,6 +630,21 @@ export class ToolDispatcher {
         // Mitrify false-success class): provisionBackend returns a fallback URL even when Postgres
         // never came up, so this line used to promise a database the very next migrate could not
         // reach. Only a real SELECT 1 gets the checkmark; anything else says what actually happened.
+        // THE FRESH-BUILD PATH MUST LEAVE EVIDENCE TOO (admin 2026-08-06). The import path records which
+        // route the sandbox got its PostgreSQL from; this one only narrated to the user, so a from-scratch
+        // build proved nothing about whether the fetched-Postgres path fired. provisionBackend talks to
+        // the sandbox directly rather than through runCommand, so the report never saw its output either.
+        // Recorded as a command entry — the channel the report already reads — so both paths are equally
+        // answerable from a single build.
+        try {
+          this.onCommand?.({
+            command: 'nbai: provision sandbox postgres',
+            exitCode: prov?.dbVerified === true ? 0 : 1,
+            stdout: `${provisionPathSummary(prov?.dbDiagnostics)}\n${prov?.dbDiagnostics ?? ''}`.trim(),
+            stderr: '',
+            durationMs: Date.now() - this.postgresProvisionedAt,
+          });
+        } catch { /* diagnostics are best-effort and must never affect the build */ }
         if (prov?.dbVerified === false) {
           // THE SANDBOX COULD NOT GIVE THE APP A DATABASE. Until now this was the end of the road: we
           // wrote a DATABASE_URL pointing at a Postgres that was never running, said we would "retry

@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 import {
   dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL,
+  pgBinariesVersion, pgBinariesUrl, PG_BINARIES_VERSION_DEFAULT,
 } from './dbProvisionVerify';
 
 /**
@@ -17,7 +19,11 @@ describe('dbProvisionScript — SELECT 1 decides, pg_isready only waits', () => 
 
   it('gates the success marker on a real SELECT 1 over the exact URL the app gets', () => {
     // pg_isready cannot see a missing database or broken auth; it is not what the app experiences.
-    expect(script).toContain(`psql "${CANONICAL_DB_URL}" -Atc 'SELECT 1'`);
+    // The gate MOVED into nbai_select1 (2026-08-06) so it can also run where psql does not exist —
+    // a fetched Postgres build ships the server only. The invariant is unchanged: SELECT 1 over the
+    // URL the app is handed, and nothing else, declares success.
+    expect(script).toContain(`psql "$1" -Atc 'SELECT 1'`);
+    expect(script).toContain('nbai_select1 "$APP_URL"');
     // The marker is emitted only inside the SELECT-1-passed branch.
     const select1At = script.indexOf("SELECT 1");
     const markerAt = script.indexOf('echo "DB_URL:');
@@ -146,7 +152,7 @@ describe('the script explains a failure instead of only announcing it', () => {
 
   it('keeps psql\'s error when SELECT 1 fails — a missing DB and a refused password differ', () => {
     expect(script).toContain('DB_DIAG_SELECT1:');
-    expect(script).toContain("SELECT1=$(psql");
+    expect(script).toContain('OUT=$(psql "$1"');
   });
 
   it('records pg_isready\'s reason when the server never came up', () => {
@@ -247,9 +253,107 @@ describe('the database starts WITHOUT root — the fix that makes the preview wo
   });
 
   it('keeps SELECT 1 as the only thing that declares success', () => {
-    const markerAt = script.indexOf('echo "DB_URL:');
-    const selectAt = script.indexOf("psql \"postgresql://postgres@localhost:5432/myapp\" -Atc 'SELECT 1'");
+    const markerAt = script.indexOf('echo "DB_URL:$APP_URL"');
+    const selectAt = script.indexOf('if nbai_select1 "$APP_URL"; then');
     expect(selectAt).toBeGreaterThan(-1);
     expect(markerAt).toBeGreaterThan(selectAt);
+  });
+});
+
+/**
+ * NO POSTGRES IN THE IMAGE AT ALL (report 26a8e81c measured it: `PSQL:none PGBIN:none`).
+ *
+ * Both existing paths had nothing to run, so every database app's boot died on ECONNREFUSED and the
+ * honest conclusion was "the E2B template must be rebuilt" — an action only the admin can take, with a
+ * whole class of app blocked behind it. A relocatable Postgres fetched over plain HTTPS into $HOME
+ * removes that dependency: no root, no apt, no template change.
+ *
+ * Verified for real before shipping: the artifact downloads, unpacks, `initdb`s and starts as an
+ * unprivileged user, and answers SELECT 1 through Node's pg driver.
+ */
+describe('pgBinariesVersion / pgBinariesUrl — pinned, never "latest"', () => {
+  it('defaults to the pinned version', () => {
+    expect(pgBinariesVersion({})).toBe(PG_BINARIES_VERSION_DEFAULT);
+    expect(PG_BINARIES_VERSION_DEFAULT).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it('an env override must be a plain x.y.z — anything else falls back rather than building a bad URL', () => {
+    expect(pgBinariesVersion({ AGENTV3_PG_BINARIES_VERSION: '15.7.0' })).toBe('15.7.0');
+    for (const bad of ['latest', '16', '16.4', '', '  ', '16.4.0; rm -rf /', '../../etc']) {
+      expect(pgBinariesVersion({ AGENTV3_PG_BINARIES_VERSION: bad }), bad).toBe(PG_BINARIES_VERSION_DEFAULT);
+    }
+  });
+
+  it('builds the exact artifact URL', () => {
+    expect(pgBinariesUrl('16.4.0')).toBe(
+      'https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/16.4.0/embedded-postgres-binaries-linux-amd64-16.4.0.jar',
+    );
+  });
+});
+
+describe('The script survives an image with NO postgres and NO client tools', () => {
+  const script = dbProvisionScript();
+
+  it('is valid shell — a generated script\'s syntax error is invisible until a real build', () => {
+    // The whole thing is a string we compose; nothing else would catch an unbalanced quote.
+    expect(() => execFileSync('bash', ['-n'], { input: script })).not.toThrow();
+  });
+
+  it('fetches a relocatable build ONLY when the image genuinely has none', () => {
+    expect(script).toContain(pgBinariesUrl(PG_BINARIES_VERSION_DEFAULT));
+    // Guarded on an empty PGBIN, so a template that already ships Postgres never pays for the download.
+    expect(script).toContain('if [ -z "$PGBIN" ] && [ ! -x "$NBAI_PG/bin/initdb" ]; then');
+    // And re-uses what it already unpacked, so a re-provision costs nothing.
+    expect(script).toContain('if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then PGBIN="$NBAI_PG/bin"; fi');
+  });
+
+  it('has a fallback for every tool the unpack needs', () => {
+    expect(script).toContain('curl -fsSL');
+    expect(script).toContain('|| wget -q');       // curl is absent in some images
+    expect(script).toContain('unzip -o -q pg.jar');
+    expect(script).toContain('python3 -c');        // …and unzip is absent in others
+    expect(script).toContain('|| jar xf pg.jar');
+  });
+
+  it('readiness never depends on pg_isready, which that build does not ship', () => {
+    expect(script).toContain('nbai_pg_up() {');
+    expect(script).toContain('pg_ctl" -D "$PGDATA" status');
+    // The final gate asks the helper, not the binary directly — the bug this prevents is a running
+    // server reported as "never accepted connections" purely because a client tool was missing.
+    expect(script).toContain('if nbai_pg_up; then');
+    expect(script).not.toContain('if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost');
+  });
+
+  it('uses the built-in postgres database when createdb is absent, and REPORTS that URL', () => {
+    // The URL is read back from the marker, so a caller always gets the database that was proven —
+    // never one we assumed existed.
+    expect(script).toContain('if command -v createdb > /dev/null 2>&1; then');
+    expect(script).toContain("sed 's|/[^/]*$|/postgres|'");
+    expect(script).toContain('echo "DB_URL:$APP_URL"');
+  });
+
+  it('verifies through Node\'s pg driver when psql is absent — never skips verification', () => {
+    expect(script).toContain('command -v node');
+    expect(script).toContain('require("pg")');
+    // No client at all is an honest failure, not a pass.
+    expect(script).toContain('no psql and no node in the sandbox');
+  });
+
+  it('a CRASHED node can never be read as a passing query', () => {
+    // Found by running it for real: with the driver missing, node dies with a stack trace whose LAST
+    // LINE is "Node.js v22.22.2" — and the first version of this used `tail -1`, so a crash was read
+    // as the query result. Success is now an exact match on a marker only our own code prints.
+    expect(script).toContain('console.log("NBAI_SELECT1="+String(r.rows[0].ok))');
+    expect(script).toContain("grep -qx 'NBAI_SELECT1=1'");
+    // Narrowly: the NODE verify must not end in `tail -1`. (A `tail -1` on a pure DIAGNOSTIC line is
+    // fine — it decides nothing.)
+    const at = script.indexOf('nbai_select1() {');
+    const fn = script.slice(at, script.indexOf('\nif ! which psql', at));
+    expect(fn).not.toContain("| tail -1)");
+  });
+
+  it('the fetched build lands in $HOME — no root, no apt, no template change', () => {
+    expect(script).toContain('${HOME:-/tmp}/.nbai-pg');
+    expect(script).not.toContain('sudo ');
   });
 });

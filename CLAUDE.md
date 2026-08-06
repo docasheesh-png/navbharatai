@@ -370,6 +370,12 @@ the code (it is actually read somewhere) on 2026-07-11.
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
   `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both)
 - **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`,
+  ⚠️ AUTO-DNS (2026-08-06): `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` now ALSO power the
+  managed-DNS zones path (`cloudflareManagedDns.ts` — nameserver delegation, "DNS hum set kar dein").
+  For zone creation the token additionally needs **Zone:Edit + DNS:Edit** account-level permissions;
+  kill switch `AGENTV3_MANAGED_DNS=off`. Custom-domain master flag: `AGENTV3_FIREBASE_CUSTOM_DOMAINS`
+  (admin set it `on` in Cloud Run before 2026-08-06 — the connect flow passed its gate in live use;
+  recorded here because it was missing from this registry).
   `RENDER_API_KEY` (admin SET in Cloud Run 2026-08-02 — the separate-BACKEND deploy: NavBharatAI triggers a
   real deploy of the user's Node/Express backend to Render via the Render API, `rnd_…` key. Read by
   `src/server/AgentV3/renderDeploy.ts`. BYO-account model: deploys to the account that owns this key; without

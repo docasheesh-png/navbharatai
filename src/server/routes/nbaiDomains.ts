@@ -11,6 +11,9 @@ import {
   sanitizeDomainErrorDetail,
 } from '../lib/firebaseCustomDomain';
 import { linkWorkspaceDomain } from '../lib/firebaseDomainLink';
+import {
+  managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
+} from '../lib/cloudflareManagedDns';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -65,7 +68,9 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       const status = await attachCustomDomain(workspaceId, host);
       // Persist the link so the deploy path publishes future builds to this workspace's dedicated site.
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
-      res.json(status);
+      // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
+      // this server — the UI offers it only when a tap can actually deliver it.
+      res.json({ ...status, autoDns: managedDnsConfigured() });
     } catch (err: any) {
       // HONEST failure (admin 2026-08-02): a permanent problem (server not permitted, domain taken)
       // must NOT tell the user to "try again" — that loops them forever on something a retry can
@@ -102,6 +107,73 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.json(status);
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
+    }
+  });
+
+  /**
+   * AUTO-DNS via nameserver delegation (admin 2026-08-06: "DNS hum set kar dein, user kuch na kare
+   * — GoDaddy bhi, Hostinger bhi"). Works on EVERY registrar: the user changes nameservers ONCE;
+   * from then on NavBharatAI writes the records itself. `start` creates/fetches the managed zone
+   * and returns the two nameservers; `sync` (tapped as "Check & apply") pushes the records Firebase
+   * asked for into the zone once it is active. Both ownership-checked; both honest about the one
+   * step only the user can do (the registrar's nameserver form) and about delegation replacing
+   * their existing DNS.
+   */
+  app.post('/api/domains/nbai/auto-dns/start', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    if (!firebaseCustomDomainsEnabled() || !managedDnsConfigured()) {
+      res.status(503).json({ error: 'Automatic DNS setup is not enabled on this server yet.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    if (!verifiedUid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    if (!ownsWorkspace(verifiedUid, req.body?.workspaceId)) {
+      res.status(403).json({ error: 'You can only set up DNS for your own app.' });
+      return;
+    }
+    const host = normalizeDomain(req.body?.domain);
+    if (!DOMAIN_RE.test(host)) {
+      res.status(400).json({ error: 'Enter a valid domain like myshop.com (no https://, no slashes).' });
+      return;
+    }
+    try {
+      const zone = await ensureZone(host);
+      res.json({ nameServers: zone.nameServers, zoneStatus: zone.status });
+    } catch (err) {
+      console.error(`[HTTP 500] auto-dns start: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+      res.status(500).json({ error: 'Could not start automatic DNS setup.', detail: sanitizeManagedDnsError(err) });
+    }
+  });
+
+  app.post('/api/domains/nbai/auto-dns/sync', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    if (!firebaseCustomDomainsEnabled() || !managedDnsConfigured()) {
+      res.status(503).json({ error: 'Automatic DNS setup is not enabled on this server yet.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    if (!verifiedUid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const workspaceId = req.body?.workspaceId;
+    if (!ownsWorkspace(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'You can only set up DNS for your own app.' });
+      return;
+    }
+    const host = normalizeDomain(req.body?.domain);
+    if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
+    try {
+      const zone = await zoneStatus(host);
+      if (!zone) { res.status(404).json({ error: 'Automatic setup has not been started for this domain.' }); return; }
+      if (zone.status !== 'active') {
+        // The one honest wait: the registrar's nameserver change has not propagated yet. Nothing to
+        // apply until it has — pretending otherwise would write records into a zone nobody queries.
+        res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, applied: 0 });
+        return;
+      }
+      const fb = await customDomainStatusLive(workspaceId, host);
+      if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run automatic setup.' }); return; }
+      const applied = await applyRecords(zone.id, fb.records);
+      res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, applied, domain: fb });
+    } catch (err) {
+      console.error(`[HTTP 500] auto-dns sync: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+      res.status(500).json({ error: 'Could not apply the DNS records automatically.', detail: sanitizeManagedDnsError(err) });
     }
   });
 }

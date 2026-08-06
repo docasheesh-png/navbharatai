@@ -268,6 +268,7 @@ import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
+import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
 import { checkPreviewCompiles, previewCompileRepairInstruction, previewDivergenceBlocksDelivery, previewCompileUnresolvedSummary } from '../runtime/PreviewCompileCheck';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -3978,38 +3979,67 @@ export function registerAgentV3Routes(app: Express): void {
    * message — this can make the terminal work, never make it worse. Kill switch:
    * AGENTV3_TERMINAL_AUTOWAKE=off.
    */
-  async function wakeWorkspaceForTerminal(workspaceId: string, userId?: string): Promise<boolean> {
-    if (process.env.AGENTV3_TERMINAL_AUTOWAKE === 'off') return false;
-    // No cloud sandbox on this deployment ⇒ nothing to wake, and LocalActuator has no TTY anyway.
-    if (!process.env.E2B_API_KEY?.trim()) return false;
-    try {
-      const actuator = buildActuator();
-      const resumeSandboxId = sandboxResumeEnabled()
-        ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
-        : undefined;
-      await actuator.ensureWorkspace(workspaceId, undefined, resumeSandboxId);
-      // Seed the saved project back in. A RESUMED sandbox usually still has the files, but a recreated
-      // one comes back empty — and a terminal opening onto an empty directory would look exactly like
-      // the data loss this whole path exists to avoid. Bounded so a very large project cannot hold the
-      // request open indefinitely; the shell still opens either way.
-      const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-      const entries = Object.entries(saved).slice(0, TERMINAL_WAKE_MAX_FILES);   // see the constant
-      // In PARALLEL batches, not one-by-one (admin 2026-08-05, "terminal bahut slow hai"): each E2B
-      // write is a network round-trip, so a 30-file project seeded serially added many seconds to
-      // every wake — most of the "Starting your workspace…" wait. Batches of 8 keep the sandbox from
-      // being hammered while cutting the seeding time to roughly the slowest file per batch.
-      for (let i = 0; i < entries.length; i += 8) {
-        await Promise.all(entries.slice(i, i + 8).map(([path, content]) =>
-          typeof content === 'string' ? actuator.writeFile(workspaceId, path, content).catch(() => {}) : Promise.resolve(),
-        ));
+  /**
+   * BACKGROUND terminal wake with LIVE, pollable progress (admin 2026-08-06: "start hone me bahut
+   * time laga, fir bhi start nahi hua").
+   *
+   * ROOT CAUSE of that report: the wake ran INLINE in /shell/open — one HTTP request holding a cold
+   * sandbox create + a full project seed + git setup. A cold create alone can take 60-90s, so the
+   * client's 90s deadline fired while the wake was genuinely working, and the user saw "took too
+   * long" for a workspace that was seconds from ready. The preview watchdog taught this exact
+   * lesson: NEVER judge slow work by a clock — judge it by progress. So the wake is now a
+   * deduplicated background job whose phase/seeded/total the client polls and paints; only a wake
+   * that stops PROGRESSING is declared dead, and the open request itself returns immediately.
+   */
+  const terminalWakes = new Map<string, TerminalWakeState>();
+  const WAKE_STALE_MS = 300_000; // an unfinished wake older than this is abandoned and restartable
+
+  function startTerminalWake(workspaceId: string, userId?: string): TerminalWakeState {
+    const existing = terminalWakes.get(workspaceId);
+    // One wake per workspace at a time; a FINISHED wake (ready or failed) never blocks a fresh one —
+    // "Try again" after a failure must actually try again.
+    if (existing && !existing.finishedAt && Date.now() - existing.startedAt < WAKE_STALE_MS) return existing;
+    const state: TerminalWakeState = { phase: 'starting', seeded: 0, total: 0, startedAt: Date.now() };
+    terminalWakes.set(workspaceId, state);
+    void (async () => {
+      try {
+        const actuator = buildActuator();
+        const resumeSandboxId = sandboxResumeEnabled()
+          ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
+          : undefined;
+        await actuator.ensureWorkspace(workspaceId, undefined, resumeSandboxId);
+        // Seed the saved project back in. A RESUMED sandbox usually still has the files, but a
+        // recreated one comes back empty — and a terminal opening onto an empty directory would look
+        // exactly like the data loss this whole path exists to avoid.
+        const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const entries = Object.entries(saved).slice(0, TERMINAL_WAKE_MAX_FILES);
+        state.total = entries.length;
+        state.phase = 'seeding';
+        // In PARALLEL batches, not one-by-one: each E2B write is a network round-trip, so a 30-file
+        // project seeded serially added many seconds to every wake. The batch counter is what the
+        // user watches — real progress, not a spinner.
+        for (let i = 0; i < entries.length; i += 8) {
+          await Promise.all(entries.slice(i, i + 8).map(([path, content]) =>
+            typeof content === 'string' ? actuator.writeFile(workspaceId, path, content).catch(() => {}) : Promise.resolve(),
+          ));
+          state.seeded = Math.min(i + 8, entries.length);
+        }
+        state.phase = 'finishing';
+        const git = new GitManager(actuator, workspaceId);
+        await git.ensureRepo().catch(() => false);
+        registerSession(workspaceId, git, userId, actuator);
+        state.phase = 'ready';
+        state.finishedAt = Date.now();
+      } catch (e) {
+        // The REAL reason, sanitized of infra branding, kept for the owner who polls it — a wake
+        // that will not name its failure is undiagnosable from a screenshot (the whole lesson of
+        // this terminal's history).
+        state.phase = 'failed';
+        state.error = sanitizeWakeError(e);
+        state.finishedAt = Date.now();
       }
-      const git = new GitManager(actuator, workspaceId);
-      await git.ensureRepo().catch(() => false);
-      registerSession(workspaceId, git, userId, actuator);
-      return true;
-    } catch {
-      return false;   // fall through to the honest dormant message — never worse than before
-    }
+    })();
+    return state;
   }
 
   /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
@@ -4031,11 +4061,23 @@ export function registerAgentV3Routes(app: Express): void {
     }
     let host = ptyHostForSession(workspaceId, userId ?? undefined);
     // Dormant workspace with a real saved project? Wake it instead of sending the user to another
-    // screen to do it by hand.
+    // screen to do it by hand — but in the BACKGROUND, answering immediately with pollable progress.
+    // Holding this request open through a cold sandbox create is what produced "took too long to
+    // wake (90s)" on a wake that was actually succeeding.
     if (!host) {
       const hasProject = await countWorkspaceFiles(workspaceId).catch(() => 0);
-      if (hasProject > 0 && await wakeWorkspaceForTerminal(workspaceId, userId ?? undefined)) {
-        host = ptyHostForSession(workspaceId, userId ?? undefined);
+      const canWake = process.env.AGENTV3_TERMINAL_AUTOWAKE !== 'off' && !!process.env.E2B_API_KEY?.trim();
+      if (hasProject > 0 && canWake) {
+        let wake = startTerminalWake(workspaceId, userId ?? undefined);
+        if (wake.phase === 'ready') {
+          host = ptyHostForSession(workspaceId, userId ?? undefined);
+          // Ready per the record but no live session (instance recycled between): restart honestly.
+          if (!host) { terminalWakes.delete(workspaceId); wake = startTerminalWake(workspaceId, userId ?? undefined); }
+        }
+        if (!host) {
+          res.json({ available: false, reason: 'waking', wake: wakePublicState(wake), savedFileCount: hasProject });
+          return;
+        }
       }
     }
     const result = await openShell(workspaceId, host, {
@@ -4082,6 +4124,34 @@ export function registerAgentV3Routes(app: Express): void {
       reason: fileCount > 0 ? 'dormant' : 'not_started',
       cause,
       savedFileCount: fileCount,
+    });
+  });
+
+  /**
+   * Wake progress poll — on the generous shell bucket, because a waking client asks every ~2.5s and
+   * the strict 60/hr workspace bucket would 429 the poll before a slow cold start could finish
+   * (the exact keystroke-limiter lesson, again).
+   */
+  app.get('/api/agentv3/shell/wake', shellInputRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const wake = terminalWakes.get(workspaceId);
+    res.json({
+      wake: wake ? wakePublicState(wake) : null,
+      hostReady: !!ptyHostForSession(workspaceId, userId ?? undefined),
     });
   });
 

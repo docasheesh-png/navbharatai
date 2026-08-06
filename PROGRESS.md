@@ -26039,3 +26039,46 @@ the budget floor, open/close staying strict, and the parallel wake) + 6 pipeline
 `shellTerminalInput.test.ts` (single-flight, coalescing, cap, retry-once + honest failure, resize
 debounce/dedupe, restart drain). Full gate: 1073 files / 11993 tests green, both tsc clean, bundle
 within budget, real boot smoke (health 200; unauth shell input correctly gated).
+
+## 2026-08-06 — The wake itself was the patient: background job + progress poll (PR #2143)
+
+**Admin screenshot, LTE, cold start:** every honesty layer from yesterday fired exactly as built
+(queue notice, 15s note, the 90s timeout, Try again, disabled bar placeholder) — and the terminal
+STILL did not start: "pahle to start hone me bahut time laga, fir bhi start nahi hua. rocksolid
+banwaya tha, apne banaya hi nahi." Fair. The instrumentation was honest about a wake that was
+genuinely too slow to fit inside one HTTP request — and THAT architecture was the un-root-caused bug.
+
+**Root cause.** `/shell/open` ran the ENTIRE wake inline: cold E2B create + full project seed + git
+setup inside one request. A cold create alone can take 60–90s, so the client's 90s deadline expired
+on wakes that were actually SUCCEEDING — the user saw "took too long" for a workspace seconds from
+ready, and "Try again" restarted the same race. A flat deadline on slow-but-working work is the exact
+mistake the preview watchdog fix named on 2026-08-05: judge PROGRESS, never the clock.
+
+**Fix.**
+- **Server:** the wake is now a DEDUPLICATED BACKGROUND JOB (`startTerminalWake`, one per workspace;
+  a finished wake never blocks "Try again"; stale unfinished wakes restartable after 5 min) with live
+  phases — starting → seeding (seeded/total counter, parallel batches of 8) → finishing → ready |
+  failed. `/shell/open` answers IMMEDIATELY (`reason: 'waking'` + state); a new ownership-checked
+  `GET /shell/wake` poll rides the generous shell bucket (a 2.5s poll on the 60/hr bucket would 429
+  mid-wake — the keystroke-limiter lesson). A failed wake records its REAL sanitized reason
+  (`sanitizeWakeError`, infra branding neutralized) instead of vanishing into a boolean — the old
+  `catch { return false; }` is why the failure could not be diagnosed from a screenshot. A
+  ready-per-record wake with no live session (instance recycle) restarts honestly. Pure helpers live
+  in `AgentV3/terminalWake.ts` (importing a 7000-line route module to test two pure functions is how
+  a test times out — found by my own test doing exactly that).
+- **Client:** `pollWake` watches and PAINTS the real phases ("Creating your cloud workspace…",
+  "Loading your saved files (24/60)…", "Preparing git and tools…"). Judgement is progress-based: only
+  a wake with NO phase/counter movement for 90s — or past a 5-min absolute ceiling — is declared
+  dead, always with Try again. Ready → bounded reopen (attempt cap). The open request's deadline
+  drops to 25s (it only starts/checks the wake now), and the waking hand-off deliberately KEEPS the
+  typed-key queue alive — the `finally` has exactly one exception, and a test pins it.
+
+**Tests:** 6 wake-job/route invariants + 2 pure-helper unit tests (`shellRateLimit.test.ts`), 6 poll
+invariants (`shellTerminalInput.test.ts`), stale 90s-era assertions updated. Full gate: 1074 files /
+12005 tests green, both tsc clean, bundle within budget, boot smoke (health 200, wake route mounted
+and gated).
+
+**What this cannot fix, said plainly:** the cold E2B create itself still takes however long E2B
+takes — the change makes the wait VISIBLE, HONEST and UNKILLABLE-by-timeout, and reopening after the
+wake completes is instant. If real-world cold creates regularly exceed ~2 min, the next lever is
+infra (warm sandbox pool / template optimization), recorded here as the open follow-up.

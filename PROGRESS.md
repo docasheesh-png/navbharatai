@@ -27035,3 +27035,25 @@ cannot run at all. Fix: merge origin/main into the branch (PROGRESS.md both-appe
 line-anchored), push, then close→reopen the PR to force a `reopened` event when the synchronize run
 still failed to appear. Lesson recorded: when a PR shows NO checks, look at `mergeable_state` FIRST —
 a dirty PR will never start CI, and no amount of re-kicking helps until the conflict is resolved.
+
+## 2026-08-06 — THE domain-records bug: we were reading field names that do not exist (mitrify.in "0 records applied")
+
+**Live report (admin screenshots):** zone ACTIVE at the DNS service, nameservers live — but "Check &
+apply records" applied 0 and the records list said "being prepared" forever. **Root cause, verified
+against Google's own v1beta1 discovery document (fetched, not guessed):** `customDomainRecords()`
+read `requiredDnsUpdates.desiredDnsState[]` and `rrdata[]` — field names that DO NOT EXIST on the
+real API. The real fields are `requiredDnsUpdates.desired[]` and `DnsRecord.rdata` (a single
+STRING). Against every live resource the function returned [] — so the UI never showed records, the
+auto-DNS sync had nothing to apply, and ownership could never advance. The unit tests passed because
+their fixtures ENCODED THE SAME INVENTED SHAPE — the "test matches broken behavior" class. Fixes:
+- Extraction now reads the real shape (+ legacy tolerance), ALSO surfaces the ACME challenge from
+  `cert.verification.dns` (deduped), and normalizes the API's trailing-dot names.
+- Primary test fixtures rewritten to the REAL shape (the old shape kept only as a tolerance test).
+- **Sibling (found by the same screenshots):** on zone activation the DNS service AUTO-IMPORTS the
+  old records PROXIED ("traffic is proxying through" — admin's dashboard). `applyRecords` treated
+  identical-content-but-proxied as "same" (left proxied ⇒ validation can never pass) and thrashed on
+  multi-value A sets. Now each managed type+name CONVERGES: stale/proxied replaced or deleted,
+  missing created, everything DNS-only; TXT still adds alongside. Regression tests encode the proxied
+  auto-import trap and the multi-A converge.
+Lesson (external-API class): NEVER hand-write an API response shape from memory — fetch the
+provider's published schema (discovery doc) and encode THAT in the types and fixtures.

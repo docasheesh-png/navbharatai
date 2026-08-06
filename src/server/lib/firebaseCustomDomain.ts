@@ -54,23 +54,32 @@ export interface CustomDomainStatus {
 interface ApiDnsRecord {
   domainName?: string;
   type?: string;
+  /** REAL API field (v1beta1 discovery, verified 2026-08-06): a single STRING per record. */
+  rdata?: string | string[];
+  /** Legacy tolerance only — never seen on the live API. */
   rrdata?: string[];
-  rdata?: string[];
   requiredAction?: string; // NONE | ADD | REMOVE (records with ADD are the ones to add)
 }
 interface ApiDnsRecordSet {
   domainName?: string;
   records?: ApiDnsRecord[];
 }
+/** REAL shape (discovery doc): `desired`/`discovered` arrays of DnsRecordSet. */
+interface ApiDnsUpdates {
+  checkTime?: string;
+  desired?: ApiDnsRecordSet[];
+  discovered?: ApiDnsRecordSet[];
+  /** Legacy tolerance — the field name this module INVENTED and read until 2026-08-06 (see below). */
+  desiredDnsState?: ApiDnsRecordSet[];
+}
 interface ApiCustomDomain {
   name?: string;
   customDomainId?: string;
   ownershipState?: string;
   hostState?: string;
-  cert?: { state?: string };
-  requiredDnsUpdates?: {
-    desiredDnsState?: ApiDnsRecordSet[];
-  };
+  /** `cert.verification.dns` carries the ACME challenge once ownership advances to cert issuance. */
+  cert?: { state?: string; verification?: { dns?: ApiDnsUpdates } };
+  requiredDnsUpdates?: ApiDnsUpdates;
 }
 
 // ── Pure helpers (unit-testable without any live API) ───────────────────────────────────────
@@ -104,30 +113,50 @@ const NOTE_BY_TYPE: Record<string, string> = {
 };
 
 /**
- * Map a CustomDomain API resource to the exact DNS records the user still needs to add. We surface
- * every `desiredDnsState` record whose `requiredAction` is ADD (i.e. not yet present); if the API
- * omits `requiredAction`, we conservatively surface every desired record so the user is never left
- * short an instruction.
+ * Map a CustomDomain API resource to the exact DNS records the user still needs to add.
+ *
+ * ROOT CAUSE FIX (admin 2026-08-06, mitrify.in "0 records applied / records being prepared
+ * forever"): this function used to read `requiredDnsUpdates.desiredDnsState[]` and `rrdata[]` —
+ * field names that DO NOT EXIST on the real API. Verified against Google's own v1beta1 discovery
+ * document: the fields are `requiredDnsUpdates.desired[]` (DnsRecordSet) and `DnsRecord.rdata`
+ * (a single STRING). Against the live API the old code therefore ALWAYS returned [] — the UI showed
+ * "records being prepared" forever, auto-DNS applied 0 records, and ownership could never advance.
+ * The invented names are kept as legacy tolerance only.
+ *
+ * Sources, both surfaced: `requiredDnsUpdates.desired` (ownership/host records) AND
+ * `cert.verification.dns.desired` (the ACME TXT challenge once cert issuance starts) — deduped, so
+ * the user/auto-DNS always holds the complete current instruction set. Records whose
+ * `requiredAction` is ADD are the instructions; if the API omits the flag entirely we conservatively
+ * surface every desired record.
  */
 export function customDomainRecords(cd: ApiCustomDomain): CustomDomainDnsRecord[] {
-  const sets = cd.requiredDnsUpdates?.desiredDnsState ?? [];
+  const updates: ApiDnsUpdates[] = [cd.requiredDnsUpdates, cd.cert?.verification?.dns]
+    .filter((u): u is ApiDnsUpdates => !!u);
   const out: CustomDomainDnsRecord[] = [];
-  const anyActionFlagged = sets.some((s) => (s.records ?? []).some((r) => !!r.requiredAction));
-  for (const set of sets) {
-    for (const rec of set.records ?? []) {
-      const action = (rec.requiredAction || '').toUpperCase();
-      // Skip records that are already correct or must be removed — only ADD is an instruction.
-      if (anyActionFlagged && action !== 'ADD') continue;
-      const values = rec.rrdata ?? rec.rdata ?? [];
-      const type = (rec.type || '').toUpperCase();
-      for (const value of values) {
-        if (!value) continue;
-        out.push({
-          type,
-          name: rec.domainName || set.domainName || cd.customDomainId || '',
-          value,
-          note: NOTE_BY_TYPE[type],
-        });
+  const seen = new Set<string>();
+  for (const upd of updates) {
+    const sets = upd.desired ?? upd.desiredDnsState ?? [];
+    const anyActionFlagged = sets.some((s) => (s.records ?? []).some((r) => !!r.requiredAction));
+    for (const set of sets) {
+      for (const rec of set.records ?? []) {
+        const action = (rec.requiredAction || '').toUpperCase();
+        // Skip records that are already correct or must be removed — only ADD is an instruction.
+        if (anyActionFlagged && action !== 'ADD') continue;
+        // rdata is a STRING on the real API; arrays are accepted as legacy tolerance.
+        const values = Array.isArray(rec.rrdata) ? rec.rrdata
+          : Array.isArray(rec.rdata) ? rec.rdata
+          : typeof rec.rdata === 'string' && rec.rdata ? [rec.rdata] : [];
+        const type = (rec.type || '').toUpperCase();
+        for (const value of values) {
+          if (!value) continue;
+          // The API writes names with a trailing dot (`foo.bar.com.`) — normalize, or every
+          // downstream consumer (UI copy button, Cloudflare, Hostinger) carries the dot.
+          const name = (rec.domainName || set.domainName || cd.customDomainId || '').replace(/\.$/, '');
+          const key = `${type}|${name}|${value}`;
+          if (seen.has(key)) continue; // the ACME TXT can appear in both sources — one instruction
+          seen.add(key);
+          out.push({ type, name, value, note: NOTE_BY_TYPE[type] });
+        }
       }
     }
   }

@@ -27295,3 +27295,42 @@ opposite of the truth.
   never runs.
 
 Gate: tsc clean both projects, SHUFFLED full run 1095 files / 12,394 tests, exit 0.
+
+## 2026-08-06 (18) — a screenshot carried a live database password out of the app
+
+The admin sent two screenshots of build 49a7a987 to show a preview failure. One of them was the Files
+viewer open on `.env`, and it displayed — in plaintext, with a copy button — a live Neon connection
+string including its password, plus a payment secret. **Those credentials had to be rotated.** The
+screenshot was taken to show something else entirely; that is the whole point.
+
+**Why this is a defect and not bad luck.** The rest of the product already treats these values as too
+sensitive to display: Settings → Database deliberately never shows a saved credential back ("values
+aren't shown here — leave a field blank to keep its current value"), and the vault encrypts them at
+rest. Then the same secrets were readable in one tap in the Files tab. A promise kept on one screen and
+broken on the next is not a promise.
+
+FIX — `src/lib/secretMask.ts` + the Files viewer:
+- **The keys stay visible, only the values go.** Which variables an app expects is the genuinely useful
+  thing to see — it is how a user checks that a key they added actually reached the app. The value is
+  the part they already know and the part a stranger must not learn.
+- **The mask is a FIXED width**, not the value's length, which would leak how long the secret is.
+- **An EMPTY value is left alone** — masking nothing would imply a secret that is not there.
+- **A key file or credentials blob has no safe half**, so its whole body is hidden.
+- **COPY uses the same text as the screen.** A copy button that hands over what the screen hides would
+  make the mask decorative.
+- **Reveal is a deliberate tap, and re-arms on every file open** — a Reveal on one file must never carry
+  into the next.
+- The notice says WHY and how to see it: a user who cannot find their own value will assume the app lost
+  it, which is a worse outcome than the one this protects against.
+- Deliberately narrow: `.env*`, `.pem/.key/.p12/.jks`, `id_rsa`, `service-account*.json`. Masking source
+  would defeat the viewer, and `env.d.ts` is code.
+
+**The second screenshot** shows the real preview failure: *"Closed Port Error — the sandbox is running
+but there's no service running on port 5173"*, after 12m 15s, next to a green "✓ Done". The app is
+full-stack (Vite frontend + Express backend) and the build's own commands show it starting the BACKEND
+(`node src/server/index.cjs &` → exit −1 after 45s) while the preview watched Vite's 5173. That is the
+same watch-the-wrong-port class as the Mitrify EADDRINUSE fix, one level up: not the wrong port within
+one server, but the wrong SERVER. Recorded as the next root cause to chase; `PREVIEW_NEVER_CAME_UP`
+(previous entry) at least makes it show up in the report instead of hiding.
+
+Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,408 tests, exit 0.

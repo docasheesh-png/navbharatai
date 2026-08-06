@@ -27123,3 +27123,44 @@ The ₹1 charge now covers EVERY built mobile file — .apk, Play Store .aab, iO
 point: delivery-time, idempotent per artifact, free-list/anon exempt, never blocks the bytes, env
 `APK_CHARGE_INR` (name kept — it now prices every built file). Ledger names the kind honestly
 ("App build (.aab)"), disclosure copy + KB updated so the user knows the price BEFORE building.
+
+---
+---
+## 2026-08-06 — "Cannot GET" shown AS the user's app: the liveness probe accepted a redirect as proof
+
+**Admin report, with a screenshot and a fair accusation:** *"aapne itna kuch badalwaya, par error abhi
+bhi wahi ka wahi hai. Problem mitrify me nahi, NavBharatAI ke code me hai."* He was right — and this
+was OUR bug, not the imported app's.
+
+**What the user saw:** the Preview tab, labelled **Live server**, rendering a raw
+`Cannot GET /customer/home` page as their app, while the build was still running (32s in).
+
+**ROOT CAUSE (two defects in one line, `/api/agentv3/preview-health`):**
+1. **A status code is not a working app.** The probe ran
+   `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>` — it threw the BODY AWAY and
+   accepted `200|301|302|304` as healthy. The imported app's `/` does
+   `res.redirect("/customer/home")` → **302** → `livePortUp = true` → `classifyPreviewHealth` returned
+   **"live — up and running"** → the tab iframed the URL → the iframe followed the redirect → 404.
+   We had `analyzePreviewHtml` (which detects "Cannot GET") since 2026-08-03 and applied it to the
+   import-boot narration — this probe simply never used it. The EARN-THE-VERDICT rule existed; it just
+   was not enforced on the path the user actually looks at.
+2. **The port was a guess.** `oneShotDevPort(framework)` returns 5173 for vite-react, while a
+   full-stack Express app commonly serves everything on its own port (this one: 5000). So the probe
+   could describe a port the app was never on.
+
+**FIX:**
+- The probe now uses `curl -sL` (FOLLOWS redirects), keeps the body, and runs the same tested
+  `analyzePreviewHtml` over it. New `PreviewStatus: 'not_serving'` — the port answers but the page is
+  not the app — with the analyzer's own reason in the summary. `pageRendered`/`pageProblems` are
+  optional signals, so an unchecked probe behaves exactly as before.
+- `previewUrlPort()` (pure, tested) reads the real port from the preview URL the CLIENT is displaying
+  (E2B hosts are `https://<port>-<sandbox>.e2b.app`); the framework guess stays only as the fallback.
+- `not_serving` is deliberately NOT auto-rebooted — a reboot cannot wire missing page routes.
+- **The Preview tab no longer presents a non-rendering page as the app:** an honest amber banner says
+  *"This is not your app yet — the server is answering, but it is not serving your pages"*, names the
+  analyzer's reason, and points at the In-browser preview. The iframe still renders below, so nothing
+  is hidden from the user.
+- `previewHealthContextLine` reports `NOT SERVING` so every AI in v5.0 answers from the real state.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **12,350 tests, 0 failures**
+(11 new, including the verbatim reported case: port up + "Cannot GET" body ⇒ never `live`).

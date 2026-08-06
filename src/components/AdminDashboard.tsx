@@ -27,6 +27,8 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
 type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 
 interface AdminBuildReportRow {
+  /** True when the build had not finished at the moment Report was pressed — see AdminBuildReportStore. */
+  inFlight?: boolean;
   id: string;
   reportedAt: number;
   userId: string | null;
@@ -1576,7 +1578,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   <td className="px-3 py-2.5 text-[12px] text-[#8b949e] tabular-nums">{idx + 1}</td>
                                   <td className="px-3 py-2.5 max-w-[240px]">
                                     <span className="flex items-center gap-2">
-                                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : r.inFlight ? 'bg-amber-500' : 'bg-zinc-600'}`} />
                                       <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
                                     </span>
                                     {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
@@ -1591,8 +1593,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                     {(() => { const c = fmtCharge(r.billedInr); return <span className={`text-[12px] ${c.cls}`} title={r.billedUsd != null ? `$${r.billedUsd}` : undefined}>{c.text}</span>; })()}
                                   </td>
                                   <td className="px-3 py-2.5">
-                                    <span className={`text-[11px] font-black ${r.ok === true ? 'text-emerald-400' : r.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>
-                                      {r.ok === true ? 'Success' : r.ok === false ? 'Failed' : '—'}
+                                    {/* "—" for an unfinished build read as "it produced nothing", which is the
+                                        alarming reading and the wrong one. A build still running when Report was
+                                        pressed says so. */}
+                                    <span className={`text-[11px] font-black ${r.ok === true ? 'text-emerald-400' : r.ok === false ? 'text-red-400' : r.inFlight ? 'text-amber-400' : 'text-zinc-500'}`}>
+                                      {r.ok === true ? 'Success' : r.ok === false ? 'Failed' : r.inFlight ? 'Still running' : '—'}
                                     </span>
                                   </td>
                                   <td className="px-3 py-2.5"><Eye className="w-4 h-4 text-[#8b949e]" /></td>

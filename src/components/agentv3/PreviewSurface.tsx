@@ -153,6 +153,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Live-server iframe load indicator: the sandbox page itself can take seconds to answer after
   // a boot — show a thin working strip until the iframe actually finishes loading.
   const [liveLoading, setLiveLoading] = useState(false);
+  // null = serving fine / not checked; string[] = the server answered but did NOT serve the app.
+  const [notServing, setNotServing] = useState<string[] | null>(null);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
   // LIVE FAILOVER (admin report 858f6d7b) — a broken in-browser preview must never be a dead end while
   // the real app is running on the sandbox. Both refs are once-per-workspace guards; `failoverNote`
@@ -307,10 +309,20 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const res = await fetch('/api/agentv3/preview-health', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          body: JSON.stringify({ workspaceId, userId, email, framework }),
+          // Send the URL we are ACTUALLY displaying: the server used to probe a port guessed from the
+          // framework name (vite-react ⇒ 5173) while a full-stack app serves on its own port.
+          body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: url || foundUrl || '' }),
         });
-        const health = await res.json().catch(() => null) as { status?: unknown } | null;
+        const health = await res.json().catch(() => null) as { status?: unknown; serving?: unknown; servingProblems?: unknown } | null;
         if (res.ok && health && typeof health.status === 'string') status = health.status;
+        // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".
+        // We used to render that page inside the iframe AS the user's app. Record it so the UI can say
+        // the truth instead — see the banner in the live view below.
+        if (res.ok && health && typeof health.serving === 'boolean') {
+          setNotServing(health.serving === false
+            ? (Array.isArray(health.servingProblems) ? health.servingProblems.filter((x): x is string => typeof x === 'string') : [])
+            : null);
+        }
       } catch { /* probe failed → status stays null → never reboot on a guess */ }
       const h = healRef.current;
       const decide = shouldAutoRebootPreview({
@@ -674,6 +686,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
             <span className="flex-1">{failoverNote}</span>
             <button onClick={() => setFailoverNote('')} className="shrink-0 text-sky-400 hover:text-sky-200" title="Dismiss">✕</button>
+          </div>
+        )}
+        {/* HONEST STATE, NOT A RENDERED 404 (admin report 2026-08-06). The server answers, so the old
+            code happily iframed whatever came back — the user was shown a raw "Cannot GET /customer/home"
+            page labelled as their live app. A page that does not render is not the app, and saying so is
+            the whole point; the iframe still shows below so nothing is hidden from the user. */}
+        {notServing && (
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-amber-200">
+            <span className="flex-1">
+              <span className="font-semibold">This is not your app yet.</span>{' '}
+              The server is answering, but it is not serving your pages
+              {notServing.length > 0 ? ` — ${notServing[0]}` : ''}. If the build is still running, give it
+              a few more seconds. Meanwhile the{' '}
+              <button onClick={() => setMode('inbrowser')} className="underline hover:text-amber-100">In-browser preview</button>{' '}
+              renders your files right now.
+            </span>
           </div>
         )}
         {liveLoading && (

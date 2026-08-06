@@ -15,7 +15,8 @@
 
 /** The real state of a workspace's preview, as far as v5.0 can determine. */
 export type PreviewStatus =
-  | 'live'            // a live server URL is up right now (a port probe succeeded)
+  | 'live'            // the server is genuinely SERVING the app (a page was fetched and it rendered)
+  | 'not_serving'     // the port answers, but what it returns is not the app (404 / "Cannot GET" / blank)
   | 'booting'         // a boot / heal is in progress
   | 'sleeping'        // files exist + a live backend exists, but the sandbox is cold/idle-recycled —
                       //   EXPECTED (E2B pauses when idle); the preview can be rebooted on demand
@@ -30,6 +31,21 @@ export interface PreviewHealthSignals {
   liveBackend: boolean;
   /** The most recent real port probe: true=up, false=down, null=not probed (cold, no sandbox). */
   livePortUp: boolean | null;
+  /**
+   * Did the fetched page actually RENDER THE APP? true=yes, false=the port answered but returned a
+   * 404 / "Cannot GET" / blank shell, null=not checked.
+   *
+   * ROOT CAUSE (admin report 2026-08-06, "Cannot GET /customer/home" shown INSIDE the preview while we
+   * labelled it live). The probe behind `livePortUp` only read an HTTP STATUS CODE from `/`, and
+   * counted `301/302` as healthy. The app's `/` did `res.redirect("/customer/home")` → 302 → we
+   * declared "live — up and running", the tab rendered the iframe, the iframe followed the redirect,
+   * and the user got a raw `Cannot GET` page presented as their app. A status code is not a working
+   * app — the same "EARN THE VERDICT" rule the import boot already follows via analyzePreviewHtml,
+   * which this probe simply never used. `pageRendered` carries that verdict here.
+   */
+  pageRendered?: boolean | null;
+  /** What analyzePreviewHtml found wrong when `pageRendered` is false (for an honest message). */
+  pageProblems?: string[];
   /** A live URL was published at least once for this workspace (from durable history/checkpoints). */
   everPublished: boolean;
   /** The last dev-server failure detail, if the port went down with a known error (else null). */
@@ -62,6 +78,17 @@ export function classifyPreviewHealth(s: PreviewHealthSignals): PreviewHealth {
     return { status: 'inbrowser_only', canReboot: false, summary: 'A live cloud server is not configured here — the In-browser preview renders your saved files.' };
   }
   if (s.livePortUp === true) {
+    // A PORT THAT ANSWERS IS NOT AN APP THAT WORKS. When the page was actually fetched and did NOT
+    // render, say so — never label it "live". This is the state the user was being shown as their app:
+    // the server answers, and every page is a 404.
+    if (s.pageRendered === false) {
+      const why = (s.pageProblems ?? []).filter(Boolean).join('; ');
+      return {
+        status: 'not_serving',
+        canReboot,
+        summary: `The server is answering, but it is not serving your app${why ? ` — ${why}` : ''}. This usually means the app is still finishing its start-up, or its page routes are not wired.`,
+      };
+    }
     return { status: 'live', canReboot, summary: 'The live preview is up and running.' };
   }
   // Port is down (false) or was never probed (null) — decide sleeping vs crashed.
@@ -113,6 +140,7 @@ export function previewHealthContextLine(health: PreviewHealth): string {
   if (health.status === 'empty') return '';
   const label: Record<PreviewStatus, string> = {
     live: 'RUNNING (live)',
+    not_serving: 'ANSWERING BUT NOT SERVING THE APP (404 / not-yet-wired pages)',
     booting: 'STARTING UP',
     sleeping: 'ASLEEP (saved; reboots on demand)',
     crashed: 'DOWN (needs a reboot/heal)',

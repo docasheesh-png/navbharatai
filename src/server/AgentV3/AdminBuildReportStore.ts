@@ -57,6 +57,17 @@ export interface AdminBuildReportMeta {
   workspaceId: string | null;
   buildId: string | null;
   ok: boolean | null;
+  /**
+   * Was the build STILL RUNNING when the report was sent?
+   *
+   * WHY THIS EXISTS (admin report f323a4db, 2026-08-06). "Report" can be pressed at any moment, and a
+   * build in flight has no verdict, no cost, no duration and no post-build checks yet — so EVERY meta
+   * field came back null. That is indistinguishable from a build that finished and produced nothing,
+   * which is the far more alarming reading, and it is the one the admin took: the report looked
+   * fabricated. A snapshot of work in progress is a perfectly useful thing; presenting it as a finished
+   * build with no result is not. So the record now SAYS which one it is.
+   */
+  inFlight: boolean;
   /** A short, human label for the app — the first line of the build prompt. */
   appLabel: string;
   /** The raw billing tier string from the build (admin-only detail). */
@@ -133,6 +144,14 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
     typeof trimmed.startedAt === 'number' && typeof trimmed.endedAt === 'number' && trimmed.endedAt >= trimmed.startedAt
       ? trimmed.endedAt - trimmed.startedAt
       : null;
+  // A build with a start and no end had not finished. `ok` is set only when the build settles, so its
+  // absence is the same fact from the other side; requiring BOTH keeps a half-written report honest.
+  const inFlight = typeof trimmed.startedAt === 'number'
+    && typeof trimmed.endedAt !== 'number'
+    && typeof trimmed.ok !== 'boolean';
+  const runningFor = inFlight && typeof trimmed.startedAt === 'number'
+    ? Math.max(0, Math.round((ctx.reportedAt - trimmed.startedAt) / 1000))
+    : 0;
   return {
     meta: {
       id,
@@ -143,6 +162,7 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       workspaceId: ctx.workspaceId ?? null,
       buildId: ctx.buildId ?? trimmed.buildId ?? null,
       ok: typeof trimmed.ok === 'boolean' ? trimmed.ok : null,
+      inFlight,
       appLabel: appLabelFromPrompt(trimmed.prompt),
       userTier,
       tier: classifyReportTier(userTier),
@@ -150,7 +170,12 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
       buildMs,
       rootCause: cap(trimmed.rootCause, 400),
-      summary: cap(trimmed.summary, 400),
+      // SAY THE OBVIOUS THING. A null summary on an unfinished build reads as "the build produced
+      // nothing"; the truth is "the build had not got there yet". One sentence is the whole difference
+      // between a report that looks fabricated and one that is simply an early snapshot.
+      summary: inFlight && !trimmed.summary
+        ? `Reported while the build was STILL RUNNING (${Math.floor(runningFor / 60)}m ${runningFor % 60}s in). There is no verdict, cost, duration or post-build check yet — those are written when the build finishes. Everything below is a snapshot of the work in progress.`
+        : cap(trimmed.summary, 400),
       // counts.autoResolved already EXCLUDES observations (advisory notes about the user's own code),
       // which is what keeps the self-heal tally from inflating itself — see BuildDiagnostics.
       healCount: typeof trimmed.counts?.autoResolved === 'number' ? trimmed.counts.autoResolved : undefined,

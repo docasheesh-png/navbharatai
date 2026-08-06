@@ -390,7 +390,7 @@ export function buildPreKillPortCommand(port: number): string {
  * Vite/Next commands — anything else is left for runtime port DETECTION. PURE +
  * unit-testable.
  */
-export function pinDevServerPort(command: string, port: number, framework?: DevFramework): string {
+export function pinDevServerPort(command: string, port: number, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
   // Piped/chained (`| head`, `&& …`) — appending a `--port` would land it on the WRONG program (report
@@ -401,7 +401,22 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
   // the health-check watches — the fix for the Mitrify "did not come up on port 5173" import (its
   // `tsx server/index.ts` had no framework signal, so the preview assumed Vite 5173 and pinned nothing).
   // If the server ignores PORT and binds its own, detectDevPort re-points the preview to the real port.
-  if (isNodeServerCommand(command) && !/\bPORT=/.test(command)) return `PORT=${port} ${command}`;
+  //
+  // LOOK THROUGH `npm run dev` (report 26a8e81c, 2026-08-06). The caller already resolves the package.json
+  // script, but used to test THIS decision against the raw `npm run dev` — where no `tsx`/`node` appears —
+  // so a Node server behind a pm script fell through to the Vite assumption and got `--port 3000
+  // --strictPort`, flags `tsx server/index.ts` silently ignores. The app then bound its own 5000 while the
+  // health check watched 3000, declared "did not start", and restarted twice — and the still-running first
+  // server made the retry die with `EADDRINUSE: address already in use 0.0.0.0:5000`. That whole cascade
+  // came from testing the wrong string. `PORT=` on the pm command propagates to the child process, so the
+  // server binds the port we are actually watching.
+  const nodeServer = isNodeServerCommand(command) || (!!resolvedScript && isNodeServerCommand(resolvedScript));
+  if (nodeServer) {
+    // RETURN, do not fall through. An already-pinned `PORT=8080 npm run dev` used to skip this branch
+    // and land in the Vite one below, which appended `--port … --strictPort` — the very flags this
+    // command ignores, and the bug being fixed. A Node server is done here either way.
+    return /\bPORT=/.test(command) ? command : `PORT=${port} ${command}`;
+  }
   if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run

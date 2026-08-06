@@ -9829,7 +9829,7 @@ export function registerAgentV3Routes(app: Express): void {
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
             const pageResults = parsePageCheck(out.stdout);
-            const pageSummary = summarizePageCheck(pageResults);
+            const pageSummary = summarizePageCheck(pageResults, pageRoutes.length);
             buildDiag.record({
               phase: 'preview',
               severity: pageSummary.ok ? 'info' : 'warning',

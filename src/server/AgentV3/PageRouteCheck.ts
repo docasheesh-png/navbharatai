@@ -22,6 +22,16 @@
 // EVERYTHING HERE IS BOUNDED, because a check that can cost minutes will be turned off and then it
 // protects nobody: a small route cap, a per-route timeout, and home is deliberately NOT re-checked —
 // the preview verifier already proved it, and paying for it twice buys nothing.
+//
+// THE ACCESSIBILITY PASS IS SIX CHECKS, NOT A LIBRARY, and it is never called "axe" or "WCAG-compliant".
+// Injecting axe-core would mean pushing ~500 KB through a sandbox command whose size limit cannot be
+// verified from here, and shipping an unverified mechanism is a mistake this codebase has already paid
+// for. The six are the ones generated apps actually fail — missing lang, missing title, images with no
+// alt, buttons and links a screen reader cannot name, form fields with no label — each reported as the
+// specific thing it is. Claiming full coverage would be the lie; finding real problems is not. Verified
+// in a real browser against a deliberately-bad page (all six found) and a correct one (none found,
+// including the cases that LOOK like violations: alt="" with aria-hidden, an aria-label on a button, a
+// label[for], a wrapping label, and a hidden input).
 
 /** How many page routes to actually open. A 40-page app must not add minutes to every build. */
 export const MAX_PAGE_ROUTES = 6;
@@ -114,12 +124,18 @@ export function pageCheckScript(previewUrl: string, routes: string[]): string {
   const base = previewUrl.replace(/\/+$/, '');
   const list = JSON.stringify(routes);
   return `cat > /tmp/nbai-pagecheck.mjs <<'NBAI_EOF'
-import { chromium } from 'playwright';
+// ABSOLUTE PATH, NOT NODE_PATH. This script is an ES module, and NODE_PATH is honoured only by CJS
+// require() — an ESM import ignores it entirely and dies with ERR_MODULE_NOT_FOUND. The first version
+// relied on NODE_PATH and would therefore have failed on EVERY build, silently: the trailing || true
+// and the grep swallow the error, so the run simply produces no result lines. Verified both ways.
+// (No backticks anywhere in this script: it lives inside a TypeScript template literal, where one would
+// close the literal. That mistake has been made twice here; tsc catches it, which is why it is caught.)
+import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js';
 const base = ${JSON.stringify(base)};
 const routes = ${list};
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 for (const route of routes) {
-  const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null };
+  const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null, a11y: [] };
   const page = await browser.newPage();
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
@@ -148,6 +164,27 @@ for (const route of routes) {
       const nav = performance.getEntriesByType('navigation')[0];
       setTimeout(() => resolve({ lcp: Math.round(lcp), cls: Math.round(cls * 1000) / 1000, ttfb: nav ? Math.round(nav.responseStart) : null }), 200);
     }));
+    // A focused accessibility pass — see the module header for why these six and not a library.
+    out.a11y = await page.evaluate(() => {
+      const issues = [];
+      const named = (el) => !!(el.getAttribute('aria-label') || el.getAttribute('title')
+        || el.getAttribute('aria-labelledby') || (el.textContent || '').trim()
+        || el.querySelector('img[alt]:not([alt=\"\"])'));
+      const hidden = (el) => el.getAttribute('aria-hidden') === 'true' || el.getAttribute('role') === 'presentation';
+      const add = (rule, nodes) => { if (nodes.length) issues.push({ rule, count: nodes.length, example: (nodes[0].outerHTML || '').slice(0, 120) }); };
+      if (!document.documentElement.getAttribute('lang')) issues.push({ rule: 'html-lang', count: 1, example: '<html>' });
+      if (!(document.title || '').trim()) issues.push({ rule: 'page-title', count: 1, example: '<title>' });
+      add('image-alt', [...document.querySelectorAll('img')].filter((el) => !hidden(el) && el.getAttribute('alt') === null));
+      add('button-name', [...document.querySelectorAll('button,[role=\"button\"]')].filter((el) => !hidden(el) && !named(el)));
+      add('link-name', [...document.querySelectorAll('a[href]')].filter((el) => !hidden(el) && !named(el)));
+      add('input-label', [...document.querySelectorAll('input:not([type=hidden]),select,textarea')].filter((el) => {
+        if (hidden(el)) return false;
+        if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return false;
+        if (el.id && document.querySelector('label[for=\"' + CSS.escape(el.id) + '\"]')) return false;
+        return !el.closest('label');
+      }));
+      return issues;
+    });
   } catch (e) {
     out.errors.push(String(e && e.message ? e.message : e).slice(0, 200));
   }
@@ -156,7 +193,7 @@ for (const route of routes) {
 }
 await browser.close().catch(() => {});
 NBAI_EOF
-NODE_PATH=${TOOLS_DIR}/node_modules PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node /tmp/nbai-pagecheck.mjs 2>&1 | grep '^NBAI_PAGE:' || true`;
+PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node /tmp/nbai-pagecheck.mjs 2>&1 | grep '^NBAI_PAGE:' || true`;
 }
 
 export type PageVerdict = 'ok' | 'blank' | 'server-error' | 'script-error' | 'unreachable';
@@ -171,6 +208,9 @@ export interface PageVitals {
   ttfb: number | null;
 }
 
+/** One accessibility problem found on a page, with a real example rather than a count alone. */
+export interface A11yIssue { rule: string; count: number; example: string }
+
 export interface PageResult {
   route: string;
   status: number | null;
@@ -178,6 +218,7 @@ export interface PageResult {
   /** Did the page go quiet before we measured it? When false, the vitals are NOT graded. */
   settled?: boolean;
   vitals?: PageVitals | null;
+  a11y?: A11yIssue[];
   errors: string[];
   verdict: PageVerdict;
   /** What this means, in the words the report should use. */
@@ -248,7 +289,7 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
     const at = line.indexOf('NBAI_PAGE:');
     if (at < 0) continue;
     try {
-      const raw = JSON.parse(line.slice(at + 'NBAI_PAGE:'.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown };
+      const raw = JSON.parse(line.slice(at + 'NBAI_PAGE:'.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown };
       if (typeof raw.route !== 'string' || !raw.route) continue;
       const rv = raw.vitals as { lcp?: unknown; cls?: unknown; ttfb?: unknown } | null | undefined;
       out.push({
@@ -259,6 +300,10 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
           errors: Array.isArray(raw.errors) ? raw.errors.filter((e): e is string => typeof e === 'string') : [],
         }),
         settled: raw.settled === true,
+        a11y: Array.isArray(raw.a11y)
+          ? (raw.a11y as unknown[]).filter((i): i is A11yIssue =>
+              !!i && typeof (i as A11yIssue).rule === 'string' && typeof (i as A11yIssue).count === 'number')
+          : [],
         // A partial vitals object is not a measurement — take it only when both numbers are real.
         vitals: rv && typeof rv.lcp === 'number' && typeof rv.cls === 'number'
           ? { lcp: rv.lcp, cls: rv.cls, ttfb: typeof rv.ttfb === 'number' ? rv.ttfb : null }
@@ -269,14 +314,52 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
   return out;
 }
 
+/** How each accessibility rule reads to someone who did not write the checker. */
+const A11Y_LABELS: Record<string, string> = {
+  'html-lang': 'the page does not say what language it is in',
+  'page-title': 'the page has no title',
+  'image-alt': 'images with no alt text',
+  'button-name': 'buttons a screen reader cannot name',
+  'link-name': 'links a screen reader cannot name',
+  'input-label': 'form fields with no label',
+};
+
+/**
+ * The accessibility line, in plain words.
+ *
+ * DELIBERATELY NOT CALLED "axe" OR "WCAG". Injecting axe-core would mean pushing ~500 KB through a
+ * sandbox command whose size limit cannot be verified from here, and shipping an unverified mechanism is
+ * a mistake this codebase has already paid for. These six checks are the ones generated apps actually
+ * fail; each is reported as the specific thing it is. Claiming full coverage would be the lie — finding
+ * real problems is not. Verified in a real browser against a deliberately-bad page (all six found) and a
+ * correct one (nothing found). PURE.
+ */
+export function a11ySummary(results: PageResult[]): string {
+  const totals = new Map<string, number>();
+  for (const r of results) for (const i of r.a11y ?? []) totals.set(i.rule, (totals.get(i.rule) ?? 0) + i.count);
+  if (totals.size === 0) return '';
+  const parts = [...totals.entries()].map(([rule, n]) => {
+    const label = A11Y_LABELS[rule] ?? rule;
+    return /^the page/.test(label) ? label : `${n} ${label}`;
+  });
+  return ` Accessibility: ${parts.join(', ')}.`;
+}
+
 /**
  * The one line the report carries.
  *
  * Says how many were CHECKED as well as how many passed, because "3 pages render" means nothing without
  * knowing whether the app has 3 pages or 30. PURE.
  */
-export function summarizePageCheck(results: PageResult[]): { ok: boolean; summary: string } {
-  if (results.length === 0) return { ok: true, summary: 'No additional page routes were found to check.' };
+export function summarizePageCheck(results: PageResult[], attempted = results.length): { ok: boolean; summary: string } {
+  // "Nothing to check" and "the check produced nothing" are different facts, and only the first is good
+  // news. Collapsing them would have reported a check that never ran as a clean result — which is what
+  // the NODE_PATH bug above would have done on every single build.
+  if (results.length === 0) {
+    return attempted > 0
+      ? { ok: false, summary: `The page-render check could not be completed for ${attempted} route${attempted === 1 ? '' : 's'} — it produced no result, so nothing about those pages was verified.` }
+      : { ok: true, summary: 'No additional page routes were found to check.' };
+  }
   const bad = results.filter((r) => r.verdict !== 'ok');
   // Performance is reported ALONGSIDE the render verdict, never as one: a slow page still renders, and
   // failing a build over a number measured on a 2-vCPU sandbox would be a false alarm about a fine app.
@@ -284,11 +367,14 @@ export function summarizePageCheck(results: PageResult[]): { ok: boolean; summar
   const perf = slow.length > 0
     ? ` Measured in the preview sandbox (not your users' devices): ${slow.map((x) => `${x.route} is ${x.v.poor.join(' and ')}`).join('; ')}.`
     : '';
+  // Accessibility rides along for the same reason performance does: a page with an unlabelled button
+  // still rendered, and failing a build over it would be a false alarm about a working app.
+  const a11y = a11ySummary(results);
   if (bad.length === 0) {
-    return { ok: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.${perf}` };
+    return { ok: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.${perf}${a11y}` };
   }
   return {
     ok: false,
-    summary: `${bad.length} of ${results.length} page route${results.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}.${perf}`,
+    summary: `${bad.length} of ${results.length} page route${results.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}.${perf}${a11y}`,
   };
 }

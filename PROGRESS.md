@@ -26899,3 +26899,40 @@ Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,266 tests, exit
 
 **Still open in this line:** axe-core accessibility over the same pages. It needs the axe source injected
 into the page (a ~500 KB script tag), which is doable with zero sandbox install but is its own slice.
+
+## 2026-08-06 (15) — accessibility on the same pages, and a bug that would have made the whole check a no-op
+
+**THE CRITICAL FIND, and it was in code merged an hour earlier (#2162).** The in-sandbox page script is an
+ES module that loaded Playwright with `NODE_PATH=…` + `import`. **NODE_PATH is honoured only by CJS
+`require`; an ESM `import` ignores it entirely and dies with `ERR_MODULE_NOT_FOUND`.** And because the
+command ends in `|| true` and pipes through `grep`, that failure produces NO output and NO error — the
+page check would have **silently verified nothing on every single build**, while the report said the
+pages were fine. Proven both ways in a real Node before fixing (NODE_PATH → module-not-found;
+absolute-path import → OK); the script now imports
+`/home/user/.e-tools/node_modules/playwright/index.js` by path. The old test that REQUIRED `NODE_PATH` —
+which is what locked the bug in place — is re-anchored to the mechanism that actually works.
+
+**Its twin: a check that produced NOTHING was reported as "nothing to check".** That is precisely the
+shape the bug produced (routes found, script ran, zero output), so the false reassurance and the failure
+were designed to arrive together. `summarizePageCheck` now takes the ATTEMPTED count and says
+"could not be completed for N routes — nothing about those pages was verified" when results are empty
+but routes existed.
+
+**Accessibility, the last piece of the roadmap's "weakest measured category".** Six checks run in the
+same already-open page: missing `lang`, missing `<title>`, images with no `alt`, buttons and links a
+screen reader cannot name, form fields with no label. **Deliberately NOT axe and never called
+WCAG-compliant** — injecting axe-core means pushing ~500 KB through a sandbox command whose size limit
+cannot be verified from here, and shipping an unverified mechanism is a mistake this codebase has already
+paid for. Claiming full coverage would be the lie; finding real problems is not.
+
+**Verified in a real browser before shipping:** a deliberately-bad page produced all six findings, and a
+correct page produced NONE — including the cases that look like violations but are not (`alt=""` with
+`aria-hidden`, an `aria-label` on a button, `label[for]`, a wrapping label, a hidden input). Reported in
+plain words ("3 images with no alt text"), and never as a build failure: a page with an unlabelled button
+still rendered.
+
+Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,276 tests, exit 0.
+
+With this, the roadmap's 🔒 "Lighthouse / Web-Vitals + axe-core over the LIVE preview — needs headless
+Chrome" is CLOSED as far as code can close it: LCP, CLS and accessibility all measured on the real pages,
+with no new dependency and no infra.

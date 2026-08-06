@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractPageRoutes, pageCheckScript, parsePageCheck, classifyPage, summarizePageCheck,
-  MAX_PAGE_ROUTES, TOOLS_DIR, PAGE_LOAD_TIMEOUT_MS, SETTLE_TIMEOUT_MS, vitalsVerdict,
+  MAX_PAGE_ROUTES, TOOLS_DIR, PAGE_LOAD_TIMEOUT_MS, SETTLE_TIMEOUT_MS, vitalsVerdict, a11ySummary,
 } from './PageRouteCheck';
 
 /**
@@ -71,7 +71,10 @@ describe('pageCheckScript — cheap by construction', () => {
   it('uses the PRE-BAKED browser — no download, no npm install', () => {
     // Playwright 1.49.1 and Chromium are baked into both E2B images; the ~300 MB is paid once at
     // template-build time. This is what makes running it by default defensible.
-    expect(script).toContain(`NODE_PATH=${TOOLS_DIR}/node_modules`);
+    // This assertion USED to require NODE_PATH — which is what locked the bug in place: NODE_PATH does
+    // nothing for an ESM import, so the check silently verified nothing. It now requires the mechanism
+    // that actually works. (See the ESM describe block below.)
+    expect(script).toContain(`import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js'`);
     expect(script).toContain(`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers`);
     expect(script).not.toContain('npm install');
     expect(script).not.toContain('playwright install');
@@ -274,5 +277,99 @@ describe('parsePageCheck carries the measurement, and refuses a partial one', ()
     expect(r.verdict).toBe('ok');
     expect(r.settled).toBe(false);
     expect(r.vitals).toBeNull();
+  });
+});
+
+/**
+ * THE ESM BUG THAT WOULD HAVE MADE THE WHOLE CHECK A NO-OP (found by running it, 2026-08-06).
+ *
+ * The first version loaded Playwright with `NODE_PATH=…` and an ESM `import`. NODE_PATH is honoured only
+ * by CJS `require`; an ESM import ignores it and dies with ERR_MODULE_NOT_FOUND. Because the command ends
+ * in `|| true` and pipes through grep, that failure produces NO output and no error — the check would
+ * have silently verified nothing on every single build, while the report said everything was fine.
+ * Proven both ways in a real Node before fixing.
+ */
+describe('the browser is imported by ABSOLUTE PATH, because NODE_PATH does not apply to ESM', () => {
+  const script = pageCheckScript('https://x.e2b.app', ['/a']);
+
+  it('imports playwright by its real path', () => {
+    expect(script).toContain(`import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js'`);
+  });
+
+  it('does not SET NODE_PATH for the run — it would do nothing and imply it works', () => {
+    const runLine = script.split('\n').filter((l) => l.includes('node /tmp/nbai-pagecheck.mjs'))[0];
+    expect(runLine).toBeTruthy();
+    expect(runLine).not.toContain('NODE_PATH=');
+    expect(runLine).toContain(`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers`);
+  });
+});
+
+describe('a check that produced NOTHING is not a clean result', () => {
+  it('says so when routes were attempted and no result came back', () => {
+    // This is the exact shape the NODE_PATH bug produced: routes found, script ran, zero output.
+    // Reporting that as "nothing to check" would have hidden a check that never ran, on every build.
+    const s = summarizePageCheck([], 3);
+    expect(s.ok).toBe(false);
+    expect(s.summary).toContain('could not be completed for 3 routes');
+    expect(s.summary).toContain('nothing about those pages was verified');
+  });
+
+  it('genuinely having no routes is still good news', () => {
+    const s = summarizePageCheck([], 0);
+    expect(s.ok).toBe(true);
+    expect(s.summary).toContain('No additional page routes');
+  });
+});
+
+/**
+ * ACCESSIBILITY — six checks, named as exactly what they are.
+ *
+ * Verified in a REAL browser before shipping: a deliberately-bad page produced all six findings, and a
+ * correct page produced none (it correctly accepts `alt=""` with aria-hidden, an aria-label on a button,
+ * `label[for]`, a wrapping label, and a hidden input).
+ */
+describe('a11ySummary — plain words, and never a claim of full coverage', () => {
+  const page = (a11y: Array<{ rule: string; count: number; example: string }>) => ({
+    ...classifyPage({ route: '/a', status: 200, text: 20, errors: [] }), settled: true, vitals: null, a11y,
+  });
+
+  it('translates each rule into something a non-developer can act on', () => {
+    const s = a11ySummary([page([{ rule: 'image-alt', count: 3, example: '<img>' }, { rule: 'input-label', count: 2, example: '<input>' }])]);
+    expect(s).toContain('3 images with no alt text');
+    expect(s).toContain('2 form fields with no label');
+  });
+
+  it('the page-level rules read as facts, not counts', () => {
+    // "1 the page has no title" would be nonsense.
+    const s = a11ySummary([page([{ rule: 'page-title', count: 1, example: '<title>' }])]);
+    expect(s).toContain('the page has no title');
+    expect(s).not.toContain('1 the page');
+  });
+
+  it('totals the same rule across pages', () => {
+    const s = a11ySummary([
+      page([{ rule: 'image-alt', count: 2, example: '<img>' }]),
+      page([{ rule: 'image-alt', count: 3, example: '<img>' }]),
+    ]);
+    expect(s).toContain('5 images with no alt text');
+  });
+
+  it('a clean app adds nothing at all', () => {
+    expect(a11ySummary([page([])])).toBe('');
+    expect(a11ySummary([])).toBe('');
+  });
+
+  it('accessibility never fails the build — an unlabelled button still rendered', () => {
+    const s = summarizePageCheck([page([{ rule: 'button-name', count: 1, example: '<button>' }])]);
+    expect(s.ok).toBe(true);
+    expect(s.summary).toContain('buttons a screen reader cannot name');
+  });
+
+  it('what the USER reads never claims to be axe or WCAG', () => {
+    // The surface that matters is the sentence in the report, not a comment in a temp file.
+    const s = a11ySummary([page([{ rule: 'image-alt', count: 1, example: '<img>' }])]);
+    expect(s).not.toMatch(/\baxe\b/i);
+    expect(s).not.toMatch(/\bWCAG\b/i);
+    expect(s).not.toMatch(/\bcompliant\b/i);
   });
 });

@@ -311,6 +311,7 @@ import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/re
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
+import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
@@ -6556,7 +6557,15 @@ export function registerAgentV3Routes(app: Express): void {
       // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
       // report instead of each report looking like a first attempt. Best-effort, non-blocking.
       void listDiagnosticsHistory(workspaceId, 50)
-        .then((h) => buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false).length))
+        .then((h) => {
+          buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false).length);
+          // THE SESSION, not just this turn (admin 2026-08-06). Two complaints, one root cause: a
+          // 58-minute session reported as 18 minutes, and three workspace wipes no report mentioned —
+          // both because startedAt/endedAt and the data-loss events are PER TURN. Built from the SAME
+          // read that already fed priorFailedBuilds, so it costs no extra query.
+          const summary = summarizeSession(h, buildStartedAt, Date.now(), 50);
+          buildDiag.setSession({ ...summary, line: sessionSummaryLine(summary) });
+        })
         .catch(() => { /* history read is best-effort */ });
       // PR4 — delivery telemetry: count which provider drove each build turn across the WHOLE
       // build (first attempt + any escalation), so `deliveredVia` records the dominant builder

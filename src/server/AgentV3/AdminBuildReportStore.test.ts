@@ -51,3 +51,30 @@ describe('a report sent mid-build says so', () => {
     expect(buildAdminReportRecord({ ...running, ok: true } as never, ctx).meta.inFlight).toBe(false);
   });
 });
+
+/**
+ * THE SESSION, NOT THE TURN (admin, 2026-08-06). A 58-minute session reported 18.8 minutes because that
+ * was the last turn; three workspace wipes appeared in no report because they belonged to earlier turns.
+ */
+describe('the session view reaches the admin inbox', () => {
+  const ctx = { reportedAt: 1786031667042, userId: 'u1', email: 'a@b.c', name: null, workspaceId: 'ws', buildId: 'b1' };
+  const base = { schema: 'navbharatai.v3.build-diagnostics/1', buildId: 'b1', prompt: 'continue', startedAt: 1786030483102, endedAt: 1786031611862, ok: true, counts: { total: 1, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 }, issues: [], problems: [] };
+
+  it('carries the sentence and the wipe count into meta', () => {
+    const rec = buildAdminReportRecord({ ...base, session: { turns: 3, elapsedMs: 3_480_000, dataLossTotal: 3, failedTurns: 1, truncated: false, line: 'This is turn 3 of this session, which has been running for 58m 0s in total.' } } as never, ctx);
+    expect(rec.meta.sessionLine).toContain('58m 0s in total');
+    expect(rec.meta.sessionDataLoss).toBe(3);
+  });
+
+  it('a first turn carries nothing rather than a hollow line', () => {
+    const rec = buildAdminReportRecord({ ...base, session: { turns: 1, elapsedMs: 0, dataLossTotal: 0, failedTurns: 0, truncated: false, line: '' } } as never, ctx);
+    expect(rec.meta.sessionLine).toBeNull();
+    expect(rec.meta.sessionDataLoss).toBe(0);
+  });
+
+  it('an older report with no session block still stores cleanly', () => {
+    const rec = buildAdminReportRecord(base as never, ctx);
+    expect(rec.meta.sessionLine).toBeNull();
+    expect(rec.meta.sessionDataLoss).toBeNull();
+  });
+});

@@ -621,3 +621,49 @@ describe('detectDevPort — a crash dump is not an announcement', () => {
     expect(detectDevPort(`serving on port 5000\n${EADDRINUSE_LOG}`, 3000)).toBe(3000);
   });
 });
+
+/**
+ * Looking THROUGH `npm run dev` (report 26a8e81c, 2026-08-06).
+ *
+ * The caller already resolved the package.json script, but the pin decision was tested against the
+ * RAW `npm run dev` — where no `tsx`/`node` appears — so Mitrify's `tsx server/index.ts` fell through
+ * to the Vite assumption and got `--port 3000 --strictPort`, flags it silently ignores. The app bound
+ * its own 5000, the health check watched 3000, declared "did not start", and restarted twice; the
+ * still-running first server then made the retry die with:
+ *
+ *   UNCAUGHT EXCEPTION: Error: listen EADDRINUSE: address already in use 0.0.0.0:5000
+ *
+ * One wrong string, and ~109s of the build went to a server we could not see.
+ */
+describe('pinDevServerPort sees through a package-manager script', () => {
+  it('injects PORT= when the RESOLVED script is a Node server', () => {
+    expect(pinDevServerPort('npm run dev', 3000, undefined, 'NODE_ENV=development tsx server/index.ts'))
+      .toBe('PORT=3000 npm run dev');
+  });
+
+  it('no longer hands Vite flags to a command that ignores them', () => {
+    const out = pinDevServerPort('npm run dev', 3000, undefined, 'tsx server/index.ts');
+    expect(out).not.toContain('--strictPort');
+    expect(out).not.toContain('--port');
+  });
+
+  it('still pins a real Vite script the Vite way', () => {
+    // The resolved script decides; a genuine Vite app must keep --strictPort.
+    expect(pinDevServerPort('npm run dev', 5173, 'vite', 'vite'))
+      .toBe('npm run dev --port 5173 --strictPort');
+  });
+
+  it('keeps the historical assumption when nothing resolved', () => {
+    // No resolved script (no package.json / parse error) → unchanged behaviour, not a new guess.
+    expect(pinDevServerPort('npm run dev', 5173)).toBe('npm run dev --port 5173 --strictPort');
+  });
+
+  it('a direct node server still works without the resolved argument', () => {
+    expect(pinDevServerPort('tsx server/index.ts', 3000)).toBe('PORT=3000 tsx server/index.ts');
+  });
+
+  it('never double-injects PORT=', () => {
+    expect(pinDevServerPort('PORT=8080 npm run dev', 3000, undefined, 'tsx server/index.ts'))
+      .toBe('PORT=8080 npm run dev');
+  });
+});

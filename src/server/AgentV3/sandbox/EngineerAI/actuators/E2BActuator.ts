@@ -819,7 +819,10 @@ export class E2BActuator implements IEngineerActuator {
         }
       }
       let devCommand = redirectDevServerOutput(
-        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework)),
+        // `resolvedCommand` is passed so the pin decision can see THROUGH `npm run dev` to the script it
+        // actually runs (report 26a8e81c): a Node server behind a pm script used to get Vite's
+        // `--port … --strictPort`, which it ignores, and the health check then watched the wrong port.
+        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework, resolvedCommand)),
       );
       // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
       // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —

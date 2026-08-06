@@ -26812,3 +26812,51 @@ unverified; the classification above makes the situation honest and actionable i
 system images that lack client tools for their own reasons.
 
 Gate: tsc clean both projects, SHUFFLED full run 1085 files / 12,229 tests, exit 0.
+
+## 2026-08-06 (13) — every page is opened in a browser, not just the home one
+
+Admin: "E2E auto-run by default — Playwright is built, it only runs on request… make it cheap for the
+admin." Investigating the cost is what unlocked it.
+
+**The stated reason for not running was factually wrong for this engine.** `e2eAutoScaffold` declined to
+execute anything because "Playwright pulls a browser of roughly 300 MB … on EVERY build". True in
+general — and false here: **Playwright 1.49.1 and Chromium are PRE-BAKED into both E2B images**
+(`infra/e2b/e2b.Dockerfile`, `e2b-fullstack.Dockerfile`, into `/home/user/.e-tools`), and
+`_kickoffPlaywright` already warms them on every sandbox for the screenshot tools. The 300 MB is paid
+once at template-build time, not per build. **A cost that does not exist is not a reason**, and leaving
+it written down would keep talking the next reader out of a check that is nearly free. Corrected in
+place rather than quietly worked around.
+
+**The gap it was hiding is real and is the one the admin has been chasing.** Three checks already ran
+after a build and NONE of them opens a non-home page:
+- the preview verifier loads HOME in a browser and reads the rendered HTML — home only;
+- `RouteSmokeCheck` curls the app's API endpoints — HTTP status, no browser, no rendering;
+- the console-error capture watches the page the preview opened — home again.
+
+So a React/Next app can answer 200 for `/dashboard` with a perfect HTML shell, throw during the
+client-side render, paint a blank screen — and every check passes. That is exactly the
+"Cannot GET /customer/home" family.
+
+`PageRouteCheck` closes it: the app's own page routes are read from its source (React Router
+`<Route path>`, Next App Router, Next Pages Router) and opened in the pre-baked browser.
+
+- **Cheap by construction:** no download, no npm install, no model call. One navigation per route.
+- **Bounded:** `MAX_PAGE_ROUTES` = 6, a 12s per-route timeout, and an overall wall-clock guard.
+- **Home is deliberately skipped** — the preview verifier already proved it; paying twice buys nothing.
+- **Dynamic routes are skipped**, for the same reason RouteSmokeCheck skips path parameters: an invented
+  id renders "not found", which we would then report as a broken page. False alarms about working code
+  are what teach people to ignore the report.
+- **The finding it exists for is a 200 that painted NOTHING** — measured as real painted text, after a
+  wait, because a client-rendered app paints after `domcontentloaded`. Console errors on a page that DID
+  render are reported but are NOT called a broken page; calling them one would fail every app that logs a
+  warning.
+- **Evidence, never a gate.** Like the route smoke check, it cannot mark a working build failed.
+- Kill switch `AGENTV3_PAGE_CHECK=off`.
+
+The user's own `@playwright/test` suite is still WRITTEN and not executed — that is their dependency and
+their CI, and adding a package to someone's project to run a test for them is a different thing.
+
+**A bug its own test caught:** the build-output filter required `/dist/`, so a top-level `dist/App.tsx` —
+the common case — was read as source. Now anchored on a path start as well as a slash.
+
+Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,253 tests, exit 0.

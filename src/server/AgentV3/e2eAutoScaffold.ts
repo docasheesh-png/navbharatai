@@ -4,17 +4,25 @@
 // shipped without one. This makes the scaffold a system reflex instead of a model decision — the
 // same move the vaccine made for unit tests.
 //
-// WHAT THIS DELIBERATELY DOES NOT DO: install Playwright or run it during the build. The roadmap
-// line said "run a starter E2E on every successful build", and that is the wrong trade at this
-// price: Playwright pulls a browser of roughly 300 MB, and paying that on EVERY build — for every
-// user, including the ones on the free tier — would make builds materially slower to add a signal we
-// now largely have from the preview render check, the console-error capture and the route smoke
-// check. Writing the files costs nothing, and it leaves the user with something real they own: a net
-// that runs in their own repo and their own CI, whenever they want it.
+// WHAT THIS DELIBERATELY DOES NOT DO: install `@playwright/test` into the user's project or run THEIR
+// suite during the build. Writing the files costs nothing and leaves the user something real they own:
+// a net that runs in their own repo and their own CI, whenever they want it.
 //
-// That is the honest version of this item, and the report says plainly that the suite was written
-// and not executed — a scaffold reported as a passing test run would be exactly the fake success the
-// constitution forbids.
+// CORRECTION (2026-08-06). This comment used to justify that by saying Playwright "pulls a browser of
+// roughly 300 MB … on EVERY build". That is true in general and FALSE for this engine: Playwright 1.49.1
+// and Chromium are PRE-BAKED into both E2B images (`infra/e2b/e2b.Dockerfile`, `e2b-fullstack.Dockerfile`,
+// into `/home/user/.e-tools`), and `_kickoffPlaywright` already warms them on every sandbox. The 300 MB is
+// paid once at template-build time, not per build. A cost that does not exist is not a reason, and
+// leaving it written down would keep talking the next reader out of a check that is nearly free.
+//
+// So the browser check DOES now run by default — as `PageRouteCheck`, which opens the app's own page
+// routes in that pre-baked browser and reports whether they actually render. What stays out of the build
+// is installing the user's own test RUNNER and executing THEIR suite: that is their dependency and their
+// CI, and adding a package to someone's project to run a test for them is a different thing entirely.
+//
+// The report still says plainly that the suite was WRITTEN and not executed — a scaffold reported as a
+// passing test run would be exactly the fake success the constitution forbids. The rendering evidence in
+// the report comes from PageRouteCheck, which really did run.
 
 /** What the decision needs to know. Kept tiny so the caller cannot accidentally widen it. */
 export interface E2eAutoScaffoldContext {

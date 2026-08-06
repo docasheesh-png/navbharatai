@@ -102,6 +102,7 @@ import { randomUUID } from 'crypto';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
+import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
@@ -338,19 +339,13 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
  * session reuse the SAME sandbox (and its files, node_modules and dev server),
  * enabling iterative building ("add a login page" after "build a todo app").
  */
-let sharedActuator: IEngineerActuator | null = null;
-/**
- * The ONE sandbox-selection decision (E2B → Docker → Local). Exported so other routes that write
- * workspace files — e.g. the chunked zip import — reuse the SAME actuator instance and the same
- * environment rules, instead of duplicating the selection and drifting from it.
- */
-export function buildActuator(): IEngineerActuator {
-  if (sharedActuator) return sharedActuator;
-  if (process.env.E2B_API_KEY) sharedActuator = new E2BActuator();
-  else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();
-  else sharedActuator = new LocalActuator();
-  return sharedActuator;
-}
+// MOVED OUT (2026-08-06) — see routes/actuatorFactory. `routes/zipUpload` needs this and nothing else
+// from this file, and importing it dragged in the whole AgentV3 engine: 6.5 SECONDS per import, paid on
+// every server boot and responsible for a test that failed at random. Re-exported here so every existing
+// importer keeps working AND there is still exactly one actuator per process — two would silently hand a
+// session's second message a cold, empty sandbox.
+import { buildActuator } from './actuatorFactory';
+export { buildActuator };
 
 /**
  * SECURITY (audit A2 — defense-in-depth for C2): should a BUILD be refused because no isolated
@@ -5783,7 +5778,7 @@ export function registerAgentV3Routes(app: Express): void {
                 if (prov.dbVerified === false) {
                   opts.diag?.record({
                     phase: 'preview', severity: 'warning', code: 'IMPORT_DB_PROVISION_FAILED',
-                    message: `PostgreSQL was set up but the real connection test FAILED after ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${prov.dbVerifyFailure === 'not-ready' ? 'the server never accepted connections' : prov.dbVerifyFailure === 'select1-failed' ? 'the server accepted connections but SELECT 1 over the app\'s URL did not succeed' : 'provisioning returned no result'}). DATABASE_URL is written for a late heal, but the app will likely fail to connect on boot.`,
+                    message: `PostgreSQL was set up but the real connection test FAILED after ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${prov.dbVerifyFailure === 'not-ready' ? 'the server never accepted connections' : prov.dbVerifyFailure === 'select1-failed' ? 'the server accepted connections but SELECT 1 over the app\'s URL did not succeed' : 'provisioning returned no result'}). DATABASE_URL is written for a late heal, but the app will likely fail to connect on boot. Source: ${provisionPathSummary(prov.dbDiagnostics)}.`,
                     autoResolved: false,
                     // WHY, for us — pg_ctlcluster's own error, whether psql exists, which user we
                     // are. Report 15985d3b said this truthfully and still left the cause unknown,
@@ -5793,8 +5788,14 @@ export function registerAgentV3Routes(app: Express): void {
                 } else {
                   opts.diag?.record({
                     phase: 'preview', severity: 'info', code: 'IMPORT_DB_PROVISIONED',
-                    message: `Sandbox database provisioned for the preview in ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${Object.keys(prov.envVars ?? {}).join(', ') || 'no env vars returned'})${prov.dbVerified === true ? ' — connection verified with a real SELECT 1' : ''}.`,
+                    // WHICH ROUTE, not just "it worked" (admin 2026-08-06). The diagnostics used to be
+                    // attached on FAILURE only, so a build that succeeded told us nothing about HOW —
+                    // and the one open question about the fetched-Postgres path is whether it fires in
+                    // the real sandbox at all. A success that carries no evidence cannot answer it, so
+                    // the summary rides here too and the next green build IS the answer.
+                    message: `Sandbox database provisioned for the preview in ${Math.round((Date.now() - dbStartedAt) / 1000)}s (${Object.keys(prov.envVars ?? {}).join(', ') || 'no env vars returned'})${prov.dbVerified === true ? ' — connection verified with a real SELECT 1' : ''}. Source: ${provisionPathSummary(prov.dbDiagnostics)}.`,
                     autoResolved: true,
+                    ...(prov.dbDiagnostics ? { detail: prov.dbDiagnostics.slice(0, 800) } : {}),
                   });
                 }
               } catch (e) {

@@ -29,7 +29,7 @@ import { verifyFirebaseToken, workspaceRateLimiter, zipChunkRateLimiter } from '
 import { extractZipProjectFromDisk, freeDiskBytes, hasSpaceForUpload } from '../AgentV3/ProjectImportStream';
 import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { buildActuator } from './agentv3';
+
 import { importDropSummary } from '../../lib/importDropReport';
 
 /** One chunk stays far under Cloud Run's ~32 MB request cap even with protocol overhead. */
@@ -213,6 +213,12 @@ export function registerZipUploadRoutes(app: Express): void {
         });
         return;
       }
+      // LAZY, and deliberately so (2026-08-06). The actuator classes pull the sandbox SDKs, ~1.5s of
+      // import work that this route needs only when someone actually finishes an upload. Loading it at
+      // module scope charged that to every server boot on a path that has nothing to do with building.
+      // Same module, so still the same process-wide singleton — a second instance would hand a
+      // session's next message a cold, empty sandbox.
+      const { buildActuator } = await import('./actuatorFactory');
       const actuator = buildActuator();
       // 'import' type starts the sandbox EMPTY so the user's app never gets scaffold files mixed in.
       try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }

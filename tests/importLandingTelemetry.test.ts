@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { enclosingBlock } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
@@ -85,11 +86,12 @@ describe('import preview boot leaves a forensic trail (the report must not be bl
   });
 
   it('a failed database provision is a WARNING that stays unresolved, not an info line', () => {
-    // Window STARTS BEFORE the code marker: severity sits on the same line but ahead of it, so
-    // slicing forward from the marker would silently cut the very field being asserted.
-    const at = SRC.indexOf("code: 'IMPORT_DB_PROVISION_FAILED'");
-    expect(at).toBeGreaterThan(-1);
-    const block = SRC.slice(at - 200, at + 600);
+    // The whole record, read by its real braces rather than a guessed character count — severity sits
+    // BEFORE the code marker and autoResolved after it, and a fixed window silently cut one or the
+    // other the moment the message string grew (it did, 2026-08-06, and this test reported the
+    // invariant as violated when it was intact). See tests/helpers/sourceSlice.
+    expect(SRC.indexOf("code: 'IMPORT_DB_PROVISION_FAILED'")).toBeGreaterThan(-1);
+    const block = enclosingBlock(SRC, "code: 'IMPORT_DB_PROVISION_FAILED'");
     expect(block).toContain("severity: 'warning'");
     expect(block).toContain('autoResolved: false');
   });

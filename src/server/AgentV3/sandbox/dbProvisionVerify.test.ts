@@ -4,7 +4,7 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 import {
   dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL,
-  pgBinariesVersion, pgBinariesUrl, pgBinariesMirrorUrl, PG_BINARIES_VERSION_DEFAULT,
+  pgBinariesVersion, pgBinariesUrl, pgBinariesMirrorUrl, PG_BINARIES_VERSION_DEFAULT, provisionPathSummary,
 } from './dbProvisionVerify';
 
 /**
@@ -438,5 +438,47 @@ describe('Downloaded is not the same as runnable', () => {
     // PGBIN is only assigned in the accepted branch.
     const branch = script.slice(script.indexOf('RUN_RC=$?'), at);
     expect(branch).toContain('PGBIN="$NBAI_PG/bin"');
+  });
+});
+
+/**
+ * A SUCCESS THAT CARRIES NO EVIDENCE CANNOT ANSWER THE ONE OPEN QUESTION (admin 2026-08-06).
+ *
+ * The diagnostics were attached to the report on FAILURE only, so a build that WORKED told us nothing
+ * about how — and the one thing genuinely unknown about the fetched-Postgres path is whether it fires in
+ * the real sandbox at all. Answering it needed someone to notice the right markers among a dozen and
+ * interpret them. Now the report says the answer in one line, and a green build IS the evidence.
+ */
+describe('provisionPathSummary — which route, in one line', () => {
+  it('names the fetched build and which host served it', () => {
+    expect(provisionPathSummary('DB_DIAG_PSQL:none\nDB_DIAG_PGFETCH:ok\nDB_DIAG_PGBIN:/home/user/.nbai-pg/bin'))
+      .toContain('FETCHED PostgreSQL via the primary host');
+    expect(provisionPathSummary('DB_DIAG_PGFETCH:curl failed\nDB_DIAG_PGFETCH2:ok\nDB_DIAG_PGBIN:/home/user/.nbai-pg/bin'))
+      .toContain('MIRROR (the primary host failed)');
+  });
+
+  it('distinguishes the image\'s own PostgreSQL from a fetched one', () => {
+    const s = provisionPathSummary('PSQL:/usr/bin/psql\nPGBIN:/usr/lib/postgresql/16/bin');
+    expect(s).toContain("image's own PostgreSQL");
+    expect(s).not.toContain('FETCHED');
+  });
+
+  it('says whether client tools came with it — the psql gap is a real difference', () => {
+    expect(provisionPathSummary('PSQL:none\nPGBIN:/home/u/.nbai-pg/bin')).toContain('server-only build, no client tools');
+    expect(provisionPathSummary('PSQL:/usr/bin/psql\nPGBIN:/home/u/.nbai-pg/bin')).toContain('client tools present');
+  });
+
+  it('never collapses "downloaded but cannot run" into "nothing found" — the fixes differ', () => {
+    const cannotRun = provisionPathSummary('PGEXEC:the fetched postgres cannot run here - libicuuc.so.60\nPGBIN:none');
+    expect(cannotRun).toContain('could not run here');
+    expect(provisionPathSummary('PSQL:none\nPGBIN:none')).toBe('no PostgreSQL found or fetched');
+  });
+
+  it('accepts the raw script output AND the stripped diagnostics, and claims nothing it cannot see', () => {
+    expect(provisionPathSummary('')).toBe('no PostgreSQL found or fetched');
+    expect(provisionPathSummary(null)).toBe('no PostgreSQL found or fetched');
+    // Same answer whether the DB_DIAG_ prefix survived or not.
+    expect(provisionPathSummary('DB_DIAG_PGBIN:/usr/lib/postgresql/16/bin'))
+      .toBe(provisionPathSummary('PGBIN:/usr/lib/postgresql/16/bin'));
   });
 });

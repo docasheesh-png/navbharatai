@@ -26654,3 +26654,44 @@ that same screenshot:
    attached domain reports its records a few seconds AFTER create (async prep on the hosting side).
    Copy now says what is happening: active ⇒ "fully set up"; pending ⇒ "records are being prepared —
    tap Check in a few seconds".
+
+## 2026-08-06 (9) — the "flaky test" was two real bugs, one of them a 6.5-second import
+
+Admin asked to close the remaining open items. The recorded "one run failed, two passed, name scrolled
+away" turned out to be two genuine, reproducible defects — found by running the suite with
+`--sequence.shuffle`, which is the tool that should have been reached for the first time.
+
+**1. `serverStats` was untestable by construction.** `tests/serverStats.test.ts` asserted
+`serverStats.totalHits === 0` on a process-wide MUTABLE singleton that routes legitimately write to —
+so it was asserting a fact about global state at an arbitrary moment, true only while that file ran
+before anything that made a request. Its own last test even increments it, so the ordering was
+load-bearing *within* the file too. FIX: `defaultServerStats()` factory — the DEFAULTS are a fact about
+the shape and are asserted on a fresh object; the SINGLETON is asserted only for what stays true however
+much traffic it has seen. Nested values are rebuilt per call, or a shared Map would recreate the
+coupling.
+
+**2. Importing `routes/zip` took 6469 ms.** `routes/zipUpload` needed exactly ONE function from
+`routes/agentv3` — `buildActuator` — and importing it dragged in the entire AgentV3 engine, the largest
+module in the repo (`zip.ts`'s own body: 43 ms). Two costs, one visible and one not: every server BOOT
+paid it on a path with nothing to do with building apps; and whichever of the two zip route tests
+imported the module FIRST paid ~5s and randomly crossed vitest's 5000 ms timeout. In a suite of 12,000
+that reads as "a random test sometimes fails". FIX: `routes/actuatorFactory.ts` owns the singleton,
+`agentv3.ts` RE-EXPORTS it (two instances would silently hand a session's next message a cold, empty
+sandbox), and `zipUpload` loads it lazily at its one call site. **6469 ms → 1044 ms.**
+
+**3. Two source-level tests broke on a longer string, not a broken invariant.** Both did
+`src.slice(at, at + N)` and asserted inside the window, so growing a message pushed the asserted field
+out and the test reported a violation that had not happened. A test that cries wolf teaches you to widen
+the number, which is how a real regression eventually slips through. FIX: `tests/helpers/sourceSlice.ts`
+— `braceBlock` / `enclosingBlock` read the real block boundaries, so they keep asserting the same thing
+however the code grows.
+
+**4. The build report now proves WHICH PostgreSQL route fired.** Diagnostics reached the report on
+FAILURE only, so a build that WORKED answered nothing about the one genuinely open question. Added
+`provisionPathSummary()` — one line: image's own / FETCHED via primary / FETCHED via MIRROR / downloaded
+but cannot run / none — recorded on success AND failure on the import path, and on the fresh-build path
+through the command channel the report already reads (`provisionBackend` bypasses `runCommand`, so the
+report never saw it at all).
+
+Gate: tsc clean both projects, and a SHUFFLED full run — the order that exposed the flakes — 1084 files
+/ 12,191 tests, exit 0.

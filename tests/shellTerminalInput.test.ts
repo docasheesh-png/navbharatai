@@ -44,10 +44,11 @@ describe('ShellTerminal input during startup', () => {
     expect(openSuccess).toContain('if (held) void sendInput(held)');
   });
 
-  it('the open request has a deadline — "Starting…" can no longer be an eternal state', () => {
-    expect(code).toContain('AbortSignal.timeout(90_000)');
-    // And the timeout produces its own honest message, not a generic network line.
-    expect(code).toContain('took too long to wake');
+  it('the open request has a SHORT deadline — the wake happens in the background, not in this request', () => {
+    // Holding /shell/open through a cold sandbox create is what expired a 90s deadline on wakes that
+    // were actually succeeding (admin 2026-08-06). The open only starts/checks the wake now.
+    expect(code).toContain('AbortSignal.timeout(25_000)');
+    expect(code).not.toContain('AbortSignal.timeout(90_000)');
   });
 
   it('a slow wake keeps talking, so slow is distinguishable from dead', () => {
@@ -59,9 +60,11 @@ describe('ShellTerminal input during startup', () => {
     expect(code).toContain("'Try again'");
   });
 
-  it('every open outcome clears the connecting flag — held keys can never leak into a later session', () => {
-    // The finally is what guarantees this on success, dormant, HTTP-error and thrown paths alike.
-    expect(code).toMatch(/} finally \{\s*clearTimeout\(slowNote\);\s*connectingRef\.current = false;\s*pendingInputRef\.current = '';/);
+  it('every open outcome clears the connecting flag — EXCEPT the hand-off to the wake poll', () => {
+    // The finally guarantees cleanup on success, dormant, HTTP-error and thrown paths alike; the
+    // waking hand-off is the one deliberate exception, because the held keys must survive into the
+    // poll (that queue is the whole point of typing during a wake).
+    expect(code).toMatch(/} finally \{\s*clearTimeout\(slowNote\);\s*if \(!enteredWakePoll\) \{/);
   });
 
   it('restart resets the queue state before reconnecting', () => {
@@ -218,5 +221,52 @@ describe('ShellTerminal input pipeline', () => {
     const restart = code.slice(code.indexOf('const restart = ()'));
     expect(restart).toContain("outBufRef.current = ''");
     expect(restart).toContain("lastSizeRef.current = ''");
+  });
+});
+
+/**
+ * THE WAKE POLL (admin 2026-08-06). The client no longer holds one request open through a cold
+ * sandbox start — it watches the background wake's progress and only calls DEAD what has actually
+ * stopped moving. The same judgement the preview watchdog uses.
+ */
+describe('ShellTerminal wake poll', () => {
+  it('a waking workspace hands off to the progress poll and KEEPS the typed-key queue alive', () => {
+    expect(code).toMatch(/j\.reason === 'waking'/);
+    expect(code).toContain('enteredWakePoll = true');
+    const fin = code.slice(code.indexOf('if (!enteredWakePoll)'));
+    expect(fin.slice(0, 200)).toContain("pendingInputRef.current = ''");
+  });
+
+  it('judges progress, not the clock: stall guard + far-out ceiling, never a flat deadline', () => {
+    const poll = code.slice(code.indexOf('async function pollWake'));
+    expect(poll).toContain('NO_PROGRESS_MS');
+    expect(poll).toContain('HARD_CEILING_MS');
+    expect(poll).toContain('lastProgressAt');
+  });
+
+  it('paints the real phases the user is waiting through', () => {
+    expect(code).toContain('Creating your cloud workspace…');
+    expect(code).toContain('Loading your saved files');
+    expect(code).toContain('Preparing git and tools…');
+  });
+
+  it('a failed wake surfaces its real (sanitized) reason and always offers Try again', () => {
+    const poll = code.slice(code.indexOf('async function pollWake'));
+    expect(poll).toContain('w.error');
+    expect(poll).toContain('Try again');
+  });
+
+  it('ready → reopen is bounded — a ready/host race can never loop forever', () => {
+    const poll = code.slice(code.indexOf('async function pollWake'));
+    expect(poll).toContain('attempt >= 4');
+    expect(poll).toContain('start(term, fit, alive, attempt + 1)');
+  });
+
+  it('one missed poll is not a verdict — a fetch error keeps polling and the no-progress guard judges', () => {
+    const poll = code.slice(code.indexOf('async function pollWake'));
+    // The poll fetch failure path swallows into null (loop continues)…
+    expect(poll).toContain('j = await res.json().catch(() => null)');
+    // …and each poll request is itself bounded so a hung request cannot stall the loop's clock.
+    expect(poll).toContain('AbortSignal.timeout(10_000)');
   });
 });

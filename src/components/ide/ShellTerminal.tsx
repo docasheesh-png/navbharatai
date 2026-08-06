@@ -228,7 +228,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  async function start(term: Terminal, fit: FitAddon, alive: () => boolean): Promise<void> {
+  async function start(term: Terminal, fit: FitAddon, alive: () => boolean, attempt = 0): Promise<void> {
     if (!workspaceId || !userId) {
       setStatus({ kind: 'unavailable', message: 'Sign in and start a build in NavBharatAI Pro v5.0 to open a terminal.' });
       term.write('\x1b[90mSign in and start a build in NavBharatAI Pro v5.0 to open a terminal.\x1b[0m\r\n');
@@ -261,17 +261,18 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     let rows = 24;
     try { const d = fit.proposeDimensions(); if (d) { cols = d.cols; rows = d.rows; } } catch { /* defaults */ }
 
+    let enteredWakePoll = false;
     try {
-      // Bounded. Without a deadline, a server that never answers left the terminal on
-      // "Starting your workspace…" FOREVER, silently eating every keystroke (admin screenshot
-      // 2026-08-05) — the user cannot tell an open that is slow from one that is dead. 90s covers
-      // the slowest real E2B wake we have seen; past that, an honest failure with a retry beats
-      // an eternal spinner.
+      // Bounded, and now SHORT: the wake runs as a background job server-side (admin 2026-08-06,
+      // "start hone me bahut time laga, fir bhi start nahi hua" — the old open held the request
+      // through a whole cold sandbox create, so 90s expired on wakes that were actually
+      // succeeding). This request only starts/checks the wake and answers; the waiting happens in
+      // pollWake below, judged by PROGRESS, never by a clock.
       const res = await fetch('/api/agentv3/shell/open', {
         method: 'POST',
         headers: await authHeaders(),
         body: JSON.stringify({ workspaceId, userId, email: email || '', cols, rows }),
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(25_000),
       });
       const j = await res.json().catch(() => null);
       if (!alive()) return;
@@ -289,6 +290,14 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[31m${message}\x1b[0m\r\n`);
         if (j?.detail) term.write(`\x1b[90m${String(j.detail).slice(0, 300)}\x1b[0m\r\n`);
+        return;
+      }
+      if (j.available === false && j.reason === 'waking') {
+        // The workspace is waking in the background — switch to the progress poll. Everything the
+        // user types keeps queueing (connectingRef stays true), exactly like typing at an ssh
+        // prompt before the banner.
+        enteredWakePoll = true;
+        void pollWake(term, fit, alive, attempt);
         return;
       }
       if (j.available === false) {
@@ -330,14 +339,79 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       const message = offline
         ? 'You appear to be offline — the terminal needs a connection.'
         : timedOut
-          ? 'The workspace took too long to wake (90s). It may still be starting — tap "Try again" in a moment.'
+          ? 'The terminal service did not answer. Check your connection, then tap "Try again".'
           : `Could not reach the terminal service${detail}. Check your connection, then reopen the terminal.`;
       setStatus({ kind: 'unavailable', message });
       term.write(`\x1b[31m${message}\x1b[0m\r\n`);
     } finally {
       clearTimeout(slowNote);
+      // Handing off to the wake poll keeps the connecting state — and the held keystrokes — alive;
+      // every other outcome ends the connecting window and drains the queue.
+      if (!enteredWakePoll) {
+        connectingRef.current = false;
+        pendingInputRef.current = '';
+      }
+    }
+  }
+
+  /**
+   * Watch a background wake and paint its REAL progress, then reopen. The judgement is the preview
+   * watchdog's: a wake that keeps advancing (phase changes, files seeded) may take as long as it
+   * needs; only one that stops advancing for NO_PROGRESS_MS — or breaches an absolute ceiling — is
+   * declared dead, with "Try again" always offered. The poll rides the generous shell rate bucket.
+   */
+  async function pollWake(term: Terminal, fit: FitAddon, alive: () => boolean, attempt: number): Promise<void> {
+    const POLL_MS = 2500;
+    const NO_PROGRESS_MS = 90_000;
+    const HARD_CEILING_MS = 300_000;
+    const startedAt = Date.now();
+    let lastKey = '';
+    let lastProgressAt = Date.now();
+    const fail = (message: string, detail?: string) => {
       connectingRef.current = false;
       pendingInputRef.current = '';
+      setStatus({ kind: 'unavailable', message });
+      term.write(`\x1b[31m${message}\x1b[0m\r\n`);
+      if (detail) term.write(`\x1b[90m${detail.slice(0, 300)}\x1b[0m\r\n`);
+    };
+    if (attempt >= 4) { fail('The workspace keeps waking without becoming ready. Tap "Try again", or send a message in NavBharatAI Pro v5.0 chat to start it.'); return; }
+    while (alive()) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      if (!alive()) return;
+      let j: { wake?: { phase?: string; seeded?: number; total?: number; error?: string } | null; hostReady?: boolean } | null = null;
+      try {
+        const params = new URLSearchParams({ workspaceId: workspaceId || '', userId: userId || '', email: email || '' });
+        const res = await fetch(`/api/agentv3/shell/wake?${params.toString()}`, {
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(10_000),
+        });
+        j = await res.json().catch(() => null);
+      } catch { /* one missed poll is not a verdict — the no-progress guard is */ }
+      const w = j?.wake;
+      if (j?.hostReady || w?.phase === 'ready') {
+        term.write('\x1b[90mWorkspace is ready — starting the shell…\x1b[0m\r\n');
+        return start(term, fit, alive, attempt + 1);   // reopen; the fast path now has a live host
+      }
+      if (w?.phase === 'failed') {
+        fail('Your workspace could not start. Tap "Try again" — a second start usually succeeds.', w.error);
+        return;
+      }
+      const key = w ? `${w.phase}:${w.seeded ?? 0}/${w.total ?? 0}` : 'none';
+      if (key !== lastKey) {
+        lastKey = key;
+        lastProgressAt = Date.now();
+        if (w?.phase === 'starting') term.write('\x1b[90mCreating your cloud workspace…\x1b[0m\r\n');
+        else if (w?.phase === 'seeding') term.write(`\x1b[90mLoading your saved files (${w.seeded ?? 0}/${w.total ?? 0})…\x1b[0m\r\n`);
+        else if (w?.phase === 'finishing') term.write('\x1b[90mPreparing git and tools…\x1b[0m\r\n');
+      }
+      if (Date.now() - lastProgressAt > NO_PROGRESS_MS) {
+        fail('The workspace stopped making progress while waking. Tap "Try again" in a moment.');
+        return;
+      }
+      if (Date.now() - startedAt > HARD_CEILING_MS) {
+        fail('The workspace is taking far longer than it should (5 min). Tap "Try again", or send a message in NavBharatAI Pro v5.0 chat.');
+        return;
+      }
     }
   }
 

@@ -295,22 +295,25 @@ describe('Code Studio shows the SAME app the rest of the product does', () => {
     // the workspace, we hold the files, and the resume path was already proven; it was simply never
     // wired to the terminal.
     const routes = read('src/server/routes/agentv3.ts');
-    expect(routes).toContain('async function wakeWorkspaceForTerminal');
-    const i = routes.indexOf('async function wakeWorkspaceForTerminal');
-    const fn = routes.slice(i, i + 2200);
+    // Now a BACKGROUND job with pollable progress (2026-08-06): holding /shell/open through a cold
+    // sandbox create is what made a 90s client deadline expire on wakes that were succeeding.
+    expect(routes).toContain('function startTerminalWake');
+    const i = routes.indexOf('function startTerminalWake');
+    const fn = routes.slice(i, i + 3600);
     expect(fn).toContain('ensureWorkspace(workspaceId, undefined, resumeSandboxId)');
     expect(fn).toContain('registerSession(workspaceId, git, userId, actuator)');
     // Seeds the saved project back — a recreated sandbox comes back EMPTY, and a terminal opening onto
     // an empty directory looks exactly like the data loss this path exists to prevent.
     expect(fn).toContain('loadWorkspaceFiles(workspaceId)');
     expect(fn).toContain('TERMINAL_WAKE_MAX_FILES');
-    // Best-effort by construction: any failure returns false and the caller falls through to today's
-    // honest dormant message. This can make the terminal work; it can never make it worse.
-    expect(fn).toContain('return false;');
-    expect(fn).toContain("AGENTV3_TERMINAL_AUTOWAKE === 'off'");
-    // Only attempted for a workspace that really holds a project.
+    // A failed wake records its REAL (sanitized) reason instead of vanishing into a boolean.
+    expect(fn).toContain('sanitizeWakeError');
+    // Only attempted for a workspace that really holds a project, and only when a sandbox exists to wake.
     const open = routes.slice(routes.indexOf("app.post('/api/agentv3/shell/open'"), routes.indexOf("app.get('/api/agentv3/shell/stream'"));
-    expect(open).toContain('hasProject > 0 && await wakeWorkspaceForTerminal');
+    expect(open).toContain('hasProject > 0 && canWake');
+    expect(open).toContain("AGENTV3_TERMINAL_AUTOWAKE !== 'off'");
+    // The open ANSWERS instead of blocking: a waking workspace is reported as such with progress.
+    expect(open).toContain("reason: 'waking'");
     // And the user is told it is happening — resuming a sandbox takes real seconds.
     expect(read('src/components/ide/ShellTerminal.tsx')).toContain('Starting your workspace…');
   });

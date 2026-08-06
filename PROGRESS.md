@@ -27416,3 +27416,28 @@ Gate: tsc clean both projects, SHUFFLED full run 1098 files / 12,423 tests, exit
 
 **Still open from the three:** per-app scoping and format validation for injected secrets (the vault is
 per-USER, so every app receives every key the user ever saved, unvalidated).
+
+## 2026-08-06 (21) — CI was running the whole test suite TWICE, and had drifted onto a 15-minute cap
+
+Two consecutive CI runs were cancelled at **exactly 15.1 and 15.0 minutes**, while a run that finished in
+~13 minutes passed. That is a cap, not flakiness — and it comes from OUTSIDE the workflow: `ci.yml` has no
+`timeout-minutes` and `ubuntu-latest` defaults to 360. Every PR had become a coin flip, which blocks
+everything.
+
+**The cause of the drift was ours.** The job ran `npm test` (`vitest run`) and then
+`npm run test:coverage` (`vitest run --coverage`) — **the same 12,400 tests twice**, the second time with
+coverage instrumentation, which is the slower of the two. The coverage run already produces the pass/fail
+signal, so the first was pure duplication and by far the largest cost in the job. This session added ~400
+tests, which is what pushed a long-standing waste over the edge.
+
+De-duplicated to one run. **No gate is removed**: the coverage gate still blocks on a real regression, and
+a failing test still fails the step exactly as before. The change is safe by construction —
+`vitest run --coverage` is already proven on this codebase by the CI run that passed with both steps; this
+only DELETES a step.
+
+Also added `timeout-minutes: 30` — bounded well above the real cost so a genuine hang fails fast and
+legibly instead of holding a runner for the six-hour default.
+
+**Still for the admin:** where the 15-minute cap comes from (GitHub → Settings → Actions, or a billing
+limit). Halving the test time takes us off the edge, but if the cap is real it will be hit again as the
+suite grows. That is visible only from the org settings, which this session cannot read.

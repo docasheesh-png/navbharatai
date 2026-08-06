@@ -219,7 +219,14 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
         <div className="flex flex-col gap-2">
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Add these DNS records at your registrar</span>
           {result.records.length === 0 && (
-            <p className="text-[11px] text-zinc-400">No records needed right now — check the status below.</p>
+            // Freshly-attached domains often report their records a few seconds AFTER create (the
+            // hosting API prepares them asynchronously). "No records needed" read as "done" while
+            // ownership sat pending — admin screenshot 2026-08-06. Say what is actually happening.
+            <p className="text-[11px] text-zinc-400">
+              {result.active
+                ? 'No records needed — this domain is fully set up.'
+                : 'Your records are being prepared — tap "Check" below in a few seconds to load them.'}
+            </p>
           )}
           {result.records.map((rec, i) => (
             <div key={i} className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 flex flex-col gap-1">

@@ -26640,3 +26640,17 @@ the same way. Regression tests encode the LITERAL message from the admin's scree
 paths, and that real errors (permission, quota) are never swallowed as not-found.
 
 Full gate: 1082 files / 12175 tests green, both tsc clean, bundle within budget.
+
+## 2026-08-06 — Live run of the domain flow: attach WORKS; two small truths tightened (PR #2157)
+
+**The admin's live retry after #2155 deployed proved the not-found fix in production:** `mitrify.in`
+attached — status honestly "Pending (ownership)", all four setup paths rendered. Two findings from
+that same screenshot:
+1. **The auto-DNS detail line named its own blocker on first use** — `HTTP 403: Requires permission
+   "….zone.create"` — the exact CF-token permission gap predicted in the Slice-A prerequisites.
+   ADMIN STEP (no deploy needed): edit the Cloud Run token in the Cloudflare dashboard → add
+   Account→Zone→Edit, Zone→DNS→Edit, Zone→Zone→Read → retry "Set up automatically".
+2. **"No records needed right now" while ownership sat pending was a false "done"** — a freshly
+   attached domain reports its records a few seconds AFTER create (async prep on the hosting side).
+   Copy now says what is happening: active ⇒ "fully set up"; pending ⇒ "records are being prepared —
+   tap Check in a few seconds".

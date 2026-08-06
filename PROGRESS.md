@@ -27123,3 +27123,90 @@ The ₹1 charge now covers EVERY built mobile file — .apk, Play Store .aab, iO
 point: delivery-time, idempotent per artifact, free-list/anon exempt, never blocks the bytes, env
 `APK_CHARGE_INR` (name kept — it now prices every built file). Ledger names the kind honestly
 ("App build (.aab)"), disclosure copy + KB updated so the user knows the price BEFORE building.
+
+---
+---
+## 2026-08-06 — "Cannot GET" shown AS the user's app: the liveness probe accepted a redirect as proof
+
+**Admin report, with a screenshot and a fair accusation:** *"aapne itna kuch badalwaya, par error abhi
+bhi wahi ka wahi hai. Problem mitrify me nahi, NavBharatAI ke code me hai."* He was right — and this
+was OUR bug, not the imported app's.
+
+**What the user saw:** the Preview tab, labelled **Live server**, rendering a raw
+`Cannot GET /customer/home` page as their app, while the build was still running (32s in).
+
+**ROOT CAUSE (two defects in one line, `/api/agentv3/preview-health`):**
+1. **A status code is not a working app.** The probe ran
+   `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<port>` — it threw the BODY AWAY and
+   accepted `200|301|302|304` as healthy. The imported app's `/` does
+   `res.redirect("/customer/home")` → **302** → `livePortUp = true` → `classifyPreviewHealth` returned
+   **"live — up and running"** → the tab iframed the URL → the iframe followed the redirect → 404.
+   We had `analyzePreviewHtml` (which detects "Cannot GET") since 2026-08-03 and applied it to the
+   import-boot narration — this probe simply never used it. The EARN-THE-VERDICT rule existed; it just
+   was not enforced on the path the user actually looks at.
+2. **The port was a guess.** `oneShotDevPort(framework)` returns 5173 for vite-react, while a
+   full-stack Express app commonly serves everything on its own port (this one: 5000). So the probe
+   could describe a port the app was never on.
+
+**FIX:**
+- The probe now uses `curl -sL` (FOLLOWS redirects), keeps the body, and runs the same tested
+  `analyzePreviewHtml` over it. New `PreviewStatus: 'not_serving'` — the port answers but the page is
+  not the app — with the analyzer's own reason in the summary. `pageRendered`/`pageProblems` are
+  optional signals, so an unchecked probe behaves exactly as before.
+- `previewUrlPort()` (pure, tested) reads the real port from the preview URL the CLIENT is displaying
+  (E2B hosts are `https://<port>-<sandbox>.e2b.app`); the framework guess stays only as the fallback.
+- `not_serving` is deliberately NOT auto-rebooted — a reboot cannot wire missing page routes.
+- **The Preview tab no longer presents a non-rendering page as the app:** an honest amber banner says
+  *"This is not your app yet — the server is answering, but it is not serving your pages"*, names the
+  analyzer's reason, and points at the In-browser preview. The iframe still renders below, so nothing
+  is hidden from the user.
+- `previewHealthContextLine` reports `NOT SERVING` so every AI in v5.0 answers from the real state.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **12,350 tests, 0 failures**
+(11 new, including the verbatim reported case: port up + "Cannot GET" body ⇒ never `live`).
+
+## 2026-08-06 — Learning from mistakes: the loop existed, but the recall key was wrong
+
+**Admin ask:** *"app kam se kam galti kare — galtiyon se seekhne wala system, ek baar wali galti wapas
+repeat na ho. Agar hai to 100x rocksolid karo."*
+
+**AUDIT FIRST (it does exist, and it is genuinely wired).** `Reflection` distils each build's
+errors/fixes into lessons; `BuildLessons` turns the build report's root cause into one concrete lesson;
+`buildRetrospective` captures failed builds; `UserLessonBrain` promotes proven fixes across a user's
+projects; `RecalledLessons` (with `KnowledgeEvolution` dedup/conflict/confidence) injects them into the
+next build. All real, all called. So the honest answer was "yes it exists" — and then the audit found
+the one broken link.
+
+**THE BROKEN LINK — the recall KEY:**
+```js
+const hits = lessonsMem.recall(prompt, 8);   // matched against the USER'S PROMPT
+```
+A lesson is about a **mistake** ("the dev server bound its port before wiring page routes, so every
+page 404'd"). A prompt is about a **wish** ("home page par green dot hatao"). They share almost no
+words, so similarity search cannot connect them. The lesson was stored, deduped, ranked and formatted
+beautifully — and then never surfaced at the one moment it mattered: when the same failure recurred.
+
+**THE FIX — `MistakeLedger.ts` (pure, 22 tests), deterministic instead of similarity-based:**
+- A mistake is keyed by its normalized SIGNATURE, reusing `Reflection.errorSignature` — so "the same
+  error" has exactly ONE definition across Reflection, the recurring-error detector and the ledger. A
+  second definition would drift, and a drifted signature silently breaks the only thing this exists for.
+- A fix is recorded as PROVEN **only when the build actually succeeded**. A fix harvested from a
+  still-failing build is a guess, and a learning system that stores guesses starts confidently teaching
+  wrong answers — that would be worse than having no system.
+- `knownFixFor` is an EXACT key lookup: it cannot miss because the wording differs (the port number in
+  `EADDRINUSE :::5173` vs `:::3000` is normalized away), and cannot fire on an unrelated lesson that
+  merely ranked well.
+- **It measures itself.** `repeatsAfterFix` is incremented at the moment a solved mistake comes back,
+  and `repeatStats` reports the repeat RATE. A learning system that cannot show its repeat rate is
+  faith, not engineering; `worstRepeats` names what to harden next.
+- Bounded (120 mistakes, 4 guards per prompt); a solved mistake outranks an unsolved one in the trim,
+  because the proven fix is the valuable part.
+
+**WIRED, not just built** (source-contract tested — a module nobody calls is dead code):
+- READ at build start, keyed by the ERROR EPISODES this project actually hit (never the prompt);
+- WRITTEN at build end from the report's real unresolved errors, next to the existing brain promotion;
+- both call sites best-effort, so the ledger can never affect a build result;
+- per USER (`user_mistakes_v3/{userId}`), mirroring UserLessonBrainStore — a mistake solved in project A
+  must not be re-made in project B.
+
+**Verification:** tsc frontend + server clean; `npx vitest run` = **12,378 tests, 0 failures**.

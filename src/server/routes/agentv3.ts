@@ -220,6 +220,7 @@ import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHea
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
+import { mistakeLedgerStore } from '../AgentV3/MistakeLedger';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -1530,6 +1531,35 @@ export function shouldRouteStrongModel(largeProject: boolean, hasImportIntent: b
 
 /** The dev-server port a framework's `npm run dev` listens on — used by the OneShot lane to
  *  publish the preview after a one-shot build. Pure + exported for testing. */
+/**
+ * The port an E2B preview URL is really serving on — E2B hosts are `https://<port>-<sandbox>.e2b.app`,
+ * so the port is the first label. Falls back to an explicit `:port`, else null. PURE.
+ *
+ * WHY (admin report 2026-08-06): the health probe used `oneShotDevPort(framework)` — a GUESS from the
+ * framework name (vite-react ⇒ 5173). A full-stack Express app commonly serves everything on its own
+ * port (mitrify: 5000), so the probe hit a port nothing was listening on and a perfectly healthy app
+ * was classified "sleeping" — or worse, the guess happened to answer and the verdict described a
+ * different process entirely. The URL the client is ACTUALLY displaying is the ground truth.
+ */
+export function previewUrlPort(previewUrl: string | null | undefined): number | null {
+  const raw = (previewUrl || '').trim();
+  if (!raw) return null;
+  let host = '';
+  try {
+    const u = new URL(raw);
+    if (u.port) {
+      const explicit = Number(u.port);
+      return Number.isInteger(explicit) && explicit > 0 && explicit < 65_536 ? explicit : null;
+    }
+    host = u.hostname;
+  } catch {
+    return null;
+  }
+  const m = /^(\d{2,5})-/.exec(host);       // E2B: 5000-abc123.e2b.app
+  const port = m ? Number(m[1]) : NaN;
+  return Number.isInteger(port) && port > 0 && port < 65_536 ? port : null;
+}
+
 export function oneShotDevPort(framework: string): number {
   if (/next|nuxt|nest|express|fastify|node/i.test(framework)) return 3000;
   if (/angular/i.test(framework)) return 4200;
@@ -3354,17 +3384,40 @@ export function registerAgentV3Routes(app: Express): void {
       const diag = sandboxDiag();
       // Only probe the live port when a sandbox is ALREADY warm — never spin one up just to check.
       let livePortUp: boolean | null = null;
+      let pageRendered: boolean | null = null;
+      let pageProblems: string[] = [];
       if (diag.livePreviewAvailable) {
         try {
           const actuator = buildActuator();
           const sandboxId = actuator.getSandboxId ? await raceTimeout(actuator.getSandboxId(workspaceId), 4_000, 'previewHealthSandbox').catch(() => null) : null;
           if (sandboxId) {
-            const port = oneShotDevPort(framework);
+            // THE PORT THE APP REALLY BOUND, not a framework guess. `oneShotDevPort('vite-react')` is
+            // 5173, but a full-stack Express app commonly serves everything on its own port (mitrify:
+            // 5000) — so the guess probed a port nothing was on, and a perfectly healthy app read as
+            // "sleeping". The client sends the live URL it is actually displaying; its port is the
+            // ground truth, and the guess stays only as the fallback.
+            const port = previewUrlPort(typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null)
+              ?? oneShotDevPort(framework);
+            // -L FOLLOWS REDIRECTS and we keep the BODY. Root cause (admin report 2026-08-06): the old
+            // probe threw the body away (`-o /dev/null`) and accepted 301/302 as healthy. The app's `/`
+            // redirected to /customer/home, we saw 302, called it "live — up and running", and the tab
+            // then rendered the raw "Cannot GET /customer/home" page AS the user's app.
             const probe = await raceTimeout(
-              actuator.runCommand(workspaceId, `curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:${port} 2>/dev/null || echo 000`),
-              8_000, 'previewHealthProbe',
-            ).catch(() => ({ stdout: '000', stderr: '', exitCode: -1 }));
-            livePortUp = /\b(?:200|301|302|304)\b/.test(probe.stdout || '');
+              actuator.runCommand(workspaceId, `curl -sL --max-time 5 -w "\\n__STATUS__%{http_code}" http://127.0.0.1:${port} 2>/dev/null || echo "__STATUS__000"`),
+              10_000, 'previewHealthProbe',
+            ).catch(() => ({ stdout: '__STATUS__000', stderr: '', exitCode: -1 }));
+            const raw = probe.stdout || '';
+            const statusMatch = /__STATUS__(\d{3})\s*$/.exec(raw.trim());
+            const code = statusMatch ? Number(statusMatch[1]) : 0;
+            const body = statusMatch ? raw.slice(0, raw.lastIndexOf('__STATUS__')) : raw;
+            livePortUp = code >= 200 && code < 400;
+            if (livePortUp) {
+              // EARN THE VERDICT — the same tested analyzer the import boot uses. A 404 / "Cannot GET"
+              // / empty shell is NOT a live app, whatever the status line says.
+              const verdict = analyzePreviewHtml(body);
+              pageRendered = verdict.rendered;
+              pageProblems = verdict.problems;
+            }
           }
         } catch { /* probe is best-effort — a failure just means "not currently up" (null/false) */ }
       }
@@ -3372,11 +3425,14 @@ export function registerAgentV3Routes(app: Express): void {
         hasFiles: fileCount > 0,
         liveBackend: diag.livePreviewAvailable,
         livePortUp,
+        pageRendered,
+        pageProblems,
         everPublished: fileCount > 0, // files exist ⇒ a build ran ⇒ a preview was attempted
         lastError: null,             // a specific crash error only comes from a live boot (Diagnose)
         booting: false,
       });
-      res.json({ ...health, fileCount });
+      // `serving` is what the CLIENT needs to stop presenting a 404 page as the user's app.
+      res.json({ ...health, fileCount, serving: pageRendered, servingProblems: pageProblems });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -7918,6 +7974,23 @@ export function registerAgentV3Routes(app: Express): void {
         if (lessons) buildPrompt = `${lessons}\n\n---\n\n${buildPrompt}`;
       } catch { /* recall is best-effort — never blocks a build */ }
 
+      // KNOWN-MISTAKE GUARD (admin ask 2026-08-06: "ek baar wali galti wapas repeat na ho").
+      //
+      // The recall above matches lessons against the user's PROMPT. A lesson is about a MISTAKE, and a
+      // prompt is about a WISH — "green dot hatao" shares no words with "the dev server bound its port
+      // before wiring page routes", so the lesson that would prevent the repeat could never surface.
+      // This lookup is keyed by the ERROR SIGNATURES this project has actually hit, so a proven fix is
+      // recalled by IDENTITY rather than by similarity, and cannot be missed because the wording
+      // differs. '' when nothing matches ⇒ a project with no such history is byte-identical to today.
+      try {
+        const pastErrors = getWorkspaceMemory(workspaceId).snapshot().episodes
+          .filter((e) => e.kind === 'error')
+          .slice(-25)
+          .map((e) => e.text);
+        const guard = await mistakeLedgerStore.guardFor(userId, pastErrors);
+        if (guard) buildPrompt = `${guard}\n\n---\n\n${buildPrompt}`;
+      } catch { /* the guard is best-effort — never blocks a build */ }
+
       // Cross-Project Lesson Brain watermark: capture the time BEFORE the build runs. On a resumed
       // build, restoreWorkspaceMemory replays every PRIOR build's episodes into memory (re-stamped
       // with a fresh ts), so promoting the whole snapshot later would re-promote old lessons and
@@ -10556,6 +10629,20 @@ export function registerAgentV3Routes(app: Express): void {
           const promotable = result.ok ? episodes : episodes.filter((e) => (e as { kind?: string }).kind === 'note');
           userLessonBrainStore.recordBuildLessons(userId, promotable, new Date().toISOString()).catch(() => {});
         } catch { /* brain promotion is best-effort */ }
+        // MISTAKE LEDGER: fold THIS build's real failures in, keyed by signature. The proven-fix rule
+        // lives in the store — a fix is recorded only when the build actually SUCCEEDED, because a
+        // "fix" harvested from a still-failing build is a guess, and a learning system that stores
+        // guesses starts confidently teaching wrong answers.
+        try {
+          const d = buildDiag.report();
+          const errs = (d.problems ?? [])
+            .filter((p) => p.severity === 'error' && p.autoResolved !== true)
+            .map((p) => p.message)
+            .slice(0, 10);
+          if (errs.length > 0) {
+            void mistakeLedgerStore.recordBuild(userId, { ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
+          }
+        } catch { /* the ledger is best-effort — never affects the build result */ }
       }
 
       // Level 9: Persist workspace memory to Firestore so the NEXT session (or build)

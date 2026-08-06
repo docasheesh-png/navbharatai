@@ -27210,3 +27210,173 @@ beautifully — and then never surfaced at the one moment it mattered: when the 
   must not be re-made in project B.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **12,378 tests, 0 failures**.
+
+## 2026-08-06 (16) — "pura farzi": a report sent mid-build looked fabricated, because nothing said so
+
+Admin sent build report `f323a4db` with one word: **"pura farzi bada!"** They were right, and the reason
+is a real honesty defect.
+
+**What the report actually was.** "Report" was pressed **423 seconds (7m 3s) into a build that was still
+running** — no `done` event, last entry 12 seconds earlier. A build in flight has no verdict, no cost, no
+duration and no post-build checks yet, so **every** meta field came back null: `ok`, `rootCause`,
+`summary`, `buildMs`, `billedInr`, and `tier: "unknown"`. 52 entries, all `info`, `errors: 0`.
+
+**Why that reads as fabricated.** Null everywhere is EXACTLY what a build that FINISHED and produced
+nothing looks like — the far more alarming reading, and the one taken. `buildAdminReportRecord` had no
+notion of "not finished yet", so a snapshot of work in progress was presented as a completed build with
+no result. A snapshot is a perfectly useful thing; presenting it as a finished build is not.
+
+FIX: `meta.inFlight` is computed from the report itself — a `startedAt` with no `endedAt` AND no boolean
+`ok`. Requiring BOTH keeps a half-written report honest in either direction. When in flight and there is
+no summary of its own, the summary SAYS it: *"Reported while the build was STILL RUNNING (7m 3s in).
+There is no verdict, cost, duration or post-build check yet…"* The admin dashboard shows **"Still
+running"** in amber instead of "—", because a dash was the thing being misread.
+
+**What the report DID prove, incidentally.** The line *"🗄️ Using the database you connected in Settings —
+your app will read and write your own data, so no temporary sandbox database is needed"* is this
+session's own `isUserOwnedDatabaseUrl` branch, working correctly: the admin has a Neon database connected
+(`@neondatabase/serverless` in package.json), so the sandbox Postgres was rightly skipped. Which also
+means **this build could not test the fetched-Postgres path** — that path only runs when the user has NO
+database of their own.
+
+Also visible: `plannedModel: claude-haiku-4-5` but every one of 13 calls delivered by `kimi-k2.5` —
+cheap floor active and holding, no Claude fallback needed.
+
+Gate: tsc clean both projects, SHUFFLED full run 1095 files / 12,390 tests, exit 0.
+
+## 2026-08-06 (17) — autopsy of build 49a7a987: it said SUCCESS, charged ₹286, and never ran
+
+A FINISHED build this time (18m 49s, `ok: true`, ₹286.51, tier admin, 30/30 calls delivered by
+`kimi-k2.7-code` with no Claude fallback). Full five-bucket ledger:
+
+**✅ Self-healed (5)** — project-integrity pass (single focus owner, duplicate stylesheet); a duplicate
+import in `src/main.tsx` removed that "would have broken the preview"; Prisma `migrate dev` + `db push`
+both exit 0.
+
+**🔀 Worked around (2)** — `npm install typescript --save-dev` (78s) run even though
+`./node_modules/.bin/tsc` had already exited 0 three commands earlier, then `npm ls typescript`, then
+`npx tsc`: four commands to answer a question already answered. And an npm corruption
+(`ENOTEMPTY … node_modules/.send-MMdoMv1g`, exit 217) papered over by re-running.
+
+**⏭️ Skipped (3)** — the E2E scaffold, the route smoke check and the page-render check. **All three for
+the same reason**, and that reason is the finding below.
+
+**❌ Still broken (4)** — no live preview; `@types/express` v5 against `express` v4; `@neondatabase/serverless`
+declared and never imported; "No tests at all". Plus a malformed `rootCause`:
+*"Critical issue found by review: Issues"* — a section heading captured as a cause.
+
+**🥵 Struggle (6)** — 18.8 minutes for a *"continue"* on a 25-file app; Prisma alone took **243s**
+(migrate 156s + push 87s); the TypeScript detour 78s; `node src/server/index.cjs &` returned **exit −1
+after 45s**; the post-answer integrity pass **133s**; the npm ENOTEMPTY race.
+
+### The missing subsystem (rule-5 step 2)
+
+**Every post-build verification is gated on a preview URL.** Route smoke, page render, E2E scaffold —
+all three silently no-op without one. So **exactly when the app is most broken (it never came up) we
+verify the least**, and the report reads quiet: 1 error, 6 warnings, nothing about the app not running.
+
+`PREVIEW_ERROR` already existed but fires only when a preview ATTEMPT reports an error. A preview that
+was **never produced at all** raised nothing — the only trace in this entire report was a passing clause
+inside the E2E skip reason: *"no live preview was available to point the tests at"*. A build that ran
+nearly 19 minutes, declared success and charged ₹286.51 for an app nobody could start is precisely the
+"looks done" the constitution forbids.
+
+FIX: `PREVIEW_NEVER_CAME_UP` — a WARNING on the build itself when a successful, non-import build ends
+with no preview URL, saying plainly that nothing has been proven to RUN and that the other checks were
+skipped *because* of it. Without that sentence the reader concludes the build was clean, which is the
+opposite of the truth.
+
+### Open questions for the admin (not code)
+
+- **₹286.51 was billed on `tier: admin`.** The free list is meant to keep the admin's own builds free.
+  Worth confirming whether that was actually debited or only computed.
+- **The fetched-Postgres path still has not been exercised** — this build (like the last) used the
+  admin's own connected Neon database, which is the correct behaviour and also the reason the new path
+  never runs.
+
+Gate: tsc clean both projects, SHUFFLED full run 1095 files / 12,394 tests, exit 0.
+
+## 2026-08-06 (18) — a screenshot carried a live database password out of the app
+
+The admin sent two screenshots of build 49a7a987 to show a preview failure. One of them was the Files
+viewer open on `.env`, and it displayed — in plaintext, with a copy button — a live Neon connection
+string including its password, plus a payment secret. **Those credentials had to be rotated.** The
+screenshot was taken to show something else entirely; that is the whole point.
+
+**Why this is a defect and not bad luck.** The rest of the product already treats these values as too
+sensitive to display: Settings → Database deliberately never shows a saved credential back ("values
+aren't shown here — leave a field blank to keep its current value"), and the vault encrypts them at
+rest. Then the same secrets were readable in one tap in the Files tab. A promise kept on one screen and
+broken on the next is not a promise.
+
+FIX — `src/lib/secretMask.ts` + the Files viewer:
+- **The keys stay visible, only the values go.** Which variables an app expects is the genuinely useful
+  thing to see — it is how a user checks that a key they added actually reached the app. The value is
+  the part they already know and the part a stranger must not learn.
+- **The mask is a FIXED width**, not the value's length, which would leak how long the secret is.
+- **An EMPTY value is left alone** — masking nothing would imply a secret that is not there.
+- **A key file or credentials blob has no safe half**, so its whole body is hidden.
+- **COPY uses the same text as the screen.** A copy button that hands over what the screen hides would
+  make the mask decorative.
+- **Reveal is a deliberate tap, and re-arms on every file open** — a Reveal on one file must never carry
+  into the next.
+- The notice says WHY and how to see it: a user who cannot find their own value will assume the app lost
+  it, which is a worse outcome than the one this protects against.
+- Deliberately narrow: `.env*`, `.pem/.key/.p12/.jks`, `id_rsa`, `service-account*.json`. Masking source
+  would defeat the viewer, and `env.d.ts` is code.
+
+**The second screenshot** shows the real preview failure: *"Closed Port Error — the sandbox is running
+but there's no service running on port 5173"*, after 12m 15s, next to a green "✓ Done". The app is
+full-stack (Vite frontend + Express backend) and the build's own commands show it starting the BACKEND
+(`node src/server/index.cjs &` → exit −1 after 45s) while the preview watched Vite's 5173. That is the
+same watch-the-wrong-port class as the Mitrify EADDRINUSE fix, one level up: not the wrong port within
+one server, but the wrong SERVER. Recorded as the next root cause to chase; `PREVIEW_NEVER_CAME_UP`
+(previous entry) at least makes it show up in the report instead of hiding.
+
+Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,408 tests, exit 0.
+
+## 2026-08-06 (19) — the admin's three findings, checked against the evidence
+
+**1. "Build ran 58 minutes, not 18 — and it failed."** The report says `buildMs: 18.8 min`, and that is
+honest for what it measures: `startedAt`/`endedAt` are PER TURN. The session was several `continue`
+turns, so the number the admin lived (58 minutes of waiting) is nowhere in the report — each turn shows
+only its own slice. **The report understates how long the user actually waited**, which is the number
+that decides whether this product feels fast. Recorded as an open root cause: a per-SESSION elapsed time
+belongs in the report beside the per-turn one.
+
+**2. "Files were fully deleted (count went to 0) and rebuilt, three times."** The screenshots show the
+Files badge at **20** and then at **4**; the report shows 26 source files, then "25 files", then
+"19/27 unchanged". No entry anywhere records a file count collapsing. **And the reason no check
+complained is worse than the missing log line:**
+
+`judgeBuild` returned `{ pass: true, score: 100 }` for an empty file set — an affirmative claim of
+perfection about nothing. **The emptier the app, the better it scored.** Twenty-four analysers treat "no
+files" as "nothing wrong", which is correct for a pure analyser handed a subset, and catastrophic for
+the one component whose entire output is a quality VERDICT.
+
+FIXED: an empty project now scores **0** with the finding *"There were no files to review — the project
+was empty at review time. This is not a passing app; it is an absent one."* A judge that could not RUN
+gets the same treatment: it has not approved anything either. Both still `pass: true` — a judge that
+fails a build on its own confusion is worse than one that stays quiet — but neither awards marks it did
+not earn. **Still open: nothing yet ALARMS when a workspace empties.** That is the next root cause.
+
+**3. "NavBharatAI used the admin's credentials without asking the user."** Two halves, and they need
+separating honestly.
+
+*The premise is not what happened.* `loadUserVaultSecrets` reads `user_secrets` filtered by
+`user_id == userId` and never `process.env` — verified in code. These were the SAME account's own saved
+keys, from its own vault, injected into an app that account built. No platform credential leaked, and no
+other user's keys were involved.
+
+*But the defect underneath is real, and it is the admin's actual point.* **The vault is per-USER, not
+per-APP.** Every app a user builds receives EVERY key they have ever saved. An inventory app was handed a
+Razorpay secret and a Neon connection string it never asked for, and the app now depends on them. Worse,
+those values are wrong on their face — `RAZORPAY_KEY_SECRET=Nav@8949199709` is a phone number and
+`VITE_RAZORPAY_KEY_ID=doc.asheesh` is not a key id — and nothing validated them at save time or at
+injection time. The build says "🔐 Loaded 3 of your saved keys" AFTER the fact; it never asks whether
+THIS app should have them.
+
+Three open root causes recorded (rule 6), none silently patched: per-session elapsed time in the report;
+an alarm when a workspace empties; and per-app scoping plus format validation for injected secrets.
+
+Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,411 tests, exit 0.

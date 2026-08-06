@@ -81,3 +81,34 @@ describe('judgeRepairPrompt — fix, not rebuild', () => {
     expect(p).toContain('build a calculator');
   });
 });
+
+/**
+ * AN EMPTY WORKSPACE IS NOT A PERFECT ONE (admin, 2026-08-06).
+ *
+ * The admin watched a build wipe its files to zero three times, and not one check complained. This is
+ * why: the judge returned score 100 with no findings for an empty file set — an affirmative claim of
+ * perfection about nothing. The emptier the app, the better it scored.
+ */
+describe('an empty or unreviewed build is never scored 100', () => {
+  const noRun = (async () => ({ text: '' })) as never;
+
+  it('an EMPTY project scores 0 and says what happened', async () => {
+    const v = await judgeBuild('build me a shop', [], noRun, 'm');
+    expect(v.score).toBe(0);
+    expect(v.findings.join(' ')).toContain('no files to review');
+    expect(v.findings.join(' ')).toContain('absent one');
+  });
+
+  it('…but still never BLOCKS — a judge that fails a build on its own confusion is worse', async () => {
+    const v = await judgeBuild('build me a shop', [], noRun, 'm');
+    expect(v.pass).toBe(true);
+  });
+
+  it('a judge that could not RUN has not approved anything either', async () => {
+    const boom = (async () => { throw new Error('provider down'); }) as never;
+    const v = await judgeBuild('build me a shop', [{ path: 'a.ts', content: 'x' }], boom, 'm');
+    expect(v.pass).toBe(true);   // never breaks a build
+    expect(v.score).toBe(0);     // and never awards marks it did not earn
+    expect(v.findings.join(' ')).toContain('could not be completed');
+  });
+});

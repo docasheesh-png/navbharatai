@@ -9,6 +9,7 @@
  * Owns the hidden file input ref internally.
  */
 import React, { useRef, useState, useEffect } from 'react';
+import { isSecretFile, maskSecretContent, maskNotice } from '../../lib/secretMask';
 import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy, Eye } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
@@ -100,7 +101,15 @@ export function FilesPanel({
   // READ-ONLY VIEWER (admin 2026-08-02): "See" shows the file exactly as it is, without opening the
   // Code Studio editor — so a user can read a file (on a phone especially) with zero risk of a stray
   // tap changing it. "Open" keeps its existing behaviour (edit in Code Studio).
-  const [viewPath, setViewPath] = useState<string | null>(null);
+  const [viewPath, setViewPathRaw] = useState<string | null>(null);
+  /** Opening ANY file re-arms the mask — a Reveal on one file must never carry into the next. */
+  const setViewPath = (p: string | null): void => { setRevealSecret(false); setViewPathRaw(p); };
+  /** Secret files open MASKED; revealing is a deliberate tap. Reset whenever a different file opens. */
+  const [revealSecret, setRevealSecret] = useState(false);
+  // ONE source for what the viewer shows AND what Copy puts on the clipboard — a copy button that
+  // hands over what the screen is hiding would make the mask decorative.
+  const viewerRaw = viewPath && typeof files[viewPath] === 'string' ? files[viewPath] : '';
+  const viewerText = viewPath && !revealSecret ? maskSecretContent(viewPath, viewerRaw) : viewerRaw;
   const [copyNote, setCopyNote] = useState<string | null>(null);
   const copyToClipboard = (text: string, what: string) => {
     navigator.clipboard.writeText(text).then(
@@ -494,8 +503,20 @@ export function FilesPanel({
             <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30">
               READ ONLY
             </span>
+            {/* REVEAL, not "always show" (incident 2026-08-06). A screenshot taken to show a build
+                problem carried a live database password out of the app. Seeing your own secret is a
+                deliberate act; having it on screen while you photograph something else is not. */}
+            {isSecretFile(viewPath) && (
+              <button
+                onClick={() => setRevealSecret((v) => !v)}
+                title={revealSecret ? 'Hide the values again' : 'Reveal the values'}
+                className="flex-shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors touch-manipulation"
+              >
+                {revealSecret ? 'Hide' : 'Reveal'}
+              </button>
+            )}
             <button
-              onClick={() => copyToClipboard(typeof files[viewPath] === 'string' ? files[viewPath] : '', 'File')}
+              onClick={() => copyToClipboard(viewerText, 'File')}
               title="Copy file contents"
               className="flex-shrink-0 p-1.5 rounded-lg text-[#8b949e] hover:text-white hover:bg-white/5 transition-colors touch-manipulation"
             >
@@ -512,10 +533,11 @@ export function FilesPanel({
           </div>
           <div className="flex-1 overflow-auto custom-scrollbar">
             <pre className="p-3 text-[11px] leading-relaxed text-[#c9d1d9] font-mono whitespace-pre-wrap break-words select-text">
-              {typeof files[viewPath] === 'string' && files[viewPath].length > 0
-                ? files[viewPath]
-                : '(this file is empty)'}
+              {viewerText.length > 0 ? viewerText : '(this file is empty)'}
             </pre>
+            {isSecretFile(viewPath) && !revealSecret && (
+              <p className="px-3 pb-3 text-[10px] text-amber-300/80 leading-relaxed">{maskNotice(viewPath)}</p>
+            )}
           </div>
           <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-white/10 bg-[#161b22]">
             {copyNote

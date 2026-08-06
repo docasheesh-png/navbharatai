@@ -9915,6 +9915,28 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
 
+      // NO PREVIEW AT ALL IS THE LOUDEST FINDING THERE IS — and it was the one thing the report never
+      // said (build f323a4db/49a7a987, admin 2026-08-06). Every post-build verification is gated on a
+      // preview URL: the route smoke check, the page-render check and the E2E scaffold all silently
+      // no-op without one. So EXACTLY when the app is most broken — it never came up — we verify the
+      // LEAST, and the report reads clean. That build ran 18.8 minutes, reported ok, charged ₹286, and
+      // the only trace of the failure was a passing mention inside the E2E skip reason.
+      //
+      // `PREVIEW_ERROR` already exists, but it fires only when a preview ATTEMPT reports an error. A
+      // preview that was never produced at all raised nothing. This is that gap, and it is deliberately
+      // a WARNING on the build itself rather than a note buried in another check's explanation.
+      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted) {
+        try {
+          buildDiag.record({
+            phase: 'preview', severity: 'warning', code: 'PREVIEW_NEVER_CAME_UP',
+            message: 'The build finished, but no live preview was ever available — so nothing here has been '
+              + 'proven to RUN. The route smoke check, the page-render check and the end-to-end scaffold all '
+              + 'need a running app and were skipped, which is why the rest of this report looks quiet.',
+            autoResolved: false,
+          });
+        } catch { /* diagnostics are best-effort and must never affect the build */ }
+      }
+
       // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
       // which in practice meant most apps shipped without one. This makes it a system reflex.
       //

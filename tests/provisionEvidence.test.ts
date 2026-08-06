@@ -46,3 +46,43 @@ describe('The fresh-build path leaves evidence through the channel the report al
     expect(dispatcher.slice(at - 200, at + 600)).toContain('catch');
   });
 });
+
+/**
+ * NO PREVIEW AT ALL WAS THE ONE THING THE REPORT NEVER SAID (admin build 49a7a987, 2026-08-06).
+ *
+ * Every post-build verification is gated on a preview URL — the route smoke check, the page-render
+ * check and the E2E scaffold all silently no-op without one. So EXACTLY when the app is most broken (it
+ * never came up) we verify the LEAST, and the report reads clean. That build ran 18.8 minutes, reported
+ * ok: true, charged ₹286.51, and the only trace of the failure was a passing mention inside the E2E skip
+ * reason: "no live preview was available to point the tests at".
+ *
+ * PREVIEW_ERROR already existed, but it fires only when a preview ATTEMPT reports an error. A preview
+ * that was never produced at all raised nothing.
+ */
+describe('a build that ends with no preview says so, loudly', () => {
+  it('records PREVIEW_NEVER_CAME_UP as a warning on the build itself', () => {
+    expect(route).toContain("code: 'PREVIEW_NEVER_CAME_UP'");
+    const at = route.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
+    const rec = route.slice(at - 300, at + 900);
+    expect(rec).toContain("severity: 'warning'");
+    expect(rec).toContain('autoResolved: false');
+  });
+
+  it('explains WHY the rest of the report looks quiet', () => {
+    // Without this the reader concludes the build was clean, which is the opposite of the truth.
+    const at = route.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
+    const rec = route.slice(at, at + 900);
+    expect(rec).toContain('nothing here has been');
+    expect(rec).toContain('were skipped');
+  });
+
+  it('fires only for a SUCCESSFUL, non-import build with no preview', () => {
+    // A failed build already reports its own cause, and an import turn deliberately changes nothing.
+    expect(route).toContain('if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted)');
+  });
+
+  it('cannot affect the build — diagnostics are best-effort', () => {
+    const at = route.indexOf("code: 'PREVIEW_NEVER_CAME_UP'");
+    expect(route.slice(at, at + 1100)).toContain('catch');
+  });
+});

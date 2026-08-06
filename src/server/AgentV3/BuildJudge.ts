@@ -82,13 +82,25 @@ export async function judgeBuild(
   runTurn: JudgeRunTurn,
   sonnetModelId: string,
 ): Promise<JudgeVerdict> {
-  if (!files || files.length === 0) return { pass: true, findings: [], score: 100 };
+  // AN EMPTY WORKSPACE IS NOT A PERFECT ONE (admin, 2026-08-06). This returned score 100 with no
+  // findings — an affirmative claim of perfection about nothing. The admin watched a build wipe its
+  // files to zero three times, and not one check complained, because every analyser here treats "no
+  // files" as "nothing wrong". For a pure analyser given a subset that is correct; for the JUDGE, whose
+  // whole output is a quality VERDICT, it is a false success of the worst kind: the emptier the app, the
+  // better it scored.
+  //
+  // It still never BLOCKS (a judge that fails a build on its own confusion is worse), but it no longer
+  // awards marks it did not earn, and it says why so the report carries the alarm.
+  if (!files || files.length === 0) {
+    return { pass: true, score: 0, findings: ['There were no files to review — the project was empty at review time. This is not a passing app; it is an absent one.'] };
+  }
   try {
     const { system, user } = buildJudgePrompt(userRequest, files);
     const t = await runTurn({ model: sonnetModelId, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 1500 });
     return parseJudgeVerdict(t.text);
   } catch {
-    return { pass: true, findings: [], score: 100 }; // best-effort — the judge never breaks a build
+    // A judge that could not RUN has not approved anything either — same rule as above.
+    return { pass: true, score: 0, findings: ['The build review could not be completed, so this build has not been reviewed.'] }; // never breaks a build
   }
 }
 

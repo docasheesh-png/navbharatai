@@ -57,9 +57,9 @@ describe('background terminal wake', () => {
   });
 
   it('progress is REAL: phase transitions plus a seeded/total counter the user watches', () => {
-    const fn = routes.slice(routes.indexOf('function startTerminalWake'));
+    const fn = routes.slice(routes.indexOf('function startTerminalWake'), routes.indexOf('function startTerminalWake') + 6500);
     for (const m of ["phase = 'seeding'", "phase = 'finishing'", "phase = 'ready'", "phase = 'failed'", 'state.seeded = Math.min(i + 8, entries.length)']) {
-      expect(fn.slice(0, 3600)).toContain(m);
+      expect(fn).toContain(m);
     }
   });
 
@@ -68,7 +68,7 @@ describe('background terminal wake', () => {
     // the session registers and READY is declared first, ensureRepo runs fire-and-forget behind it.
     // Invariants read CODE, not comments — prose mentioning ensureRepo must not satisfy the check.
     const bare = routes.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    const fn = bare.slice(bare.indexOf('function startTerminalWake'), bare.indexOf('function startTerminalWake') + 4200);
+    const fn = bare.slice(bare.indexOf('function startTerminalWake'), bare.indexOf('function startTerminalWake') + 6500);
     expect(fn.indexOf("state.phase = 'ready'")).toBeLessThan(fn.indexOf('git.ensureRepo('));
     expect(fn).toContain('void git.ensureRepo().catch(() => false)');
   });
@@ -91,5 +91,20 @@ describe('wake state helpers', () => {
     expect(sanitizeWakeError(new Error('E2B sandbox quota exceeded on E2B'))).toBe('sandbox sandbox quota exceeded on sandbox');
     expect(sanitizeWakeError(new Error('x'.repeat(500))).length).toBe(300);
     expect(sanitizeWakeError(undefined)).toBe('unknown error');
+  });
+});
+
+describe('resume skips the seed', () => {
+  it('a resumed sandbox with its files intact never re-seeds — the Replit trick, honestly probed', () => {
+    // E2B pause preserves the disk. Re-writing every file onto a resumed sandbox was most of the
+    // wake for the common case; one readFile probe of the first saved file decides instead of hope.
+    const bare = routes.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const fn = bare.slice(bare.indexOf('function startTerminalWake'), bare.indexOf('function startTerminalWake') + 6500);
+    expect(fn).toContain('if (needSeed && resumeSandboxId)');
+    expect(fn).toContain('actuator.readFile(workspaceId, entries[0][0])');
+    // The skip is honest: the counter jumps to complete only because the files verifiably exist.
+    expect(fn).toContain('state.seeded = entries.length');
+    // And the seed loop itself is gated — no path writes files after a successful probe.
+    expect(fn).toContain('if (needSeed) {');
   });
 });

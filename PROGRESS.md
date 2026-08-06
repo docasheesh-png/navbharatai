@@ -26202,3 +26202,26 @@ stripped source (the assertion strips comments — prose mentioning ensureRepo m
 - Failure paths break off the in-place line (`\r\n` first) before printing their red reason.
 
 Full gate: 1074 files / 12007 tests green, both tsc clean, bundle within budget.
+
+## 2026-08-06 — Resume skips the seed: the Replit answer, honestly probed (PR #2148)
+
+**Admin question: "Replit jaise app builder me to shell load nahi hota — hame kyu loading ki zaroorat
+hai?"** Straight answer given (no sycophancy): VS Code's shell is the user's own always-on machine;
+Replit DOES have loading ("Waking up your Repl…") hidden behind funded warm infrastructure and
+snapshot resumes; ours is honest about a cloud VM that pauses after 15 idle minutes BY the admin's own
+(correct) cost rules. But the question exposed a real inefficiency: **the wake re-seeded every file
+onto RESUMED sandboxes too** — and E2B pause preserves the disk, so for the common case those writes
+were pure waste. Replit's snapshot trick, unimplemented on our side.
+
+**Fix.** After `ensureWorkspace` with a `resumeSandboxId`, ONE cheap probe (`readFile` of the first
+saved file) decides: content present ⇒ the entire seed loop is skipped (counter honestly jumps to
+total — the files verifiably exist); empty/unreadable ⇒ seed as before. Only a genuinely recreated
+sandbox pays the seeding time. Resume-reopen is now sandbox-resume + probe + register ≈ seconds.
+
+**Deliberately NOT done without admin sign-off: a warm sandbox pool** (pre-created sandboxes so even
+a true cold create is invisible). That is the last lever and it costs real money per idle warm VM —
+proposed to the admin with the cost caveat, awaiting their call. Recorded as the open follow-up.
+
+Tests: resume-skip invariants (probe gated on resumeSandboxId, honest counter jump, gated seed loop)
+on comment-stripped source; three stale slice-windows widened. Full gate: 1075 files / 12054 tests
+green, both tsc clean, bundle within budget.

@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
@@ -3994,9 +3994,14 @@ export function registerAgentV3Routes(app: Express): void {
       // request open indefinitely; the shell still opens either way.
       const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
       const entries = Object.entries(saved).slice(0, TERMINAL_WAKE_MAX_FILES);   // see the constant
-      for (const [path, content] of entries) {
-        if (typeof content !== 'string') continue;
-        await actuator.writeFile(workspaceId, path, content).catch(() => {});
+      // In PARALLEL batches, not one-by-one (admin 2026-08-05, "terminal bahut slow hai"): each E2B
+      // write is a network round-trip, so a 30-file project seeded serially added many seconds to
+      // every wake — most of the "Starting your workspace…" wait. Batches of 8 keep the sandbox from
+      // being hammered while cutting the seeding time to roughly the slowest file per batch.
+      for (let i = 0; i < entries.length; i += 8) {
+        await Promise.all(entries.slice(i, i + 8).map(([path, content]) =>
+          typeof content === 'string' ? actuator.writeFile(workspaceId, path, content).catch(() => {}) : Promise.resolve(),
+        ));
       }
       const git = new GitManager(actuator, workspaceId);
       await git.ensureRepo().catch(() => false);
@@ -4159,7 +4164,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
-  app.post('/api/agentv3/shell/input', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/shell/input', shellInputRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -4182,7 +4187,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   /** New window size → the TTY, so column-drawn output (top, vim, progress bars) wraps correctly. */
-  app.post('/api/agentv3/shell/resize', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/shell/resize', shellInputRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {

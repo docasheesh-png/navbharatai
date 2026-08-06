@@ -451,6 +451,27 @@ export function inbrowserPreviewRateLimiter() {
 }
 
 /**
+ * TERMINAL KEYSTROKES (`/api/agentv3/shell/input`, `/shell/resize`) — their own bucket, sized to the
+ * real work, exactly the zip-chunk lesson over again.
+ *
+ * ROOT CAUSE (admin 2026-08-05, "terminal bahut slow hai"): shell input sat on `workspaceRateLimiter`
+ * — 60 requests per HOUR, shared with ~44 other workspace routes. A terminal keystroke is one
+ * request, so the "real Replit-style shell" died 429 after about one minute of typing, and every
+ * rotation of the phone spent more of the same bucket on resize events. A rate ceiling that makes
+ * the advertised feature impossible is fiction, not protection.
+ *
+ * Sized to reality: the client coalesces bursts (one in-flight batch at a time), so even frantic
+ * typing lands well under 2 requests/second. 7200/hr sustains exactly that ceiling; the shell itself
+ * is memory-write cheap (PTY append), and the true resource guards are MAX_SHELLS_PER_WORKSPACE and
+ * the PTY input cap in ShellSessions. Anonymous is lower but real — anon workspaces are a legitimate
+ * capability (unguessable sid) and their terminal must type too.
+ */
+export const SHELL_INPUT_RATE: RateLimitOptions = { name: 'shell-input', authed: 7200, anon: 1800, noun: 'terminal keystrokes', durable: false };
+export function shellInputRateLimiter() {
+  return rateLimiter(SHELL_INPUT_RATE);
+}
+
+/**
  * CHUNKED UPLOAD TRANSPORT (`/api/zip-upload/chunk`) — its own bucket, sized to the real work.
  *
  * ROOT CAUSE (admin question 2026-08-04, "60 per hour — per user or for the whole app?"): the chunk

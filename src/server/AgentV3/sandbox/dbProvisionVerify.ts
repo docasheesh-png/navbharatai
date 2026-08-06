@@ -20,6 +20,8 @@
 //      .env points at the local server and a late-starting Postgres heals without a rewrite; what
 //      changed is that the fallback can no longer masquerade as success.
 
+import { pgUpCommand } from './pgShell';
+
 /** The one URL the sandbox database lives at — the same string the app is handed. */
 export const CANONICAL_DB_URL = 'postgresql://postgres@localhost:5432/myapp';
 
@@ -64,6 +66,27 @@ export function pgBinariesUrl(version: string): string {
 }
 
 /**
+ * A SECOND, independent host for the SAME artifact bytes (admin 2026-08-06, "pura rocksolid banao").
+ *
+ * WHY REDUNDANCY IS NOT OPTIONAL. One download host is one outage away from "this sandbox cannot have a
+ * database" — precisely the outside dependency PATH 2b exists to remove. Google's mirror of Maven
+ * Central is a different company, a different network and a different failure domain, serving the
+ * byte-identical artifact, so nothing about the unpack or the binaries changes.
+ *
+ * REJECTED, and worth recording so nobody re-proposes it: the npm package `@embedded-postgres/linux-x64`
+ * looks like the obvious fallback (the registry is reachable from every build sandbox by definition).
+ * It is a DIFFERENT project's build, and it does not run — every version tested, from 16.4.0-beta.14 to
+ * 18.4.0-beta.17, dies with `libicuuc.so.60: cannot open shared object file` on any modern image. It
+ * would have downloaded 23 MB and produced a Postgres that cannot start. Found by executing it.
+ */
+export function pgBinariesMirrorUrl(version: string): string {
+  return 'https://maven-central.storage-download.googleapis.com/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/'
+    + `${version}/embedded-postgres-binaries-linux-amd64-${version}.jar`;
+}
+
+
+
+/**
  * The in-sandbox provisioning script.
  *
  * Emits exactly one of three markers, parsed by `parseDbProvision`:
@@ -75,6 +98,7 @@ export function pgBinariesUrl(version: string): string {
  */
 export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL, env: NodeJS.ProcessEnv = process.env): string {
   const binariesUrl = pgBinariesUrl(pgBinariesVersion(env));
+  const mirrorUrl = pgBinariesMirrorUrl(pgBinariesVersion(env));
   return `# ROOT IS NOT AVAILABLE HERE — and every command this script used to rely on needs it.
 #
 # The sandbox runs as \`user\` (the build's own \`ls -la\` shows /home/user/workspace owned by
@@ -98,11 +122,7 @@ export function dbProvisionScript(dbUrl: string = CANONICAL_DB_URL, env: NodeJS.
 #                    app will use, so it proves the thing we actually care about. Verification is never
 #                    skipped — if neither is possible the function fails and the outcome is honest.
 nbai_pg_up() {
-  if command -v pg_isready > /dev/null 2>&1; then
-    pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost -p 5432 -q 2>/dev/null
-    return $?
-  fi
-  [ -n "$PGDATA" ] && [ -n "$PGBIN" ] && "$PGBIN/pg_ctl" -D "$PGDATA" status > /dev/null 2>&1
+  ${pgUpCommand()}
 }
 nbai_select1() {
   if command -v psql > /dev/null 2>&1; then
@@ -168,6 +188,14 @@ if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
     FETCH_ERR=$( (curl -fsSL --max-time 180 -o "$NBAI_PG/pg.jar" "${binariesUrl}" \\
       || wget -q -T 180 -O "$NBAI_PG/pg.jar" "${binariesUrl}") 2>&1 | tail -2)
     echo "DB_DIAG_PGFETCH:\${FETCH_ERR:-ok}"
+    if [ ! -s "$NBAI_PG/pg.jar" ]; then
+      # SECOND HOST, same bytes. One download host is one outage away from "this sandbox cannot have a
+      # database" — precisely the outside dependency this path exists to remove. A different company, a
+      # different network, the byte-identical artifact, so nothing below changes.
+      MIRROR_ERR=$( (curl -fsSL --max-time 180 -o "$NBAI_PG/pg.jar" "${mirrorUrl}" \\
+        || wget -q -T 180 -O "$NBAI_PG/pg.jar" "${mirrorUrl}") 2>&1 | tail -2)
+      echo "DB_DIAG_PGFETCH2:\${MIRROR_ERR:-ok}"
+    fi
     if [ -s "$NBAI_PG/pg.jar" ]; then
       # A .jar IS a zip. Whichever unpacker the image has: unzip, then python3, then the JDK's jar.
       UNZIP_ERR=$( (cd "$NBAI_PG" && (unzip -o -q pg.jar 2>&1 \\
@@ -182,13 +210,38 @@ if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
       rm -f "$NBAI_PG/pg.jar" "$TXZ" 2>/dev/null
     fi
   fi
-  if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then PGBIN="$NBAI_PG/bin"; fi
+  # DOWNLOADED IS NOT THE SAME AS RUNNABLE. A build linked against libraries this image does not have
+  # exits with "error while loading shared libraries" — it is present, it is +x, and it cannot run. Found
+  # for real while testing a candidate source, which downloaded 23 MB and produced a Postgres that could
+  # never start. Asking the binary itself is the only honest check, and it costs milliseconds.
+  if [ -z "$PGBIN" ] && [ -x "$NBAI_PG/bin/initdb" ]; then
+    RUN_ERR=$("$NBAI_PG/bin/initdb" --version 2>&1 | tail -1)
+    RUN_RC=$?
+    # MATCH THE VERSION BANNER, NOT THE WORD "initdb". The first version of this matched *initdb*, and a
+    # loader failure prints the BINARY PATH — ".../bin/initdb: error while loading shared libraries" —
+    # which contains that word, so the broken build was ACCEPTED. Caught by running both a working and a
+    # deliberately broken build through it. The exit code is checked too: a loader failure exits 127.
+    case "$RUN_RC:$RUN_ERR" in
+      0:*"(PostgreSQL)"*) PGBIN="$NBAI_PG/bin" ;;
+      *) echo "DB_DIAG_PGEXEC:the fetched postgres cannot run here - $RUN_ERR" ;;
+    esac
+  fi
   echo "DB_DIAG_PGBIN:\${PGBIN:-none}"
   if [ -n "$PGBIN" ]; then
     export PGDATA="\${HOME:-/tmp}/.nbai-pgdata"
     if [ ! -f "$PGDATA/PG_VERSION" ]; then
       INITDB_ERR=$("$PGBIN/initdb" -D "$PGDATA" -U postgres --auth=trust --encoding=UTF8 2>&1 | tail -3)
       echo "DB_DIAG_INITDB:\${INITDB_ERR:-ok}"
+      # CREATE THE APP DATABASE WITH THE SERVER ITSELF. \`createdb\` is a CLIENT tool and a fetched
+      # Postgres build ships none, which briefly meant the app's database name changed between paths —
+      # our canonical URL said \`myapp\` while the database was really \`postgres\`, so any caller
+      # holding CANONICAL_DB_URL pointed at a database that did not exist. \`postgres --single\` is the
+      # server's own single-user mode: it needs no client, no running server and no root. Done here,
+      # before pg_ctl starts, because single-user mode requires the server to be STOPPED. Verified for
+      # real against these exact binaries. Harmless when createdb also exists — the later createdb then
+      # just reports "already exists" and is ignored.
+      CREATEDB_ERR=$(echo "CREATE DATABASE myapp;" | "$PGBIN/postgres" --single -D "$PGDATA" postgres 2>&1 | grep -iE '\berror\b|\bfatal\b' | tail -2)
+      echo "DB_DIAG_CREATEDB:\${CREATEDB_ERR:-ok}"
     fi
     # -k /tmp puts the unix socket somewhere writable; -h 127.0.0.1 keeps it on loopback only.
     PGCTL_ERR=$("$PGBIN/pg_ctl" -D "$PGDATA" -o "-p 5432 -h 127.0.0.1 -k /tmp" -l "$PGDATA/server.log" -w -t 25 start 2>&1 | tail -3)
@@ -215,14 +268,22 @@ if nbai_pg_up; then
   APP_URL="${dbUrl}"
   if command -v createdb > /dev/null 2>&1; then
     createdb -h 127.0.0.1 -p 5432 -U postgres myapp 2>/dev/null || true
-  else
-    APP_URL=$(echo "${dbUrl}" | sed 's|/[^/]*$|/postgres|')
-    echo "DB_DIAG_DBNAME:createdb absent — using the built-in postgres database"
   fi
   if nbai_select1 "$APP_URL"; then
     echo "DB_URL:$APP_URL"
   else
-    echo "DB_SELECT1_FAILED"
+    # LAST RESORT, AND ONLY WHEN THE APP DATABASE GENUINELY IS NOT THERE. Every path above tries to
+    # create it (createdb, or the server's own single-user mode), so reaching here means the create
+    # failed — on a data directory that already existed before this fix, say. \`postgres\` is the one
+    # database initdb ALWAYS makes, so it is the honest fallback. We report the URL that actually
+    # answered, never the one we assumed, so a caller can only ever be handed a proven database.
+    FALLBACK_URL=$(echo "${dbUrl}" | sed 's|/[^/]*$|/postgres|')
+    if nbai_select1 "$FALLBACK_URL"; then
+      echo "DB_DIAG_DBNAME:the app database was unreachable — using the built-in postgres database"
+      echo "DB_URL:$FALLBACK_URL"
+    else
+      echo "DB_SELECT1_FAILED"
+    fi
   fi
 else
   echo "DB_DIAG_ISREADY:$(pg_isready -h 127.0.0.1 -p 5432 2>&1 | tail -1 || echo 'pg_isready absent')"

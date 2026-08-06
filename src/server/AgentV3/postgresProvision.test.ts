@@ -1,3 +1,4 @@
+import { pgUpCommand } from './sandbox/pgShell';
 import { describe, it, expect } from 'vitest';
 import {
   sandboxPostgresEnabled,
@@ -143,7 +144,15 @@ describe('Postgres liveness — watchdog + preflight + bounded revival (last-5-r
     const cmd = postgresWatchdogCommand();
     expect(cmd).toContain(`pgrep -f ${POSTGRES_WATCHDOG_MARKER}`); // never stack two watchdogs
     expect(cmd).toContain('pg_isready');                            // liveness check, not a blind restart
-    expect(cmd).toContain('pg_ctlcluster');                         // the restart that actually works in E2B
+    expect(cmd).toContain('pg_ctlcluster');                         // the privileged restart, where it works
+    // …AND our own instance, which is the only one a sandbox with no system Postgres has. Written as
+    // pg_isready + pg_ctlcluster ALONE, this loop read "down" every 20s and then ran a command that
+    // does not exist — a busy loop that could never revive anything (see pgShell).
+    expect(cmd).toContain('pg_ctl');
+    expect(cmd).toContain('.nbai-pgdata');
+    // The shared builders are single-quote-free on purpose: this whole body lives inside `sh -c '…'`.
+    const body = cmd.slice(cmd.indexOf("sh -c '") + 7, cmd.lastIndexOf("' " + POSTGRES_WATCHDOG_MARKER));
+    expect(body).not.toContain("'");
     expect(cmd).toContain('nohup');                                 // survives the provisioning command
     expect(cmd).toContain('setsid');                                // detached from the caller's session
     expect(cmd).toContain('WATCHDOG_ARMED');                        // observable arm confirmation
@@ -156,6 +165,11 @@ describe('Postgres liveness — watchdog + preflight + bounded revival (last-5-r
     expect(cmd).toContain('pg_isready');
     expect(cmd).toContain('PG_UP');
     expect(cmd).toContain('PG_DOWN');
+    // As a bare pg_isready this reported PG_DOWN for a perfectly HEALTHY database whenever the image
+    // had no client tools — burning the bounded revivals and releasing the provider lock into the very
+    // SQLite downgrade the lock exists to prevent.
+    expect(cmd).toContain('pg_ctl');
+    expect(cmd).toBe(`${pgUpCommand()} && echo PG_UP || echo PG_DOWN`);
   });
 
   it('preflight fires only for a provisioned, not-dead, live-DB command — and not right after provisioning', () => {

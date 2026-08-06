@@ -26485,3 +26485,106 @@ registered with each registrar, an external approval step). C — Hostinger dire
 Domain Connect support is absent per training knowledge; flag-gated until one live verification).
 D — in-app domain purchase: NOT built; needs the admin's reseller account (ResellerClub/GoDaddy
 reseller), real money + KYC — no fake Buy button before that exists (second absolute rule).
+
+## 2026-08-06 (6) — correcting the record on the no-root Postgres, and closing the gap it left
+
+The admin asked whether the plan I described was done. Two corrections, both mine, both tested rather
+than argued.
+
+**1. What I described is NOT what shipped.** I said PATH 2b would use `apt-get download` + `dpkg-deb -x`
+(which yields the full toolchain including `psql`). #2150 actually ships the Maven relocatable tarball,
+which has no `psql`, with the Node `pg` driver as the verification client instead.
+
+**2. The plan I described was WORSE, and the test proves it.** Run as a non-root user here:
+`apt-get download postgresql-client-16` → **404**. The package lists are stale and point at a version
+already superseded in the pool; refreshing them needs `apt-get update`, which needs ROOT. So "apt-get
+download needs no root" was technically true and practically useless — and an E2B image typically ships
+with `/var/lib/apt/lists` emptied, which fails even harder. The Maven artifact has no such dependency:
+its URL is permanent and immutable. The shipped route is the better one; that was luck, not planning,
+and it is recorded as such.
+
+**3. The gap it left, now closed.** No `createdb` meant the app database NAME changed between paths —
+`CANONICAL_DB_URL` says `myapp` while the fetched path had created nothing but `postgres`, so any caller
+holding the canonical URL pointed at a database that did not exist. That was an inconsistency this
+session introduced. Fixed with the server's own single-user mode:
+`echo "CREATE DATABASE myapp;" | postgres --single -D $PGDATA postgres` — no client, no running server,
+no root. Run on a FRESH data directory only and BEFORE `pg_ctl start` (single-user mode requires the
+server stopped). **Verified for real against these exact binaries**: the database is created and
+`postgresql://postgres@127.0.0.1:PORT/myapp` answers `SELECT current_database()` = `myapp`.
+The `postgres`-database fallback survives as a genuine LAST resort — reached only when the app database
+fails to answer, and it must pass its own `SELECT 1` before its URL is reported, so a caller can still
+only ever be handed a database that was proven.
+
+Remaining honest gap: an app that shells out to `psql` itself (some seed/migration scripts do) still
+finds no `psql` on the fetched path. Every app that connects over TCP — Prisma, Drizzle, `pg`, `mysql2`,
+i.e. effectively all of them — is unaffected. Recorded rather than papered over.
+
+Gate: tsc clean both projects, 1077 files / 12,119 tests, exit 0.
+
+## 2026-08-06 (7) — "pura rocksolid banao": the new Postgres path would have worked ONCE, then died
+
+The admin asked for rock-solid. Auditing the new path for what happens AFTER it works found two defects
+of exactly the worst kind — a build that starts fine and dies half way — plus three more found by
+running things rather than reading them.
+
+**THE CLASS: three copies of "is Postgres up" and two of "start Postgres".** The provisioning script,
+the keepalive watchdog and the pre-flight liveness probe each had their own, all written when the only
+possible Postgres was the Debian cluster. The moment the sandbox could get Postgres from somewhere else
+— a relocatable build shipping NO client tools — they broke in opposite directions:
+- **The PROBE said PG_DOWN forever** (`pg_isready` absent). A perfectly healthy database is declared
+  dead, the bounded revivals are burned, and the provider lock releases into the SQLite downgrade the
+  lock exists to prevent.
+- **The WATCHDOG became a busy loop that could never help**: "down" every 20s, then `pg_ctlcluster`,
+  which is absent (and root-only anyway). A reaped Postgres NEVER came back.
+Fixed as a CLASS, not three times: `src/server/AgentV3/sandbox/pgShell.ts` is now the ONE definition and
+all three callers are derived from it. Deliberately free of single quotes — the watchdog embeds it
+inside `sh -c '…'`.
+
+**Found by running it, not by reading it:**
+1. `ls` RE-SORTS its arguments. `PGBIN_EXPR` listed both directories and took `tail -1` on the
+   assumption argument order survives — so `/home/...` sorted before `/usr/...` and the IMAGE's binary
+   won every time. `pg_ctl` refuses a data directory written by a different major version, so an image
+   shipping PG 14 beside a fetched 16 would have failed every start and every status check. Now ours
+   wins by explicit test.
+2. The npm package `@embedded-postgres/linux-x64` — the obvious-looking second source — **does not run**.
+   Every version tested (16.4.0-beta.14 … 18.4.0-beta.17) dies with `libicuuc.so.60: cannot open shared
+   object file` on a modern image. It would have downloaded 23 MB and produced a Postgres that cannot
+   start. Rejected and recorded so it is not re-proposed.
+3. So redundancy is now Google's mirror of Maven Central: a different company, a different network, the
+   **byte-identical** artifact (fetched and started for real from that host too).
+4. **Downloaded is not the same as runnable** — a new guard asks the binary itself
+   (`initdb --version`) before adopting it. Its FIRST version matched `*initdb*`, which a loader failure
+   also matches because the error prints the binary PATH — so the broken build was ACCEPTED. Now it
+   matches the version banner `(PostgreSQL)` AND the exit code. Verified against a working build, a
+   deliberately broken build, and an absent one.
+
+**Verified end to end, as an unprivileged user with no client tools on PATH:** server stopped → PG_DOWN;
+the shared start revives it; server running → PG_UP (the case that was broken); and the bin resolver
+picks ours.
+
+Gate: tsc clean both projects, 1079 files / 12,141 tests, exit 0.
+
+## 2026-08-06 (8) — the sibling: Engineer AI had a rotted COPY of the same provisioner
+
+Rule 3 (hunt the siblings) applied to the rock-solid pass. `src/server/EngineerAI/actuators/E2BActuator.ts`
+held an independent COPY of the AgentV3 provisioner as it stood BEFORE the Mitrify autopsies, so it
+carried every defect they killed — plus the worst one of its own:
+
+- `apt-get install`, `pg_ctlcluster` and `su postgres` are ALL root-only, and the sandbox runs
+  unprivileged, so it could never start a database on any build, ever;
+- the image ships no PostgreSQL at all (measured: `PSQL:none PGBIN:none`), so there was nothing to start
+  either way;
+- and on failure it printed `DB_NOT_READY` and then handed the caller a `DATABASE_URL` **anyway**
+  (`?? 'postgresql://…/myapp'`), which `EngineerAgentLoop` wrote straight into `.env`. The app met
+  ECONNREFUSED on boot while every status line said the backend was provisioned. That is precisely the
+  false success the shared provisioner exists to kill — alive in a second copy the whole time.
+
+Now it runs the SAME `dbProvisionScript()`, parses the SAME markers, and returns `dbVerified` /
+`dbVerifyFailure` as part of the `BackendProvisionResult` CONTRACT (not a private detail). The loop
+reports the outcome through the SAME `provisionOutcomeNote()` wording, so the two engines can never
+drift on what "provisioned" means. A URL is still written when unverified — `.env` must point at the
+local server so a late start heals without a rewrite — it simply can no longer masquerade as success.
+
+Two copies of this is how one of them silently rots. There is one.
+
+Gate: tsc clean both projects, 1080 files / 12,147 tests, exit 0.

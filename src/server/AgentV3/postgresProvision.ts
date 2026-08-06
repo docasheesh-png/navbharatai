@@ -86,6 +86,8 @@ export function mergeEnvVar(envContent: string | null | undefined, key: string, 
 // Both are pure command builders here; the actuator/dispatcher own the I/O. Same kill switch
 // (AGENTV3_SANDBOX_POSTGRES=off) governs the whole regime.
 
+import { pgUpCommand, pgStartCommand } from './sandbox/pgShell';
+
 /** Marker embedded as the watchdog shell's $0 so `pgrep -f` can find (and not duplicate) it. */
 export const POSTGRES_WATCHDOG_MARKER = 'nb_pg_watchdog';
 
@@ -95,11 +97,15 @@ export const POSTGRES_WATCHDOG_MARKER = 'nb_pg_watchdog';
  * fails. Detached via nohup + setsid so it outlives the provisioning command. Pure.
  */
 export function postgresWatchdogCommand(): string {
+  // The up-check and the start are the SHARED ones (pgShell). They used to be written inline here in
+  // terms of pg_isready + pg_ctlcluster, which meant that the moment the sandbox got its Postgres from
+  // anywhere else, this loop read "down" every 20 seconds and then ran a command that does not exist —
+  // a busy loop that could never revive anything. A reaped database then never came back and the build
+  // died half way through. See pgShell for the whole class.
   return `if ! pgrep -f ${POSTGRES_WATCHDOG_MARKER} >/dev/null 2>&1; then
   nohup setsid sh -c 'while true; do
-  if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
-    PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-    pg_ctlcluster "$PG_VER" main start >/dev/null 2>&1 || true
+  if ! ${pgUpCommand()}; then
+    ${pgStartCommand()}
   fi
   sleep 20
 done' ${POSTGRES_WATCHDOG_MARKER} >/tmp/${POSTGRES_WATCHDOG_MARKER}.log 2>&1 &
@@ -109,7 +115,10 @@ echo WATCHDOG_ARMED`;
 
 /** The millisecond-cheap liveness probe run BEFORE a live-DB command. Prints PG_UP / PG_DOWN. Pure. */
 export function postgresPreflightProbeCommand(): string {
-  return 'pg_isready -h localhost -p 5432 -q 2>/dev/null && echo PG_UP || echo PG_DOWN';
+  // SHARED up-check. As a bare `pg_isready` this reported PG_DOWN for a perfectly healthy database
+  // whenever the image had no client tools — burning the bounded revivals and releasing the provider
+  // lock into the SQLite downgrade the lock exists to prevent.
+  return `${pgUpCommand()} && echo PG_UP || echo PG_DOWN`;
 }
 
 /**

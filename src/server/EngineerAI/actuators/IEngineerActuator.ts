@@ -2,6 +2,17 @@ export interface BackendProvisionResult {
   dbUrl: string;
   envVars: Record<string, string>;
   scaffoldFiles: { path: string; content: string }[];
+  /**
+   * True ONLY when a real `SELECT 1` succeeded over the exact URL the app is handed.
+   *
+   * A URL is returned either way, deliberately — `.env` must point at the local server so a
+   * late-starting database heals without a rewrite. What this flag prevents is the URL's mere existence
+   * being read as success, which is how an app ended up meeting ECONNREFUSED on boot while every status
+   * line said the backend was provisioned.
+   */
+  dbVerified?: boolean;
+  /** Which way it failed, when it did — so the message can say something true and specific. */
+  dbVerifyFailure?: string | null;
 }
 
 export interface IEngineerActuator {

@@ -30,6 +30,11 @@ import {
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
 import { buildPackageJson, detectProjectKind } from '../lib/mobileProjectAssembler';
+import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
+import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { debitWalletForBuild } from '../lib/walletDebit';
+import { getServerDb } from '../lib/serverDb';
 
 const githubToken = githubTokenFromRequest;
 
@@ -156,6 +161,22 @@ export function registerMobileShipRoutes(app: Express): void {
       const status = got.failure === 'expired' ? 404 : got.failure === 'not-app' ? 422 : got.failure === 'bad-request' ? 400 : 502;
       return res.status(status).json({ error: got.message });
     }
+    // ₹1-PER-BUILT-FILE (admin 2026-08-06, "sabhi kuch 1₹ par file"): charged at DELIVERY of a real
+    // built .apk/.aab/.ipa — never on a failed build (nothing streams), never twice for one artifact
+    // (the debit ref IS the artifact), never for free-list/anon, and never blocking the bytes. See
+    // lib/apkCharge.ts for the full contract.
+    try {
+      if (isChargeableApk(got.fileName)) {
+        const identity = await verifyFirebaseIdentity(req);
+        if (identity?.uid && !isAgentV3FreeUser(identity.uid, identity.email)) {
+          void debitWalletForBuild(getServerDb() as any, identity.uid, {
+            billedInr: apkChargeInr(),
+            buildRef: apkChargeRef(owner, repo, artifactId),
+            description: chargeDescription(got.fileName),
+          });
+        }
+      }
+    } catch { /* the charge must never break the download */ }
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${got.fileName}"`);
     res.send(got.bytes);

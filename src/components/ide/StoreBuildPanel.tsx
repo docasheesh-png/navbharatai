@@ -458,6 +458,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
               Installs straight onto any Android phone. Nothing to set up — no signing key needed.
               (This file cannot go on Google Play; for that, use the option below.)
+              {' '}₹1 per built app file (.apk, Play Store .aab, or iOS .ipa alike), taken from your
+              wallet when you download the finished file — a failed build costs nothing, and
+              re-downloading the same file is free.
             </p>
 
             {/* SECONDARY — Google Play. This is the only path that genuinely needs the user's own key. */}

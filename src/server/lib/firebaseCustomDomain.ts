@@ -267,9 +267,28 @@ export function customDomainErrorMessage(err: unknown): string {
     return 'Too many domain requests right now. Please wait a few minutes and try again.';
   }
   if (/invalid|not.?found|400|404/.test(raw)) {
-    return 'That domain could not be set up — check the spelling (like myshop.com, no https:// and no slashes) and try again.';
+    // The route validates the domain's SHAPE before any API call — so by the time an
+    // invalid/not-found lands here, the spelling is provably NOT the problem, and telling the user
+    // to fix it would be a false accusation that hides a server-side gap (admin 2026-08-06:
+    // mitrify.in, a perfectly valid domain, was told to "check the spelling" for every attempt).
+    return 'The hosting service rejected this domain request. Your domain name looks valid — this is usually a setup gap on our side, not yours. Try once more; if it repeats, use Report and we will fix it.';
   }
   return 'Could not start the domain connection. Please try again in a moment.';
+}
+
+/**
+ * The REAL failure, bounded and stripped of infra identifiers, for the workspace OWNER's screen.
+ * The connect route is ownership-checked, so only the app's owner can ever read it — and a failure
+ * that names its cause is the difference between a fixable report and a dead screenshot (the
+ * terminal's whole 2026-08-05 lesson). Project ids and vendor branding are neutralized; the full raw
+ * text still goes to the server log.
+ */
+export function sanitizeDomainErrorDetail(err: unknown): string {
+  const msg = err instanceof Error && err.message ? err.message : String(err ?? '');
+  return msg
+    .replace(/gen-lang-client-[0-9]+/gi, '[project]')
+    .replace(/firebase/gi, 'hosting')
+    .slice(0, 240);
 }
 
 /** True when Firebase Hosting deploys are available (ADC present). Mirrors the deploy provider. */

@@ -210,10 +210,24 @@ describe('customDomainErrorMessage — the right answer per failure class (never
     expect(m).toMatch(/wait a few minutes/i);
   });
 
-  it('an invalid/not-found domain points at the input, with a real example', () => {
+  it('an invalid/not-found failure NEVER accuses the user\'s spelling — the route validated it first', () => {
+    // admin 2026-08-06: mitrify.in (a valid domain) was told to "check the spelling" on every attempt,
+    // while the real failure was server-side. By the time this classifier runs, the domain's shape
+    // has already passed DOMAIN_RE — blaming the input is a false accusation that hides our gap.
     const m = customDomainErrorMessage(new Error('HTTP 400: invalid domain name'));
-    expect(m).toMatch(/check the spelling/i);
-    expect(m).toContain('myshop.com');
+    expect(m).not.toMatch(/check the spelling/i);
+    expect(m).toMatch(/looks valid/i);
+    expect(m).toMatch(/on our side/i);
+  });
+
+  it('sanitizeDomainErrorDetail names the real cause with infra identifiers neutralized', async () => {
+    const { sanitizeDomainErrorDetail } = await import('./firebaseCustomDomain');
+    const d = sanitizeDomainErrorDetail(new Error('Firebase Hosting API error (HTTP 404) for project gen-lang-client-0866594388'));
+    expect(d).toContain('HTTP 404');
+    expect(d).not.toMatch(/firebase/i);
+    expect(d).not.toContain('gen-lang-client-0866594388');
+    expect(d).toContain('[project]');
+    expect(sanitizeDomainErrorDetail(new Error('x'.repeat(500))).length).toBe(240);
   });
 
   it('an unknown failure keeps the honest transient default', () => {

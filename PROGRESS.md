@@ -26082,3 +26082,5 @@ and gated).
 takes — the change makes the wait VISIBLE, HONEST and UNKILLABLE-by-timeout, and reopening after the
 wake completes is instant. If real-world cold creates regularly exceed ~2 min, the next lever is
 infra (warm sandbox pool / template optimization), recorded here as the open follow-up.
+
+

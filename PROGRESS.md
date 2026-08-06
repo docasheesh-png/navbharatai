@@ -27057,3 +27057,24 @@ their fixtures ENCODED THE SAME INVENTED SHAPE — the "test matches broken beha
   auto-import trap and the multi-A converge.
 Lesson (external-API class): NEVER hand-write an API response shape from memory — fetch the
 provider's published schema (discovery doc) and encode THAT in the types and fixtures.
+
+## 2026-08-06 — Plan lifecycle enforcement: reminders → grace → domain pause → auto-reconnect (admin: "renewal kyu karega?")
+
+**Admin's razor-sharp catch:** the first plan cut only gated CONNECT — a lapsed plan kept the custom
+domain serving forever, so nobody would ever renew. Their ask: domain linked only while ₹99 is paid;
+lapse ⇒ down; 5-day reminder. Adapted per the external-suggestion rule (best-of-best, not blind):
+the DOMAIN pauses but the APP is never deleted — it stays on its free NavBharatAI URL with the badge
+(an angry user with a dead app leaves; one whose vanity domain paused recharges and returns).
+Lifecycle, all lazy/idempotent, no cron: T-5d and T-1d in-app reminders (once per window per period,
+naming the exact ₹ shortfall when the wallet can't cover renewal) → lazy auto-renew → 3-day grace
+(late recharge = domain never blinks) → past grace, LAPSE enforced once: every active link detached
+at the hosting API (deleteCustomDomain, idempotent), marked suspended, user told honestly ("nothing
+was deleted") → re-purchase auto-RE-ATTACHES suspended domains + notifies. Pure decision
+`decidePlanSweepStep` (renewal always wins over remind/lapse); sweep module with injectable deps;
+periodic in-process sweep (2min after boot + 6-hourly) registered beside the wallet routes; sweep
+query kept to ONE single-field inequality (an equality+inequality combo would need a composite index
+and FAILED_PRECONDITION would have become a silent forever-no-op). Notifications ride the existing
+admin_notifications store (target: user). 15 new tests (windows, dedupe, grace, lapse-once,
+reattach-only-lapsed, wiring). **Open infra item (rule 6): in-process cadence delivers reminders only
+while instances run; guaranteed delivery wants Cloud Scheduler hitting a sweep endpoint — recorded,
+not silently skipped.**

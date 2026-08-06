@@ -632,7 +632,8 @@ NOTE (2026-08-06): connecting a domain is part of the Custom Domain plan (₹99/
 • Removes the "Made with NavBharatAI" badge from every app you publish (takes effect on your next publish).
 • Unlocks connecting your OWN purchased domain (e.g. myshop.com from Hostinger/GoDaddy) to your app.
 The Plans card also shows the rest of the account honestly: Database is always FREE (your apps' databases run on your own account), and Coding is pay-per-use from the wallet — no subscription.
-Renewal: auto-renew is on by default and charges the wallet ₹99 when the 30 days end; turn it off with one tap and the plan simply ends on its expiry date. If the wallet balance is too low at renewal time, nothing is charged and the plan lapses honestly (free hosting with the badge continues — the published app never goes down).`,
+Renewal: auto-renew is on by default and charges the wallet ₹99 when the 30 days end; turn it off with one tap and the plan simply ends on its expiry date.
+What happens if it is NOT renewed (honest answer): you get in-app reminders 5 days and 1 day before expiry (they name the exact shortfall if your balance is low). After expiry there is a 3-day grace window — recharge in it and nothing is interrupted. Past grace, your custom DOMAIN is paused (it stops serving) — but your APP is never deleted: it stays live on its free NavBharatAI link with the badge. Buy the plan again and the domain reconnects automatically within minutes.`,
     howToUse: 'Open Billing (wallet) → find the Plans card → tap "Activate — ₹99". Needs at least ₹99 of wallet balance (recharge first if short). Then publish again for badge-free hosting, or go to Settings → App Settings → Domain to connect your domain.',
     relatedFeatures: ['made_with_badge', 'connect_domain'],
     keywords: [

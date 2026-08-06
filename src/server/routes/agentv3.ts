@@ -102,6 +102,7 @@ import { randomUUID } from 'crypto';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
+import { extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS } from '../AgentV3/PageRouteCheck';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -9799,6 +9800,46 @@ export function registerAgentV3Routes(app: Express): void {
             });
           }
         } catch { /* the smoke check is evidence, never a gate — a failure here changes nothing */ }
+      }
+
+      // DOES EVERY PAGE ACTUALLY RENDER, OR ONLY THE HOME ONE? (admin 2026-08-06 — "E2E auto-run, and
+      // make it cheap for the admin".) Three checks already ran and none covers this: the preview
+      // verifier loads HOME in a browser, RouteSmokeCheck curls the API, the console capture watches the
+      // page the preview opened. So a React/Next app can answer 200 for `/dashboard`, throw during the
+      // client-side render, paint a blank screen — and every one of them passes. That is the family the
+      // "Cannot GET /customer/home" reports came from.
+      //
+      // IT IS CHEAP BY CONSTRUCTION, which is why it can run by default: Playwright AND Chromium are
+      // PRE-BAKED into both E2B images and `_kickoffPlaywright` already warms them for the screenshot
+      // tools. No download, no npm install, no model call — one browser navigation per route, capped at
+      // MAX_PAGE_ROUTES, with home skipped because the preview verifier already proved it.
+      //
+      // EVIDENCE, NEVER A GATE — same rule as the route smoke check: a working build is never marked
+      // failed by a probe that could be wrong about a route it does not fully understand.
+      if (
+        process.env.AGENTV3_PAGE_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
+        && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+      ) {
+        try {
+          const pageRoutes = extractPageRoutes(Object.fromEntries(writtenFiles));
+          if (pageRoutes.length > 0) {
+            const out = await withTimeout(
+              actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes)),
+              20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
+            );
+            const pageResults = parsePageCheck(out.stdout);
+            const pageSummary = summarizePageCheck(pageResults, pageRoutes.length);
+            buildDiag.record({
+              phase: 'preview',
+              severity: pageSummary.ok ? 'info' : 'warning',
+              code: pageSummary.ok ? 'PAGE_RENDER_PASSED' : 'PAGE_RENDER_FAILED',
+              message: pageSummary.summary,
+              autoResolved: pageSummary.ok,
+              detail: pageResults.map((r) => `${r.verdict.toUpperCase()} ${r.note}`).join('\n'),
+            });
+          }
+        } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
 
       // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,

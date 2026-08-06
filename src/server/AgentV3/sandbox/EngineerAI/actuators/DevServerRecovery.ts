@@ -17,6 +17,8 @@ export type DevServerFailureCause =
   | 'missing_script'  // the launch command names a script package.json doesn't have ("Missing script: dev")
   | 'port_in_use'     // the target port is occupied (EADDRINUSE)
   | 'db_unreachable'  // the app's database isn't running in the sandbox (Prisma P1001 / ECONNREFUSED :5432)
+  | 'db_engine_unavailable' // the app needs a database ENGINE the sandbox cannot start (MongoDB, MySQL, Redis…)
+  | 'db_client_missing' // a script shells out to psql/createdb/pg_dump, which this PostgreSQL does not ship
   | 'missing_credential' // the app kills itself at boot because a USER-supplied key isn't set yet
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
@@ -58,6 +60,39 @@ export interface DevServerDiagnosis {
    * port the error itself names is the only recovery that can ever succeed.
    */
   conflictPort?: number;
+  /**
+   * Which database ENGINE the app was trying to reach, when the log names one.
+   *
+   * The message has to be specific to be useful: "connect a database" is advice; "your app is trying to
+   * reach MongoDB, and this preview can only start PostgreSQL" is an explanation the user can act on —
+   * either connect their own MongoDB or ask for the app to use a database that IS available here.
+   */
+  dbEngine?: 'mongodb' | 'mysql' | 'redis' | 'mssql';
+}
+
+/** How each engine is named to a user, and the port that identifies it in a connection error. */
+const DB_ENGINES: Array<{ id: 'mongodb' | 'mysql' | 'redis' | 'mssql'; label: string; port: number; re: RegExp }> = [
+  { id: 'mongodb', label: 'MongoDB', port: 27017, re: /\bMongo(?:Server|Network|Timeout)?\w*Error\b|\bmongodb(?:\+srv)?:\/\/|\bfailed to connect to server\b.*\b27017\b|:27017\b/i },
+  { id: 'mysql', label: 'MySQL', port: 3306, re: /\bER_(?:ACCESS_DENIED|BAD_DB|CON_COUNT)\w*\b|\bPROTOCOL_CONNECTION_LOST\b|\bmysql:\/\/|:3306\b/i },
+  { id: 'redis', label: 'Redis', port: 6379, re: /\bredis(?:s)?:\/\/|\bReplyError\b|\bNOAUTH\b|:6379\b/i },
+  { id: 'mssql', label: 'SQL Server', port: 1433, re: /\bELOGIN\b|\bmssql:\/\/|:1433\b/i },
+];
+
+/**
+ * Which database engine a boot failure is about, when the log names one that is NOT PostgreSQL.
+ *
+ * Only fires alongside a real CONNECTION failure — a log that merely mentions `mongodb://` in a comment
+ * or a printed config is not a database being unreachable, and misreading that would send a working app
+ * down a "you need a database" path it never needed. PURE.
+ */
+export function unavailableDbEngine(log: string): { id: 'mongodb' | 'mysql' | 'redis' | 'mssql'; label: string } | null {
+  const text = stripAnsi(log || '').slice(-8000);
+  const refused = /\b(?:ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|connection refused|connect failed|server selection|topology was destroyed|getaddrinfo)\b/i.test(text);
+  if (!refused) return null;
+  for (const e of DB_ENGINES) {
+    if (e.re.test(text)) return { id: e.id, label: e.label };
+  }
+  return null;
 }
 
 /**
@@ -205,6 +240,13 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
     case 'missing_script': return 'code_fix'; // restarting re-runs the same wrong command forever — the LAUNCH COMMAND must change
     case 'port_in_use': return 'kill_port_retry';
     case 'db_unreachable': return 'reprovision_db'; // a blind restart can never revive a reaped Postgres — restart the DB itself
+    // The sandbox can start PostgreSQL and nothing else. Restarting an app that wants MongoDB does not
+    // conjure a MongoDB, so 'reprovision_db' would burn both attempts on a certainty. Short-circuit and
+    // say something the user can act on instead.
+    case 'db_engine_unavailable': return 'code_fix';
+    // `npm install` cannot deliver an OS binary, and a restart re-runs the same script against the same
+    // missing tool. The SCRIPT must use the database client the app already has.
+    case 'db_client_missing': return 'code_fix';
     case 'missing_credential': return 'code_fix'; // the key is still unset on every restart — only the SOURCE can stop crashing
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
@@ -338,6 +380,20 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return pkg ? { ...d, corruptPackage: pkg } : d;
   }
   if (/\bModule not found\b/i.test(text)) return make('missing_module', 'A module could not be resolved — reinstalling dependencies and restarting.');
+  // 3.5) A DATABASE CLIENT TOOL, not an npm package. Caught BEFORE the generic "command not found"
+  //    branch, which reinstalls node_modules — and `npm install` can never deliver an OS binary, so that
+  //    branch spent a real install and a restart on a certainty. Today the same situation produced THREE
+  //    different wrong answers: `psql: not found` was 'unknown' (two blind retries), `createdb: command
+  //    not found` was 'missing_module' (npm install), `pg_dump: not found` was 'unknown' again.
+  //    A relocatable PostgreSQL ships the SERVER only — no psql, no createdb, no pg_dump — so a script
+  //    that shells out to one has to use the client the app already depends on instead.
+  const clientTool = /\b(psql|createdb|dropdb|pg_dump|pg_restore|pg_isready)\b\s*:\s*(?:command\s+)?not found/i.exec(text)
+    || /\bcommand not found\b[^\n]*\b(psql|createdb|dropdb|pg_dump|pg_restore|pg_isready)\b/i.exec(text);
+  if (clientTool) {
+    const tool = clientTool[1];
+    return make('db_client_missing', `A script runs \`${tool}\`, which is not installed here — the preview's PostgreSQL ships the server only, with no command-line tools. Run this step through the database client the app already depends on (pg / Prisma / Drizzle) instead of shelling out to \`${tool}\`; installing packages cannot provide it.`);
+  }
+
   if (/\b(?:vite|next|tsc|tsx|node|npm)\b\s*:\s*(?:command\s+)?not found/i.test(text) || /command not found/i.test(text)) {
     return make('missing_module', 'A required CLI was not found — reinstalling dependencies and restarting.');
   }
@@ -375,6 +431,20 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   //    of the truth. This is the RETROACTIVE half of the missing-credential contract (2026-08-03): apps
   //    built BEFORE the contract shipped still contain these boot-killers, and this is the moment it
   //    actually bites — so classify it honestly and route it to the SOURCE fix.
+  // 2.55) A DATABASE ENGINE THE SANDBOX CANNOT START. Caught right after the Postgres branch, because
+  //    the two need OPPOSITE actions: Postgres can be provisioned here, MongoDB/MySQL/Redis cannot.
+  //    Before this, a Mongo app's `MongoServerSelectionError … ECONNREFUSED 127.0.0.1:27017` matched
+  //    nothing, fell through to the generic crash branch, and bought two blind restarts that could not
+  //    possibly help — then reported "the dev server kept crashing on startup", which names the symptom
+  //    and hides the cause. A restart does not conjure a MongoDB.
+  const engine = unavailableDbEngine(text);
+  if (engine) {
+    return {
+      ...make('db_engine_unavailable', `The app is trying to reach ${engine.label}, which this preview cannot start — only PostgreSQL can be started here. Connect a ${engine.label} database (Settings → App Settings → Database), or switch the app to a database available in the preview.`),
+      dbEngine: engine.id,
+    };
+  }
+
   const missingCred = missingCredentialFromLog(text);
   if (missingCred) {
     return make('missing_credential',
@@ -443,6 +513,12 @@ export function terminalDetail(d: DevServerDiagnosis): string {
       return `A dependency the app needs is still missing after reinstalling. ${tail} ${d.detail.includes('incomplete') ? 'The package installed only partially — deleting node_modules and installing again usually clears it.' : 'Check that it is listed in package.json and installs cleanly.'}`.trim();
     case 'port_in_use':
       return `The port stayed occupied by another process. ${tail}`;
+    case 'db_engine_unavailable':
+      // NOT "recovery is exhausted" — nothing was attempted, and nothing could have been. Saying we
+      // tried and failed would misdescribe a situation the user can fix in one step.
+      return `${d.detail}`;
+    case 'db_client_missing':
+      return `${d.detail}`;
     case 'out_of_memory':
       return `The dev server ran out of memory and was killed. ${tail} A smaller build or fewer watchers may be needed.`;
     case 'crash':
@@ -478,6 +554,14 @@ export function userFacingPreviewFailure(diag: DevServerDiagnosis, port: number,
     }
     case 'db_unreachable':
       return 'Your app needs a database to start, and one could not be set up automatically here. Connect your own in Settings → App Settings → Database, then press Diagnose again — your data always stays in your own account.';
+    case 'db_client_missing':
+      // The user did not write this script and cannot install an OS package here — so this is one to
+      // hand back to the assistant, not a chore to hand to them.
+      return 'One of your app\'s setup steps uses a database command-line tool that is not available in the preview. Ask me to run that step through the app\'s own database library instead, and I will fix the script.';
+    case 'db_engine_unavailable': {
+      const label = (log ? unavailableDbEngine(log)?.label : null) ?? 'that database';
+      return `Your app needs ${label} to start. This preview can only start PostgreSQL for you, so connect your own ${label} in Settings → App Settings → Database — or ask me to switch the app to a database that runs here, and I will.`;
+    }
     case 'missing_module':
       return "One of the app's dependencies could not be installed, so it can't start. Ask me to fix the dependencies and I'll sort it out.";
     case 'missing_script':

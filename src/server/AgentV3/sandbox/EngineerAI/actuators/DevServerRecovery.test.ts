@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog, unavailableDbEngine } from './DevServerRecovery';
 
 // MITRIFY AUTOPSY 2026-08-04 — "The app didn't finish starting… its log had no recognisable error."
 // The log was FULL of recognisable errors; two defects hid them:
@@ -638,5 +638,126 @@ describe('conflictingPortFromLog — the occupied port comes from the ERROR, nev
 
   it('survives an ANSI-coloured log (the stripAnsi class fix applies here too)', () => {
     expect(conflictingPortFromLog(`${ESC}[31mError: listen EADDRINUSE: address already in use :::5000${ESC}[0m`)).toBe(5000);
+  });
+});
+
+/**
+ * A DATABASE ENGINE THE SANDBOX CANNOT START (admin 2026-08-06).
+ *
+ * The sandbox can provision PostgreSQL and nothing else. A Mongo app's
+ * `MongoServerSelectionError … ECONNREFUSED 127.0.0.1:27017` matched NOTHING in this file, fell through
+ * to the generic crash branch, and bought two blind restarts that could not possibly help — then
+ * reported "the dev server kept crashing on startup", which names the symptom and hides the cause. A
+ * restart does not conjure a MongoDB. (Verified separately: MongoDB's own binaries cannot be fetched
+ * from this environment, so provisioning one is not something that could be shipped honestly today —
+ * telling the truth is.)
+ */
+describe('unavailableDbEngine — names the engine, and only on a real connection failure', () => {
+  it('recognises the real MongoDB driver error', () => {
+    const log = 'MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017';
+    expect(unavailableDbEngine(log)).toEqual({ id: 'mongodb', label: 'MongoDB' });
+    const d = classifyDevServerFailure(log);
+    expect(d.cause).toBe('db_engine_unavailable');
+    expect(d.dbEngine).toBe('mongodb');
+  });
+
+  it('recognises MySQL, Redis and SQL Server', () => {
+    expect(unavailableDbEngine('Error: connect ECONNREFUSED 127.0.0.1:3306')?.label).toBe('MySQL');
+    expect(unavailableDbEngine('ReplyError: connect ECONNREFUSED 127.0.0.1:6379')?.label).toBe('Redis');
+    expect(unavailableDbEngine('ELOGIN: connect ETIMEDOUT 10.0.0.5:1433')?.label).toBe('SQL Server');
+  });
+
+  it('does NOT fire on a log that merely MENTIONS a database', () => {
+    // A printed config or a comment is not a database being unreachable; misreading it would send a
+    // working app down a "you need a database" path it never needed.
+    expect(unavailableDbEngine('Using mongodb://localhost:27017/app')).toBeNull();
+    expect(unavailableDbEngine('vite ready in 300 ms')).toBeNull();
+    expect(unavailableDbEngine('')).toBeNull();
+  });
+
+  it('POSTGRES still wins — it is the one engine we CAN start, and its recovery is the opposite', () => {
+    // Routing a Postgres failure here would stop us reviving a database we could have revived.
+    const pg = classifyDevServerFailure("Error: P1001: Can't reach database server at `localhost:5432`");
+    expect(pg.cause).toBe('db_unreachable');
+    expect(pg.recovery).toBe('reprovision_db');
+  });
+
+  it('short-circuits instead of burning both restart attempts on a certainty', () => {
+    expect(classifyDevServerFailure('MongoServerSelectionError: connect ECONNREFUSED :27017').recovery).toBe('code_fix');
+  });
+
+  it('a busy port is still the more specific cause', () => {
+    // The same log can carry both; freeing the port is the actionable one.
+    expect(classifyDevServerFailure('Error: listen EADDRINUSE :::3000\nMongoServerSelectionError: connect ECONNREFUSED :27017').cause).toBe('port_in_use');
+  });
+});
+
+describe('what the user and the report are told', () => {
+  const log = 'MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017';
+
+  it('the user is told which engine, and given two real choices', () => {
+    const msg = userFacingPreviewFailure(classifyDevServerFailure(log), 3000, log);
+    expect(msg).toContain('MongoDB');
+    expect(msg).toContain('Settings → App Settings → Database');
+    expect(msg).toContain('switch the app to a database that runs here');
+  });
+
+  it('the terminal line does NOT claim recovery was attempted and exhausted', () => {
+    // Nothing was attempted, and nothing could have been. Saying we tried would misdescribe a situation
+    // the user can fix in one step.
+    const t = terminalDetail(classifyDevServerFailure(log));
+    expect(t).not.toContain('Automatic recovery is exhausted');
+    expect(t).toContain('MongoDB');
+  });
+});
+
+/**
+ * A DATABASE CLIENT TOOL IS NOT AN NPM PACKAGE (admin 2026-08-06).
+ *
+ * A relocatable PostgreSQL ships the SERVER only — no psql, no createdb, no pg_dump — so a generated
+ * seed/migrate script that shells out to one fails with "command not found". Today that produced THREE
+ * different wrong answers for the same situation:
+ *   psql: not found            -> 'unknown'        -> two blind restarts
+ *   createdb: command not found-> 'missing_module' -> `npm install`, which can NEVER deliver an OS binary
+ *   pg_dump: not found         -> 'unknown'        -> two blind restarts again
+ * Every one of them spends real time on a certainty. The script has to use the client the app already
+ * depends on.
+ */
+describe('db_client_missing — one right answer instead of three wrong ones', () => {
+  it('recognises every client tool, however the shell phrases it', () => {
+    for (const log of [
+      'sh: 1: psql: not found',
+      '/bin/sh: createdb: command not found',
+      'sh: pg_dump: not found',
+      'bash: pg_restore: command not found',
+      'sh: 1: dropdb: not found',
+    ]) {
+      const d = classifyDevServerFailure(log);
+      expect(d.cause, log).toBe('db_client_missing');
+      expect(d.recovery, log).toBe('code_fix'); // short-circuit: no install, no restart
+    }
+  });
+
+  it('names the tool and the real alternative, so the agent can act', () => {
+    const d = classifyDevServerFailure('sh: 1: psql: not found');
+    expect(d.detail).toContain('psql');
+    expect(d.detail).toContain('pg / Prisma / Drizzle');
+    expect(d.detail).toContain('installing packages cannot provide it');
+  });
+
+  it('a MISSING NPM BINARY still reinstalls — the branch it now sits in front of', () => {
+    // The point is to stop reinstalling for OS tools, not to stop reinstalling.
+    expect(classifyDevServerFailure('sh: 1: vite: not found').recovery).toBe('reinstall');
+    expect(classifyDevServerFailure("Cannot find module 'express'").recovery).toBe('reinstall');
+  });
+
+  it('the user is asked to hand it back, not to install something they cannot', () => {
+    const msg = userFacingPreviewFailure(classifyDevServerFailure('sh: 1: psql: not found'), 3000);
+    expect(msg).toContain('Ask me to run that step through the app\'s own database library');
+    expect(msg).not.toContain('Settings'); // nothing for them to configure here
+  });
+
+  it('the terminal line does not claim an exhausted recovery', () => {
+    expect(terminalDetail(classifyDevServerFailure('sh: 1: psql: not found'))).not.toContain('Automatic recovery is exhausted');
   });
 });

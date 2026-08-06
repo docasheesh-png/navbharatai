@@ -26741,6 +26741,78 @@ catalogue SQL — `information_schema` differs and identifiers are backtick-quot
 at all; collections/documents is a different browsing model, so a real UI change). Both are named
 honestly on screen today rather than silently showing sample data.
 
+## 2026-08-06 (11) — a database engine the sandbox cannot start, told honestly instead of retried
+
+Task was "sandbox-local database for MongoDB and MySQL apps". **It cannot be shipped honestly today, and
+the reason is recorded rather than worked around.** Every source of MongoDB binaries is unreachable from
+this environment — `fastdl.mongodb.org` and `downloads.mongodb.com` are both policy-denied at the proxy
+(`gateway answered 403 to CONNECT`), `mongodb-memory-server` downloads from that same host at runtime,
+and `mongodb-prebuilt` has not been published since 2019. Shipping an unverified binary fetch is exactly
+the mistake this session already caught once: the npm PostgreSQL package downloaded 23 MB and produced a
+server that could not start. **What cannot be verified is not shipped.**
+
+**What WAS shipped is the honest half, and it is the half the user actually feels.** Today a Mongo app's
+`MongoServerSelectionError … ECONNREFUSED 127.0.0.1:27017` matched NOTHING in `classifyDevServerFailure`,
+fell through to the generic crash branch, bought two blind restarts that could not possibly help, and
+reported *"the dev server kept crashing on startup"* — a sentence that names the symptom and hides the
+cause. A restart does not conjure a MongoDB. That is the same "retry loop around code that
+deterministically fails" the Postgres work killed, alive for four other engines.
+
+- New cause `db_engine_unavailable` with `unavailableDbEngine()` — recognises MongoDB, MySQL, Redis and
+  SQL Server, and only ever **alongside a real connection failure**. A log that merely *mentions*
+  `mongodb://` (a printed config, a comment) is not a database being unreachable, and misreading it
+  would send a working app down a "you need a database" path it never needed.
+- Recovery is `code_fix` — short-circuit, because nothing a restart does can help. PostgreSQL still wins
+  the classification, since it is the one engine we CAN start and its recovery is the opposite
+  (`reprovision_db`); routing it here would stop us reviving a database we could have revived.
+- The terminal line deliberately does **not** say "automatic recovery is exhausted" — nothing was
+  attempted and nothing could have been; claiming otherwise misdescribes a situation the user fixes in
+  one step.
+- The user is told **which engine**, and given two real choices: connect their own, or ask for the app to
+  use a database that does run in the preview.
+- `halfBootCause` maps it too, so the "Cannot GET" verdict names the engine instead of guessing.
+
+Gate: tsc clean both projects, SHUFFLED full run 1085 files / 12,224 tests, exit 0.
+
+**Open, with the reason (rule 6):** a real sandbox MongoDB/MySQL needs either a binary source reachable
+from the build sandbox, or those engines in the E2B template. Neither is verifiable from here.
+
+## 2026-08-06 (12) — a database client tool is not an npm package
+
+Task was "close the psql / client-tools gap honestly". A relocatable PostgreSQL ships the SERVER only —
+no `psql`, no `createdb`, no `pg_dump` — so a generated seed/migrate script that shells out to one fails
+with "command not found". Measured what happens today, and it was worse than expected: **the same
+situation produced three different wrong answers.**
+
+```
+sh: 1: psql: not found              -> 'unknown'        -> two blind restarts
+/bin/sh: createdb: command not found -> 'missing_module' -> `npm install`
+sh: pg_dump: not found              -> 'unknown'        -> two blind restarts again
+```
+
+`npm install` can never deliver an OS binary, and a restart re-runs the same script against the same
+missing tool. Every one of those spends real time on a certainty — the retry-into-a-certainty class
+again, in a third place.
+
+New cause `db_client_missing`, caught BEFORE the generic "command not found" branch (that branch is what
+was reinstalling node_modules for an OS tool). Recovery is `code_fix`: no install, no restart. The detail
+names the tool AND the real alternative — run the step through the database client the app already
+depends on (pg / Prisma / Drizzle) — so the agent can act on it. The user-facing message asks them to
+hand it back rather than pointing at a Settings screen: they did not write the script and cannot install
+an OS package in the preview. A missing npm binary (`vite: not found`) still reinstalls; the point was to
+stop reinstalling for OS tools, not to stop reinstalling.
+
+**The `psql` SHIM was designed and deliberately NOT shipped.** A Node-backed `psql` (we already install
+`pg` into the scratch prefix for the SELECT-1 gate, so the shim itself is small) would make those scripts
+genuinely work. Two things stopped it: the container reset destroyed the verified Postgres this session
+had been testing against, and — more importantly — the gap sits behind TWO unproven layers (the fetched
+path firing in E2B at all, and an app shelling out to psql). Delivering the shim also needs its directory
+on the app's PATH, which is not verifiable from here. Recorded as a designed option rather than shipped
+unverified; the classification above makes the situation honest and actionable in every case, including
+system images that lack client tools for their own reasons.
+
+Gate: tsc clean both projects, SHUFFLED full run 1085 files / 12,229 tests, exit 0.
+
 ## 2026-08-06 — Domain flow survives a reload: rehydrate from the durable truth (PR #2158)
 
 **Report (admin, mid-flow):** switching to the Cloudflare tab and back reloaded the page — "sab chala

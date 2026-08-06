@@ -8,9 +8,10 @@
 // throughout: it shows the real pending/active state and never claims a domain is connected when it
 // isn't. Gated by the server flag (the caller only renders this when custom domains are enabled).
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
 
 interface DnsRecord { type: string; name: string; value: string; note?: string; }
 interface DomainStatus {
@@ -50,6 +51,8 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [error, setError] = useState<string | null>(null);
   // The sanitized REAL reason from the ownership-checked route — dim, owner-only, diagnosis-grade.
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Server said 402 needsPlan: the Custom Domain plan is required — an upgrade note, not a red error.
+  const [needsPlan, setNeedsPlan] = useState(false);
   const [result, setResult] = useState<DomainStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   // Auto-DNS (nameserver delegation): the zero-copy-paste path. Offered only when the server says a
@@ -62,6 +65,39 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
   const [hostingerToken, setHostingerToken] = useState('');
   const [hostingerDone, setHostingerDone] = useState<number | null>(null);
+  // "Where did you buy this domain?" — preselected from public RDAP data when possible; the user's
+  // own pick always wins (admin suggestion 2026-08-06, adapted: placed at the nameserver step where
+  // the question actually arises, with auto-detection so most users never touch the dropdown).
+  const [registrarId, setRegistrarId] = useState('');
+
+  /**
+   * REHYDRATE ON MOUNT (admin 2026-08-06: a tab switch reloaded the page and "sab chala gaya").
+   * Every fact was safe server-side the whole time — only this component's memory died. One request
+   * restores the domain, its live status + records, and the automatic-setup state (nameservers +
+   * zone), so a reload lands the user exactly where they left off. Guarded so it never clobbers a
+   * domain the user is actively typing.
+   */
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ workspaceId });
+        const res = await fetch(`/api/domains/nbai/state?${params.toString()}`, { headers: await authHeaders() });
+        if (!res.ok) return;                              // no saved state / not enabled — a fresh form is correct
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data?.domain) return;
+        setDomain((prev) => prev || data.domain);
+        if (data.status) setResult((prev) => prev ?? data.status);
+        if (data.zone?.nameServers?.length) {
+          setAutoNs((prev) => prev ?? data.zone.nameServers);
+          setAutoZoneStatus((prev) => prev ?? data.zone.status);
+        }
+      } catch { /* offline — the manual flow still works from scratch */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
 
   const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const domainValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(cleanDomain);
@@ -80,7 +116,15 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
         body: JSON.stringify({ workspaceId, domain: cleanDomain }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data?.error || 'Could not start the connection.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      if (!res.ok) {
+        // 402 needsPlan is not a failure — it is the plan pitch (Custom Domain plan). Rendered as an
+        // upgrade note, not a red error: nothing is broken, one purchase away.
+        setNeedsPlan(data?.needsPlan === true);
+        setError(data?.error || 'Could not start the connection.');
+        setErrorDetail(typeof data?.detail === 'string' ? data.detail : null);
+        return;
+      }
+      setNeedsPlan(false);
       setResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
@@ -140,6 +184,23 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
       setError(e instanceof Error ? e.message : 'Network error.');
     } finally { setAutoBusy(false); }
   };
+
+  useEffect(() => {
+    // Detect the registrar only once the nameserver step is on screen, from RDAP (public data).
+    // Best-effort: CORS/timeouts fall back to the manual dropdown; a manual pick is never overridden.
+    if (!autoNs || !cleanDomain) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(cleanDomain)}`, { signal: AbortSignal.timeout(6000) });
+        if (!res.ok || cancelled) return;
+        const detected = detectRegistrarId(registrarNameFromRdap(await res.json().catch(() => null)));
+        if (detected && !cancelled) setRegistrarId((prev) => prev || detected);
+      } catch { /* unknown registrar — the dropdown handles it */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoNs, cleanDomain]);
 
   const domainConnectCheck = async () => {
     setAutoBusy(true); setError(null); setErrorDetail(null);
@@ -204,7 +265,16 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
         <p className="text-[10px] text-red-400">Enter a valid domain like myshop.com (no https://, no slashes).</p>
       )}
 
-      {error && (
+      {error && needsPlan && (
+        <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
+          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-[11px] text-amber-100/90">{error}</p>
+            <p className="mt-1 text-[10px] text-amber-200/60">Open the Billing panel → Plans to activate it, then come back and tap Connect.</p>
+          </div>
+        </div>
+      )}
+      {error && !needsPlan && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
           <Info className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
           <div className="min-w-0">
@@ -276,6 +346,29 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                         ? (autoApplied !== null ? `Nameservers live — ${autoApplied} record${autoApplied === 1 ? '' : 's'} applied automatically.` : 'Nameservers live.')
                         : 'Waiting for the nameserver change to take effect (can take a few hours).'}
                     </span>
+                  </div>
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-indigo-500/20">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Where did you buy this domain?</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <select
+                        value={registrarId}
+                        onChange={(e) => setRegistrarId(e.target.value)}
+                        aria-label="Your domain registrar"
+                        className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500/60"
+                      >
+                        <option value="">Select…</option>
+                        {REGISTRARS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      {registrarById(registrarId)?.panelUrl && (
+                        <a href={registrarById(registrarId)!.panelUrl} target="_blank" rel="noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                          Open {registrarById(registrarId)!.name} →
+                        </a>
+                      )}
+                    </div>
+                    {registrarById(registrarId) && (
+                      <p className="text-[10px] text-zinc-400">{registrarById(registrarId)!.steps}</p>
+                    )}
                   </div>
                 </>
               )}

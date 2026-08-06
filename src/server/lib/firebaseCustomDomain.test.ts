@@ -34,7 +34,57 @@ describe('firebaseCustomDomain — pure helpers', () => {
   });
 
   describe('customDomainRecords', () => {
-    it('surfaces only ADD records when requiredAction is present', () => {
+    it('reads the REAL API shape — `desired` + string `rdata` (the 2026-08-06 mitrify.in bug, encoded)', () => {
+      // ROOT CAUSE regression: the code used to read `desiredDnsState[]`/`rrdata[]` — field names
+      // that do not exist on the live API (verified against Google's v1beta1 discovery document).
+      // Against a REAL resource it therefore always returned [] — "records being prepared" forever,
+      // auto-DNS applied 0, ownership never advanced. This fixture is the real shape.
+      const recs = customDomainRecords({
+        customDomainId: 'mitrify.in',
+        requiredDnsUpdates: {
+          checkTime: '2026-08-06T10:00:00Z',
+          desired: [
+            {
+              domainName: 'mitrify.in.',
+              records: [
+                { domainName: 'mitrify.in.', type: 'A', rdata: '199.36.158.100', requiredAction: 'ADD' },
+                { domainName: 'mitrify.in.', type: 'TXT', rdata: 'hosting-site=nbai-abc', requiredAction: 'ADD' },
+              ],
+            },
+          ],
+        },
+      });
+      expect(recs.map((r) => `${r.type} ${r.name} ${r.value}`)).toEqual([
+        'A mitrify.in 199.36.158.100',        // trailing dot normalized
+        'TXT mitrify.in hosting-site=nbai-abc',
+      ]);
+    });
+
+    it('surfaces the ACME challenge from cert.verification.dns too, deduped against requiredDnsUpdates', () => {
+      const recs = customDomainRecords({
+        customDomainId: 'mitrify.in',
+        requiredDnsUpdates: {
+          desired: [{ domainName: 'mitrify.in.', records: [
+            { domainName: '_acme-challenge.mitrify.in.', type: 'TXT', rdata: 'token-1', requiredAction: 'ADD' },
+          ] }],
+        },
+        cert: {
+          state: 'CERT_PENDING',
+          verification: {
+            dns: {
+              desired: [{ domainName: '_acme-challenge.mitrify.in.', records: [
+                { domainName: '_acme-challenge.mitrify.in.', type: 'TXT', rdata: 'token-1', requiredAction: 'ADD' }, // duplicate
+                { domainName: '_acme-challenge.mitrify.in.', type: 'TXT', rdata: 'token-2', requiredAction: 'ADD' },
+              ] }],
+            },
+          },
+        },
+      });
+      expect(recs.map((r) => r.value).sort()).toEqual(['token-1', 'token-2']); // deduped, both sources
+      for (const r of recs) expect(r.name).toBe('_acme-challenge.mitrify.in');
+    });
+
+    it('LEGACY tolerance: the old invented shape (desiredDnsState/rrdata) still parses', () => {
       const recs = customDomainRecords({
         customDomainId: 'myshop.com',
         requiredDnsUpdates: {

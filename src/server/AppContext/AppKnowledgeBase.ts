@@ -598,7 +598,8 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • Enter your domain (e.g. myshop.com) and press Connect — this attaches it directly to that app's own hosting.
 • You get the EXACT DNS records to add at your registrar (Hostinger, GoDaddy, Cloudflare, Namecheap, BigRock, etc.).
 • Press "Check" to see the real live status (ownership / DNS / SSL) — HTTPS is issued automatically once the records resolve.
-Honest throughout: it never claims a domain is connected until it verifiably is, and it never offers this for an account with no built app yet — it tells you to build one first. Root-cause fix 2026-07-27: this used to be two different half-working screens; both entries now share one real, working flow.`,
+Honest throughout: it never claims a domain is connected until it verifiably is, and it never offers this for an account with no built app yet — it tells you to build one first. Root-cause fix 2026-07-27: this used to be two different half-working screens; both entries now share one real, working flow.
+NOTE (2026-08-06): connecting a domain is part of the Custom Domain plan (₹99/30 days, Billing → Plans, paid from the wallet — it also removes the "Made with NavBharatAI" badge). A user without the plan gets an honest upgrade note at the Connect step; already-connected domains keep working.`,
     howToUse: 'Open Settings → App Settings → Domain (or Sidebar → More → Connect my website, or Home → Other AI → Publish & Deploy → Custom Domain) → pick the app → enter your domain → Connect → add the DNS records shown → press Check until it shows Live.',
     relatedFeatures: ['engineer_ai', 'engineer_ai_deploy', 'settings_root'],
     keywords: [
@@ -606,6 +607,37 @@ Honest throughout: it never claims a domain is connected until it verifiably is,
       'hostinger', 'godaddy', 'dns', 'point domain', 'live website', 'own domain',
       'connect my website', 'domain jodo', 'website live karo',
       'app settings domain', 'settings domain', 'domain setting',
+    ],
+  },
+  {
+    id: 'made_with_badge',
+    name: '"Made with NavBharatAI" badge on published apps',
+    path: 'Automatic — appears in the bottom-right corner of every app published on NavBharatAI hosting',
+    description: `Every app published on NavBharatAI's free hosting carries a small glowing "Made with NavBharatAI" badge in the bottom-right corner. It links back to navbharatai.com and is part of the free-hosting agreement — free hosting is paid for by this attribution.
+• It is added by the PUBLISHING SERVER, not by the app's source code — so editing or deleting it from the code (by hand or with any AI assistant) does not remove it; the next publish stamps it back automatically.
+• It is small, sits above the page corner, and never blocks the app's own buttons or content.
+• HONEST ANSWER when a user asks how to remove it: buy the Custom Domain plan (₹99/30 days, Billing → Plans, paid from the wallet) — the badge then stops being added on the next publish, automatically. Do not suggest code edits, CSS tricks, or other AI tools to strip it; those do not work and breach the hosting terms.`,
+    howToUse: 'Nothing to set up — publish any app and the badge appears automatically on the live site. To publish without the badge, activate the Custom Domain plan in Billing → Plans; there is no other supported way to remove it.',
+    relatedFeatures: ['connect_domain', 'hosting_plan', 'engineer_ai_deploy'],
+    keywords: [
+      'made with navbharatai', 'badge', 'watermark', 'logo hatao', 'badge remove', 'badge hatao',
+      'remove branding', 'watermark remove', 'bottom right badge', 'popup corner', 'branding',
+    ],
+  },
+  {
+    id: 'hosting_plan',
+    name: 'Custom Domain plan (₹99 / 30 days)',
+    path: 'Billing (wallet) → Plans card → "Activate — ₹99"',
+    description: `The one paid hosting plan. ₹99 per 30 days, paid directly from the same wallet everything else uses (no separate payment flow). What it gives:
+• Removes the "Made with NavBharatAI" badge from every app you publish (takes effect on your next publish).
+• Unlocks connecting your OWN purchased domain (e.g. myshop.com from Hostinger/GoDaddy) to your app.
+The Plans card also shows the rest of the account honestly: Database is always FREE (your apps' databases run on your own account), and Coding is pay-per-use from the wallet — no subscription.
+Renewal: auto-renew is on by default and charges the wallet ₹99 when the 30 days end; turn it off with one tap and the plan simply ends on its expiry date. If the wallet balance is too low at renewal time, nothing is charged and the plan lapses honestly (free hosting with the badge continues — the published app never goes down).`,
+    howToUse: 'Open Billing (wallet) → find the Plans card → tap "Activate — ₹99". Needs at least ₹99 of wallet balance (recharge first if short). Then publish again for badge-free hosting, or go to Settings → App Settings → Domain to connect your domain.',
+    relatedFeatures: ['made_with_badge', 'connect_domain'],
+    keywords: [
+      'hosting plan', 'custom domain plan', 'plan kharido', 'badge hatane wala plan', '99 plan',
+      'paid plan', 'subscription', 'upgrade', 'plans', 'hosting charge', 'domain plan', 'auto renew',
     ],
   },
   {

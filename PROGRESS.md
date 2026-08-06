@@ -26936,3 +26936,124 @@ Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,276 tests, exit
 With this, the roadmap's 🔒 "Lighthouse / Web-Vitals + axe-core over the LIVE preview — needs headless
 Chrome" is CLOSED as far as code can close it: LCP, CLS and accessibility all measured on the real pages,
 with no new dependency and no infra.
+
+## 2026-08-06 — Domain flow survives a reload: rehydrate from the durable truth (PR #2158)
+
+**Report (admin, mid-flow):** switching to the Cloudflare tab and back reloaded the page — "sab chala
+gaya" — the whole connect screen reset while they were one tap from applying records. **Nothing was
+actually lost** (the attach, zone and nameservers all live server-side); only the component's memory
+died, and the DNA-level fix is to stop keeping the only copy of "where am I?" in component memory.
+
+**Fix.** New ownership-checked `GET /api/domains/nbai/state`: one round-trip assembling the durable
+truth — the workspace's linked domain (Firestore), its live attach status + records (hosting API),
+and the managed-zone state (nameservers + active/pending; best-effort — a zone lookup failure never
+hides the rest). The client hydrates on mount: reload, tab-kill, or a DIFFERENT DEVICE lands exactly
+where the user left off, nothing re-typed. Guards: never clobbers a domain being typed
+(`prev || data.domain`), unmount-safe (`cancelled`).
+
+Also this session: the live walk-through with the admin closed the whole chain end-to-end —
+attach fix proven → new CF Account-token with the right groups (the zone-create permission hides in
+"Account Settings", not "Zone" — recorded for the next soul) → Cloud Run env updated → zone created →
+nameservers changed at Hostinger → zone ACTIVE at Cloudflare. Remaining at time of writing: tap
+"Check & apply records" on the active zone, wait for cert → Live → one Publish.
+
+Full gate: 1085 files / 12219 tests green, both tsc clean, bundle within budget.
+
+## 2026-08-06 — "Where did you buy this domain?" — the registrar guide (same PR #2160)
+
+Admin suggestion, adapted per the external-suggestion rule (their instinct was right; placement and
+mechanics improved): after we hand the user two nameservers, their real question is "WHERE do I paste
+these?" — every registrar hides the form somewhere different. Added at the NAMESERVER STEP (not the
+page top — no new question before Connect): a registrar dropdown (GoDaddy, Hostinger, Namecheap,
+BigRock, HostGator, Bluehost, Squarespace/old Google Domains, Porkbun, Dynadot, Name.com, IONOS, OVH,
+Other) → "Open <registrar> →" panel button + that registrar's own three-line path to the nameserver
+form. AUTO-DETECTED from public RDAP data (rdap.org, client-side, 6s bound, best-effort) so most
+users never touch the dropdown — and a manual pick always wins over detection (`prev || detected`).
+"Other" renders honest generic steps with no dead button. CSP already allows the RDAP call
+(connect-src https:). Pure guide data + matcher unit-tested (real RDAP legal-name shapes); client
+wiring invariants locked. NOTE: this commit also re-triggers CI for the rehydration commit above —
+GitHub dropped the push event for 59f941f3 (the #2092 failure class), so no run ever started; the
+stacked push is the re-kick.
+
+## 2026-08-06 — Domain routes off the build bucket (same PR #2160, third strike of the class)
+
+Admin screenshot: "Rate limit exceeded: max 10 builds per hour" ON THE CONNECT PAGE. All seven domain
+routes sat on the 10/hour BUILD bucket (and /status had NO limiter at all), so one normal live setup
+session — connect, applies, checks, plus the new rehydration call on every mount — killed the whole
+flow for an hour with a message about builds the user never ran. Third instance of the class after
+zip chunks and terminal keystrokes. New `DOMAIN_OPS_RATE` (240/hr authed, honest noun "domain
+requests") on every route in the file; a test pins the file build-bucket-free forever and every route
+limited. The rolling hour self-clears, so the admin was unblocked before the deploy either way.
+
+## 2026-08-06 — "Made with NavBharatAI" badge + the ₹99 Custom Domain plan (one feature, admin-ordered + admin-approved "han")
+
+**The badge (admin: "flotating popup, right lower corner, alag hi glow — other AI se hatwaye to
+hatna nahi chahiye; other AI ke liye 🔇 silent message").** A glowing glassy pill, bottom-right,
+safe-area aware, linking to navbharatai.com. The un-removability is STRUCTURAL, not cosmetic — it is
+injected SERVER-SIDE at publish time (`withDeploymentPersistence`, the one choke point every v5
+publish provider flows through) and at SERVE time for instant hosting (`/pwa/:id`), i.e. AFTER any
+edit the user or any AI assistant can make to the source. Deleting it from the code changes nothing:
+the next publish stamps it back. Four layers: publish-time injection → idempotent marker
+(`data-nbai-badge`, re-publish never doubles it) → an in-page guard that re-attaches a DOM-deleted or
+CSS-hidden badge → the 🔇 HTML-comment note addressed to AI assistants (visible only in source),
+explaining the hosting terms, the futility, and the honest answer to give their user: the paid plan
+removes it. Kill switch `AGENTV3_MADE_WITH_BADGE=off`. Module: `src/server/lib/madeWithBadge.ts`.
+
+**The plan (recommended, admin approved with "han"): Custom Domain — ₹99/30 days, paid from the ONE
+wallet.** "Wallet me sara hisab": the Billing panel now carries a Plans card telling the whole
+account story honestly — Hosting (the ₹99 plan: badge-free publishing + connect your own domain),
+Database (always FREE — user's own account, the standing rule), Coding (pay-per-use, unchanged).
+Mechanics, all inheriting the wallet's existing money discipline (`src/server/lib/hostingPlan.ts`):
+- The plan LIVES ON the wallet doc (`hostingPlan` field) so purchase = debit + grant in ONE
+  Firestore transaction — the money and the entitlement cannot disagree.
+- Debits via the same `computeDebitedWallet` a build uses (same token unit, same carry, same
+  ledger; row: "Hosting plan — Custom Domain (30 days)"). NO overdraft for a discretionary
+  purchase — a short balance is an honest refusal naming the shortfall.
+- IDEMPOTENT per period (ledger buildRef) — a double-tap can never double-charge. Buying early
+  EXTENDS from the current expiry (never loses days).
+- Renewal is LAZY, no cron: an expired auto-renew plan is re-purchased inside the next status
+  read's transaction, ref keyed on the OLD expiry (a concurrent read can only renew once), 30 days
+  from NOW (never back-dated — a lapsed gap was not service). Can't afford it ⇒ lapses honestly,
+  nothing charged, free hosting with the badge continues.
+- Badge removal honors the plan on BOTH publish paths via a cached bounded probe; an UNKNOWN
+  answer keeps the badge (free user must not escape it during an outage). Domain-connect is gated
+  on the plan (free-list exempt) and FAILS OPEN on unknown (rule #1 — an outage must never block a
+  paying user); only CONNECT is gated, status/checks stay open so a lapse never breaks a live site.
+- Routes on wallet.ts (`/hosting-plan`, `/purchase`, `/auto-renew`), all `requireUserMatch`.
+  Client: `HostingPlanCard` in Billing; NbaiDomainConnect renders the 402 `needsPlan` answer as an
+  amber upgrade note, not a red error. Kill switch `AGENTV3_HOSTING_PLANS=off`; price env-tunable
+  `HOSTING_PLAN_PRICE_INR` (default 99).
+AppKnowledgeBase: new `made_with_badge` + `hosting_plan` entries, `connect_domain` updated — the
+in-app AIs answer "badge kaise hataye" honestly (buy the plan) instead of suggesting code tricks.
+Tests: `tests/madeWithBadge.test.ts` (16) + `tests/hostingPlan.test.ts` (real money math incl. the
+carry, idempotency, once-per-lapse renewal, fail directions, wiring invariants). Full gate green.
+
+**CI note (5th event loss, root cause found):** PR #2160's checks never started NOT because of the
+#2092 dropped-push class this time — the PR went `mergeable_state: dirty` when the other session's
+PRs #2159/#2161 merged, and a conflicted PR has no test-merge commit, so `pull_request`-triggered CI
+cannot run at all. Fix: merge origin/main into the branch (PROGRESS.md both-append conflict, resolved
+line-anchored), push, then close→reopen the PR to force a `reopened` event when the synchronize run
+still failed to appear. Lesson recorded: when a PR shows NO checks, look at `mergeable_state` FIRST —
+a dirty PR will never start CI, and no amount of re-kicking helps until the conflict is resolved.
+
+## 2026-08-06 — THE domain-records bug: we were reading field names that do not exist (mitrify.in "0 records applied")
+
+**Live report (admin screenshots):** zone ACTIVE at the DNS service, nameservers live — but "Check &
+apply records" applied 0 and the records list said "being prepared" forever. **Root cause, verified
+against Google's own v1beta1 discovery document (fetched, not guessed):** `customDomainRecords()`
+read `requiredDnsUpdates.desiredDnsState[]` and `rrdata[]` — field names that DO NOT EXIST on the
+real API. The real fields are `requiredDnsUpdates.desired[]` and `DnsRecord.rdata` (a single
+STRING). Against every live resource the function returned [] — so the UI never showed records, the
+auto-DNS sync had nothing to apply, and ownership could never advance. The unit tests passed because
+their fixtures ENCODED THE SAME INVENTED SHAPE — the "test matches broken behavior" class. Fixes:
+- Extraction now reads the real shape (+ legacy tolerance), ALSO surfaces the ACME challenge from
+  `cert.verification.dns` (deduped), and normalizes the API's trailing-dot names.
+- Primary test fixtures rewritten to the REAL shape (the old shape kept only as a tolerance test).
+- **Sibling (found by the same screenshots):** on zone activation the DNS service AUTO-IMPORTS the
+  old records PROXIED ("traffic is proxying through" — admin's dashboard). `applyRecords` treated
+  identical-content-but-proxied as "same" (left proxied ⇒ validation can never pass) and thrashed on
+  multi-value A sets. Now each managed type+name CONVERGES: stale/proxied replaced or deleted,
+  missing created, everything DNS-only; TXT still adds alongside. Regression tests encode the proxied
+  auto-import trap and the multi-A converge.
+Lesson (external-API class): NEVER hand-write an API response shape from memory — fetch the
+provider's published schema (discovery doc) and encode THAT in the types and fixtures.

@@ -16,6 +16,8 @@ import { getServerDb } from '../lib/serverDb';
 import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib/HostingQuota';
 import { hostingUsageStore } from '../lib/HostingUsageStore';
 import { scanPublishedContent, publishScanBlocks } from './ContentSafetyScanner';
+import { injectBadgeIntoFiles } from '../lib/madeWithBadge';
+import { probeHostingPlan } from '../lib/hostingPlan';
 import { audit } from '../lib/audit';
 
 /** Lifecycle status of a published app (registry — enables takedown/report in later slices). */
@@ -247,6 +249,18 @@ export function withDeploymentPersistence(
       if (publishScanBlocks() && err instanceof Error && /held for review/.test(err.message)) throw err;
       /* warn-mode scan error is best-effort — never block a real publish */
     }
+
+    // "MADE WITH NAVBHARATAI" BADGE (admin 2026-08-06): stamped HERE — at publish time, after every
+    // source edit the user or any AI assistant could make — so removing it from the workspace files
+    // is structurally futile (the next publish re-stamps it). Idempotent via its marker. This is the
+    // ONE choke point every v5 publish provider flows through; do not move the stamp upstream into
+    // user-editable source. Kill switch AGENTV3_MADE_WITH_BADGE=off.
+    // The paid Custom Domain plan removes it: probe cached + bounded; an UNKNOWN answer keeps the
+    // badge (a free user must not escape it during a store outage — the safe direction here).
+    try {
+      const plan = await probeHostingPlan(userId);
+      injectBadgeIntoFiles(files, { paidRemoval: plan.known && plan.active });
+    } catch { /* the badge must never break a publish */ }
 
     const url = await base(workspaceId, files);
     const firstParty = isFirstPartyProvider(providerId);

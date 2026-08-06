@@ -3,12 +3,16 @@ import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules; `snap.exists` is a PROPERTY here) — see serverDb.ts.
 import { doc, getDoc, setDoc, getServerDb } from '../lib/serverDb';
 import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { injectBadge } from '../lib/madeWithBadge';
+import { probeHostingPlan } from '../lib/hostingPlan';
 
 // In-memory PWA cache entry (the durable copy lives in Firestore — see below).
 export interface PwaEntry {
   html: string;
   name: string;
   createdAt: number;
+  /** Owner uid — lets the serve path honor the owner's paid badge-removal plan. Absent on legacy entries. */
+  userId?: string;
 }
 
 export type PwaStore = Map<string, PwaEntry>;
@@ -68,6 +72,7 @@ async function loadEntry(pwaStore: PwaStore, id: string): Promise<PwaEntry | nul
       html: d.html,
       name: typeof d.name === 'string' && d.name ? d.name : 'My NavBharat App',
       createdAt: typeof d.createdAt === 'number' ? d.createdAt : Date.now(),
+      ...(typeof (d as { userId?: unknown }).userId === 'string' ? { userId: (d as { userId: string }).userId } : {}),
     };
     pwaStore.set(id, entry); // hydrate the cache so the next hit is instant
     return entry;
@@ -91,7 +96,7 @@ export function registerPwaRoutes(app: Express, pwaStore: PwaStore): void {
       return res.status(413).json({ error: 'This app is too large for instant hosting (max 900 KB). Use the Git/Deploy panel to publish it to a full host instead.' });
     }
     const id = crypto.randomBytes(8).toString('hex');
-    const entry: PwaEntry = { html, name: String(name || 'My NavBharat App').slice(0, 30), createdAt: Date.now() };
+    const entry: PwaEntry = { html, name: String(name || 'My NavBharat App').slice(0, 30), createdAt: Date.now(), userId };
     const db = getServerDb() as any;
     if (db) {
       try {
@@ -160,6 +165,12 @@ self.addEventListener('fetch',e=>e.respondWith(
     if (html.includes('</head>')) html = html.replace('</head>', `${pwaHead}</head>`);
     else if (html.includes('<head>')) html = html.replace('<head>', `<head>${pwaHead}`);
     else html = `<head>${pwaHead}</head>${html}`;
+    // "Made with NavBharatAI" badge — stamped at SERVE time (even stronger than publish-time: the
+    // stored HTML never contains it, so no edit anywhere can strip it). Idempotent via its marker.
+    // The owner's paid plan removes it; the probe is cached (5 min) so per-view cost stays near zero,
+    // and an unknown answer keeps the badge (safe direction).
+    const plan = await probeHostingPlan(entry.userId);
+    html = injectBadge(html, { paidRemoval: plan.known && plan.active });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   });

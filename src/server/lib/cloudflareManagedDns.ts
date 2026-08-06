@@ -111,30 +111,74 @@ export function toCfRecordPayloads(records: DesiredRecord[]): Array<{ type: stri
     .map((r) => ({ type: r.type.toUpperCase(), name: r.name, content: r.value, ttl: 300, proxied: false }));
 }
 
-interface CfDnsRecord { id: string; type: string; name: string; content: string }
+interface CfDnsRecord { id: string; type: string; name: string; content: string; proxied?: boolean }
+
+const stripQuotes = (s: string) => s.replace(/^"|"$/g, '');
 
 /**
- * Write the desired records into the zone. For each type+name we manage: identical record ⇒ left
- * alone; different content on a SINGLE-VALUE type (A/AAAA/CNAME set of ours) ⇒ replaced; TXT ⇒
- * added alongside (multiple TXT values are legal and Firebase's challenge must not clobber
- * unrelated TXT). Returns how many records were actually created/updated — an honest "0 changes"
- * is a valid, verifiable outcome.
+ * Write the desired records into the zone by CONVERGING each type+name set we manage.
+ *
+ * ROOT CAUSE HARDENING (mitrify.in live walk, 2026-08-06): when a zone activates, Cloudflare
+ * AUTO-IMPORTS the domain's old records — often PROXIED (orange cloud; the admin's dashboard
+ * literally said "your traffic is proxying through Cloudflare"). A proxied record hides the real
+ * value behind Cloudflare IPs, so the hosting service can never validate the domain — and the old
+ * per-record logic had two holes: an identical-content record that was PROXIED was "same" and left
+ * proxied, and a multi-value A set thrashed (each value replaced the same first record). Now, per
+ * type+name:
+ *   • non-TXT: the whole set converges to exactly the desired values, DNS-only — stale/proxied
+ *     records are replaced or deleted, missing values created, proxied-but-right-content records
+ *     re-written un-proxied.
+ *   • TXT: desired values are added alongside (multiple TXT values are legal; the ownership/ACME
+ *     challenge must not clobber unrelated TXT like SPF).
+ * Records on names we were not asked about are never touched. Returns how many records were
+ * created/updated/removed — an honest "0 changes" remains a valid, verifiable outcome.
  */
 export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Promise<number> {
   let changed = 0;
+  const groups = new Map<string, ReturnType<typeof toCfRecordPayloads>>();
   for (const want of toCfRecordPayloads(desired)) {
-    const existing = await cf<CfDnsRecord[]>(
-      `/zones/${zoneId}/dns_records?type=${encodeURIComponent(want.type)}&name=${encodeURIComponent(want.name)}&per_page=100`,
-    );
-    const same = (existing ?? []).find((r) => r.content.replace(/^"|"$/g, '') === want.content.replace(/^"|"$/g, ''));
-    if (same) continue;
-    if (want.type !== 'TXT' && (existing ?? []).length > 0) {
-      await cf(`/zones/${zoneId}/dns_records/${existing[0].id}`, { method: 'PUT', body: want });
-      changed++;
+    const key = `${want.type}|${want.name}`;
+    const g = groups.get(key) ?? [];
+    g.push(want);
+    groups.set(key, g);
+  }
+  for (const group of groups.values()) {
+    const { type, name } = group[0];
+    const existing = (await cf<CfDnsRecord[]>(
+      `/zones/${zoneId}/dns_records?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=100`,
+    )) ?? [];
+
+    if (type === 'TXT') {
+      for (const want of group) {
+        const present = existing.some((r) => stripQuotes(r.content) === stripQuotes(want.content));
+        if (present) continue;
+        await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: want });
+        changed++;
+      }
       continue;
     }
-    await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: want });
-    changed++;
+
+    // Non-TXT: converge to exactly the desired value set, all DNS-only (grey cloud).
+    const wantedContents = new Set(group.map((w) => stripQuotes(w.content)));
+    const good = existing.filter((r) => wantedContents.has(stripQuotes(r.content)) && r.proxied !== true);
+    const goodContents = new Set(good.map((r) => stripQuotes(r.content)));
+    const stale = existing.filter((r) => !good.includes(r)); // wrong content OR proxied
+    const missing = group.filter((w) => !goodContents.has(stripQuotes(w.content)));
+
+    // Replace stale records with missing values pairwise, then create/delete the remainder.
+    let i = 0;
+    for (; i < missing.length && i < stale.length; i++) {
+      await cf(`/zones/${zoneId}/dns_records/${stale[i].id}`, { method: 'PUT', body: missing[i] });
+      changed++;
+    }
+    for (; i < missing.length; i++) {
+      await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: missing[i] });
+      changed++;
+    }
+    for (let j = missing.length; j < stale.length; j++) {
+      await cf(`/zones/${zoneId}/dns_records/${stale[j].id}`, { method: 'DELETE' });
+      changed++;
+    }
   }
   return changed;
 }

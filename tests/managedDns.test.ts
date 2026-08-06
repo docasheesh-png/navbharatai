@@ -97,6 +97,52 @@ describe('applyRecords', () => {
     expect(writes[1].method).toBe('POST');                       // TXT added, unrelated TXT untouched
   });
 
+  it('a PROXIED record with the right content is re-written DNS-only (the 2026-08-06 auto-import trap)', async () => {
+    // When the zone activated, Cloudflare AUTO-IMPORTED the old records as PROXIED ("your traffic is
+    // proxying through Cloudflare" — the admin's live dashboard). A proxied record hides the real
+    // value behind proxy IPs, so hosting validation can never pass — "identical content" is NOT
+    // enough; the record must also be un-proxied.
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    const writes: Array<{ method: string; url: string; body?: string }> = [];
+    _setCfFetchForTests(async (url, init) => {
+      const method = init.method ?? 'GET';
+      if (method === 'GET') {
+        return j({ success: true, result: [{ id: 'r1', type: 'A', name: 'mitrify.in', content: '199.36.158.100', proxied: true }] });
+      }
+      writes.push({ method, url, body: init.body });
+      return j({ success: true, result: {} });
+    });
+    const changed = await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '199.36.158.100' }]);
+    expect(changed).toBe(1);
+    expect(writes[0].method).toBe('PUT');
+    expect(writes[0].url).toContain('/dns_records/r1');
+    expect(writes[0].body).toContain('"proxied":false');
+  });
+
+  it('a multi-value A set converges without thrash: replace one stale, add the other, delete extras', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    const writes: Array<{ method: string; url: string }> = [];
+    _setCfFetchForTests(async (url, init) => {
+      const method = init.method ?? 'GET';
+      if (method === 'GET') {
+        return j({ success: true, result: [
+          { id: 'old1', type: 'A', name: 'mitrify.in', content: '84.32.84.32', proxied: true },  // old host's parking IP
+          { id: 'old2', type: 'A', name: 'mitrify.in', content: '84.32.84.33', proxied: true },
+          { id: 'old3', type: 'A', name: 'mitrify.in', content: '84.32.84.34' },
+        ] });
+      }
+      writes.push({ method, url });
+      return j({ success: true, result: {} });
+    });
+    const changed = await applyRecords('z1', [
+      { type: 'A', name: 'mitrify.in', value: '151.101.1.195' },
+      { type: 'A', name: 'mitrify.in', value: '151.101.65.195' },
+    ]);
+    // 2 replacements + 1 delete — the set ends EXACTLY at the two desired values, nothing thrashes.
+    expect(changed).toBe(3);
+    expect(writes.map((w) => w.method)).toEqual(['PUT', 'PUT', 'DELETE']);
+  });
+
   it('an already-correct zone reports 0 changes — an honest, verifiable no-op', async () => {
     process.env.CLOUDFLARE_API_TOKEN = 't';
     _setCfFetchForTests(async (url, init) => {

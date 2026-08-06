@@ -1,6 +1,8 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { domainOpsRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
+import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   normalizeDomain,
   firebaseCustomDomainsEnabled,
@@ -10,7 +12,7 @@ import {
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
 } from '../lib/firebaseCustomDomain';
-import { linkWorkspaceDomain } from '../lib/firebaseDomainLink';
+import { linkWorkspaceDomain, firebaseDomainsForWorkspace } from '../lib/firebaseDomainLink';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
 } from '../lib/cloudflareManagedDns';
@@ -42,12 +44,13 @@ function ownsWorkspace(verifiedUid: string | null, workspaceId: unknown): worksp
 }
 
 export function registerNbaiDomainsRoutes(app: Express): void {
-  app.post('/api/domains/nbai/connect', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/connect', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet. Please try again later.' });
       return;
     }
-    const verifiedUid = await verifyFirebaseToken(req);
+    const identity = await verifyFirebaseIdentity(req);
+    const verifiedUid = identity?.uid ?? null;
     if (!verifiedUid) {
       res.status(401).json({ error: 'Please sign in to connect a custom domain.' });
       return;
@@ -56,6 +59,22 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     if (!ownsWorkspace(verifiedUid, workspaceId)) {
       res.status(403).json({ error: 'You can only connect a domain to your own app.' });
       return;
+    }
+    // PLAN GATE (admin-approved 2026-08-06): connecting a custom domain is part of the paid Custom
+    // Domain plan. Free-list (admin/tester) accounts are exempt; a store outage FAILS OPEN (`known`
+    // false ⇒ allow — rule #1: an outage must never block a paying user's setup). Only the CONNECT
+    // action is gated — status/checks/sync for an already-connected domain keep working, so a lapse
+    // never breaks a live site mid-flow.
+    if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identity?.email ?? null)) {
+      const plan = await probeHostingPlan(verifiedUid);
+      if (plan.known && !plan.active) {
+        res.status(402).json({
+          error: `Connecting your own domain is part of the Custom Domain plan (₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
+          needsPlan: true,
+          priceInr: hostingPlanPriceInr(),
+        });
+        return;
+      }
     }
     const host = normalizeDomain(req.body?.domain);
     if (!DOMAIN_RE.test(host)) {
@@ -84,7 +103,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     }
   });
 
-  app.get('/api/domains/nbai/status', async (req: Request, res: Response) => {
+  app.get('/api/domains/nbai/status', domainOpsRateLimiter(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet.' });
       return;
@@ -121,7 +140,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * step only the user can do (the registrar's nameserver form) and about delegation replacing
    * their existing DNS.
    */
-  app.post('/api/domains/nbai/auto-dns/start', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/auto-dns/start', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled() || !managedDnsConfigured()) {
       res.status(503).json({ error: 'Automatic DNS setup is not enabled on this server yet.' });
       return;
@@ -146,7 +165,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/domains/nbai/auto-dns/sync', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/auto-dns/sync', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled() || !managedDnsConfigured()) {
       res.status(503).json({ error: 'Automatic DNS setup is not enabled on this server yet.' });
       return;
@@ -180,11 +199,50 @@ export function registerNbaiDomainsRoutes(app: Express): void {
   });
 
   /**
+   * REHYDRATE (admin 2026-08-06: "tab badalne se reload hua, aur sab chala gaya — permanent DNA
+   * level par fix karo"). The connect flow's every fact already lives durably server-side — the
+   * domain↔workspace link in Firestore, the attach status at the hosting API, the zone +
+   * nameservers at the DNS service. Only the SCREEN forgot, because its state lived in component
+   * memory. This route answers "where was I?" in one round-trip, so a reload, a tab switch, or a
+   * different device lands the user exactly where they left off — nothing to re-type, ever.
+   */
+  app.get('/api/domains/nbai/state', domainOpsRateLimiter(), async (req: Request, res: Response) => {
+    if (!firebaseCustomDomainsEnabled()) {
+      res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    const workspaceId = req.query?.workspaceId;
+    if (!ownsWorkspace(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'You can only view your own app’s domain.' });
+      return;
+    }
+    try {
+      const domains = await firebaseDomainsForWorkspace(workspaceId as string);
+      const domain = domains[0] ?? null;
+      if (!domain) {
+        res.json({ domain: null });
+        return;
+      }
+      const status = await customDomainStatusLive(workspaceId as string, domain).catch(() => null);
+      // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
+      const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;
+      res.json({
+        domain,
+        status: status ? { ...status, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() } : null,
+        zone: zone ? { nameServers: zone.nameServers, status: zone.status } : null,
+      });
+    } catch (err) {
+      sendSafeError(res, 500, 'Could not load the saved domain state.', err, 'nbai domain state');
+    }
+  });
+
+  /**
    * ONE-CLICK via Domain Connect (Slice B): is the user's registrar in the protocol, and if so,
    * where does the Approve button go? Flag-gated until our template is registered with the
    * registrars — the UI never shows a button that would 404 at GoDaddy.
    */
-  app.get('/api/domains/nbai/domain-connect/check', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.get('/api/domains/nbai/domain-connect/check', domainOpsRateLimiter(), async (req: Request, res: Response) => {
     const verifiedUid = await verifyFirebaseToken(req);
     const workspaceId = req.query?.workspaceId;
     if (!ownsWorkspace(verifiedUid, workspaceId)) {
@@ -207,7 +265,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * HOSTINGER direct apply (Slice C): the user's own hPanel API token writes the records into their
    * own zone, once — the token is used for this single call and NEVER stored, logged, or echoed.
    */
-  app.post('/api/domains/nbai/hostinger/apply', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/hostinger/apply', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!hostingerDnsEnabled()) {
       res.status(503).json({ error: 'Hostinger automatic setup is not enabled on this server yet.' });
       return;

@@ -11,6 +11,7 @@
 import React from 'react';
 import { cn } from '../../lib/utils';
 import { FreeGiftBanner } from './FreeGiftBanner';
+import { HostingPlanCard } from './HostingPlanCard';
 import {
   Wallet, Zap, RefreshCw, AlertCircle, Sparkles, Gift, CreditCard,
   Activity, CheckCircle2, ShieldCheck, ExternalLink,
@@ -147,6 +148,11 @@ export function BillingPanel(props: BillingPanelProps) {
               </button>
             </div>
           </div>
+
+          {/* Plans (admin 2026-08-06): the whole account story in one card — Hosting plan (₹99
+              Custom Domain, bought from THIS wallet), Database (free, user's own account), Coding
+              (pay-per-use). Self-contained: talks to the ownership-checked wallet routes itself. */}
+          <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />
 
           {/* Phase 4.2 — This Month's AI Cost card */}
           {monthlyAiCost !== undefined && (

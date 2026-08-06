@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { domainOpsRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
 import {
   normalizeDomain,
@@ -42,7 +42,7 @@ function ownsWorkspace(verifiedUid: string | null, workspaceId: unknown): worksp
 }
 
 export function registerNbaiDomainsRoutes(app: Express): void {
-  app.post('/api/domains/nbai/connect', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/connect', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet. Please try again later.' });
       return;
@@ -84,7 +84,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     }
   });
 
-  app.get('/api/domains/nbai/status', async (req: Request, res: Response) => {
+  app.get('/api/domains/nbai/status', domainOpsRateLimiter(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet.' });
       return;
@@ -121,7 +121,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * step only the user can do (the registrar's nameserver form) and about delegation replacing
    * their existing DNS.
    */
-  app.post('/api/domains/nbai/auto-dns/start', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/auto-dns/start', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled() || !managedDnsConfigured()) {
       res.status(503).json({ error: 'Automatic DNS setup is not enabled on this server yet.' });
       return;
@@ -146,7 +146,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/domains/nbai/auto-dns/sync', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/auto-dns/sync', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled() || !managedDnsConfigured()) {
       res.status(503).json({ error: 'Automatic DNS setup is not enabled on this server yet.' });
       return;
@@ -187,7 +187,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * memory. This route answers "where was I?" in one round-trip, so a reload, a tab switch, or a
    * different device lands the user exactly where they left off — nothing to re-type, ever.
    */
-  app.get('/api/domains/nbai/state', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.get('/api/domains/nbai/state', domainOpsRateLimiter(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet.' });
       return;
@@ -223,7 +223,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * where does the Approve button go? Flag-gated until our template is registered with the
    * registrars — the UI never shows a button that would 404 at GoDaddy.
    */
-  app.get('/api/domains/nbai/domain-connect/check', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.get('/api/domains/nbai/domain-connect/check', domainOpsRateLimiter(), async (req: Request, res: Response) => {
     const verifiedUid = await verifyFirebaseToken(req);
     const workspaceId = req.query?.workspaceId;
     if (!ownsWorkspace(verifiedUid, workspaceId)) {
@@ -246,7 +246,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * HOSTINGER direct apply (Slice C): the user's own hPanel API token writes the records into their
    * own zone, once — the token is used for this single call and NEVER stored, logged, or echoed.
    */
-  app.post('/api/domains/nbai/hostinger/apply', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/domains/nbai/hostinger/apply', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!hostingerDnsEnabled()) {
       res.status(503).json({ error: 'Hostinger automatic setup is not enabled on this server yet.' });
       return;

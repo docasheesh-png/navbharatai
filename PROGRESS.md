@@ -26778,3 +26778,13 @@ users never touch the dropdown — and a manual pick always wins over detection 
 wiring invariants locked. NOTE: this commit also re-triggers CI for the rehydration commit above —
 GitHub dropped the push event for 59f941f3 (the #2092 failure class), so no run ever started; the
 stacked push is the re-kick.
+
+## 2026-08-06 — Domain routes off the build bucket (same PR #2160, third strike of the class)
+
+Admin screenshot: "Rate limit exceeded: max 10 builds per hour" ON THE CONNECT PAGE. All seven domain
+routes sat on the 10/hour BUILD bucket (and /status had NO limiter at all), so one normal live setup
+session — connect, applies, checks, plus the new rehydration call on every mount — killed the whole
+flow for an hour with a message about builds the user never ran. Third instance of the class after
+zip chunks and terminal keystrokes. New `DOMAIN_OPS_RATE` (240/hr authed, honest noun "domain
+requests") on every route in the file; a test pins the file build-bucket-free forever and every route
+limited. The rolling hour self-clears, so the admin was unblocked before the deploy either way.

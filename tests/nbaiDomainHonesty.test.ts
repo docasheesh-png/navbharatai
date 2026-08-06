@@ -57,3 +57,27 @@ describe('domain state rehydration', () => {
     expect(freshClient).toContain('cancelled = true');
   });
 });
+
+/**
+ * DOMAIN RATE BUDGET (admin screenshot 2026-08-06: "Rate limit exceeded: max 10 builds per hour" on
+ * the CONNECT page). Third instance of the same class — zip chunks, terminal keystrokes, now domains:
+ * every domain route sat on the 10/hour BUILD bucket, so one live setup session killed the whole flow
+ * for an hour, with a message about builds the user never ran.
+ */
+describe('domain ops rate budget', () => {
+  it('no domain route rides the build bucket — ever again', () => {
+    const fresh = readFileSync(join(__dirname, '..', 'src/server/routes/nbaiDomains.ts'), 'utf8');
+    expect(fresh).not.toContain('buildRateLimiter');
+    // every route in this file carries the domain-ops bucket, including status (which had NONE)
+    const routes = fresh.match(/app\.(get|post)\('\/api\/domains\/nbai\//g) ?? [];
+    const limited = fresh.match(/domainOpsRateLimiter\(\)/g) ?? [];
+    expect(routes.length).toBeGreaterThanOrEqual(7);
+    expect(limited.length).toBe(routes.length);
+  });
+
+  it('the budget fits a real setup session and names the right noun', async () => {
+    const { DOMAIN_OPS_RATE } = await import('../src/server/lib/authMiddleware');
+    expect(DOMAIN_OPS_RATE.authed).toBeGreaterThanOrEqual(240);
+    expect(DOMAIN_OPS_RATE.noun).toBe('domain requests');
+  });
+});

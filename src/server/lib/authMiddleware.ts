@@ -472,6 +472,22 @@ export function shellInputRateLimiter() {
 }
 
 /**
+ * CUSTOM-DOMAIN OPERATIONS (`/api/domains/nbai/*`) — their own bucket, the third instance of the
+ * same lesson (zip chunks, then terminal keystrokes, now domains).
+ *
+ * ROOT CAUSE (admin screenshot 2026-08-06): every domain route sat on `buildRateLimiter` — 10/hour,
+ * the bucket for AI BUILDS — so one live setup session (connect, apply taps, status checks, plus the
+ * rehydration call on every page open) exhausted it and the whole domain flow died for an hour with
+ * a message about "builds" the user never ran. Setting up a domain is a handful of cheap metadata
+ * calls, not an AI build. Bounded still — these fan out to external DNS/hosting APIs with their own
+ * quotas — but sized to a real setup session, and the message names the right noun.
+ */
+export const DOMAIN_OPS_RATE: RateLimitOptions = { name: 'domain-ops', authed: 240, anon: 30, noun: 'domain requests', durable: false };
+export function domainOpsRateLimiter() {
+  return rateLimiter(DOMAIN_OPS_RATE);
+}
+
+/**
  * CHUNKED UPLOAD TRANSPORT (`/api/zip-upload/chunk`) — its own bucket, sized to the real work.
  *
  * ROOT CAUSE (admin question 2026-08-04, "60 per hour — per user or for the whole app?"): the chunk

@@ -99,6 +99,8 @@ import {
 // ADMIN-SDK binding (bypasses rules) — getDb() here feeds only the wallet read/debit money path.
 import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
+import { getConnection } from '../lib/supabaseConnectionStore';
+import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
 import { summarizeFileTree } from '../AgentV3/systemPrompt';
@@ -7305,6 +7307,63 @@ export function registerAgentV3Routes(app: Express): void {
           await dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {});
         }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
+
+      // ASK FOR A DATABASE WHEN THE SANDBOX CANNOT PROVIDE ONE (admin 2026-08-06: "user se puchona
+      // chahiye na!"). The sandbox's own Postgres is free and instant, so it is always tried FIRST and
+      // no question is asked when it works. When it does not, the build used to write a DATABASE_URL
+      // pointing at a database that was never running and carry on toward a certain ECONNREFUSED.
+      //
+      // The offer is only wired when we can genuinely honour a "yes": the user must already have their
+      // Supabase account connected, because consent needs a browser popup that a running build cannot
+      // open. Without a grant we stay silent here — the existing "connect your own in Settings" guidance
+      // is the honest answer, and an offer we cannot fulfil would be worse than none.
+      //
+      // It ASKS rather than acting because a new project consumes one of the two a free Supabase plan
+      // allows. Deny (or the approval timeout) simply means we continue and report honestly.
+      if (userId && vaultSecrets[DB_PROVIDER_MARKER] !== 'supabase') {
+        const connected = await getConnection(userId).catch(() => null);
+        if (connected?.orgId) {
+          let asked = false;
+          dispatcher.setDatabaseFallback(async () => {
+            if (asked) return null; // one offer per build — never a loop of prompts
+            asked = true;
+            const requestId = randomUUID();
+            emit({
+              type: 'narration', agent: 'architect', ts: Date.now(),
+              text: '🗄️ Your app needs a database to save data, and a temporary one could not be started here.',
+            });
+            emit({
+              type: 'permission_request',
+              agent: 'architect',
+              action: 'Create a free database in YOUR OWN Supabase account so this app can save data? '
+                + 'Approve = I create it now and wire it up (your data and its billing stay yours; it uses one of the 2 projects a free Supabase plan allows). '
+                + 'Deny = I keep going without one, and you can connect your own in Settings → App Settings → Database.',
+              callId: requestId,
+              ts: Date.now(),
+            });
+            if (!await awaitApproval(requestId)) {
+              emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 No database created. You can connect your own any time in Settings → App Settings → Database.' });
+              return null;
+            }
+            emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
+            const result = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
+            if (!result || !result.ok) {
+              // Supabase's own words — a full free plan in particular needs the user's action, not a
+              // generic failure line that reads like our bug.
+              emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${result && !result.ok ? result.error : 'Your database could not be created just now.'}` });
+              return null;
+            }
+            emit({
+              type: 'narration', agent: 'architect', ts: Date.now(),
+              text: result.schemaApplied === false
+                ? '✅ Database created in your Supabase account and wired into your app — its tables could not be set up yet, so I will create them as the build continues.'
+                : '✅ Database created in your Supabase account and wired into your app. Your data stays in your own account.',
+            });
+            return result.env;
+          });
+        }
+      }
+
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
 
       // Surgical edit mode (gold standard): when the user is editing an existing

@@ -139,10 +139,16 @@ describe('one token-refresh implementation, not two', () => {
   it('provisioning and the data reads share freshAccessToken', () => {
     // The dangerous half is rotation persistence: Supabase may return a NEW refresh token, and a
     // copy that forgets to store it breaks the connection an hour later, somewhere else entirely.
-    expect(route).toContain('async function freshAccessToken');
-    expect(route.match(/freshAccessToken\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
-    // Exactly one place still calls the raw refresh.
-    expect(route.match(/await refreshAccessToken\(/g)?.length ?? 0).toBe(1);
+    // The implementation MOVED to supabaseProvisionFlow (2026-08-06) so a running BUILD can create a
+    // database too, not just a request handler. The invariant this test exists for is unchanged and is
+    // now checked at its new home: one implementation, one caller of the raw refresh.
+    const flow = read('src/server/lib/supabaseProvisionFlow.ts');
+    expect(flow).toContain('export async function freshAccessToken');
+    expect(route).toContain("freshAccessToken } from '../lib/supabaseProvisionFlow'");
+    expect(route).not.toContain('async function freshAccessToken(');
+    // Exactly one place still calls the raw refresh, and it is that shared implementation.
+    expect(flow.match(/await refreshAccessToken\(/g)?.length ?? 0).toBe(1);
+    expect(route.match(/await refreshAccessToken\(/g)?.length ?? 0).toBe(0);
   });
 });
 

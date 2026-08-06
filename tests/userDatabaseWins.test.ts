@@ -27,6 +27,7 @@ const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 const dispatcher = read('src/server/AgentV3/ToolDispatcher.ts');
 const route = read('src/server/routes/supabaseIntegration.ts');
 const dbSettings = read('src/components/settings/DatabaseSettings.tsx');
+const flowSrc = read('src/server/lib/supabaseProvisionFlow.ts');
 const settingsPanel = read('src/components/panels/SettingsPanel.tsx');
 
 describe('A connected database is never replaced by the sandbox one', () => {
@@ -68,21 +69,22 @@ describe('A connected database is never replaced by the sandbox one', () => {
 
 describe('The one-tap database is usable by a SERVER-side app', () => {
   it('the generated password is kept so a connection string can be composed at all', () => {
-    expect(route).toContain('const dbPass = crypto.randomBytes(24).toString(\'base64url\')');
-    expect(route).toContain('dbPass,');
+    expect(flowSrc).toContain('const dbPass = crypto.randomBytes(24).toString(\'base64url\')');
+    expect(flowSrc).toContain('dbPass,');
     // The old comment promised the opposite; if it comes back, the feature is broken again.
-    expect(route).not.toContain('never shown or stored by us');
+    expect(flowSrc).not.toContain('never shown or stored by us');
   });
 
   it('a real DATABASE_URL is saved alongside the browser keys', () => {
-    expect(route).toContain('databaseEnvFor(created.project.id, dbPass, pooler)');
-    expect(route).toContain('fetchPoolerConnection(accessToken, created.project.id)');
+    expect(flowSrc).toContain('databaseEnvFor(created.project.id, dbPass, pooler)');
+    expect(flowSrc).toContain('fetchPoolerConnection(accessToken, created.project.id)');
   });
 
   it('the response says which connection the app actually got', () => {
     // `direct` is IPv6-only on new projects, so the client must be able to tell the user honestly
     // rather than letting them discover it as a connection error later.
-    expect(route).toContain("serverConnection: pooler ? 'pooled' : 'direct'");
+    expect(flowSrc).toContain("serverConnection: pooler ? 'pooled' : 'direct'");
+    expect(route).toContain('serverConnection: result.serverConnection,');
   });
 });
 
@@ -99,5 +101,104 @@ describe('KB — the one-tap entry describes what it now really does', () => {
     expect(e).toBeTruthy();
     expect(e!.description).toContain('DATABASE_URL');
     expect(e!.description.toLowerCase()).toContain('not empty');
+  });
+});
+
+/**
+ * ASKING FOR A DATABASE (admin 2026-08-06: "user se puchona chahiye na!").
+ *
+ * The sandbox's own Postgres is free and instant, so it is tried FIRST and nothing is asked when it
+ * works. When it does not, the build used to write a DATABASE_URL pointing at a database that was never
+ * running and carry on toward a certain ECONNREFUSED — which is how an app ends up serving
+ * "Cannot GET /" with no explanation. Now it offers the real alternative.
+ */
+const flow = flowSrc;
+const agentv3Src = read('src/server/routes/agentv3.ts');
+
+describe('The provision sequence is callable from outside a request handler', () => {
+  it('lives in one shared module, and the route is a thin adapter over it', () => {
+    expect(flow).toContain('export async function provisionDatabaseForUser');
+    expect(route).toContain('const result = await provisionDatabaseForUser(uid, {');
+    // The route must no longer own the sequence, or the two copies drift.
+    expect(route).not.toContain('await createProject({');
+    expect(route).not.toContain('await waitUntilReady(');
+  });
+
+  it('the shared sequence keeps every honesty property the route had', () => {
+    expect(flow).toContain('await waitUntilReady(');                 // "created" is not "usable"
+    expect(flow).toContain('could not save its keys');               // created-but-unrecorded says EXISTS
+    expect(flow).toContain('schemaApplied');                         // schema reported separately
+    expect(flow).toContain("status: created.failure === 'plan-limit' ? 409 : 502");
+  });
+
+  it('it refuses when there is no grant instead of pretending it asked', () => {
+    // Consent needs a browser popup; provisioning cannot start one.
+    expect(flow).toContain('Connect your Supabase account first');
+  });
+});
+
+describe('The build asks — but only when it can honour a yes', () => {
+  it('the offer is wired only for a user whose Supabase account is already connected', () => {
+    expect(agentv3Src).toContain('const connected = await getConnection(userId).catch(() => null);');
+    expect(agentv3Src).toContain('if (connected?.orgId) {');
+    expect(agentv3Src).toContain('dispatcher.setDatabaseFallback(');
+  });
+
+  it('it is a real blocking ask, not a narration', () => {
+    const at = agentv3Src.indexOf('dispatcher.setDatabaseFallback(');
+    const block = agentv3Src.slice(at, at + 3000);
+    expect(block).toContain("type: 'permission_request'");
+    expect(block).toContain('await awaitApproval(requestId)');
+    // Denial is a real outcome that continues the build, never a silent retry.
+    expect(block).toContain('return null;');
+  });
+
+  it('it asks at most ONCE per build', () => {
+    const at = agentv3Src.indexOf('dispatcher.setDatabaseFallback(');
+    const block = agentv3Src.slice(at, at + 3000);
+    expect(block).toContain('if (asked) return null;');
+  });
+
+  it('the offer names the real cost to the user, not just the benefit', () => {
+    const at = agentv3Src.indexOf('dispatcher.setDatabaseFallback(');
+    const block = agentv3Src.slice(at, at + 3000);
+    expect(block).toContain('2 projects a free Supabase plan allows');
+    expect(block).toContain('billing stay yours');
+  });
+
+  it('a provisioning failure passes Supabase\'s own words through, never a generic line', () => {
+    const at = agentv3Src.indexOf('dispatcher.setDatabaseFallback(');
+    const block = agentv3Src.slice(at, at + 3000);
+    expect(block).toContain('result.error');
+  });
+});
+
+describe('An accepted database reaches the build that is still running', () => {
+  it('the sandbox database is tried first, and only its FAILURE triggers the ask', () => {
+    const at = dispatcher.indexOf('private async ensureSandboxPostgres');
+    const fn = dispatcher.slice(at, at + 5000);
+    expect(fn.indexOf('sandbox-postgres-provision')).toBeLessThan(fn.indexOf('this.rescueDatabase()'));
+    expect(fn).toContain("if (prov?.dbVerified === false) {");
+  });
+
+  it('the rescue writes the connection into the app\'s .env, because the vault is only read at build start', () => {
+    const at = dispatcher.indexOf('private async rescueDatabase');
+    expect(at).toBeGreaterThan(-1);
+    const fn = dispatcher.slice(at, at + 2000);
+    expect(fn).toContain('mergeDotEnv(existing, env)');
+    expect(fn).toContain("writeFile(this.workspaceId, '.env', merged)");
+    expect(fn).toContain('gitignoreWithEnv'); // real keys must never reach the user's git repo
+  });
+
+  it('a rescue with no DATABASE_URL is NOT reported as a rescue', () => {
+    const at = dispatcher.indexOf('private async rescueDatabase');
+    const fn = dispatcher.slice(at, at + 2000);
+    expect(fn).toContain('if (!env || !env.DATABASE_URL) return false;');
+  });
+
+  it('the old "will retry it" warning only prints when the rescue did NOT happen', () => {
+    const at = dispatcher.indexOf('const rescued = await this.rescueDatabase();');
+    expect(at).toBeGreaterThan(-1);
+    expect(dispatcher.slice(at, at + 400)).toContain('if (!rescued) {');
   });
 });

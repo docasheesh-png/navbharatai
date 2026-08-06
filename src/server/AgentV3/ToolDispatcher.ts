@@ -504,6 +504,21 @@ export class ToolDispatcher {
   /** Postgres died mid-build and could NOT be brought back — the lock RELEASES so the app can fall to SQLite. */
   private postgresConfirmedDead = false;
 
+  /**
+   * Asked ONCE, only when the sandbox could not give the app a working database, and only by a caller
+   * that can genuinely act on the user's answer — see ensureSandboxPostgres. Returns the env pairs of a
+   * real database, or null if the user declined, was never asked, or provisioning failed.
+   *
+   * Injected rather than imported so the dispatcher stays free of Supabase, Firestore and approval
+   * plumbing: it knows only "someone may be able to get me a database", which is all it needs.
+   */
+  private onDatabaseUnavailable?: () => Promise<Record<string, string> | null>;
+
+  /** Wire the fallback above. The composition root supplies it only when it can really deliver. */
+  setDatabaseFallback(fn: () => Promise<Record<string, string> | null>): void {
+    this.onDatabaseUnavailable = fn;
+  }
+
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
     this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
@@ -615,14 +630,62 @@ export class ToolDispatcher {
         // never came up, so this line used to promise a database the very next migrate could not
         // reach. Only a real SELECT 1 gets the checkmark; anything else says what actually happened.
         if (prov?.dbVerified === false) {
-          this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ The sandbox database did not pass its connection test — I wrote DATABASE_URL and will keep going; the next database step will retry it.', ts: Date.now() });
+          // THE SANDBOX COULD NOT GIVE THE APP A DATABASE. Until now this was the end of the road: we
+          // wrote a DATABASE_URL pointing at a Postgres that was never running, said we would "retry
+          // it", and every later step failed with ECONNREFUSED — which is how an app ends up serving
+          // "Cannot GET /" with no explanation. There IS another real database available (one in the
+          // user's own account), so ASK for it rather than continuing toward a certain failure.
+          const rescued = await this.rescueDatabase();
+          if (!rescued) {
+            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ The sandbox database did not pass its connection test — I wrote DATABASE_URL and will keep going; the next database step will retry it.', ts: Date.now() });
+          }
         } else {
           this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
         }
       }
     } catch {
-      // Provisioning genuinely failed — do NOT fake it. The migrate command runs next and its real
-      // DB-unreachable output is surfaced honestly (Slice 1 DB_UNREACHABLE). Never block the build.
+      // Provisioning genuinely failed — do NOT fake it. Offer the real alternative first (the same ask
+      // as the failed-verification branch above); if that is unavailable or declined, the migrate
+      // command runs next and its real DB-unreachable output is surfaced honestly (Slice 1
+      // DB_UNREACHABLE). Never block the build.
+      await this.rescueDatabase().catch(() => false);
+    }
+  }
+
+  /**
+   * Last resort when the sandbox has no working database: ask whoever wired setDatabaseFallback.
+   *
+   * WHY THIS IS AN ASK AND NOT AN AUTOMATIC ACTION (admin 2026-08-06: "user se puchona chahiye na!").
+   * The alternative is a database created inside the USER's own account, which consumes one of the two
+   * projects their free plan allows. Spending that silently is not ours to do. The callback owns the
+   * asking; this method owns making the answer real — writing the returned connection into the app's
+   * `.env` so a build ALREADY IN FLIGHT uses it, because the vault is only read at the start of a build.
+   *
+   * Returns whether the app now has a real database. Never throws.
+   */
+  private async rescueDatabase(): Promise<boolean> {
+    if (!this.onDatabaseUnavailable) return false;
+    let env: Record<string, string> | null = null;
+    try { env = await this.onDatabaseUnavailable(); } catch { env = null; }
+    // No DATABASE_URL means nothing changed for a server-side app, so claiming a rescue would be the
+    // nearly-true report this whole path exists to avoid.
+    if (!env || !env.DATABASE_URL) return false;
+    try {
+      let existing = '';
+      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+      // Written LAST, so it wins over the sandbox-local URL merged moments earlier.
+      const merged = mergeDotEnv(existing, env);
+      await this.actuator.writeFile(this.workspaceId, '.env', merged);
+      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
+      try {
+        let gi = '';
+        try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
+        const nextGi = gitignoreWithEnv(gi);
+        if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
+      } catch { /* gitignore hardening is best-effort */ }
+      return true;
+    } catch {
+      return false;
     }
   }
 

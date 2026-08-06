@@ -28,13 +28,9 @@ import {
   tokenExchangeBody, basicAuthHeader, parseCallbackParams, supabaseOAuthConfigured,
   connectFailureMessage, SUPABASE_TOKEN_URL, OAUTH_STATE_TTL_MS,
 } from '../lib/supabaseOAuth';
+import { listOrganizations } from '../lib/supabaseProvision';
 import {
-  listOrganizations, createProject, waitUntilReady, fetchProjectCredentials,
-  projectNameFor, envForProject, refreshAccessToken, applySchemaToProject, schemaSqlFromFiles,
-  fetchPoolerConnection, databaseEnvFor,
-} from '../lib/supabaseProvision';
-import {
-  saveConnection, getConnection, getConnectionStatus, deleteConnection, needsRefresh, updateTokens,
+  saveConnection, getConnection, getConnectionStatus, deleteConnection,
 } from '../lib/supabaseConnectionStore';
 import {
   projectRefFromUrl, isSafeIdentifier, boundedInt, listTablesSql, listColumnsSql, readRowsSql,
@@ -46,79 +42,8 @@ import {
   primaryKeySql, buildInsertSql, buildUpdateSql, buildDeleteSql, buildBulkInsertSql, verifySingleRow,
 } from '../lib/supabaseWrite';
 import { audit } from '../lib/audit';
-import { getServerDb } from '../lib/serverDb';
-import { encrypt, loadUserVaultSecrets } from '../lib/secrets';
-import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-
-/**
- * Default region for a new project.
- *
- * India-first is the product's whole positioning, and database latency is felt on every single
- * request — so a user in India gets a Mumbai database unless they ask for something else, rather
- * than the provider's US default.
- */
-export const DEFAULT_REGION = 'ap-south-1';
-
-/**
- * A usable access token for this user — renewed silently if the stored one is stale.
- *
- * ONE implementation on purpose (Phase 2.1). This block was written for provisioning; the Data GUI
- * needs exactly the same thing, and a second copy is how the two drift — the dangerous half being
- * the rotation persistence: Supabase may hand back a NEW refresh token, and a caller that forgets to
- * store it breaks the connection an hour later, somewhere else entirely, where the cause is nearly
- * impossible to find. Centralising it means that can only be got right or wrong once.
- *
- * Returns a status rather than throwing, because the two failures need different words: a genuinely
- * revoked grant sends the user back through consent (401), while a network blip or a provider 5xx is
- * transient (502) and must never cost them a re-authorisation.
- */
-async function freshAccessToken(
-  userId: string,
-  conn: { accessToken: string; refreshToken: string; expiresAtMs: number },
-): Promise<{ ok: true; token: string } | { ok: false; status: number; message: string; failure: string }> {
-  if (!needsRefresh(conn.expiresAtMs, Date.now())) return { ok: true, token: conn.accessToken };
-  const renewed = await refreshAccessToken({
-    refreshToken: conn.refreshToken,
-    clientId: process.env.SUPABASE_OAUTH_CLIENT_ID as string,
-    clientSecret: process.env.SUPABASE_OAUTH_CLIENT_SECRET as string,
-    nowMs: Date.now(),
-  });
-  if (!renewed.ok) {
-    return { ok: false, status: renewed.failure === 'unauthorized' ? 401 : 502, message: renewed.message, failure: renewed.failure };
-  }
-  // Persist BEFORE spending it — see above.
-  await updateTokens(userId, renewed.tokens);
-  return { ok: true, token: renewed.tokens.accessToken };
-}
-
-/**
- * Write the provisioned keys into the user's encrypted vault, replacing any earlier value.
- *
- * Uses the same `user_secrets` collection, the same names and the same encryption as the manual
- * Settings → Database flow, so the builder picks them up through a path that already works.
- */
-async function saveUserSecrets(userId: string, values: Record<string, string>): Promise<boolean> {
-  const db = getServerDb() as any;
-  if (!db) return false;
-  try {
-    const col = db.collection('user_secrets');
-    for (const [name, value] of Object.entries(values)) {
-      if (!value) continue;
-      // Replace rather than accumulate — a stale duplicate would make which key wins ambiguous.
-      const dupes = await col.where('user_id', '==', userId).where('secret_name', '==', name).get();
-      await Promise.all(dupes.docs.map((d: { ref: { delete: () => Promise<unknown> } }) => d.ref.delete()));
-      await col.add({
-        user_id: userId,
-        secret_name: name,
-        encrypted_secret_value: encrypt(value),
-        created_at: new Date(),
-      });
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { loadUserVaultSecrets } from '../lib/secrets';
+import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
 
 /** What Supabase's token endpoint returns. Fields are `unknown` because they come off the wire. */
 interface TokenResponse {
@@ -305,126 +230,33 @@ export function registerSupabaseIntegrationRoutes(
     const uid = await verifyFirebaseToken(req);
     if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
 
-    const conn = await getConnection(uid);
-    if (!conn) {
-      res.status(400).json({ error: 'Connect your Supabase account first, then create the database.' });
-      return;
-    }
-    if (!conn.orgId) {
-      res.status(400).json({ error: 'No Supabase organization is linked. Please disconnect and connect again.' });
-      return;
-    }
-    // A Supabase access token lives about an hour, but a user connects once and builds for weeks — so
-    // an expired token is renewed SILENTLY here. Without this the user's second app would meet
-    // "please connect again", turning one-time setup into a recurring chore.
-    const fresh = await freshAccessToken(uid, conn);
-    if (!fresh.ok) {
-      res.status(fresh.status).json({ error: fresh.message, failure: fresh.failure });
-      return;
-    }
-    const accessToken = fresh.token;
-
-    const appLabel = typeof (req.body ?? {}).appLabel === 'string' ? (req.body as { appLabel: string }).appLabel : '';
-    const region = typeof (req.body ?? {}).region === 'string' && (req.body as { region: string }).region
-      ? (req.body as { region: string }).region
-      : DEFAULT_REGION;
-
-    // The database password is generated here and then KEPT — encrypted, in this user's own vault,
-    // beside the keys they add by hand (admin question 2026-08-06). It used to be discarded on the
-    // reasoning that we had no reason to hold it. We did: Supabase never hands the password back, so
-    // without it no Postgres connection string can EVER be composed, and a one-click database was
-    // therefore usable only by browser-only supabase-js apps. Every server-side app — Prisma, Drizzle,
-    // `pg` — got a real database in the user's account that its own code could not connect to.
-    // It is the user's password, in the user's vault, written only into the user's app.
-    const dbPass = crypto.randomBytes(24).toString('base64url');
-    const created = await createProject({
-      token: accessToken,
-      orgId: conn.orgId,
-      name: projectNameFor(appLabel),
-      region,
-      dbPass,
+    const body = (req.body ?? {}) as { appLabel?: unknown; region?: unknown; workspaceId?: unknown };
+    const result = await provisionDatabaseForUser(uid, {
+      appLabel: typeof body.appLabel === 'string' ? body.appLabel : '',
+      region: typeof body.region === 'string' ? body.region : '',
+      workspaceId: typeof body.workspaceId === 'string' ? body.workspaceId : '',
     });
-    if (!created.ok) {
-      res.status(created.failure === 'plan-limit' ? 409 : 502)
-        .json({ error: created.message, failure: created.failure });
-      return;
-    }
-
-    // "Created" is not "usable" — see supabaseProvision.waitUntilReady. Claiming success here would
-    // hand the user a database that refuses every connection.
-    const ready = await waitUntilReady(accessToken, created.project.id);
-    if (!ready.ok) {
-      res.status(202).json({ error: ready.message, failure: ready.failure, projectRef: created.project.id });
-      return;
-    }
-
-    const creds = await fetchProjectCredentials(accessToken, created.project.id);
-    if (!creds.ok) {
-      res.status(202).json({ error: creds.message, failure: creds.failure, projectRef: created.project.id });
-      return;
-    }
-
-    // A database with no tables is not "ready". The build already writes migrations/001_init.sql, so
-    // apply it now — otherwise the app is wired to an EMPTY database and every query hits a table
-    // that does not exist, which is the same class of nearly-true claim this feature exists to avoid.
-    //
-    // Reported SEPARATELY from the database itself: the project genuinely was created, so saying the
-    // whole thing failed would send the user to create a second one (and burn a free-plan slot). The
-    // schema outcome is its own field the client can surface honestly.
-    let schemaApplied: boolean | null = null;
-    let schemaNote: string | undefined;
-    const workspaceId = typeof (req.body ?? {}).workspaceId === 'string' ? (req.body as { workspaceId: string }).workspaceId : '';
-    if (workspaceId) {
-      try {
-        const files = await loadWorkspaceFiles(workspaceId);
-        const sql = schemaSqlFromFiles(files || {});
-        if (sql) {
-          const applied = await applySchemaToProject(accessToken, created.project.id, sql);
-          schemaApplied = applied.ok;
-          if (!applied.ok) schemaNote = applied.message;
-        }
-      } catch {
-        // Reading the workspace is best-effort; a database with no schema applied is still a real,
-        // usable database, and we say so rather than failing the whole provision.
-        schemaApplied = null;
-      }
-    }
-
-    // Ask Supabase where this project's pooler is, rather than inventing the hostname — see
-    // fetchPoolerConnection. A missing pooler is a DOWNGRADE (we write the direct URL instead), never a
-    // failed provision: the database exists either way and saying otherwise would send the user to
-    // create a second one and burn a free-plan slot.
-    const pooler = await fetchPoolerConnection(accessToken, created.project.id);
-
-    const saved = await saveUserSecrets(uid, {
-      ENGINEER_DB_PROVIDER: 'supabase',
-      ...envForProject(creds.credentials),
-      ...databaseEnvFor(created.project.id, dbPass, pooler),
-    });
-    if (!saved) {
-      // The project EXISTS in their account even though we could not record it — say so, so they do
-      // not create a second one chasing a database they already have.
-      res.status(500).json({
-        error: 'Your database was created in Supabase, but NavBharatAI could not save its keys. '
-          + 'Open Settings → Database and try again — do not create another project.',
-        projectRef: created.project.id,
+    if (!result.ok) {
+      // The sequence already decided the right status — a 202 in particular means the project EXISTS
+      // and is still starting, which must never read as "it failed, make another one".
+      res.status(result.status).json({
+        error: result.error,
+        ...(result.failure ? { failure: result.failure } : {}),
+        ...(result.projectRef ? { projectRef: result.projectRef } : {}),
       });
       return;
     }
-
-    try { audit('SUPABASE_PROJECT_PROVISIONED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
     res.json({
       ok: true,
-      projectRef: created.project.id,
-      projectName: created.project.name,
-      url: creds.credentials.url,
-      schemaApplied,
-      // What the app can actually DO with this database, stated plainly. `pooled: false` means we could
-      // not read the pooler endpoint and wrote the direct connection instead — that host is IPv6-only
-      // on new Supabase projects, so a container-hosted app may not reach it. The client can say so
-      // rather than the user discovering it as a connection error later.
-      serverConnection: pooler ? 'pooled' : 'direct',
-      ...(schemaNote ? { schemaNote } : {}),
+      projectRef: result.projectRef,
+      projectName: result.projectName,
+      url: result.url,
+      schemaApplied: result.schemaApplied,
+      // What the app can actually DO with this database, stated plainly. `direct` means we could not
+      // read the pooler endpoint and wrote the direct connection instead — that host is IPv6-only on
+      // new Supabase projects, so a container-hosted app may not reach it.
+      serverConnection: result.serverConnection,
+      ...(result.schemaNote ? { schemaNote: result.schemaNote } : {}),
     });
   });
 

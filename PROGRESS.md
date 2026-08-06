@@ -26225,3 +26225,87 @@ proposed to the admin with the cost caveat, awaiting their call. Recorded as the
 Tests: resume-skip invariants (probe gated on resumeSandboxId, honest counter jump, gated seed loop)
 on comment-stripped source; three stale slice-windows widened. Full gate: 1075 files / 12054 tests
 green, both tsc clean, bundle within budget.
+
+## 2026-08-06 (2) — the build now ASKS for a database when the sandbox cannot give it one
+
+Admin: "user se puchona chahiye na! ... nahi dega to ham apna db use kar sakte hai?" Asking was only
+worth building once both database paths actually worked (previous entry). They do now, so:
+
+**The sequence became callable from outside a request handler.** Provisioning lived inside
+`POST /provision`, so the only way to create a database was for the user to walk to Settings. A build
+that discovers mid-flight that the app needs one — the moment the user is actually thinking about it —
+could only print a sentence pointing at a screen. Extracted to `src/server/lib/supabaseProvisionFlow.ts`
+(`provisionDatabaseForUser`, plus `freshAccessToken` / `saveUserSecrets` moved with it); the route is now
+a thin adapter mapping the outcome onto status codes. Order of operations and every honesty property
+unchanged — readiness polled not assumed, created-but-unrecorded reported as EXISTING, schema reported
+separately. `dataStudioRealDb`'s "one token-refresh implementation" test re-anchored to the new home
+rather than deleted.
+
+**The ask itself.** The sandbox's own Postgres is free and instant, so it is still tried FIRST and
+nothing is asked when it works. Only when it fails to verify (or throws) does `rescueDatabase()` run —
+a real blocking `permission_request`, at most once per build:
+- Wired ONLY when the user's Supabase account is already connected, because consent needs a browser
+  popup a running build cannot open. Without a grant we stay silent; an offer we cannot fulfil is worse
+  than none.
+- It names the real cost, not just the benefit: a new project uses one of the 2 a free Supabase plan
+  allows. Deny (or the 10-minute approval timeout) continues the build honestly.
+- On approve, the returned env is written into the app's `.env` — the vault is only read at the START of
+  a build, so a build already in flight would otherwise finish against a database it was never told
+  about. Written last, so it beats the sandbox-local URL merged moments earlier; `.gitignore` hardened
+  the same way the vault write does.
+- A rescue that returns no `DATABASE_URL` is NOT reported as a rescue, and the old "will retry it"
+  warning now prints only when the rescue genuinely did not happen.
+
+This is what closes the Mitrify class end-to-end WITHOUT the E2B template rebuild: sandbox Postgres
+missing → the build offers a real database in the user's own account → the app connects instead of
+serving "Cannot GET /".
+
+Gate: tsc clean both projects, 1075 files / 12,063 tests, exit 0.
+
+## 2026-08-06 (3) — every database, one definition (admin: "user jo chahe db use kare")
+
+The problem was not the length of the list — it was that the list existed TWICE. The settings screen
+owned the provider fields and a hand-written `buildEnvKeys` switch; `userDatabaseContext.ts` owned a
+second map of the same providers with a second copy of their env-var names. Two lists of one thing
+drift, and this pair drifted in the worst possible direction: the screen could save a credential under
+a name the builder was never told to read, so a user connected their database and the app ignored it.
+Adding a provider also meant remembering both places, which is why the catalogue had stopped at six.
+
+**One definition:** `src/lib/dbProviders.ts`, imported by both. Each FIELD carries its own `env` name,
+so the form, the vault write and the builder instruction are all derived from the same fact. A new
+provider is added once and cannot be half-added (`envKeysFor` replaced the switch entirely).
+
+**6 → 11 providers.** Added: PostgreSQL on any host, **MySQL/MariaDB on any host**, PlanetScale, Turso
+(libSQL), Upstash Redis. MySQL was the important gap — nearly every Indian shared host (Hostinger,
+cPanel, Bluehost) gives MySQL and nothing else, and those users had to pick "Other", which told the
+builder nothing. Each provider now also carries a one-line blurb shown in the UI: an 11-item list of
+bare brand names is a worse choice than a 6-item one if the user has not heard of half of them.
+
+**The builder is now told the DIALECT, not just the brand** (`familyGuidance`, per family so every brand
+of one engine gets identical correct instructions): MySQL is warned off `jsonb`/`serial`/`RETURNING`,
+a document store is told not to generate SQL tables, a key-value store is told to say so honestly if the
+app needs relationships. This was the half that broke apps silently — Postgres-only SQL against a cPanel
+MySQL fails at the first query, long after the build reported success.
+
+**`providerForEnvVar` now refuses a shared name.** `DATABASE_URL` belongs to Postgres, MySQL, Neon,
+PlanetScale and Supabase alike, so inferring a brand from it was a guess presented as a fact; it resolves
+through the explicit marker or falls to the generic entry.
+
+**Supabase gained an optional server connection-string field** — a browser anon key cannot serve an
+Express/Prisma/Drizzle app, which is the same gap the one-tap provisioner had.
+
+Deliberately NOT added: Cloudflare D1. Its canonical wiring is a `wrangler.toml` binding, not an env
+var, so listing it would offer a connection that quietly does nothing (rule 2). "Other" carries it.
+
+Gate: tsc clean both projects, 1076 files / 12,085 tests, exit 0.
+
+### Verified, and it changes an earlier "open root cause"
+
+`@embedded-postgres/linux-x64` ships only `initdb`/`pg_ctl`/`postgres` (no `psql`, so our `SELECT 1`
+honesty gate could not run) and has NO stable release — only betas. But the official Debian packages can
+be fetched and unpacked WITHOUT root (`apt-get download` + `dpkg-deb -x` into `$HOME`), which yields the
+complete toolchain including `psql`. So "the E2B template must be rebuilt" is no longer an admin-only
+infra blocker — it is a code fix, and it is the next slice. PGlite (WASM Postgres) was considered and
+rejected for the sandbox: our in-browser preview runs only the FRONTEND, so a server-side app has
+nothing running there to connect to it. (Bolt does not run Postgres in the browser either —
+WebContainers run Node, and Bolt's own docs send users to Supabase for a database.)

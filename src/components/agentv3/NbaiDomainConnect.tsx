@@ -11,6 +11,7 @@
 import { useState, useEffect } from 'react';
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
 
 interface DnsRecord { type: string; name: string; value: string; note?: string; }
 interface DomainStatus {
@@ -62,6 +63,10 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
   const [hostingerToken, setHostingerToken] = useState('');
   const [hostingerDone, setHostingerDone] = useState<number | null>(null);
+  // "Where did you buy this domain?" — preselected from public RDAP data when possible; the user's
+  // own pick always wins (admin suggestion 2026-08-06, adapted: placed at the nameserver step where
+  // the question actually arises, with auto-detection so most users never touch the dropdown).
+  const [registrarId, setRegistrarId] = useState('');
 
   /**
    * REHYDRATE ON MOUNT (admin 2026-08-06: a tab switch reloaded the page and "sab chala gaya").
@@ -169,6 +174,23 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
       setError(e instanceof Error ? e.message : 'Network error.');
     } finally { setAutoBusy(false); }
   };
+
+  useEffect(() => {
+    // Detect the registrar only once the nameserver step is on screen, from RDAP (public data).
+    // Best-effort: CORS/timeouts fall back to the manual dropdown; a manual pick is never overridden.
+    if (!autoNs || !cleanDomain) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(cleanDomain)}`, { signal: AbortSignal.timeout(6000) });
+        if (!res.ok || cancelled) return;
+        const detected = detectRegistrarId(registrarNameFromRdap(await res.json().catch(() => null)));
+        if (detected && !cancelled) setRegistrarId((prev) => prev || detected);
+      } catch { /* unknown registrar — the dropdown handles it */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoNs, cleanDomain]);
 
   const domainConnectCheck = async () => {
     setAutoBusy(true); setError(null); setErrorDetail(null);
@@ -305,6 +327,29 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                         ? (autoApplied !== null ? `Nameservers live — ${autoApplied} record${autoApplied === 1 ? '' : 's'} applied automatically.` : 'Nameservers live.')
                         : 'Waiting for the nameserver change to take effect (can take a few hours).'}
                     </span>
+                  </div>
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-indigo-500/20">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Where did you buy this domain?</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <select
+                        value={registrarId}
+                        onChange={(e) => setRegistrarId(e.target.value)}
+                        aria-label="Your domain registrar"
+                        className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500/60"
+                      >
+                        <option value="">Select…</option>
+                        {REGISTRARS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      {registrarById(registrarId)?.panelUrl && (
+                        <a href={registrarById(registrarId)!.panelUrl} target="_blank" rel="noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                          Open {registrarById(registrarId)!.name} →
+                        </a>
+                      )}
+                    </div>
+                    {registrarById(registrarId) && (
+                      <p className="text-[10px] text-zinc-400">{registrarById(registrarId)!.steps}</p>
+                    )}
                   </div>
                 </>
               )}

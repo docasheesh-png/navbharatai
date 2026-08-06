@@ -26762,3 +26762,19 @@ nameservers changed at Hostinger → zone ACTIVE at Cloudflare. Remaining at tim
 "Check & apply records" on the active zone, wait for cert → Live → one Publish.
 
 Full gate: 1085 files / 12219 tests green, both tsc clean, bundle within budget.
+
+## 2026-08-06 — "Where did you buy this domain?" — the registrar guide (same PR #2160)
+
+Admin suggestion, adapted per the external-suggestion rule (their instinct was right; placement and
+mechanics improved): after we hand the user two nameservers, their real question is "WHERE do I paste
+these?" — every registrar hides the form somewhere different. Added at the NAMESERVER STEP (not the
+page top — no new question before Connect): a registrar dropdown (GoDaddy, Hostinger, Namecheap,
+BigRock, HostGator, Bluehost, Squarespace/old Google Domains, Porkbun, Dynadot, Name.com, IONOS, OVH,
+Other) → "Open <registrar> →" panel button + that registrar's own three-line path to the nameserver
+form. AUTO-DETECTED from public RDAP data (rdap.org, client-side, 6s bound, best-effort) so most
+users never touch the dropdown — and a manual pick always wins over detection (`prev || detected`).
+"Other" renders honest generic steps with no dead button. CSP already allows the RDAP call
+(connect-src https:). Pure guide data + matcher unit-tested (real RDAP legal-name shapes); client
+wiring invariants locked. NOTE: this commit also re-triggers CI for the rehydration commit above —
+GitHub dropped the push event for 59f941f3 (the #2092 failure class), so no run ever started; the
+stacked push is the re-kick.

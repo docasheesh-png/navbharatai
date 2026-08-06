@@ -27243,3 +27243,55 @@ Also visible: `plannedModel: claude-haiku-4-5` but every one of 13 calls deliver
 cheap floor active and holding, no Claude fallback needed.
 
 Gate: tsc clean both projects, SHUFFLED full run 1095 files / 12,390 tests, exit 0.
+
+## 2026-08-06 (17) — autopsy of build 49a7a987: it said SUCCESS, charged ₹286, and never ran
+
+A FINISHED build this time (18m 49s, `ok: true`, ₹286.51, tier admin, 30/30 calls delivered by
+`kimi-k2.7-code` with no Claude fallback). Full five-bucket ledger:
+
+**✅ Self-healed (5)** — project-integrity pass (single focus owner, duplicate stylesheet); a duplicate
+import in `src/main.tsx` removed that "would have broken the preview"; Prisma `migrate dev` + `db push`
+both exit 0.
+
+**🔀 Worked around (2)** — `npm install typescript --save-dev` (78s) run even though
+`./node_modules/.bin/tsc` had already exited 0 three commands earlier, then `npm ls typescript`, then
+`npx tsc`: four commands to answer a question already answered. And an npm corruption
+(`ENOTEMPTY … node_modules/.send-MMdoMv1g`, exit 217) papered over by re-running.
+
+**⏭️ Skipped (3)** — the E2E scaffold, the route smoke check and the page-render check. **All three for
+the same reason**, and that reason is the finding below.
+
+**❌ Still broken (4)** — no live preview; `@types/express` v5 against `express` v4; `@neondatabase/serverless`
+declared and never imported; "No tests at all". Plus a malformed `rootCause`:
+*"Critical issue found by review: Issues"* — a section heading captured as a cause.
+
+**🥵 Struggle (6)** — 18.8 minutes for a *"continue"* on a 25-file app; Prisma alone took **243s**
+(migrate 156s + push 87s); the TypeScript detour 78s; `node src/server/index.cjs &` returned **exit −1
+after 45s**; the post-answer integrity pass **133s**; the npm ENOTEMPTY race.
+
+### The missing subsystem (rule-5 step 2)
+
+**Every post-build verification is gated on a preview URL.** Route smoke, page render, E2E scaffold —
+all three silently no-op without one. So **exactly when the app is most broken (it never came up) we
+verify the least**, and the report reads quiet: 1 error, 6 warnings, nothing about the app not running.
+
+`PREVIEW_ERROR` already existed but fires only when a preview ATTEMPT reports an error. A preview that
+was **never produced at all** raised nothing — the only trace in this entire report was a passing clause
+inside the E2E skip reason: *"no live preview was available to point the tests at"*. A build that ran
+nearly 19 minutes, declared success and charged ₹286.51 for an app nobody could start is precisely the
+"looks done" the constitution forbids.
+
+FIX: `PREVIEW_NEVER_CAME_UP` — a WARNING on the build itself when a successful, non-import build ends
+with no preview URL, saying plainly that nothing has been proven to RUN and that the other checks were
+skipped *because* of it. Without that sentence the reader concludes the build was clean, which is the
+opposite of the truth.
+
+### Open questions for the admin (not code)
+
+- **₹286.51 was billed on `tier: admin`.** The free list is meant to keep the admin's own builds free.
+  Worth confirming whether that was actually debited or only computed.
+- **The fetched-Postgres path still has not been exercised** — this build (like the last) used the
+  admin's own connected Neon database, which is the correct behaviour and also the reason the new path
+  never runs.
+
+Gate: tsc clean both projects, SHUFFLED full run 1095 files / 12,394 tests, exit 0.

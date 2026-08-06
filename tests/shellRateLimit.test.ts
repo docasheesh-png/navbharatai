@@ -63,6 +63,16 @@ describe('background terminal wake', () => {
     }
   });
 
+  it('ready is NEVER gated on git — the freeze on "Preparing git and tools" is structurally impossible', () => {
+    // admin screenshot 2026-08-06: 166 files seeded, then frozen on git init. The shell needs no git;
+    // the session registers and READY is declared first, ensureRepo runs fire-and-forget behind it.
+    // Invariants read CODE, not comments — prose mentioning ensureRepo must not satisfy the check.
+    const bare = routes.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const fn = bare.slice(bare.indexOf('function startTerminalWake'), bare.indexOf('function startTerminalWake') + 4200);
+    expect(fn.indexOf("state.phase = 'ready'")).toBeLessThan(fn.indexOf('git.ensureRepo('));
+    expect(fn).toContain('void git.ensureRepo().catch(() => false)');
+  });
+
   it('a ready-per-record wake with no live session restarts honestly (instance recycle)', () => {
     const open = routes.slice(routes.indexOf("app.post('/api/agentv3/shell/open'"), routes.indexOf("app.get('/api/agentv3/shell/stream'"));
     expect(open).toContain('terminalWakes.delete(workspaceId)');

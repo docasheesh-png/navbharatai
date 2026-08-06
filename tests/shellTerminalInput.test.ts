@@ -244,10 +244,27 @@ describe('ShellTerminal wake poll', () => {
     expect(poll).toContain('lastProgressAt');
   });
 
-  it('paints the real phases the user is waiting through', () => {
-    expect(code).toContain('Creating your cloud workspace…');
-    expect(code).toContain('Loading your saved files');
-    expect(code).toContain('Preparing git and tools…');
+  it('paints ONE in-place line: percent + live timer, not a scroll of prose', () => {
+    // admin 2026-08-06: "loading files hata do — % banao, timer laga do". \r + erase updates the
+    // same line; the timer advances every tick so alive-but-slow never looks frozen.
+    const poll = code.slice(code.indexOf('async function pollWake'));
+    expect(poll).toContain('\\r\\x1b[K');
+    expect(poll).toContain('Loading workspace…');
+    expect(poll).toMatch(/\$\{secs\}s/);
+    expect(poll).not.toContain('Loading your saved files');
+    expect(poll).not.toContain('Preparing git and tools');
+  });
+
+  it('100% is HONEST: it exists only for ready, and the shell follows in the same breath', () => {
+    // "aur 100% loading bad, chalna chahiye, farzi na lage" — the percent function can only return
+    // 100 for phase ready, and the only 100% write is immediately followed by the reopen.
+    const pctFn = code.slice(code.indexOf('export function wakePercent'), code.indexOf('export function wakePercent') + 700);
+    expect(pctFn).toMatch(/phase === 'ready'\) return 100/);
+    expect(pctFn).toContain('Math.min(94');                    // seeding can NEVER show complete
+    const poll = code.slice(code.indexOf('async function pollWake'));
+    const at100 = poll.indexOf('100%');
+    expect(at100).toBeGreaterThan(-1);
+    expect(poll.slice(at100, at100 + 260)).toContain('start(term, fit, alive, attempt + 1)');
   });
 
   it('a failed wake surfaces its real (sanitized) reason and always offers Try again', () => {

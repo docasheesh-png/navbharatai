@@ -4025,11 +4025,17 @@ export function registerAgentV3Routes(app: Express): void {
           state.seeded = Math.min(i + 8, entries.length);
         }
         state.phase = 'finishing';
+        // THE SHELL MUST NEVER WAIT FOR GIT (admin screenshot 2026-08-06: the wake froze on
+        // "Preparing git and tools…"). ensureRepo runs git init/config inside the sandbox — on a
+        // 166-file project that can take long, and it has no timeout — while the shell needs NONE of
+        // it (git only serves the Git panel). Register the session and declare ready FIRST; the repo
+        // initializes in the background and is simply already done by the time anyone opens the Git
+        // panel. This hang class is now structurally impossible, not merely handled.
         const git = new GitManager(actuator, workspaceId);
-        await git.ensureRepo().catch(() => false);
         registerSession(workspaceId, git, userId, actuator);
         state.phase = 'ready';
         state.finishedAt = Date.now();
+        void git.ensureRepo().catch(() => false);
       } catch (e) {
         // The REAL reason, sanitized of infra branding, kept for the owner who polls it — a wake
         // that will not name its failure is undiagnosable from a screenshot (the whole lesson of

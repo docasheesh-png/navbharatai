@@ -26174,3 +26174,31 @@ Gate: tsc clean both projects, 1075 files / 12,051 tests, exit 0.
 - Nothing yet ASKS the user which database they want. The `permission_request` / `awaitApproval`
   primitive exists but is wired only to rebuild-vs-edit and plan approval. Designed position: never ask
   for preview (a throwaway database, no question), ask once at deploy.
+
+## 2026-08-06 — The wake froze on git; progress became one honest percent (PR #2144)
+
+**Admin screenshot: the background wake WORKED** — real phases painted, 166 files seeded with live
+counters — **then froze on "Preparing git and tools…"**. Plus the direct ask: "loading files hata do,
+% banao, timer lagao — aur 100% ke bad chalna chahiye, farzi na lage."
+
+**Root cause of the freeze.** The wake job ran `git.ensureRepo()` (git init/config inside the
+sandbox, no timeout) BEFORE registering the session — but the shell needs no git at all; git serves
+only the Git panel. On a 166-file project that call can run long or hang, and it was gating the
+terminal. **Reordered so the hang class is structurally impossible (50/50 law):** register the
+session → declare `ready` → `git.ensureRepo()` runs fire-and-forget behind it, done by the time
+anyone opens the Git panel. Test-pinned: `ready` is assigned strictly before `git.ensureRepo(` in the
+stripped source (the assertion strips comments — prose mentioning ensureRepo must never satisfy it).
+
+**Progress became ONE honest line, updated in place** (`\r` + erase): `Loading workspace… 62% · 41s`.
+- The percent is anchored to the REAL phases (`wakePercent`): starting 5%, seeding 10–94 scaled by
+  the actual seeded/total counter, finishing 96, **ready — and only ready — 100**. Seeding is capped
+  at 94 so the bar can NEVER read complete while anything is pending; an unknown total sits mid-scale
+  rather than lying.
+- The elapsed timer advances every 2.5s tick even when the percent holds, so alive-but-slow never
+  looks frozen — the admin's exact complaint.
+- The single 100% write is immediately followed by the reopen call in the same breath — "100% ke bad
+  chalna chahiye" is now enforced by code shape and pinned by a test (the 100% write and
+  `start(term, fit, alive, attempt + 1)` within one slice).
+- Failure paths break off the in-place line (`\r\n` first) before printing their red reason.
+
+Full gate: 1074 files / 12007 tests green, both tsc clean, bundle within budget.

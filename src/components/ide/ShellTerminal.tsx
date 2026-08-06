@@ -33,6 +33,23 @@ import { auth } from '../../App';
  * terminal — or by the server's idle reaper, long after everyone has stopped watching.
  */
 
+/**
+ * One honest percentage for the wake (admin 2026-08-06: "loading files hata do! % banao. aur 100%
+ * ke bad chalna chahiye, farzi na lage"). The scale is anchored to the real phases — and 100 exists
+ * ONLY for 'ready', so the bar can never read complete while anything is still pending. Seeding maps
+ * to 10–94 by the actual seeded/total counter; an unknown total sits mid-scale rather than lying.
+ */
+export function wakePercent(w?: { phase?: string; seeded?: number; total?: number } | null): number {
+  if (!w || w.phase === 'starting') return 5;
+  if (w.phase === 'seeding') {
+    const total = w.total ?? 0;
+    return total > 0 ? Math.min(94, 10 + Math.round(((w.seeded ?? 0) / total) * 84)) : 50;
+  }
+  if (w.phase === 'finishing') return 96;
+  if (w.phase === 'ready') return 100;
+  return 5;
+}
+
 /** sessionKey → live shellId, so a remount reattaches instead of orphaning a running shell. */
 const attachedShells = new Map<string, string>();
 
@@ -371,10 +388,18 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       connectingRef.current = false;
       pendingInputRef.current = '';
       setStatus({ kind: 'unavailable', message });
-      term.write(`\x1b[31m${message}\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);   // \r\n first: end the in-place % line
       if (detail) term.write(`\x1b[90m${detail.slice(0, 300)}\x1b[0m\r\n`);
     };
     if (attempt >= 4) { fail('The workspace keeps waking without becoming ready. Tap "Try again", or send a message in NavBharatAI Pro v5.0 chat to start it.'); return; }
+    // ONE line, updated IN PLACE (\r + erase): a percentage anchored to the real phases plus a live
+    // elapsed timer, instead of a scroll of prose (admin 2026-08-06: "loading files hata do — % banao,
+    // timer laga do"). The timer advances every tick even when the percent holds, so alive-but-slow
+    // never looks frozen; 100% is printed ONLY on ready, immediately followed by the real shell.
+    const paint = (pct: number, secs: number) => {
+      term.write(`\r\x1b[K\x1b[90mLoading workspace… ${pct}% \x1b[2m· ${secs}s\x1b[0m`);
+    };
+    paint(wakePercent(null), 0);
     while (alive()) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       if (!alive()) return;
@@ -388,10 +413,14 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         j = await res.json().catch(() => null);
       } catch { /* one missed poll is not a verdict — the no-progress guard is */ }
       const w = j?.wake;
+      const secs = Math.round((Date.now() - startedAt) / 1000);
       if (j?.hostReady || w?.phase === 'ready') {
-        term.write('\x1b[90mWorkspace is ready — starting the shell…\x1b[0m\r\n');
+        // The one place 100% can appear — and the shell follows in the same breath, so complete
+        // always MEANS complete.
+        term.write(`\r\x1b[K\x1b[90mLoading workspace… 100% \x1b[2m· ${secs}s\x1b[0m\r\n`);
         return start(term, fit, alive, attempt + 1);   // reopen; the fast path now has a live host
       }
+      paint(wakePercent(w), secs);
       if (w?.phase === 'failed') {
         fail('Your workspace could not start. Tap "Try again" — a second start usually succeeds.', w.error);
         return;
@@ -400,9 +429,6 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       if (key !== lastKey) {
         lastKey = key;
         lastProgressAt = Date.now();
-        if (w?.phase === 'starting') term.write('\x1b[90mCreating your cloud workspace…\x1b[0m\r\n');
-        else if (w?.phase === 'seeding') term.write(`\x1b[90mLoading your saved files (${w.seeded ?? 0}/${w.total ?? 0})…\x1b[0m\r\n`);
-        else if (w?.phase === 'finishing') term.write('\x1b[90mPreparing git and tools…\x1b[0m\r\n');
       }
       if (Date.now() - lastProgressAt > NO_PROGRESS_MS) {
         fail('The workspace stopped making progress while waking. Tap "Try again" in a moment.');

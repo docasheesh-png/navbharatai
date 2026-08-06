@@ -8,6 +8,7 @@ import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
+import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
@@ -30,6 +31,10 @@ async function canonicalWalletId(db: any, uid: string): Promise<string> {
  * - GET /api/wallet/:userId/transactions  — recent payment transactions
  */
 export function registerWalletRoutes(app: Express): void {
+  // Hosting-plan lifecycle sweep (reminders / auto-renew / lapse enforcement) — periodic, idempotent,
+  // no-op under VITEST. Registered here because the wallet IS the plan's home.
+  registerHostingPlanSweep();
+
   // SECURITY (audit): require the verified token uid to match :userId — these expose balance, PII
   // (email/name), usage logs and payment history; without the check any uid could be read. Client
   // sends the Bearer token via authedHeaders(); VITEST skips the check.
@@ -208,6 +213,9 @@ export function registerWalletRoutes(app: Express): void {
         // insufficient → 402 (recharge first); disabled/unavailable → 503. Nothing was charged.
         return res.status(result.reason === 'insufficient' ? 402 : 503).json(result);
       }
+      // Renewal undoes a lapse: any domain paused for the lapsed plan reconnects automatically.
+      // Best-effort and non-blocking — the purchase result never waits on hosting calls.
+      void reattachSuspendedDomains(req.params.userId);
       return res.json(result);
     } catch (err: any) {
       return sendSafeError(res, 500, 'Could not complete the purchase — nothing was charged. Please try again.', err, 'hosting plan purchase');

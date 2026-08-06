@@ -50,7 +50,16 @@ export interface HostingPlanRecord {
   purchasedAt: string;
   expiresAt: string;
   autoRenew: boolean;
+  /** Reminder dedupe: `${days}` → the expiresAt it was sent for (a new period resets naturally). */
+  remindedFor?: Record<string, string>;
+  /** Set when the lapse was ENFORCED (domains detached) — cleared by a new purchase. */
+  lapsedAt?: string | null;
 }
+
+/** Days before expiry the renewal reminders go out (admin 2026-08-06: "5 din pahle reminder"). */
+export const HOSTING_PLAN_REMINDER_DAYS: ReadonlyArray<number> = [5, 1];
+/** Days AFTER expiry before the domain is actually detached — the late-recharge grace window. */
+export const HOSTING_PLAN_GRACE_DAYS = 3;
 
 export interface HostingPlanStatus {
   enabled: boolean;
@@ -155,6 +164,61 @@ export function computeLazyRenewal(current: Record<string, any>, nowIso: string)
     expiresAt: new Date(nowMs + HOSTING_PLAN_DAYS * 24 * 60 * 60 * 1000).toISOString(),
   };
   return { wallet: { ...debited.wallet, hostingPlan: plan }, renewed: true, applied: true };
+}
+
+export type PlanSweepAction =
+  | { kind: 'renewed' }
+  | { kind: 'remind'; days: number; shortfallInr: number } // 0 = balance covers the renewal
+  | { kind: 'lapse' }
+  | null;
+
+/**
+ * PURE per-wallet sweep step — the plan's whole lifecycle in one decision (admin 2026-08-06:
+ * "renewal na ho to website down; 5 din pehle reminder"). Order matters:
+ *   1. An expired auto-renew plan RENEWS if the balance allows (computeLazyRenewal).
+ *   2. An active plan inside a reminder window (5d / 1d) gets ONE reminder per window per period —
+ *      naming the shortfall when the wallet cannot cover ₹99, so the user knows exactly what to do.
+ *   3. A plan expired past the grace window LAPSES: marked here; the caller detaches the domains.
+ * Inside grace, nothing happens — a late recharge renews silently and the domain never blinks.
+ * Returns the possibly-updated wallet + whether it must be persisted + the action for side effects.
+ */
+export function decidePlanSweepStep(
+  current: Record<string, any>,
+  nowIso: string,
+): { wallet: Record<string, any>; applied: boolean; action: PlanSweepAction } {
+  const w = current || {};
+  const p = w.hostingPlan as HostingPlanRecord | undefined;
+  if (!hostingPlansEnabled() || !p || p.id !== HOSTING_PLAN_ID) return { wallet: w, applied: false, action: null };
+  const nowMs = Date.parse(nowIso);
+  const exp = Date.parse(p.expiresAt);
+  if (!Number.isFinite(exp)) return { wallet: w, applied: false, action: null };
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // 1) renewal first — a renewed plan needs no reminder and no lapse.
+  const renewal = computeLazyRenewal(w, nowIso);
+  if (renewal.renewed) return { wallet: renewal.wallet, applied: true, action: { kind: 'renewed' } };
+
+  // 2) reminders, largest window first, one per window per period.
+  if (exp > nowMs) {
+    for (const days of HOSTING_PLAN_REMINDER_DAYS) {
+      if (exp - nowMs > days * DAY) continue;               // window not reached yet
+      if ((p.remindedFor ?? {})[String(days)] === p.expiresAt) continue; // already sent for this period
+      const price = hostingPlanPriceInr();
+      const needed = inrToDebitTokens(price);
+      const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+      const shortTokens = Math.max(0, needed - balance);
+      const shortfallInr = shortTokens > 0 ? Math.ceil((shortTokens * price) / needed) : 0;
+      const plan: HostingPlanRecord = { ...p, remindedFor: { ...(p.remindedFor ?? {}), [String(days)]: p.expiresAt } };
+      return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'remind', days, shortfallInr } };
+    }
+    return { wallet: w, applied: false, action: null };
+  }
+
+  // 3) expired: inside grace = wait (a lazy renewal can still save it); past grace = lapse once.
+  if (nowMs - exp <= HOSTING_PLAN_GRACE_DAYS * DAY) return { wallet: w, applied: false, action: null };
+  if (p.lapsedAt) return { wallet: w, applied: false, action: null }; // already enforced
+  const plan: HostingPlanRecord = { ...p, lapsedAt: nowIso };
+  return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'lapse' } };
 }
 
 async function canonicalId(db: any, uid: string): Promise<string> {

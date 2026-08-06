@@ -97,7 +97,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
               </p>
             ) : (
               <p className="text-[11px] text-[#8b949e] mt-0.5">
-                ₹{status.priceInr}/{status.days} days from your wallet — removes the "Made with NavBharatAI" badge and unlocks connecting your own domain. Free hosting (with the badge) stays free forever.
+                ₹{status.priceInr}/{status.days} days from your wallet — removes the "Made with NavBharatAI" badge and unlocks connecting your own domain. If the plan ever ends, your domain pauses (we remind you 5 days ahead) but your app stays live on its free NavBharatAI link — renewing reconnects the domain automatically.
               </p>
             )}
           </div>

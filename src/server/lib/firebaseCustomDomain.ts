@@ -285,6 +285,25 @@ export function isNotFound(err: unknown): boolean {
   return /HTTP 404|NOT_FOUND|not\s+found/i.test(msg);
 }
 
+/**
+ * Detach a custom domain from its workspace's site (plan-lapse enforcement — admin 2026-08-06:
+ * "recharge khatam to website down"). Already-absent counts as success: the desired end state is
+ * "not serving", and a repeat sweep must be idempotent.
+ */
+export async function deleteCustomDomain(workspaceId: string, domain: string): Promise<boolean> {
+  const siteId = siteIdForWorkspace(workspaceId);
+  try {
+    await api(
+      `/projects/${FIREBASE_PROJECT}/sites/${siteId}/customDomains/${encodeURIComponent(domain)}`,
+      { method: 'DELETE' },
+    );
+    return true;
+  } catch (err) {
+    if (isNotFound(err)) return true;
+    throw err;
+  }
+}
+
 /** Poll the current status of a workspace's custom domain (null if never attached). */
 export async function customDomainStatusLive(
   workspaceId: string,

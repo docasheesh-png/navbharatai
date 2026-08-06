@@ -44,6 +44,16 @@ import {
 import { audit } from '../lib/audit';
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
+import { runPostgresQuery, isPostgresUrl } from '../lib/postgresQuery';
+import { dbProvider } from '../../lib/dbProviders';
+
+/**
+ * WHERE the SQL runs. Supabase grants us an API that executes SQL for us; every other PostgreSQL is a
+ * connection string we open ourselves. Kept as a union so a route cannot accidentally assume one.
+ */
+type SqlAccess =
+  | { kind: 'supabase-api'; token: string; projectRef: string }
+  | { kind: 'postgres-url'; connectionString: string };
 
 /** What Supabase's token endpoint returns. Fields are `unknown` because they come off the wire. */
 interface TokenResponse {
@@ -277,20 +287,57 @@ export function registerSupabaseIntegrationRoutes(
    * so a custom domain yields an honest "not connected" rather than a call aimed at a guessed ref.
    */
   async function resolveDataAccess(req: Request): Promise<
-    { ok: true; token: string; projectRef: string } | { ok: false; status: number; error: string }
+    { ok: true; access: SqlAccess } | { ok: false; status: number; error: string }
   > {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return { ok: false, status: 401, error: 'Please sign in first.' };
-    const conn = await getConnection(uid);
-    if (!conn) return { ok: false, status: 400, error: 'Connect your database first — Settings → Database.' };
-    const fresh = await freshAccessToken(uid, conn);
-    if (!fresh.ok) return { ok: false, status: fresh.status, error: fresh.message };
     const secrets = await loadUserVaultSecrets(uid).catch(() => ({} as Record<string, string>));
-    const projectRef = projectRefFromUrl(secrets.VITE_SUPABASE_URL);
-    if (!projectRef) {
-      return { ok: false, status: 400, error: 'No database is set up for your account yet. Create one in Settings → Database.' };
+
+    // ROUTE 1 — the Supabase Management API, when the user granted us their Supabase account. Preferred
+    // where available: no database driver, no outbound connection to their database, and the token is
+    // already scoped by their own consent.
+    const conn = await getConnection(uid).catch(() => null);
+    if (conn) {
+      const projectRef = projectRefFromUrl(secrets.VITE_SUPABASE_URL);
+      if (projectRef) {
+        const fresh = await freshAccessToken(uid, conn);
+        if (!fresh.ok) return { ok: false, status: fresh.status, error: fresh.message };
+        return { ok: true, access: { kind: 'supabase-api', token: fresh.token, projectRef } };
+      }
     }
-    return { ok: true, token: fresh.token, projectRef };
+
+    // ROUTE 2 — ANY PostgreSQL, over the connection string they saved (admin 2026-08-06). Studio used to
+    // stop at route 1, so a user on Neon, Render, Railway, Aiven or their own server opened it, saw
+    // "Sample data", and reasonably concluded the feature was broken. A shipped screen that tells 10 of
+    // 11 users something false is worse than one that is honestly absent.
+    if (isPostgresUrl(secrets.DATABASE_URL)) {
+      return { ok: true, access: { kind: 'postgres-url', connectionString: secrets.DATABASE_URL } };
+    }
+
+    // Honest, and SPECIFIC about which of the two situations they are in — "connect a database" is
+    // useless advice to someone who already connected a MySQL one.
+    const marker = String(secrets.ENGINEER_DB_PROVIDER ?? '').trim();
+    if (marker || Object.keys(secrets).length > 0) {
+      const label = dbProvider(marker)?.label ?? 'that database';
+      return {
+        ok: false, status: 400,
+        error: `Database Studio can read PostgreSQL databases (including Supabase, Neon and any Postgres connection string). It cannot browse ${label} yet — your app still uses it normally.`,
+      };
+    }
+    return { ok: false, status: 400, error: 'No database is connected yet. Connect one in Settings → App Settings → Database.' };
+  }
+
+  /**
+   * ONE way to run SQL, whichever transport the user's database needs.
+   *
+   * Every route below used to call `runQuery(token, projectRef, sql)` directly, which hard-wired the
+   * Supabase Management API into all ten of them. Routing here instead means a new transport is added
+   * once, and no route can be forgotten.
+   */
+  async function execSql(access: SqlAccess, sql: string): Promise<{ ok: true; rows: Array<Record<string, unknown>> } | { ok: false; failure: string; message: string; detail?: string }> {
+    return access.kind === 'supabase-api'
+      ? runQuery(access.token, access.projectRef, sql)
+      : runPostgresQuery(access.connectionString, sql);
   }
 
   /** Turn a classified data failure into a response — the provider's own text never goes out. */
@@ -304,7 +351,7 @@ export function registerSupabaseIntegrationRoutes(
   app.get('/api/integrations/supabase/tables', async (req: Request, res: Response) => {
     const access = await resolveDataAccess(req);
     if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
-    const result = await runQuery(access.token, access.projectRef, listTablesSql());
+    const result = await execSql(access.access, listTablesSql());
     if (!result.ok) { sendDataError(res, result); return; }
     res.json({
       tables: result.rows.map((r) => ({
@@ -331,8 +378,8 @@ export function registerSupabaseIntegrationRoutes(
     const desc = req.query.desc === '1' || req.query.desc === 'true';
 
     const [rows, columns] = await Promise.all([
-      runQuery(access.token, access.projectRef, readRowsSql({ table, limit, offset, orderBy, desc })),
-      runQuery(access.token, access.projectRef, listColumnsSql(table)),
+      execSql(access.access, readRowsSql({ table, limit, offset, orderBy, desc })),
+      execSql(access.access, listColumnsSql(table)),
     ]);
     if (!rows.ok) { sendDataError(res, rows); return; }
     // The column list is a nicety: a page of rows is still worth showing if the catalogue read fails,
@@ -361,7 +408,7 @@ export function registerSupabaseIntegrationRoutes(
     }
     const access = await resolveDataAccess(req);
     if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
-    const result = await runQuery(access.token, access.projectRef, listColumnsSql(table));
+    const result = await execSql(access.access, listColumnsSql(table));
     if (!result.ok) { sendDataError(res, result); return; }
     res.json({
       table,
@@ -381,15 +428,15 @@ export function registerSupabaseIntegrationRoutes(
   // ask the database what the key actually IS, and verify afterwards that exactly one row changed.
 
   /** The table's real primary key, from the database's own catalogue — never inferred from a name. */
-  async function primaryKeyOf(token: string, projectRef: string, table: string): Promise<string[] | null> {
-    const result = await runQuery(token, projectRef, primaryKeySql(table));
+  async function primaryKeyOf(access: SqlAccess, table: string): Promise<string[] | null> {
+    const result = await execSql(access, primaryKeySql(table));
     if (!result.ok) return null;
     return result.rows.map((r) => String(r.column_name ?? '')).filter(Boolean);
   }
 
   /** The table's declared columns, so a payload naming a column that does not exist is refused. */
-  async function columnNamesOf(token: string, projectRef: string, table: string): Promise<string[]> {
-    const result = await runQuery(token, projectRef, listColumnsSql(table));
+  async function columnNamesOf(access: SqlAccess, table: string): Promise<string[]> {
+    const result = await execSql(access, listColumnsSql(table));
     if (!result.ok) return [];
     return result.rows.map((r) => String(r.column_name ?? '')).filter(Boolean);
   }
@@ -402,7 +449,7 @@ export function registerSupabaseIntegrationRoutes(
    * primary key), while "write failed" sends them to support.
    */
   async function prepareWrite(req: Request, res: Response): Promise<
-    { ok: true; token: string; projectRef: string; table: string; pk: string[]; columns: string[] } | { ok: false }
+    { ok: true; access: SqlAccess; table: string; pk: string[]; columns: string[] } | { ok: false }
   > {
     const table = typeof req.body?.table === 'string' ? req.body.table : '';
     if (!isSafeIdentifier(table)) {
@@ -412,8 +459,8 @@ export function registerSupabaseIntegrationRoutes(
     const access = await resolveDataAccess(req);
     if (!access.ok) { res.status(access.status).json({ error: access.error }); return { ok: false }; }
     const [pk, columns] = await Promise.all([
-      primaryKeyOf(access.token, access.projectRef, table),
-      columnNamesOf(access.token, access.projectRef, table),
+      primaryKeyOf(access.access, table),
+      columnNamesOf(access.access, table),
     ]);
     if (pk === null) {
       res.status(502).json({ error: 'Could not read that table just now — please try again in a moment.' });
@@ -426,11 +473,11 @@ export function registerSupabaseIntegrationRoutes(
       });
       return { ok: false };
     }
-    return { ok: true, token: access.token, projectRef: access.projectRef, table, pk, columns };
+    return { ok: true, access: access.access, table, pk, columns };
   }
 
   /** Run one write and report what genuinely changed. A builder's refusal is the user's answer. */
-  async function runWrite(res: Response, token: string, projectRef: string, build: () => string): Promise<void> {
+  async function runWrite(res: Response, access: SqlAccess, build: () => string): Promise<void> {
     let sql: string;
     try {
       sql = build();
@@ -440,7 +487,7 @@ export function registerSupabaseIntegrationRoutes(
       res.status(400).json({ error: e instanceof Error ? e.message : 'That change could not be saved.' });
       return;
     }
-    const result = await runQuery(token, projectRef, sql);
+    const result = await execSql(access, sql);
     if (!result.ok) { sendDataError(res, result); return; }
     const verified = verifySingleRow(result.rows);
     if (!verified.ok) { res.status(409).json({ error: verified.message }); return; }
@@ -451,7 +498,7 @@ export function registerSupabaseIntegrationRoutes(
     const prep = await prepareWrite(req, res);
     if (!prep.ok) return;
     const values = (req.body?.values ?? {}) as Record<string, unknown>;
-    await runWrite(res, prep.token, prep.projectRef, () =>
+    await runWrite(res, prep.access, () =>
       buildInsertSql({ table: prep.table, values, columns: prep.columns }));
   });
 
@@ -460,7 +507,7 @@ export function registerSupabaseIntegrationRoutes(
     if (!prep.ok) return;
     const values = (req.body?.values ?? {}) as Record<string, unknown>;
     const key = (req.body?.key ?? {}) as Record<string, unknown>;
-    await runWrite(res, prep.token, prep.projectRef, () =>
+    await runWrite(res, prep.access, () =>
       buildUpdateSql({ table: prep.table, values, key, pkColumns: prep.pk, columns: prep.columns }));
   });
 
@@ -470,7 +517,7 @@ export function registerSupabaseIntegrationRoutes(
     const prep = await prepareWrite(req, res);
     if (!prep.ok) return;
     const key = (req.body?.key ?? {}) as Record<string, unknown>;
-    await runWrite(res, prep.token, prep.projectRef, () =>
+    await runWrite(res, prep.access, () =>
       buildDeleteSql({ table: prep.table, key, pkColumns: prep.pk }));
   });
 
@@ -481,7 +528,7 @@ export function registerSupabaseIntegrationRoutes(
     if (!isSafeIdentifier(table)) { res.status(400).json({ error: 'That table name is not one NavBharatAI can read.' }); return; }
     const access = await resolveDataAccess(req);
     if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
-    const pk = await primaryKeyOf(access.token, access.projectRef, table);
+    const pk = await primaryKeyOf(access.access, table);
     if (pk === null) { res.status(502).json({ error: 'Could not read that table just now.' }); return; }
     res.json({ table, primaryKey: pk, editable: pk.length > 0 });
   });
@@ -493,8 +540,8 @@ export function registerSupabaseIntegrationRoutes(
     const access = await resolveDataAccess(req);
     if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
     const [fks, indexes] = await Promise.all([
-      runQuery(access.token, access.projectRef, listForeignKeysSql(table)),
-      runQuery(access.token, access.projectRef, listIndexesSql(table)),
+      execSql(access.access, listForeignKeysSql(table)),
+      execSql(access.access, listIndexesSql(table)),
     ]);
     if (!fks.ok) { sendDataError(res, fks); return; }
     res.json({
@@ -534,7 +581,7 @@ export function registerSupabaseIntegrationRoutes(
     if (!prepared.ok) { res.status(400).json({ error: prepared.message }); return; }
 
     const started = Date.now();
-    const result = await runQuery(access.token, access.projectRef, prepared.sql);
+    const result = await execSql(access.access, prepared.sql);
     if (!result.ok) { sendDataError(res, result); return; }
     // A write reports what it did; a read reports what it found. Neither invents a number.
     res.json({
@@ -566,13 +613,12 @@ export function registerSupabaseIntegrationRoutes(
 
     const limit = boundedInt(req.query.limit, EXPORT_MAX_ROWS, 1, EXPORT_MAX_ROWS);
     // Ask for one more than we will emit, so "there is more" is something we OBSERVED rather than guessed.
-    const probe = await runQuery(access.token, access.projectRef,
-      `select * from public.${quoteIdent(table)} limit ${limit + 1}`);
+    const probe = await execSql(access.access, `select * from public.${quoteIdent(table)} limit ${limit + 1}`);
     if (!probe.ok) { sendDataError(res, probe); return; }
     const truncated = probe.rows.length > limit;
     const rows = truncated ? probe.rows.slice(0, limit) : probe.rows;
 
-    const columnsResult = await runQuery(access.token, access.projectRef, listColumnsSql(table));
+    const columnsResult = await execSql(access.access, listColumnsSql(table));
     const columns = columnsResult.ok
       ? columnsResult.rows.map((c) => String(c.column_name ?? '')).filter(Boolean)
       : columnsOf(rows);
@@ -603,7 +649,7 @@ export function registerSupabaseIntegrationRoutes(
     const access = await resolveDataAccess(req);
     if (!access.ok) { res.status(access.status).json({ error: access.error }); return; }
 
-    const tableColumns = await columnNamesOf(access.token, access.projectRef, table);
+    const tableColumns = await columnNamesOf(access.access, table);
     if (tableColumns.length === 0) {
       res.status(502).json({ error: 'Could not read that table just now — please try again in a moment.' });
       return;
@@ -632,7 +678,7 @@ export function registerSupabaseIntegrationRoutes(
         failure = e instanceof Error ? e.message : 'Some rows could not be imported.';
         break;
       }
-      const result = await runQuery(access.token, access.projectRef, sql);
+      const result = await execSql(access.access, sql);
       if (!result.ok) {
         if (result.detail) console.error(`[SUPABASE-IMPORT] ${result.failure}: ${result.detail}`);
         failure = result.message;

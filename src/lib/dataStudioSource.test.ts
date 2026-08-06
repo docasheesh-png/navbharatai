@@ -98,3 +98,33 @@ describe('pageSummary — the count is an estimate and says so', () => {
     expect(pageSummary({ offset: 0, shown: 0, rowEstimate: 0 })).toBe('No rows');
   });
 });
+
+/**
+ * EVERY POSTGRES, NOT JUST SUPABASE (admin 2026-08-06).
+ *
+ * Studio could read only Supabase, so a user on Neon, Render, Railway or their own Postgres — and every
+ * MySQL/Mongo user — was shown "connect a database in Settings" while they HAD connected one, and then
+ * given sample rows. A shipped screen that tells 10 of 11 users something false is worse than one that
+ * is honestly absent.
+ */
+describe('studioState — the server\'s own reason beats a guess', () => {
+  it('shows the server\'s reason when it cannot browse that database', () => {
+    const reason = 'Database Studio can read PostgreSQL databases. It cannot browse MongoDB Atlas yet — your app still uses it normally.';
+    const s = studioState({ connected: false, hasDatabase: false, blockedReason: reason });
+    expect(s.isRealData).toBe(false);
+    expect(s.hint).toBe(reason);
+    // Never the generic advice on top of it — the user already connected a database.
+    expect(s.hint).not.toContain('Connect a database in Settings');
+  });
+
+  it('live data still wins over any reason', () => {
+    const s = studioState({ connected: true, hasDatabase: true, blockedReason: 'stale' });
+    expect(s.isRealData).toBe(true);
+    expect(s.label).toBe('Your database');
+  });
+
+  it('with no reason, the two original states are unchanged', () => {
+    expect(studioState({ connected: true, hasDatabase: false }).hint).toContain('no database has been created yet');
+    expect(studioState({ connected: false, hasDatabase: false }).hint).toContain('Connect a database in Settings');
+  });
+});

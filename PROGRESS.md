@@ -26695,3 +26695,48 @@ report never saw it at all).
 
 Gate: tsc clean both projects, and a SHUFFLED full run — the order that exposed the flakes — 1084 files
 / 12,191 tests, exit 0.
+
+## 2026-08-06 (10) — Database Studio reads any PostgreSQL, not one provider in eleven
+
+The highest-impact open item. Studio's whole Data GUI ran on Supabase's Management API
+(`POST /v1/projects/{ref}/database/query`), so it could read exactly ONE of the eleven providers a user
+can connect. Everyone else — Neon, a Render/Railway/Aiven Postgres, their own server, and every
+MySQL/Mongo user — opened it, was told "connect a database in Settings" while they HAD connected one,
+and was shown sample rows. **A shipped screen that tells 10 of 11 users something false is worse than one
+that is honestly absent.**
+
+**The SQL needed no changes.** Every builder in `supabaseData` is ordinary PostgreSQL against
+`information_schema`/`pg_catalog`, and `sqlSafety` enforces read-only by WRAPPING the statement in a
+bounded subquery rather than by guessing at keywords. Only the transport was Supabase-shaped.
+
+- `src/server/lib/postgresQuery.ts` — the second transport, over a plain connection string (`pg`).
+- `resolveDataAccess` now returns a TRANSPORT union: the Supabase API is preferred where available (no
+  driver, no outbound connection, token already scoped by the user's own consent), otherwise any
+  `DATABASE_URL` that is a Postgres URL.
+- `execSql()` is the ONE place SQL runs. Ten routes each called `runQuery(token, projectRef, …)`
+  directly, which hard-wired the Supabase transport into all of them; a new transport is now added once
+  and no route can be forgotten. `primaryKeyOf` / `columnNamesOf` / `runWrite` carry the transport too —
+  the write path, not just the reads.
+- A database it genuinely cannot browse (MySQL, Mongo, Firebase, Turso) gets a SPECIFIC answer naming
+  that provider and saying the app still uses it normally. "Connect a database" is useless advice to
+  someone who already connected a MySQL one.
+- The client asks the SERVER whether it can read, rather than whether one provider is linked, and shows
+  the server's own reason (`blockedReason`) instead of a guess.
+
+**SSL is implemented to the Postgres spec, not to what is convenient.** The usual shortcut is
+`rejectUnauthorized: false` for every connection, which silently turns off MITM protection on somebody's
+production database. The URL's own `sslmode` decides, exactly as libpq defines it: `verify-full`/
+`verify-ca` VERIFY; `require`/`prefer` encrypt without verifying; `disable` does neither; a remote host
+with no `sslmode` gets encrypted-but-unverified (cleartext would be worse than both) and localhost gets
+none. A fresh client per query, always closed in a `finally` — a pool held open against a user's database
+occupies one of their app's own connection slots on a free tier.
+
+The driver's error text NEVER reaches the user: it quotes the failing SQL, and for a write it quotes
+VALUES. The user gets a message naming something they can check; the real text goes to the server log.
+
+Gate: tsc clean both projects, SHUFFLED full run 1085 files / 12,216 tests, exit 0.
+
+**Still open in this line of work (honest):** MySQL/PlanetScale (needs `mysql2` plus dialect-specific
+catalogue SQL — `information_schema` differs and identifiers are backtick-quoted) and MongoDB (not SQL
+at all; collections/documents is a different browsing model, so a real UI change). Both are named
+honestly on screen today rather than silently showing sample data.

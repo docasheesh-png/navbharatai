@@ -33,9 +33,17 @@ export interface StudioState {
  * telling that user "no database" without saying they can create one strands them one click away
  * from the fix.
  */
-export function studioState(opts: { connected: boolean; hasDatabase: boolean }): StudioState {
+export function studioState(opts: { connected: boolean; hasDatabase: boolean; blockedReason?: string | null }): StudioState {
   if (opts.connected && opts.hasDatabase) {
     return { source: 'live', label: 'Your database', isRealData: true, hint: '' };
+  }
+  // THE SERVER'S OWN REASON WINS (admin 2026-08-06). Studio could read only Supabase, so a user on
+  // Neon, Render, Railway or their own Postgres — and every MySQL/Mongo user — saw "connect a database"
+  // while they HAD connected one. Studio now reads any PostgreSQL, and where it still cannot help
+  // (MySQL, Mongo, Firebase) the server says which database it found and that the app still uses it
+  // normally. Repeating "connect a database" over that would be telling the user something false.
+  if (opts.blockedReason) {
+    return { source: 'demo', label: 'Sample data', isRealData: false, hint: opts.blockedReason };
   }
   if (opts.connected) {
     return {

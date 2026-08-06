@@ -324,12 +324,30 @@ describe('The script survives an image with NO postgres and NO client tools', ()
     expect(script).not.toContain('if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || pg_isready -h localhost');
   });
 
-  it('uses the built-in postgres database when createdb is absent, and REPORTS that URL', () => {
-    // The URL is read back from the marker, so a caller always gets the database that was proven —
-    // never one we assumed existed.
-    expect(script).toContain('if command -v createdb > /dev/null 2>&1; then');
-    expect(script).toContain("sed 's|/[^/]*$|/postgres|'");
-    expect(script).toContain('echo "DB_URL:$APP_URL"');
+  it('creates the app database with the SERVER itself, since createdb is a client tool', () => {
+    // Without this the database NAME changed between paths: our canonical URL said `myapp` while the
+    // database was really `postgres`, so any caller holding CANONICAL_DB_URL pointed at a database that
+    // did not exist. `postgres --single` needs no client, no running server and no root — verified for
+    // real against these exact binaries.
+    expect(script).toContain('echo "CREATE DATABASE myapp;" | "$PGBIN/postgres" --single -D "$PGDATA" postgres');
+    expect(script).toContain('DB_DIAG_CREATEDB:');
+    // It runs on a FRESH data directory only, and BEFORE the server starts — single-user mode requires
+    // the server to be stopped.
+    const createAt = script.indexOf('CREATE DATABASE myapp;');
+    const startAt = script.indexOf('pg_ctl" -D "$PGDATA" -o "-p 5432');
+    expect(createAt).toBeGreaterThan(script.indexOf('initdb" -D "$PGDATA"'));
+    expect(createAt).toBeLessThan(startAt);
+  });
+
+  it('the canonical URL is what every path reports — the fallback is a LAST resort, and proven', () => {
+    expect(script).toContain(`echo "DB_URL:$APP_URL"`);
+    // The postgres-database fallback is only reached after the app database itself failed to answer,
+    // and it must ALSO pass SELECT 1 before its URL is reported.
+    const firstTry = script.indexOf('if nbai_select1 "$APP_URL"; then');
+    const fallback = script.indexOf('if nbai_select1 "$FALLBACK_URL"; then');
+    expect(firstTry).toBeGreaterThan(-1);
+    expect(fallback).toBeGreaterThan(firstTry);
+    expect(script).toContain('echo "DB_URL:$FALLBACK_URL"');
   });
 
   it('verifies through Node\'s pg driver when psql is absent — never skips verification', () => {

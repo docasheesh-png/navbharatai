@@ -26485,3 +26485,38 @@ registered with each registrar, an external approval step). C — Hostinger dire
 Domain Connect support is absent per training knowledge; flag-gated until one live verification).
 D — in-app domain purchase: NOT built; needs the admin's reseller account (ResellerClub/GoDaddy
 reseller), real money + KYC — no fake Buy button before that exists (second absolute rule).
+
+## 2026-08-06 (6) — correcting the record on the no-root Postgres, and closing the gap it left
+
+The admin asked whether the plan I described was done. Two corrections, both mine, both tested rather
+than argued.
+
+**1. What I described is NOT what shipped.** I said PATH 2b would use `apt-get download` + `dpkg-deb -x`
+(which yields the full toolchain including `psql`). #2150 actually ships the Maven relocatable tarball,
+which has no `psql`, with the Node `pg` driver as the verification client instead.
+
+**2. The plan I described was WORSE, and the test proves it.** Run as a non-root user here:
+`apt-get download postgresql-client-16` → **404**. The package lists are stale and point at a version
+already superseded in the pool; refreshing them needs `apt-get update`, which needs ROOT. So "apt-get
+download needs no root" was technically true and practically useless — and an E2B image typically ships
+with `/var/lib/apt/lists` emptied, which fails even harder. The Maven artifact has no such dependency:
+its URL is permanent and immutable. The shipped route is the better one; that was luck, not planning,
+and it is recorded as such.
+
+**3. The gap it left, now closed.** No `createdb` meant the app database NAME changed between paths —
+`CANONICAL_DB_URL` says `myapp` while the fetched path had created nothing but `postgres`, so any caller
+holding the canonical URL pointed at a database that did not exist. That was an inconsistency this
+session introduced. Fixed with the server's own single-user mode:
+`echo "CREATE DATABASE myapp;" | postgres --single -D $PGDATA postgres` — no client, no running server,
+no root. Run on a FRESH data directory only and BEFORE `pg_ctl start` (single-user mode requires the
+server stopped). **Verified for real against these exact binaries**: the database is created and
+`postgresql://postgres@127.0.0.1:PORT/myapp` answers `SELECT current_database()` = `myapp`.
+The `postgres`-database fallback survives as a genuine LAST resort — reached only when the app database
+fails to answer, and it must pass its own `SELECT 1` before its URL is reported, so a caller can still
+only ever be handed a database that was proven.
+
+Remaining honest gap: an app that shells out to `psql` itself (some seed/migration scripts do) still
+finds no `psql` on the fetched path. Every app that connects over TCP — Prisma, Drizzle, `pg`, `mysql2`,
+i.e. effectively all of them — is unaffected. Recorded rather than papered over.
+
+Gate: tsc clean both projects, 1077 files / 12,119 tests, exit 0.

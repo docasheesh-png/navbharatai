@@ -189,6 +189,16 @@ if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
     if [ ! -f "$PGDATA/PG_VERSION" ]; then
       INITDB_ERR=$("$PGBIN/initdb" -D "$PGDATA" -U postgres --auth=trust --encoding=UTF8 2>&1 | tail -3)
       echo "DB_DIAG_INITDB:\${INITDB_ERR:-ok}"
+      # CREATE THE APP DATABASE WITH THE SERVER ITSELF. \`createdb\` is a CLIENT tool and a fetched
+      # Postgres build ships none, which briefly meant the app's database name changed between paths —
+      # our canonical URL said \`myapp\` while the database was really \`postgres\`, so any caller
+      # holding CANONICAL_DB_URL pointed at a database that did not exist. \`postgres --single\` is the
+      # server's own single-user mode: it needs no client, no running server and no root. Done here,
+      # before pg_ctl starts, because single-user mode requires the server to be STOPPED. Verified for
+      # real against these exact binaries. Harmless when createdb also exists — the later createdb then
+      # just reports "already exists" and is ignored.
+      CREATEDB_ERR=$(echo "CREATE DATABASE myapp;" | "$PGBIN/postgres" --single -D "$PGDATA" postgres 2>&1 | grep -iE '\berror\b|\bfatal\b' | tail -2)
+      echo "DB_DIAG_CREATEDB:\${CREATEDB_ERR:-ok}"
     fi
     # -k /tmp puts the unix socket somewhere writable; -h 127.0.0.1 keeps it on loopback only.
     PGCTL_ERR=$("$PGBIN/pg_ctl" -D "$PGDATA" -o "-p 5432 -h 127.0.0.1 -k /tmp" -l "$PGDATA/server.log" -w -t 25 start 2>&1 | tail -3)
@@ -215,14 +225,22 @@ if nbai_pg_up; then
   APP_URL="${dbUrl}"
   if command -v createdb > /dev/null 2>&1; then
     createdb -h 127.0.0.1 -p 5432 -U postgres myapp 2>/dev/null || true
-  else
-    APP_URL=$(echo "${dbUrl}" | sed 's|/[^/]*$|/postgres|')
-    echo "DB_DIAG_DBNAME:createdb absent — using the built-in postgres database"
   fi
   if nbai_select1 "$APP_URL"; then
     echo "DB_URL:$APP_URL"
   else
-    echo "DB_SELECT1_FAILED"
+    # LAST RESORT, AND ONLY WHEN THE APP DATABASE GENUINELY IS NOT THERE. Every path above tries to
+    # create it (createdb, or the server's own single-user mode), so reaching here means the create
+    # failed — on a data directory that already existed before this fix, say. \`postgres\` is the one
+    # database initdb ALWAYS makes, so it is the honest fallback. We report the URL that actually
+    # answered, never the one we assumed, so a caller can only ever be handed a proven database.
+    FALLBACK_URL=$(echo "${dbUrl}" | sed 's|/[^/]*$|/postgres|')
+    if nbai_select1 "$FALLBACK_URL"; then
+      echo "DB_DIAG_DBNAME:the app database was unreachable — using the built-in postgres database"
+      echo "DB_URL:$FALLBACK_URL"
+    else
+      echo "DB_SELECT1_FAILED"
+    fi
   fi
 else
   echo "DB_DIAG_ISREADY:$(pg_isready -h 127.0.0.1 -p 5432 2>&1 | tail -1 || echo 'pg_isready absent')"

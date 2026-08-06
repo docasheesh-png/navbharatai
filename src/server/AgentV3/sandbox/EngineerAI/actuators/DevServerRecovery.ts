@@ -18,6 +18,7 @@ export type DevServerFailureCause =
   | 'port_in_use'     // the target port is occupied (EADDRINUSE)
   | 'db_unreachable'  // the app's database isn't running in the sandbox (Prisma P1001 / ECONNREFUSED :5432)
   | 'db_engine_unavailable' // the app needs a database ENGINE the sandbox cannot start (MongoDB, MySQL, Redis…)
+  | 'db_client_missing' // a script shells out to psql/createdb/pg_dump, which this PostgreSQL does not ship
   | 'missing_credential' // the app kills itself at boot because a USER-supplied key isn't set yet
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
@@ -243,6 +244,9 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
     // conjure a MongoDB, so 'reprovision_db' would burn both attempts on a certainty. Short-circuit and
     // say something the user can act on instead.
     case 'db_engine_unavailable': return 'code_fix';
+    // `npm install` cannot deliver an OS binary, and a restart re-runs the same script against the same
+    // missing tool. The SCRIPT must use the database client the app already has.
+    case 'db_client_missing': return 'code_fix';
     case 'missing_credential': return 'code_fix'; // the key is still unset on every restart — only the SOURCE can stop crashing
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
@@ -376,6 +380,20 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return pkg ? { ...d, corruptPackage: pkg } : d;
   }
   if (/\bModule not found\b/i.test(text)) return make('missing_module', 'A module could not be resolved — reinstalling dependencies and restarting.');
+  // 3.5) A DATABASE CLIENT TOOL, not an npm package. Caught BEFORE the generic "command not found"
+  //    branch, which reinstalls node_modules — and `npm install` can never deliver an OS binary, so that
+  //    branch spent a real install and a restart on a certainty. Today the same situation produced THREE
+  //    different wrong answers: `psql: not found` was 'unknown' (two blind retries), `createdb: command
+  //    not found` was 'missing_module' (npm install), `pg_dump: not found` was 'unknown' again.
+  //    A relocatable PostgreSQL ships the SERVER only — no psql, no createdb, no pg_dump — so a script
+  //    that shells out to one has to use the client the app already depends on instead.
+  const clientTool = /\b(psql|createdb|dropdb|pg_dump|pg_restore|pg_isready)\b\s*:\s*(?:command\s+)?not found/i.exec(text)
+    || /\bcommand not found\b[^\n]*\b(psql|createdb|dropdb|pg_dump|pg_restore|pg_isready)\b/i.exec(text);
+  if (clientTool) {
+    const tool = clientTool[1];
+    return make('db_client_missing', `A script runs \`${tool}\`, which is not installed here — the preview's PostgreSQL ships the server only, with no command-line tools. Run this step through the database client the app already depends on (pg / Prisma / Drizzle) instead of shelling out to \`${tool}\`; installing packages cannot provide it.`);
+  }
+
   if (/\b(?:vite|next|tsc|tsx|node|npm)\b\s*:\s*(?:command\s+)?not found/i.test(text) || /command not found/i.test(text)) {
     return make('missing_module', 'A required CLI was not found — reinstalling dependencies and restarting.');
   }
@@ -499,6 +517,8 @@ export function terminalDetail(d: DevServerDiagnosis): string {
       // NOT "recovery is exhausted" — nothing was attempted, and nothing could have been. Saying we
       // tried and failed would misdescribe a situation the user can fix in one step.
       return `${d.detail}`;
+    case 'db_client_missing':
+      return `${d.detail}`;
     case 'out_of_memory':
       return `The dev server ran out of memory and was killed. ${tail} A smaller build or fewer watchers may be needed.`;
     case 'crash':
@@ -534,6 +554,10 @@ export function userFacingPreviewFailure(diag: DevServerDiagnosis, port: number,
     }
     case 'db_unreachable':
       return 'Your app needs a database to start, and one could not be set up automatically here. Connect your own in Settings → App Settings → Database, then press Diagnose again — your data always stays in your own account.';
+    case 'db_client_missing':
+      // The user did not write this script and cannot install an OS package here — so this is one to
+      // hand back to the assistant, not a chore to hand to them.
+      return 'One of your app\'s setup steps uses a database command-line tool that is not available in the preview. Ask me to run that step through the app\'s own database library instead, and I will fix the script.';
     case 'db_engine_unavailable': {
       const label = (log ? unavailableDbEngine(log)?.label : null) ?? 'that database';
       return `Your app needs ${label} to start. This preview can only start PostgreSQL for you, so connect your own ${label} in Settings → App Settings → Database — or ask me to switch the app to a database that runs here, and I will.`;

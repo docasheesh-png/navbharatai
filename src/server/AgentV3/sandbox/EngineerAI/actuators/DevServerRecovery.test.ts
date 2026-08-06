@@ -710,3 +710,54 @@ describe('what the user and the report are told', () => {
     expect(t).toContain('MongoDB');
   });
 });
+
+/**
+ * A DATABASE CLIENT TOOL IS NOT AN NPM PACKAGE (admin 2026-08-06).
+ *
+ * A relocatable PostgreSQL ships the SERVER only — no psql, no createdb, no pg_dump — so a generated
+ * seed/migrate script that shells out to one fails with "command not found". Today that produced THREE
+ * different wrong answers for the same situation:
+ *   psql: not found            -> 'unknown'        -> two blind restarts
+ *   createdb: command not found-> 'missing_module' -> `npm install`, which can NEVER deliver an OS binary
+ *   pg_dump: not found         -> 'unknown'        -> two blind restarts again
+ * Every one of them spends real time on a certainty. The script has to use the client the app already
+ * depends on.
+ */
+describe('db_client_missing — one right answer instead of three wrong ones', () => {
+  it('recognises every client tool, however the shell phrases it', () => {
+    for (const log of [
+      'sh: 1: psql: not found',
+      '/bin/sh: createdb: command not found',
+      'sh: pg_dump: not found',
+      'bash: pg_restore: command not found',
+      'sh: 1: dropdb: not found',
+    ]) {
+      const d = classifyDevServerFailure(log);
+      expect(d.cause, log).toBe('db_client_missing');
+      expect(d.recovery, log).toBe('code_fix'); // short-circuit: no install, no restart
+    }
+  });
+
+  it('names the tool and the real alternative, so the agent can act', () => {
+    const d = classifyDevServerFailure('sh: 1: psql: not found');
+    expect(d.detail).toContain('psql');
+    expect(d.detail).toContain('pg / Prisma / Drizzle');
+    expect(d.detail).toContain('installing packages cannot provide it');
+  });
+
+  it('a MISSING NPM BINARY still reinstalls — the branch it now sits in front of', () => {
+    // The point is to stop reinstalling for OS tools, not to stop reinstalling.
+    expect(classifyDevServerFailure('sh: 1: vite: not found').recovery).toBe('reinstall');
+    expect(classifyDevServerFailure("Cannot find module 'express'").recovery).toBe('reinstall');
+  });
+
+  it('the user is asked to hand it back, not to install something they cannot', () => {
+    const msg = userFacingPreviewFailure(classifyDevServerFailure('sh: 1: psql: not found'), 3000);
+    expect(msg).toContain('Ask me to run that step through the app\'s own database library');
+    expect(msg).not.toContain('Settings'); // nothing for them to configure here
+  });
+
+  it('the terminal line does not claim an exhausted recovery', () => {
+    expect(terminalDetail(classifyDevServerFailure('sh: 1: psql: not found'))).not.toContain('Automatic recovery is exhausted');
+  });
+});

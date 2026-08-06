@@ -14,6 +14,8 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface DnsRecord { type: string; name: string; value: string; note?: string; }
 interface DomainStatus {
+  /** Server capability: the zero-copy-paste nameserver-delegation path is available. */
+  autoDns?: boolean;
   domain: string;
   active: boolean;
   ownershipState: string;
@@ -46,6 +48,12 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [result, setResult] = useState<DomainStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  // Auto-DNS (nameserver delegation): the zero-copy-paste path. Offered only when the server says a
+  // tap can actually deliver it (result.autoDns), and honest about the ONE registrar step it needs.
+  const [autoNs, setAutoNs] = useState<string[] | null>(null);
+  const [autoZoneStatus, setAutoZoneStatus] = useState<string | null>(null);
+  const [autoApplied, setAutoApplied] = useState<number | null>(null);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const domainValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(cleanDomain);
@@ -87,6 +95,42 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
     } finally {
       setChecking(false);
     }
+  };
+
+  const autoDnsStart = async () => {
+    setAutoBusy(true); setError(null); setErrorDetail(null);
+    try {
+      const res = await fetch('/api/domains/nbai/auto-dns/start', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ workspaceId, domain: cleanDomain }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error || 'Could not start automatic setup.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      setAutoNs(Array.isArray(data?.nameServers) ? data.nameServers : []);
+      setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error.');
+    } finally { setAutoBusy(false); }
+  };
+
+  const autoDnsSync = async () => {
+    setAutoBusy(true); setError(null); setErrorDetail(null);
+    try {
+      const res = await fetch('/api/domains/nbai/auto-dns/sync', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ workspaceId, domain: cleanDomain }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error || 'Could not apply the records.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
+      if (Array.isArray(data?.nameServers)) setAutoNs(data.nameServers);
+      if (typeof data?.applied === 'number') setAutoApplied(data.applied);
+      if (data?.domain) setResult((prev) => (prev ? { ...prev, ...data.domain } : prev));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error.');
+    } finally { setAutoBusy(false); }
   };
 
   return (
@@ -150,6 +194,49 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
               <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
             </div>
           ))}
+
+          {result.autoDns && (
+            <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">
+              <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
+              {!autoNs && (
+                <>
+                  <p className="text-[11px] text-zinc-300">
+                    NavBharatAI can add these records for you. You change your domain's nameservers ONCE at
+                    your registrar (GoDaddy, Hostinger, anywhere) — after that, we manage the DNS records
+                    automatically, now and for every future update.
+                  </p>
+                  <p className="text-[10px] text-amber-200/80">
+                    ⚠️ Changing nameservers moves ALL DNS for this domain to NavBharatAI — custom email or
+                    other records set at your registrar will need re-adding here. Skip this and use the
+                    manual records above if that worries you.
+                  </p>
+                  <button onClick={autoDnsStart} disabled={autoBusy}
+                    className="self-start px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                    {autoBusy ? 'Starting…' : 'Set up automatically'}
+                  </button>
+                </>
+              )}
+              {autoNs && (
+                <>
+                  <p className="text-[11px] text-zinc-300">Set these two nameservers at your registrar (replace the existing ones):</p>
+                  {autoNs.map((ns, i) => (
+                    <Field key={ns} label={`Nameserver ${i + 1}`} value={ns} k={`ns${i}`} copied={copied} onCopy={copy} />
+                  ))}
+                  <div className="flex items-center gap-2">
+                    <button onClick={autoDnsSync} disabled={autoBusy}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                      {autoBusy ? 'Checking…' : 'Check & apply records'}
+                    </button>
+                    <span className="text-[10px] text-zinc-400">
+                      {autoZoneStatus === 'active'
+                        ? (autoApplied !== null ? `Nameservers live — ${autoApplied} record${autoApplied === 1 ? '' : 's'} applied automatically.` : 'Nameservers live.')
+                        : 'Waiting for the nameserver change to take effect (can take a few hours).'}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border ${result.active ? 'bg-green-500/10 border-green-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
             <div className="flex items-center gap-2 min-w-0">

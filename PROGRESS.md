@@ -26448,3 +26448,40 @@ middle of it. Caught by checking for leftover markers before pushing; resolved b
 this file from origin/main and appending this entry at the end. Lesson recorded: conflict-marker
 scripts must anchor to LINE-START markers only — and this file legitimately contains marker-like
 text inside prose.
+
+---
+
+## 2026-08-06 — Auto-DNS Slice A: nameserver delegation — "DNS hum set kar dein" (PR #2153)
+
+**Admin order: "yeh banao — sab. Not only GoDaddy, Hostinger bhi."** Slice A is the universal
+foundation: **nameserver delegation via managed Cloudflare zones** — the one mechanism that works on
+EVERY registrar (GoDaddy, Hostinger, anywhere), because the user changes nameservers ONCE and from
+then on NavBharatAI writes every DNS record itself.
+
+**Built (`cloudflareManagedDns.ts` + routes + UI):**
+- `ensureZone` (idempotent — CF code 1061 "already exists" is fetched, so Try again works),
+  `zoneStatus`, `applyRecords` (identical → untouched; changed single-value A/AAAA/CNAME → replaced
+  in place; TXT → added ALONGSIDE so Firebase's challenge never clobbers unrelated TXT; returns an
+  honest changed-count — 0 is a valid verifiable outcome). All records **proxied:false** — a hard
+  correctness constraint, Firebase must see its A records directly to validate + issue the cert.
+- Routes `auto-dns/start` + `auto-dns/sync` (ownership-checked, creds-gated on
+  `CLOUDFLARE_API_TOKEN`+`ACCOUNT_ID`, kill switch `AGENTV3_MANAGED_DNS=off`, sanitized detail on
+  failure — vendor → "DNS service"). Sync refuses to pretend: a pending zone applies nothing.
+- UI in NbaiDomainConnect: "Or: automatic setup" appears ONLY when the server can deliver it
+  (`autoDns` capability flag); shows the two nameservers with copy buttons; **warns plainly that
+  delegation moves ALL DNS** (existing MX/email records need re-adding) and points at the manual
+  records as the no-risk alternative; "Check & apply" reports waiting vs applied-count honestly.
+- CF API unreachable from CI ⇒ injectable-fetch seam; 13 tests cover config gating, zone
+  idempotency, the replace/alongside record semantics, the 0-change no-op, sanitization, and the
+  route/UI honesty invariants.
+
+**Prerequisites for it to go LIVE (admin):** the existing CF token needs **Zone:Edit + DNS:Edit**
+(zone creation) — registry note added to CLAUDE.md. And the Google-side attach root cause (#2152's
+detail line) must close first: auto-DNS applies the records Firebase HANDS BACK, so attach failing =
+nothing to apply. End-to-end "live on user's domain" is gated on that, stated plainly.
+
+**Next slices (in flight):** B — Domain Connect one-click (GoDaddy-class registrars; template must be
+registered with each registrar, an external approval step). C — Hostinger direct DNS API (their
+Domain Connect support is absent per training knowledge; flag-gated until one live verification).
+D — in-app domain purchase: NOT built; needs the admin's reseller account (ResellerClub/GoDaddy
+reseller), real money + KYC — no fake Buy button before that exists (second absolute rule).

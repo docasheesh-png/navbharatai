@@ -299,7 +299,7 @@ describe('Code Studio shows the SAME app the rest of the product does', () => {
     // sandbox create is what made a 90s client deadline expire on wakes that were succeeding.
     expect(routes).toContain('function startTerminalWake');
     const i = routes.indexOf('function startTerminalWake');
-    const fn = routes.slice(i, i + 3600);
+    const fn = routes.slice(i, i + 6500);
     expect(fn).toContain('ensureWorkspace(workspaceId, undefined, resumeSandboxId)');
     expect(fn).toContain('registerSession(workspaceId, git, userId, actuator)');
     // Seeds the saved project back — a recreated sandbox comes back EMPTY, and a terminal opening onto

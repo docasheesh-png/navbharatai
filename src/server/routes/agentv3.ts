@@ -4015,16 +4015,35 @@ export function registerAgentV3Routes(app: Express): void {
         const entries = Object.entries(saved).slice(0, TERMINAL_WAKE_MAX_FILES);
         state.total = entries.length;
         state.phase = 'seeding';
+        // A RESUMED sandbox still holds its filesystem — E2B pause preserves the disk, and the
+        // reaper pauses rather than kills. Re-seeding every file onto a resumed sandbox was most of
+        // the wake for the COMMON case (admin 2026-08-06: "Replit me to shell load nahi hota" —
+        // Replit's trick is exactly this: resume from a snapshot, copy nothing). One cheap probe
+        // decides: if the first saved file already exists with content, the whole seed is skipped;
+        // only a genuinely recreated (empty) sandbox pays the seeding time.
+        let needSeed = entries.length > 0;
+        if (needSeed && resumeSandboxId) {
+          const probe = await actuator.readFile(workspaceId, entries[0][0]).catch(() => null);
+          if (typeof probe === 'string' && probe.length > 0) {
+            needSeed = false;
+            state.seeded = entries.length;
+          }
+        }
+        if (!needSeed) {
+          state.phase = 'finishing';
+        }
         // In PARALLEL batches, not one-by-one: each E2B write is a network round-trip, so a 30-file
         // project seeded serially added many seconds to every wake. The batch counter is what the
         // user watches — real progress, not a spinner.
-        for (let i = 0; i < entries.length; i += 8) {
-          await Promise.all(entries.slice(i, i + 8).map(([path, content]) =>
-            typeof content === 'string' ? actuator.writeFile(workspaceId, path, content).catch(() => {}) : Promise.resolve(),
-          ));
-          state.seeded = Math.min(i + 8, entries.length);
+        if (needSeed) {
+          for (let i = 0; i < entries.length; i += 8) {
+            await Promise.all(entries.slice(i, i + 8).map(([path, content]) =>
+              typeof content === 'string' ? actuator.writeFile(workspaceId, path, content).catch(() => {}) : Promise.resolve(),
+            ));
+            state.seeded = Math.min(i + 8, entries.length);
+          }
+          state.phase = 'finishing';
         }
-        state.phase = 'finishing';
         // THE SHELL MUST NEVER WAIT FOR GIT (admin screenshot 2026-08-06: the wake froze on
         // "Preparing git and tools…"). ensureRepo runs git init/config inside the sandbox — on a
         // 166-file project that can take long, and it has no timeout — while the shell needs NONE of

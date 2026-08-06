@@ -26402,3 +26402,49 @@ All three of the admin's 2026-08-05 tasks are now closed, plus the 2026-08-06 "e
 DB provision verified with a real SELECT 1 (entry 2026-08-05), the boot-log diagnoser (same day), the
 build-time offer, the deploy-time ask, 11 providers from one definition, and the no-root PostgreSQL that
 removed the template-rebuild blocker.
+
+---
+
+## 2026-08-06 — Custom domain: a valid domain was told to "check the spelling" (PR #2152)
+
+(Numbering correction, append-only style: the "Resume skips the seed" entry above shipped as PR
+**#2149**, and this entry ships as PR **#2152** — both numbers were guessed before PR creation, and
+another session's #2148/#2150/#2151 landed in between.)
+
+**Report (admin screenshot):** Publish & Deploy → Connect your own domain → `mitrify.in` (perfectly
+valid) → *"That domain could not be set up — check the spelling…"* — **for every domain tried.**
+
+**What the trace shows.** The domain passed the route's own `DOMAIN_RE` validation, so the failure is
+the Google Hosting API call (`ensureSite`/`customDomains.create`) throwing something the classifier's
+`/invalid|not.?found|400|404/` bucket caught — and that bucket's copy **blamed the user's spelling for
+a server-side failure.** By the time the classifier runs, spelling is provably not the problem: the
+message was a false accusation that hid our gap (rule 3 + rule 5 violation in one sentence).
+
+**Fixed the honesty; the underlying Google-side cause still needs its name.** From this session the
+Hosting API is unreachable (dev egress), and the raw error lives only in Cloud Run logs — the same
+undiagnosable-screenshot trap the terminal taught. So, exactly the #2129 pattern:
+- The invalid/404 class copy now says the truth: *"Your domain name looks valid — this is usually a
+  setup gap on our side"* — never a spelling accusation after validation has passed.
+- The connect route (ownership-checked) now returns `detail: sanitizeDomainErrorDetail(err)` — the
+  REAL provider error, bounded to 240 chars, project ids → `[project]`, vendor branding neutralized —
+  and the client renders it dim under the human message. The full raw text still goes to the server
+  log. **The admin's NEXT attempt will name the actual cause on screen.**
+- Retry clears stale detail with stale error.
+
+**Open root cause (rule 6):** the actual Google-side failure (likely candidates: Firebase Hosting
+Admin role missing on the Cloud Run service account for `customDomains.*`, the Hosting API surface
+not fully enabled, or a site-quota edge) — cannot be determined from this session. The detail line
+exists precisely so the next screenshot closes it.
+
+Tests: classifier no longer contains the spelling accusation (locked), sanitize helper unit-tested
+(HTTP code kept, identifiers stripped, 240 bound), route-detail + client-render + retry-clear
+invariants (`tests/nbaiDomainHonesty.test.ts`). Full gate: 1076 files / 12058 tests green, both tsc
+clean, bundle within budget.
+
+**Rebase note (same day):** while rebasing this entry over another session's work, my
+keep-both-sides conflict script matched a LITERAL `<<<<<<< HEAD` inside that session's historical
+prose (an old incident report about committing conflict markers!) and spliced this entry into the
+middle of it. Caught by checking for leftover markers before pushing; resolved by reconstructing
+this file from origin/main and appending this entry at the end. Lesson recorded: conflict-marker
+scripts must anchor to LINE-START markers only — and this file legitimately contains marker-like
+text inside prose.

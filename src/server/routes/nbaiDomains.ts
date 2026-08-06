@@ -8,6 +8,7 @@ import {
   attachCustomDomain,
   customDomainStatusLive,
   customDomainErrorMessage,
+  sanitizeDomainErrorDetail,
 } from '../lib/firebaseCustomDomain';
 import { linkWorkspaceDomain } from '../lib/firebaseDomainLink';
 
@@ -68,8 +69,11 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     } catch (err: any) {
       // HONEST failure (admin 2026-08-02): a permanent problem (server not permitted, domain taken)
       // must NOT tell the user to "try again" — that loops them forever on something a retry can
-      // never fix. customDomainErrorMessage classifies it; the raw detail still goes to the log only.
-      sendSafeError(res, 500, customDomainErrorMessage(err), err, 'nbai domain connect');
+      // never fix. customDomainErrorMessage classifies it. The SANITIZED real reason rides along for
+      // the owner (this route is ownership-checked): every class of this failure looked identical
+      // from a screenshot (admin 2026-08-06, mitrify.in) until the cause was allowed to name itself.
+      console.error(`[HTTP 500] nbai domain connect: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+      res.status(500).json({ error: customDomainErrorMessage(err), detail: sanitizeDomainErrorDetail(err) });
     }
   });
 

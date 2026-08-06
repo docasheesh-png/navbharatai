@@ -42,6 +42,8 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The sanitized REAL reason from the ownership-checked route — dim, owner-only, diagnosis-grade.
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [result, setResult] = useState<DomainStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -54,7 +56,7 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
 
   const connect = async () => {
     if (!domainValid || busy) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setErrorDetail(null);
     try {
       const res = await fetch('/api/domains/nbai/connect', {
         method: 'POST',
@@ -62,7 +64,7 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
         body: JSON.stringify({ workspaceId, domain: cleanDomain }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data?.error || 'Could not start the connection.'); return; }
+      if (!res.ok) { setError(data?.error || 'Could not start the connection.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
       setResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
@@ -73,7 +75,7 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
 
   const checkStatus = async () => {
     if (!domainValid || checking) return;
-    setChecking(true); setError(null);
+    setChecking(true); setError(null); setErrorDetail(null);
     try {
       const params = new URLSearchParams({ workspaceId, domain: cleanDomain });
       const res = await fetch(`/api/domains/nbai/status?${params.toString()}`, { headers: await authHeaders() });
@@ -124,7 +126,10 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
       {error && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
           <Info className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-red-200/90">{error}</p>
+          <div className="min-w-0">
+            <p className="text-[11px] text-red-200/90">{error}</p>
+            {errorDetail && <p className="mt-1 text-[10px] text-red-200/50 break-words">[{errorDetail}]</p>}
+          </div>
         </div>
       )}
 

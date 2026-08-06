@@ -14,39 +14,15 @@
 // white-label law (which hides our AI providers) does not apply. This block is injected into the
 // builder's system prompt only; it is never shown to the end user.
 
+import { dbProvider, ALL_DB_ENV_VARS, providerForEnvVar, envVarsFor, familyGuidance } from '../../lib/dbProviders';
+
 /** The marker secret written by Settings → Database that records the chosen provider. */
 export const DB_PROVIDER_MARKER = 'ENGINEER_DB_PROVIDER';
 
-interface DbProviderSpec {
-  label: string;
-  /** The real SDK/package the builder must use. */
-  sdk: string;
-  /** The env-var names this provider's credentials live under (mirrors the client's buildEnvKeys). */
-  envVars: string[];
-}
-
-const DB_PROVIDERS: Record<string, DbProviderSpec> = {
-  supabase: { label: 'Supabase', sdk: '@supabase/supabase-js', envVars: ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] },
-  firebase: {
-    label: 'Firebase', sdk: 'firebase',
-    envVars: ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_STORAGE_BUCKET', 'VITE_FIREBASE_MESSAGING_SENDER_ID', 'VITE_FIREBASE_APP_ID'],
-  },
-  mongodb: { label: 'MongoDB Atlas', sdk: 'mongodb', envVars: ['MONGODB_URI'] },
-  neon: { label: 'Neon (Postgres)', sdk: 'the Postgres client (pg / @neondatabase/serverless / Prisma)', envVars: ['DATABASE_URL'] },
-  appwrite: { label: 'Appwrite', sdk: 'appwrite', envVars: ['VITE_APPWRITE_ENDPOINT', 'VITE_APPWRITE_PROJECT_ID'] },
-  other: { label: 'the connected database', sdk: 'the appropriate client for its connection string', envVars: ['DATABASE_URL'] },
-};
-
-/** All env-var names any known provider can use — lets us detect a connection even without the marker. */
-const ALL_DB_ENV_VARS = Array.from(new Set(Object.values(DB_PROVIDERS).flatMap(p => p.envVars)));
-
-/** Which known provider owns a given env-var name (first match wins). */
-function providerForEnvVar(name: string): string | null {
-  for (const [id, spec] of Object.entries(DB_PROVIDERS)) {
-    if (id !== 'other' && spec.envVars.includes(name)) return id;
-  }
-  return null;
-}
+// The provider catalogue is SHARED with the settings screen (src/lib/dbProviders.ts). It used to be a
+// second, independent copy here — and a second copy of an env-var name is how the screen ends up saving
+// a credential the builder was never told to read, i.e. the user connects a database and the app
+// ignores it. One definition, both consumers derived from it (admin 2026-08-06).
 
 /**
  * Build the "a database is already connected — use it, don't create a new one" instruction block
@@ -62,20 +38,24 @@ export function userDatabaseContext(vaultSecrets: Record<string, string> | null 
 
   // 1) Resolve the provider id: the marker wins; else infer from populated env-vars.
   let providerId = (secrets[DB_PROVIDER_MARKER] || '').trim().toLowerCase();
-  if (!providerId || !DB_PROVIDERS[providerId]) {
+  if (!dbProvider(providerId)) {
+    // providerForEnvVar deliberately refuses a name more than one provider writes — DATABASE_URL
+    // belongs to Postgres, MySQL, Neon and PlanetScale alike, so naming a brand from it would be a
+    // guess presented as a fact. Such a connection resolves to the generic entry instead, which still
+    // tells the builder to use the real client for that connection string.
     const inferred = ALL_DB_ENV_VARS.filter(nonEmpty).map(providerForEnvVar).find(Boolean);
     providerId = inferred || (nonEmpty('DATABASE_URL') ? 'other' : '');
   }
-  if (!providerId || !DB_PROVIDERS[providerId]) return '';
+  const spec = dbProvider(providerId);
+  if (!spec) return '';
 
-  const spec = DB_PROVIDERS[providerId];
   // 2) Which of this provider's env-vars are actually present (so the builder is told the real ones).
-  const presentVars = spec.envVars.filter(nonEmpty);
+  const presentVars = envVarsFor(spec.id).filter(nonEmpty);
   // If the marker names a provider but NO credential env-var is present, still guide the builder to
   // that provider (it can surface an honest "set <VAR>" note) — but only if a marker was explicit.
   const hasMarker = !!(secrets[DB_PROVIDER_MARKER] || '').trim();
   if (presentVars.length === 0 && !hasMarker) return '';
-  const varsToName = presentVars.length > 0 ? presentVars : spec.envVars;
+  const varsToName = presentVars.length > 0 ? presentVars : envVarsFor(spec.id);
 
   return [
     '## CONNECTED DATABASE — USE IT, DO NOT CREATE A NEW ONE',
@@ -83,13 +63,17 @@ export function userDatabaseContext(vaultSecrets: Record<string, string> | null 
     `credentials are injected into this app's \`.env\` under these exact variables: ${varsToName.join(', ')}.`,
     'You MUST:',
     `- Use the real ${spec.label} SDK (${spec.sdk}) and read these EXACT \`.env\` variables — never hardcode a value.`,
+    // The DIALECT is the half that used to be missing, and it is the half that breaks an app silently:
+    // Postgres-only SQL against a cPanel MySQL fails at the first query, long after the build reported
+    // success. Named per FAMILY so every brand of the same engine gets identical, correct instructions.
+    `- ${familyGuidance(spec.family)}`,
     '- Wire any data/auth/storage the app needs to THIS connected database.',
     'You MUST NOT:',
     '- Provision, scaffold, or spin up a new/different database, an in-memory store, or a local file DB.',
     '- Substitute a different provider, or ask the user to create or configure a database — they already did.',
-    `- Invent new env-var names for the database; reuse the ones above.`,
+    '- Invent new env-var names for the database; reuse the ones above.',
     presentVars.length === 0
-      ? `NOTE: the ${spec.label} credentials are not all set yet — wire the real integration and surface an honest "set ${spec.envVars[0]}" note rather than swapping in a different store.`
+      ? `NOTE: the ${spec.label} credentials are not all set yet — wire the real integration and surface an honest "set ${envVarsFor(spec.id)[0]}" note rather than swapping in a different store.`
       : '',
   ].filter(Boolean).join('\n');
 }
@@ -109,8 +93,11 @@ export function noDatabaseConnectedContext(): string {
     '— accounts/login, saved records, user-generated content, orders, bookings, anything that must',
     'survive a page refresh — then, as part of your reply, you MUST:',
     '- Tell the user CLEARLY that this app needs a database and that they should connect their own at',
-    '  **Settings → App Settings → Database** (supported: Supabase, Firebase, MongoDB, Neon, Appwrite,',
-    '  or a custom connection string). Say in one short line WHY (so their data is saved and stays',
+    '  **Settings → App Settings → Database** — they can use ANY database they like: Supabase, Firebase,',
+    '  MongoDB, Neon, PostgreSQL on any host, MySQL/MariaDB (including shared hosting like Hostinger or',
+    '  cPanel), PlanetScale, Turso, Upstash Redis, Appwrite, or any other connection string. Mention that',
+    '  NavBharatAI can also create a free one for them in one tap, inside their OWN Supabase account.',
+    '  Say in one short line WHY (so their data is saved and stays',
     '  private to them), and that once they connect it you will wire it in automatically on the next build.',
     '- Write this message IN THE USER\'S OWN LANGUAGE — mirror the exact language they wrote their request',
     '  in (Hindi, Hinglish, Tamil, Telugu, Bengali, Marathi, Gujarati, Kannada, Malayalam, Punjabi,',

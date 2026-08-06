@@ -1,112 +1,25 @@
 import { useState, useEffect } from 'react';
+import { DB_PROVIDERS, envKeysFor, dbProvider, type DbProviderId } from '../../lib/dbProviders';
 import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
 import { SupabaseConnectCard } from './SupabaseConnectCard';
 
-type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
+/**
+ * The provider catalogue and the credential → `.env` mapping now live in ONE shared place
+ * (`src/lib/dbProviders.ts`), imported by BOTH this screen and the builder's prompt context.
+ *
+ * They used to be two independent copies, and the drift was silent in the worst possible direction:
+ * this screen could save a credential under a name the builder was never told to read, so a user
+ * connected their database and the app ignored it. Adding a provider also meant remembering both
+ * places, which is why the list had stopped growing.
+ */
+type DbProvider = DbProviderId;
 
 interface DbConfig {
   provider: DbProvider;
   platformName?: string;
   credentials: Record<string, string>;
-}
-
-const DB_PROVIDERS: {
-  id: DbProvider;
-  label: string;
-  keyLink: string;
-  // `where` is a short, per-field navigation hint (admin 2026-07-18): shown next to each input so the
-  // user knows EXACTLY where in their provider's dashboard that specific value lives — not just one link
-  // for the whole provider. Written from the real provider consoles.
-  fields: { key: string; label: string; placeholder: string; where?: string }[];
-}[] = [
-  {
-    id: 'supabase', label: 'Supabase',
-    keyLink: 'https://supabase.com/dashboard/project/_/settings/api',
-    fields: [
-      { key: 'url',     label: 'Project URL', placeholder: 'https://xxxx.supabase.co', where: 'Project Settings → API → Project URL' },
-      { key: 'anonKey', label: 'Anon Key',     placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…', where: 'Project Settings → API → Project API keys → anon / public' },
-    ],
-  },
-  {
-    id: 'firebase', label: 'Firebase',
-    keyLink: 'https://console.firebase.google.com/',
-    fields: [
-      { key: 'apiKey',            label: 'API Key',             placeholder: 'AIzaSy…',                         where: 'Project Settings → General → Your apps → SDK setup and configuration → apiKey' },
-      { key: 'authDomain',        label: 'Auth Domain',         placeholder: 'your-project.firebaseapp.com',    where: 'Project Settings → General → Your apps → authDomain' },
-      { key: 'projectId',         label: 'Project ID',          placeholder: 'your-project-id',                 where: 'Project Settings → General → Project ID' },
-      { key: 'storageBucket',     label: 'Storage Bucket',      placeholder: 'your-project.appspot.com',        where: 'Project Settings → General → Your apps → storageBucket' },
-      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789',                       where: 'Project Settings → Cloud Messaging → Sender ID' },
-      { key: 'appId',             label: 'App ID',              placeholder: '1:123:web:abc',                   where: 'Project Settings → General → Your apps → appId' },
-    ],
-  },
-  {
-    id: 'mongodb', label: 'MongoDB Atlas',
-    keyLink: 'https://cloud.mongodb.com/',
-    fields: [
-      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb', where: 'Atlas → Database → Connect → Drivers → copy the SRV string (replace <password> with your DB user password)' },
-    ],
-  },
-  {
-    id: 'neon', label: 'Neon (Postgres)',
-    keyLink: 'https://console.neon.tech/',
-    fields: [
-      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb', where: 'Neon Console → your project → Dashboard → Connection Details → Connection string (Pooled)' },
-    ],
-  },
-  {
-    id: 'appwrite', label: 'Appwrite',
-    keyLink: 'https://cloud.appwrite.io/',
-    fields: [
-      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1', where: 'Appwrite Console → your project → Settings → API Endpoint (Cloud users: https://cloud.appwrite.io/v1)' },
-      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id',            where: 'Appwrite Console → your project → Settings → Project ID' },
-    ],
-  },
-  {
-    id: 'other', label: 'Other',
-    keyLink: '',
-    fields: [
-      { key: 'platformName',     label: 'Platform Name',               placeholder: 'e.g. PlanetScale, Turso…', where: 'The name of your database provider — used only as a label so v5.0 knows which SDK to wire' },
-      { key: 'connectionString', label: 'Connection String / API Key',  placeholder: 'mysql://… or your API key', where: "Your provider's dashboard → Connect / Connection string (or API key)" },
-    ],
-  },
-];
-
-/**
- * Maps DbProvider credentials to their corresponding .env variable names.
- * These are the exact names that BackendScaffolder writes into the sandbox .env.
- */
-function buildEnvKeys(provider: DbProvider, credentials: Record<string, string>): Record<string, string> {
-  switch (provider) {
-    case 'supabase':
-      return {
-        VITE_SUPABASE_URL: credentials.url ?? '',
-        VITE_SUPABASE_ANON_KEY: credentials.anonKey ?? '',
-      };
-    case 'firebase':
-      return {
-        VITE_FIREBASE_API_KEY: credentials.apiKey ?? '',
-        VITE_FIREBASE_AUTH_DOMAIN: credentials.authDomain ?? '',
-        VITE_FIREBASE_PROJECT_ID: credentials.projectId ?? '',
-        VITE_FIREBASE_STORAGE_BUCKET: credentials.storageBucket ?? '',
-        VITE_FIREBASE_MESSAGING_SENDER_ID: credentials.messagingSenderId ?? '',
-        VITE_FIREBASE_APP_ID: credentials.appId ?? '',
-      };
-    case 'mongodb':
-      return { MONGODB_URI: credentials.uri ?? '' };
-    case 'neon':
-      return { DATABASE_URL: credentials.connectionString ?? '' };
-    case 'appwrite':
-      return {
-        VITE_APPWRITE_ENDPOINT: credentials.endpoint ?? '',
-        VITE_APPWRITE_PROJECT_ID: credentials.projectId ?? '',
-      };
-    case 'other': {
-      const val = credentials.connectionString || '';
-      return val ? { DATABASE_URL: val } : {};
-    }
-  }
 }
 
 interface DatabaseSettingsProps {
@@ -159,7 +72,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
   }, [userId]);
 
   const handleSave = async () => {
-    const providerDef = DB_PROVIDERS.find(p => p.id === provider);
+    const providerDef = dbProvider(provider);
     if (!providerDef) return;
 
     // Only the fields the user actually filled THIS time. A blank field means "keep the existing
@@ -183,7 +96,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
       // here previously omitted it, so requireUserMatch rejected the sync (401) and nothing saved.
       const existing = await listSecrets(userId);
 
-      const envKeys = buildEnvKeys(provider, enteredCreds);
+      const envKeys = envKeysFor(provider, enteredCreds);
       const upserts: { name: string; value: string }[] = [{ name: 'ENGINEER_DB_PROVIDER', value: provider }];
       for (const [name, value] of Object.entries(envKeys)) if (value) upserts.push({ name, value });
 
@@ -206,7 +119,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
     }
   };
 
-  const currentDef = DB_PROVIDERS.find(p => p.id === provider);
+  const currentDef = dbProvider(provider);
   const hasSavedConfig = !!activeMarker && activeMarker.provider === provider;
 
   return (
@@ -247,6 +160,13 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
             ))}
           </select>
         </div>
+
+        {/* One line on what the selected provider actually IS. The list grew from 6 options to 11
+            (admin 2026-08-06: "user jo chahe db use kare"), and a longer list of bare brand names is a
+            worse choice than a short one — most users have not heard of half of them. */}
+        {currentDef?.blurb && (
+          <p className="text-[11px] text-[#8b949e] leading-relaxed -mt-2">{currentDef.blurb}</p>
+        )}
 
         {/* Security note: fields start blank on purpose — saved values live encrypted, not in the browser. */}
         {hasSavedConfig && (

@@ -26860,3 +26860,79 @@ their CI, and adding a package to someone's project to run a test for them is a 
 the common case — was read as source. Now anchored on a path start as well as a slash.
 
 Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,253 tests, exit 0.
+
+## 2026-08-06 (14) — real Web Vitals on the pages we already open
+
+The roadmap lists "Lighthouse / Web-Vitals (LCP/CLS/INP) + axe-core over the LIVE preview" as 🔒 BLOCKED
+— *"needs headless Chrome"* — and calls it **the app's weakest measured category**. That is the SAME
+false premise as the 300 MB one: **Chromium is pre-baked into the E2B image**, and `PageRouteCheck`
+already loads each page in it. So LCP and CLS cost one extra in-page read and **no dependency at all**.
+
+(`lighthouse@13.3.0` IS already a dependency of this repo — but it drives Chrome from wherever it runs,
+and there is no Chrome on Cloud Run. That is the real blocker for the server-side approach, and it is
+irrelevant to measuring from inside the sandbox's own browser.)
+
+**The danger here is a measurement being WRONG, not absent, so two honesty rules are enforced:**
+
+1. **The observation window decides whether the numbers mean anything.** A fixed short wait can only ever
+   observe an LCP *smaller than itself*, so every page would score "good" — the slowest pages most
+   confidently of all. That is a false pass, worse than no number. The check now waits for the page to go
+   QUIET (`networkidle`, capped by `SETTLE_TIMEOUT_MS`), records whether it settled, and **refuses to
+   grade an unsettled page**, reporting its LCP as a floor ("at least Xms") instead. On a quick preview
+   networkidle usually resolves well under the cap, so in practice this is often FASTER than the fixed
+   1.2s wait it replaced.
+2. **Only clearly-bad values are flagged, and the numbers say where they came from.** These are measured
+   on a 2-vCPU sandbox against a cold dev server, not the user's machine on a production build. Treating
+   "needs improvement" as a finding would frighten people about an app that is fine for their users, so
+   only Google's *poor* thresholds are called out (LCP > 4s, CLS > 0.25) and the line says
+   "measured in the preview sandbox (not your users' devices)".
+
+Performance is reported **alongside** the render verdict, never as one: a slow page still rendered, and
+failing a build over a sandbox number would be a false alarm. A partial vitals object is treated as no
+measurement rather than a half-truth.
+
+**A bug caught while writing it:** an in-script comment used backticks, which CLOSED the enclosing TS
+template literal. The generated JavaScript is composed text exactly like the shell around it, so a
+`new Function` syntax check now guards it permanently — the same lesson as the `bash -n`/`sh -n` guards.
+
+Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,266 tests, exit 0.
+
+**Still open in this line:** axe-core accessibility over the same pages. It needs the axe source injected
+into the page (a ~500 KB script tag), which is doable with zero sandbox install but is its own slice.
+
+## 2026-08-06 (15) — accessibility on the same pages, and a bug that would have made the whole check a no-op
+
+**THE CRITICAL FIND, and it was in code merged an hour earlier (#2162).** The in-sandbox page script is an
+ES module that loaded Playwright with `NODE_PATH=…` + `import`. **NODE_PATH is honoured only by CJS
+`require`; an ESM `import` ignores it entirely and dies with `ERR_MODULE_NOT_FOUND`.** And because the
+command ends in `|| true` and pipes through `grep`, that failure produces NO output and NO error — the
+page check would have **silently verified nothing on every single build**, while the report said the
+pages were fine. Proven both ways in a real Node before fixing (NODE_PATH → module-not-found;
+absolute-path import → OK); the script now imports
+`/home/user/.e-tools/node_modules/playwright/index.js` by path. The old test that REQUIRED `NODE_PATH` —
+which is what locked the bug in place — is re-anchored to the mechanism that actually works.
+
+**Its twin: a check that produced NOTHING was reported as "nothing to check".** That is precisely the
+shape the bug produced (routes found, script ran, zero output), so the false reassurance and the failure
+were designed to arrive together. `summarizePageCheck` now takes the ATTEMPTED count and says
+"could not be completed for N routes — nothing about those pages was verified" when results are empty
+but routes existed.
+
+**Accessibility, the last piece of the roadmap's "weakest measured category".** Six checks run in the
+same already-open page: missing `lang`, missing `<title>`, images with no `alt`, buttons and links a
+screen reader cannot name, form fields with no label. **Deliberately NOT axe and never called
+WCAG-compliant** — injecting axe-core means pushing ~500 KB through a sandbox command whose size limit
+cannot be verified from here, and shipping an unverified mechanism is a mistake this codebase has already
+paid for. Claiming full coverage would be the lie; finding real problems is not.
+
+**Verified in a real browser before shipping:** a deliberately-bad page produced all six findings, and a
+correct page produced NONE — including the cases that look like violations but are not (`alt=""` with
+`aria-hidden`, an `aria-label` on a button, `label[for]`, a wrapping label, a hidden input). Reported in
+plain words ("3 images with no alt text"), and never as a build failure: a page with an unlabelled button
+still rendered.
+
+Gate: tsc clean both projects, SHUFFLED full run 1086 files / 12,276 tests, exit 0.
+
+With this, the roadmap's 🔒 "Lighthouse / Web-Vitals + axe-core over the LIVE preview — needs headless
+Chrome" is CLOSED as far as code can close it: LCP, CLS and accessibility all measured on the real pages,
+with no new dependency and no infra.

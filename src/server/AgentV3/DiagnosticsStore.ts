@@ -521,6 +521,63 @@ export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HI
   }
 }
 
+/**
+ * The owner uid encoded in a v5 workspace id (`agentv3-<uid>-<session>`). Pure. Null for the anon
+ * prefix or an unrecognized shape — the caller shows the raw workspaceId instead of guessing.
+ */
+export function workspaceOwnerUid(workspaceId: string | null | undefined): string | null {
+  const m = /^agentv3-([A-Za-z0-9_-]{1,64})-/.exec(workspaceId ?? '');
+  if (!m || m[1] === 'anon') return null;
+  return m[1];
+}
+
+/** One row of the ADMIN all-builds browser: a workspace's latest report, metadata only. */
+export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
+  workspaceId: string;
+  savedAt: number;
+  ownerUid: string | null;
+}
+
+/**
+ * ADMIN-ONLY (2026-08-06, admin: "koi bhi user kuch bhi app banaye — admin puri 0→100% build report
+ * download kar sake, user ke send kiye bina"): list EVERY workspace's latest build report across ALL
+ * users, most recently active first. Every build already lands here durably (the latest doc is
+ * written per message and the per-build history rides a subcollection) — this is just the missing
+ * global index over it. Ordered by the top-level `savedAt` (auto single-field index at collection
+ * scope — no composite, no collection-group index, so it can never FAILED_PRECONDITION). Metadata
+ * only; the full payloads stay behind the per-workspace loaders. Never throws.
+ */
+export async function listAllDiagnostics(limit = 100): Promise<AllDiagnosticsEntry[]> {
+  const db = getDb();
+  if (!db) return [];
+  try {
+    const snap = await db
+      .collection(COLLECTION)
+      .orderBy('savedAt', 'desc')
+      .limit(Math.max(1, Math.min(500, limit)))
+      .get();
+    return snap.docs.map((d) => {
+      const r = (d.data()?.report ?? {}) as BuildDiagnosticsReport;
+      return {
+        workspaceId: d.id,
+        savedAt: (d.data()?.savedAt as number) ?? 0,
+        ownerUid: workspaceOwnerUid(d.id),
+        id: String(r.startedAt ?? ''),
+        buildId: r.buildId,
+        startedAt: r.startedAt,
+        endedAt: r.endedAt,
+        ok: r.ok,
+        summary: r.summary,
+        rootCause: r.rootCause,
+        counts: r.counts,
+        prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 /** Load ONE specific historical report by id (an entry's `id` from listDiagnosticsHistory). Null on any failure/absence. */
 export async function getDiagnosticsHistoryItem(workspaceId: string, id: string): Promise<BuildDiagnosticsReport | null> {
   const db = getDb();

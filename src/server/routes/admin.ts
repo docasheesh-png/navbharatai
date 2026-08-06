@@ -14,6 +14,8 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
@@ -527,6 +529,74 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
+    }
+  });
+
+  // ALL BUILDS browser (admin 2026-08-06: "koi bhi user kuch bhi app banaye — admin apne panel se
+  // puri 0→100% build report download kar sake, user ke send kiye bina"). Every build's report is
+  // already durably recorded (workspace latest doc + per-build history, including in-progress
+  // upserts); these routes are the missing ADMIN-ONLY global window over it. Full provider detail —
+  // this is the forensic surface; nothing here is ever user-reachable (verifyAdminToken on each).
+
+  app.get('/api/admin/all-builds', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+      const q = String(req.query.q ?? '').trim().toLowerCase();
+      let builds = await listAllDiagnostics(limit);
+      if (q) {
+        builds = builds.filter((b) =>
+          b.workspaceId.toLowerCase().includes(q) ||
+          (b.ownerUid ?? '').toLowerCase().includes(q) ||
+          (b.prompt ?? '').toLowerCase().includes(q) ||
+          (b.summary ?? '').toLowerCase().includes(q));
+      }
+      res.json({ builds });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to list builds.' });
+    }
+  });
+
+  app.get('/api/admin/all-builds/:workspaceId', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const workspaceId = String(req.params.workspaceId || '');
+      const [latest, history] = await Promise.all([
+        loadDiagnostics(workspaceId).catch(() => null),
+        listDiagnosticsHistory(workspaceId).catch(() => []),
+      ]);
+      if (!latest && history.length === 0) { res.status(404).json({ error: 'No build reports recorded for this workspace.' }); return; }
+      res.json({ workspaceId, latest, history });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load the workspace reports.' });
+    }
+  });
+
+  // Download: ?build=<historyId> → that ONE build's full report; no build param → the whole 0→100%
+  // session (every recorded build, oldest → newest, byte-capped exactly like the user-side stitch so
+  // the download always actually loads — omissions are counted, never silent).
+  app.get('/api/admin/all-builds/:workspaceId/download', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const workspaceId = String(req.params.workspaceId || '');
+      const buildId = typeof req.query.build === 'string' ? req.query.build : '';
+      if (buildId) {
+        const report = await getDiagnosticsHistoryItem(workspaceId, buildId);
+        if (!report) { res.status(404).json({ error: 'No report recorded for that build.' }); return; }
+        res.setHeader('Content-Disposition', `attachment; filename="build-${workspaceId}-${buildId}.json"`);
+        res.json({ workspaceId, report });
+        return;
+      }
+      const meta = await listDiagnosticsHistory(workspaceId, 20).catch(() => []);
+      const full = (await Promise.all(meta.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => null)))).filter(Boolean) as NonNullable<Awaited<ReturnType<typeof getDiagnosticsHistoryItem>>>[];
+      const latest = await loadDiagnostics(workspaceId).catch(() => null);
+      const byStart = new Map<number, (typeof full)[number]>();
+      for (const r of full) byStart.set(r.startedAt, r);
+      if (latest) byStart.set(latest.startedAt, latest);
+      const ordered = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+      if (ordered.length === 0) { res.status(404).json({ error: 'No build reports recorded for this workspace.' }); return; }
+      const { kept, omitted } = capSessionReports(ordered);
+      res.setHeader('Content-Disposition', `attachment; filename="build-session-${workspaceId}.json"`);
+      res.json({ workspaceId, session: { builds: kept, count: ordered.length, omittedBuilds: omitted } });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to download the report.' });
     }
   });
 

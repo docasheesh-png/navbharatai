@@ -19,7 +19,7 @@
 // module is pure so the classification + env generation are fully unit-testable.
 
 import { randomBytes } from 'node:crypto';
-import { classifyDevServerFailure, missingCredentialFromLog } from './sandbox/EngineerAI/actuators/DevServerRecovery';
+import { classifyDevServerFailure, missingCredentialFromLog, unavailableDbEngine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 
 /** SQL/ORM drivers whose presence means the app needs a database to boot. */
 const DB_DEPS = [
@@ -242,6 +242,13 @@ export function halfBootCause(bootLog: string | null | undefined): string | null
   const cause = classifyDevServerFailure(log).cause;
   if (cause === 'db_unreachable') {
     return 'Your app started but could not reach its database (connection refused), so it stopped booting half-way — its pages were never mounted. That is why pages answer "Cannot GET"';
+  }
+  // The SAME half-boot shape, a different cause and a different action: the sandbox can start
+  // PostgreSQL and nothing else, so a Mongo/MySQL/Redis app stops half-way for a reason no retry
+  // touches. Naming the engine is what makes the message actionable.
+  if (cause === 'db_engine_unavailable') {
+    const engine = unavailableDbEngine(log)?.label ?? 'its database';
+    return `Your app started but could not reach ${engine}, so it stopped booting half-way — its pages were never mounted. That is why pages answer "Cannot GET". This preview can only start PostgreSQL, so connect your own ${engine} in Settings → App Settings → Database`;
   }
   if (cause === 'missing_credential') {
     const key = missingCredentialFromLog(log);

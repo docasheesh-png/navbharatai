@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog, unavailableDbEngine } from './DevServerRecovery';
 
 // MITRIFY AUTOPSY 2026-08-04 — "The app didn't finish starting… its log had no recognisable error."
 // The log was FULL of recognisable errors; two defects hid them:
@@ -638,5 +638,75 @@ describe('conflictingPortFromLog — the occupied port comes from the ERROR, nev
 
   it('survives an ANSI-coloured log (the stripAnsi class fix applies here too)', () => {
     expect(conflictingPortFromLog(`${ESC}[31mError: listen EADDRINUSE: address already in use :::5000${ESC}[0m`)).toBe(5000);
+  });
+});
+
+/**
+ * A DATABASE ENGINE THE SANDBOX CANNOT START (admin 2026-08-06).
+ *
+ * The sandbox can provision PostgreSQL and nothing else. A Mongo app's
+ * `MongoServerSelectionError … ECONNREFUSED 127.0.0.1:27017` matched NOTHING in this file, fell through
+ * to the generic crash branch, and bought two blind restarts that could not possibly help — then
+ * reported "the dev server kept crashing on startup", which names the symptom and hides the cause. A
+ * restart does not conjure a MongoDB. (Verified separately: MongoDB's own binaries cannot be fetched
+ * from this environment, so provisioning one is not something that could be shipped honestly today —
+ * telling the truth is.)
+ */
+describe('unavailableDbEngine — names the engine, and only on a real connection failure', () => {
+  it('recognises the real MongoDB driver error', () => {
+    const log = 'MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017';
+    expect(unavailableDbEngine(log)).toEqual({ id: 'mongodb', label: 'MongoDB' });
+    const d = classifyDevServerFailure(log);
+    expect(d.cause).toBe('db_engine_unavailable');
+    expect(d.dbEngine).toBe('mongodb');
+  });
+
+  it('recognises MySQL, Redis and SQL Server', () => {
+    expect(unavailableDbEngine('Error: connect ECONNREFUSED 127.0.0.1:3306')?.label).toBe('MySQL');
+    expect(unavailableDbEngine('ReplyError: connect ECONNREFUSED 127.0.0.1:6379')?.label).toBe('Redis');
+    expect(unavailableDbEngine('ELOGIN: connect ETIMEDOUT 10.0.0.5:1433')?.label).toBe('SQL Server');
+  });
+
+  it('does NOT fire on a log that merely MENTIONS a database', () => {
+    // A printed config or a comment is not a database being unreachable; misreading it would send a
+    // working app down a "you need a database" path it never needed.
+    expect(unavailableDbEngine('Using mongodb://localhost:27017/app')).toBeNull();
+    expect(unavailableDbEngine('vite ready in 300 ms')).toBeNull();
+    expect(unavailableDbEngine('')).toBeNull();
+  });
+
+  it('POSTGRES still wins — it is the one engine we CAN start, and its recovery is the opposite', () => {
+    // Routing a Postgres failure here would stop us reviving a database we could have revived.
+    const pg = classifyDevServerFailure("Error: P1001: Can't reach database server at `localhost:5432`");
+    expect(pg.cause).toBe('db_unreachable');
+    expect(pg.recovery).toBe('reprovision_db');
+  });
+
+  it('short-circuits instead of burning both restart attempts on a certainty', () => {
+    expect(classifyDevServerFailure('MongoServerSelectionError: connect ECONNREFUSED :27017').recovery).toBe('code_fix');
+  });
+
+  it('a busy port is still the more specific cause', () => {
+    // The same log can carry both; freeing the port is the actionable one.
+    expect(classifyDevServerFailure('Error: listen EADDRINUSE :::3000\nMongoServerSelectionError: connect ECONNREFUSED :27017').cause).toBe('port_in_use');
+  });
+});
+
+describe('what the user and the report are told', () => {
+  const log = 'MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017';
+
+  it('the user is told which engine, and given two real choices', () => {
+    const msg = userFacingPreviewFailure(classifyDevServerFailure(log), 3000, log);
+    expect(msg).toContain('MongoDB');
+    expect(msg).toContain('Settings → App Settings → Database');
+    expect(msg).toContain('switch the app to a database that runs here');
+  });
+
+  it('the terminal line does NOT claim recovery was attempted and exhausted', () => {
+    // Nothing was attempted, and nothing could have been. Saying we tried would misdescribe a situation
+    // the user can fix in one step.
+    const t = terminalDetail(classifyDevServerFailure(log));
+    expect(t).not.toContain('Automatic recovery is exhausted');
+    expect(t).toContain('MongoDB');
   });
 });

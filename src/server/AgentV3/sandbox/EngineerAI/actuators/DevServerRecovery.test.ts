@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog } from './DevServerRecovery';
 
 // MITRIFY AUTOPSY 2026-08-04 — "The app didn't finish starting… its log had no recognisable error."
 // The log was FULL of recognisable errors; two defects hid them:
@@ -575,5 +575,68 @@ describe('cleanPreviewLogForUser — no git noise in the panel a user reads', ()
     const raw = 'Error: connect ECONNREFUSED 127.0.0.1:5432\n    at foo (bar.js:1:1)';
     expect(cleanPreviewLogForUser(raw)).toBe(raw);
     expect(cleanPreviewLogForUser('')).toBe('');
+  });
+});
+
+/**
+ * MITRIFY AUTOPSY 2026-08-05 — "[health-check] dev server did not come up on port 3000 after automatic
+ * recovery. Root cause: The port stayed occupied by another process. Automatic recovery is exhausted."
+ *
+ * The recovery could NEVER have worked. The port was scraped with `/(?:port\s+|:)(\d{2,5})/` over the
+ * whole log tail, which takes the first port-shaped number — and a dev-server log opens with its own
+ * launch command. So the engine read `--port 3000` from the ECHO, announced "Port 3000 is already in
+ * use", and freed 3000, while the actual failure two lines down was a bind on 5000. Wrong port in the
+ * message, wrong port in the fix, two attempts spent reproducing the identical error.
+ */
+describe('conflictingPortFromLog — the occupied port comes from the ERROR, never the command echo', () => {
+  // Verbatim from the admin's pasted dev-server log.
+  const REAL_LOG = [
+    '[health-check] attempt 1 — Port 3000 is already in use — freeing it and restarting.',
+    '> rest-express@1.0.0 dev',
+    '> NODE_ENV=development tsx server/index.ts --host 0.0.0.0 --port 3000 --strictPort',
+    '',
+    'UNCAUGHT EXCEPTION — server kept alive: Error: listen EADDRINUSE: address already in use 0.0.0.0:5000',
+  ].join('\n');
+
+  it('reads 5000 from the bind error, NOT 3000 from the echoed launch command', () => {
+    expect(conflictingPortFromLog(REAL_LOG)).toBe(5000);
+  });
+
+  it('the diagnosis names the real port and carries it for the recovery to free', () => {
+    const d = classifyDevServerFailure(REAL_LOG);
+    expect(d.cause).toBe('port_in_use');
+    expect(d.recovery).toBe('kill_port_retry');
+    expect(d.conflictPort).toBe(5000);
+    expect(d.detail).toContain('5000');
+    expect(d.detail).not.toContain('3000'); // the old message said exactly this — the echoed flag
+  });
+
+  it('never mistakes the octets of a dotted IP for the port', () => {
+    expect(conflictingPortFromLog('Error: listen EADDRINUSE: address already in use 127.0.0.1:3000')).toBe(3000);
+    expect(conflictingPortFromLog('Error: listen EADDRINUSE :::8080')).toBe(8080);
+  });
+
+  it('still reads the framework phrasings it always handled', () => {
+    expect(conflictingPortFromLog('Port 5173 is already in use')).toBe(5173);
+    expect(conflictingPortFromLog('> cross-env PORT=4100 react-scripts start\nSomething is already running on port 4100.')).toBe(4100);
+    expect(conflictingPortFromLog('address already in use :::9000')).toBe(9000);
+  });
+
+  it('refuses to name an INFRASTRUCTURE port — freeing one would kill the app database', () => {
+    // "Recovering" by killing Postgres turns "won't start" into "started with no data store".
+    expect(conflictingPortFromLog('Error: listen EADDRINUSE: address already in use 0.0.0.0:5432')).toBeNull();
+    expect(conflictingPortFromLog('Error: listen EADDRINUSE :::6379')).toBeNull();
+    const d = classifyDevServerFailure('Error: listen EADDRINUSE: address already in use 0.0.0.0:5432');
+    expect(d.cause).toBe('port_in_use'); // still classified honestly…
+    expect(d.conflictPort).toBeUndefined(); // …but nothing is offered up to be killed
+  });
+
+  it('returns null when no port conflict is present at all', () => {
+    expect(conflictingPortFromLog('')).toBeNull();
+    expect(conflictingPortFromLog('> vite\nready in 300 ms')).toBeNull();
+  });
+
+  it('survives an ANSI-coloured log (the stripAnsi class fix applies here too)', () => {
+    expect(conflictingPortFromLog(`${ESC}[31mError: listen EADDRINUSE: address already in use :::5000${ESC}[0m`)).toBe(5000);
   });
 });

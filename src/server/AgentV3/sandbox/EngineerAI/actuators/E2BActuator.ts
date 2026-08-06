@@ -957,8 +957,14 @@ export class E2BActuator implements IEngineerActuator {
             stdout += ' (PostgreSQL provision reported errors — retrying anyway).';
           }
         }
-        // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).
-        await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 }).catch(() => {});
+        // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean)
+        // — AND, when the log named a DIFFERENT port as the occupied one, free that one too. Without it
+        // the recovery frees the port we watch while the orphan sits on the port the app actually binds,
+        // so every attempt reproduces the same EADDRINUSE and "recovery exhausted" is guaranteed before
+        // the first restart runs (mitrify autopsy 2026-08-05). conflictPort is read from the error text
+        // only, and never names an infrastructure port we must not kill (PROTECTED_PORTS).
+        const killPorts = diag.conflictPort && diag.conflictPort !== port ? [port, diag.conflictPort] : port;
+        await sandbox.commands.run(buildPreKillPortCommand(killPorts), { timeoutMs: 5000 }).catch(() => {});
         portUp = await launchAndWait(20);
       }
       // Attempts are spent and the server is still down: NOW escalate to give_up, with a detail that

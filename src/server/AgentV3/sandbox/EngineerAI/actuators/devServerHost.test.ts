@@ -229,6 +229,29 @@ describe('buildPreKillPortCommand', () => {
   it('does NOT use the old Vite-blind `node.*:{port}` pattern (it never matched a real vite process)', () => {
     expect(buildPreKillPortCommand(5173)).not.toContain('node.*:5173');
   });
+
+  // MITRIFY AUTOPSY 2026-08-05. The recovery freed only the port the health check WATCHES (3000) while
+  // the app's real bind failed on 5000 — so the orphan holding 5000 survived every attempt and
+  // "automatic recovery is exhausted" was guaranteed before the first restart even ran.
+  it('frees EVERY given port, so the watched port and the truly-occupied one are both cleared', () => {
+    const cmd = buildPreKillPortCommand([3000, 5000]);
+    for (const p of [3000, 5000]) {
+      expect(cmd).toContain(`fuser -k ${p}/tcp`);
+      expect(cmd).toContain(`lsof -ti tcp:${p}`);
+      expect(cmd).toContain(`sport = :${p}`);
+    }
+    expect(cmd.trim().endsWith('true')).toBe(true);
+  });
+
+  it('a single number behaves exactly as before (no caller had to change)', () => {
+    expect(buildPreKillPortCommand([5173])).toBe(buildPreKillPortCommand(5173));
+  });
+
+  it('de-duplicates and drops nonsense ports rather than emitting a broken kill', () => {
+    expect(buildPreKillPortCommand([3000, 3000])).toBe(buildPreKillPortCommand(3000));
+    expect(buildPreKillPortCommand([0, -1, 70000, NaN])).toBe('true');
+    expect(buildPreKillPortCommand([])).toBe('true');
+  });
 });
 
 describe('pinDevServerPort', () => {

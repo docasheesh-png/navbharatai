@@ -26084,3 +26084,46 @@ wake completes is instant. If real-world cold creates regularly exceed ~2 min, t
 infra (warm sandbox pool / template optimization), recorded here as the open follow-up.
 
 
+
+## 2026-08-05 — "Cannot GET" / preview-down, half 2: the port recovery could never have worked
+
+The admin's dev-server log closed the loop on the mitrify preview failure:
+
+```
+[health-check] attempt 1 — Port 3000 is already in use — freeing it and restarting.
+[health-check] attempt 2 — Port 3000 is already in use — freeing it and restarting.
+> NODE_ENV=development tsx server/index.ts --host 0.0.0.0 --port 3000 --strictPort
+UNCAUGHT EXCEPTION — server kept alive: Error: listen EADDRINUSE: address already in use 0.0.0.0:5000
+[health-check] dev server did not come up on port 3000 after automatic recovery.
+Root cause: The port stayed occupied by another process. Automatic recovery is exhausted
+```
+
+Two independent defects, one per half of the 50/50 law.
+
+**Prevention (PR #2144, merged).** `pinDevServerPort` appended `--port 3000 --strictPort` to
+`tsx server/index.ts`. A direct Node server has no such flag, so it ignored it and bound
+`process.env.PORT || 5000`. The app and the health check were watching different ports by
+construction. `resolvedScript` is now passed through, so `isNodeServerCommand` tests what actually
+runs and the port is injected as `PORT=3000` in the environment — the app binds the watched port.
+
+**Reliable heal (this change).** Even with the app on the right port, the recovery itself was a
+retry loop around code that deterministically fails:
+
+- The occupied port was scraped with `/(?:port\s+|:)(\d{2,5})/` over the whole log tail, which takes
+  the first port-shaped number — and a dev-server log opens with its own launch command. It read
+  `--port 3000` from the ECHO while the real failure was a bind on 5000. Wrong port in the message
+  AND wrong port in the fix. New `conflictingPortFromLog()` reads the ERROR forms only (libuv
+  EADDRINUSE, Vite, CRA, bare bind), refuses the octets of a dotted IP, and travels on the diagnosis
+  as `conflictPort`.
+- `buildPreKillPortCommand` freed only the port we WATCH, so the orphan holding the app's real port
+  survived every attempt. It now takes a list and the recovery passes both the watched port and the
+  port the error named.
+- `PROTECTED_PORTS` (5432/3306/6379/27017/1433/9200): a log naming an infrastructure port yields no
+  `conflictPort`. "Recovering" by killing Postgres would turn "won't start" into "started and lost
+  its data store".
+- `userFacingPreviewFailure` names the port the error named, not the one we happened to watch.
+
+Regression tests use the admin's log verbatim, including the assertion that the detail does NOT
+contain 3000 — the exact wrong number the old scrape produced.
+
+Gate: tsc clean both projects, 1074 files / 12,021 tests, exit 0.

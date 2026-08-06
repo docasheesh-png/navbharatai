@@ -27100,3 +27100,18 @@ in-progress upserts) — what was missing was only the admin's GLOBAL window ove
   "⬇ Full session" and "⬇ This build" downloads (token rides the fetch; blob → .json file).
 6 new tests (uid extraction, token-gated routes, capped download invariant, index-safe query, UI
 wiring). No AppKnowledgeBase entry — admin-only surface, not a user-facing feature.
+
+## 2026-08-06 — ₹1 per APK (admin: "jitni baar apk bana utne ₹ 😂")
+
+The APK Builder's built .apk is now a priced deliverable, wired through the one-wallet law:
+charged at DELIVERY of the real binary (the download that streams a genuine .apk — a failed or
+never-finished build costs nothing), IDEMPOTENT per artifact via the wallet debit's buildRef
+(`apk_<owner>/<repo>#<artifactId>` — one ₹1 per BUILD, re-downloads free, and every new build is a
+new ₹1, exactly as ordered), verified-user only (anon has no wallet), free-list exempt, and never
+blocking the bytes (void debit beside the stream; overdraft is the wallet's normal design and the
+existing gates stop new spending when negative). Scope deliberately .apk ONLY — the admin priced
+exactly that; .aab/.ipa stay unmetered until priced. Env `APK_CHARGE_INR` (default 1, 0/off = free)
+— price changes never need a deploy. HONESTY: the price is disclosed BEFORE building (StoreBuildPanel
+copy under "Build my APK now") and the in-app AIs know it (apk_builder KB entry) — no surprise
+charges, ledger line "APK build — … (₹1.00)". 6 tests incl. the delivery-point and disclosure
+invariants. Pure module `src/server/lib/apkCharge.ts`.

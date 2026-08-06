@@ -27334,3 +27334,49 @@ one server, but the wrong SERVER. Recorded as the next root cause to chase; `PRE
 (previous entry) at least makes it show up in the report instead of hiding.
 
 Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,408 tests, exit 0.
+
+## 2026-08-06 (19) — the admin's three findings, checked against the evidence
+
+**1. "Build ran 58 minutes, not 18 — and it failed."** The report says `buildMs: 18.8 min`, and that is
+honest for what it measures: `startedAt`/`endedAt` are PER TURN. The session was several `continue`
+turns, so the number the admin lived (58 minutes of waiting) is nowhere in the report — each turn shows
+only its own slice. **The report understates how long the user actually waited**, which is the number
+that decides whether this product feels fast. Recorded as an open root cause: a per-SESSION elapsed time
+belongs in the report beside the per-turn one.
+
+**2. "Files were fully deleted (count went to 0) and rebuilt, three times."** The screenshots show the
+Files badge at **20** and then at **4**; the report shows 26 source files, then "25 files", then
+"19/27 unchanged". No entry anywhere records a file count collapsing. **And the reason no check
+complained is worse than the missing log line:**
+
+`judgeBuild` returned `{ pass: true, score: 100 }` for an empty file set — an affirmative claim of
+perfection about nothing. **The emptier the app, the better it scored.** Twenty-four analysers treat "no
+files" as "nothing wrong", which is correct for a pure analyser handed a subset, and catastrophic for
+the one component whose entire output is a quality VERDICT.
+
+FIXED: an empty project now scores **0** with the finding *"There were no files to review — the project
+was empty at review time. This is not a passing app; it is an absent one."* A judge that could not RUN
+gets the same treatment: it has not approved anything either. Both still `pass: true` — a judge that
+fails a build on its own confusion is worse than one that stays quiet — but neither awards marks it did
+not earn. **Still open: nothing yet ALARMS when a workspace empties.** That is the next root cause.
+
+**3. "NavBharatAI used the admin's credentials without asking the user."** Two halves, and they need
+separating honestly.
+
+*The premise is not what happened.* `loadUserVaultSecrets` reads `user_secrets` filtered by
+`user_id == userId` and never `process.env` — verified in code. These were the SAME account's own saved
+keys, from its own vault, injected into an app that account built. No platform credential leaked, and no
+other user's keys were involved.
+
+*But the defect underneath is real, and it is the admin's actual point.* **The vault is per-USER, not
+per-APP.** Every app a user builds receives EVERY key they have ever saved. An inventory app was handed a
+Razorpay secret and a Neon connection string it never asked for, and the app now depends on them. Worse,
+those values are wrong on their face — `RAZORPAY_KEY_SECRET=Nav@8949199709` is a phone number and
+`VITE_RAZORPAY_KEY_ID=doc.asheesh` is not a key id — and nothing validated them at save time or at
+injection time. The build says "🔐 Loaded 3 of your saved keys" AFTER the fact; it never asks whether
+THIS app should have them.
+
+Three open root causes recorded (rule 6), none silently patched: per-session elapsed time in the report;
+an alarm when a workspace empties; and per-app scoping plus format validation for injected secrets.
+
+Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,411 tests, exit 0.

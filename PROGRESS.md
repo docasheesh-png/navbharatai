@@ -27441,3 +27441,40 @@ legibly instead of holding a runner for the six-hour default.
 **Still for the admin:** where the 15-minute cap comes from (GitHub → Settings → Actions, or a billing
 limit). Halving the test time takes us off the edge, but if the cap is real it will be hit again as the
 suite grows. That is visible only from the org settings, which this session cannot read.
+
+## 2026-08-06 (22) — CI would have failed anyway: instrumentation speed was deciding pass/fail
+
+Measuring instead of guessing changed the whole picture, and corrected my own claim from the previous
+entry (that de-duplicating the test run would take CI off the 15-minute edge — it did not: the next run
+was cancelled at 15.2 min with ONE test run).
+
+**Two measured facts:**
+
+1. **The coverage run alone costs 363s (~6 min) locally**, so on a 2-core runner it plausibly fills the
+   whole 15 minutes by itself. Removing the plain `npm test` saved the FASTER of the two runs; the long
+   pole was always the instrumented one. My earlier prediction was wrong and is corrected here rather
+   than left standing.
+
+2. **A test FAILED under coverage that passes without it.** `SimpleBuilder` "emits a REAL per-file
+   progress line…" takes **1158ms alone** and **5665ms under coverage in a full run** — over vitest's
+   **5000ms default**. It asserts nothing about time. So CI would have gone RED even if it had not been
+   cancelled.
+
+**That second one is a CLASS, not a test.** After the de-duplication, CI's ONLY test run is the
+instrumented one, where everything is 2–5× slower. At a 5s default, **instrumentation speed decides
+pass/fail rather than correctness**, and every test that drifts near the line becomes a red build that
+teaches people to re-run rather than to look — the same lesson as the fixed-width source windows earlier
+today.
+
+FIX: `testTimeout` / `hookTimeout` = **20s**, set explicitly with the reasoning in the config. Far above
+real work, far below "a hang nobody notices" — a genuinely stuck test still fails, just later, and
+durations are still printed so a test creeping toward the number is still worth chasing. This is not
+hiding a slow test; it is removing a limit that was never about correctness.
+
+Verified: the previously-failing test now passes under coverage (3332ms), and the FULL instrumented
+suite — the exact command CI now runs — is **1098 files / 12,423 tests, exit 0 in 363s**.
+
+**Still for the admin, unchanged:** where the 15-minute cap comes from. Three cancellations at 15.0,
+15.1 and 15.2 minutes, and halving the test work did not move that number — which is strong evidence
+the cap is a fixed external limit rather than our workload. Visible only from GitHub → Settings →
+Actions or the billing page.

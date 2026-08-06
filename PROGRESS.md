@@ -27210,3 +27210,36 @@ beautifully — and then never surfaced at the one moment it mattered: when the 
   must not be re-made in project B.
 
 **Verification:** tsc frontend + server clean; `npx vitest run` = **12,378 tests, 0 failures**.
+
+## 2026-08-06 (16) — "pura farzi": a report sent mid-build looked fabricated, because nothing said so
+
+Admin sent build report `f323a4db` with one word: **"pura farzi bada!"** They were right, and the reason
+is a real honesty defect.
+
+**What the report actually was.** "Report" was pressed **423 seconds (7m 3s) into a build that was still
+running** — no `done` event, last entry 12 seconds earlier. A build in flight has no verdict, no cost, no
+duration and no post-build checks yet, so **every** meta field came back null: `ok`, `rootCause`,
+`summary`, `buildMs`, `billedInr`, and `tier: "unknown"`. 52 entries, all `info`, `errors: 0`.
+
+**Why that reads as fabricated.** Null everywhere is EXACTLY what a build that FINISHED and produced
+nothing looks like — the far more alarming reading, and the one taken. `buildAdminReportRecord` had no
+notion of "not finished yet", so a snapshot of work in progress was presented as a completed build with
+no result. A snapshot is a perfectly useful thing; presenting it as a finished build is not.
+
+FIX: `meta.inFlight` is computed from the report itself — a `startedAt` with no `endedAt` AND no boolean
+`ok`. Requiring BOTH keeps a half-written report honest in either direction. When in flight and there is
+no summary of its own, the summary SAYS it: *"Reported while the build was STILL RUNNING (7m 3s in).
+There is no verdict, cost, duration or post-build check yet…"* The admin dashboard shows **"Still
+running"** in amber instead of "—", because a dash was the thing being misread.
+
+**What the report DID prove, incidentally.** The line *"🗄️ Using the database you connected in Settings —
+your app will read and write your own data, so no temporary sandbox database is needed"* is this
+session's own `isUserOwnedDatabaseUrl` branch, working correctly: the admin has a Neon database connected
+(`@neondatabase/serverless` in package.json), so the sandbox Postgres was rightly skipped. Which also
+means **this build could not test the fetched-Postgres path** — that path only runs when the user has NO
+database of their own.
+
+Also visible: `plannedModel: claude-haiku-4-5` but every one of 13 calls delivered by `kimi-k2.5` —
+cheap floor active and holding, no Claude fallback needed.
+
+Gate: tsc clean both projects, SHUFFLED full run 1095 files / 12,390 tests, exit 0.

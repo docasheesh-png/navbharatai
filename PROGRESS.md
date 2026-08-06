@@ -27078,3 +27078,25 @@ admin_notifications store (target: user). 15 new tests (windows, dedupe, grace, 
 reattach-only-lapsed, wiring). **Open infra item (rule 6): in-process cadence delivers reminders only
 while instances run; guaranteed delivery wants Cloud Scheduler hitting a sweep endpoint — recorded,
 not silently skipped.**
+
+## 2026-08-06 — Admin ALL-BUILDS browser: every user's 0→100% report, downloadable without a user submit
+
+Admin order: "koi bhi user kuch bhi app banaye — admin apne panel se puri 0→100% build report
+download kar sake, user ke report send kiye bina." The engine ALREADY records every build durably
+(`workspace_diagnostics_v3/{ws}` latest + `/history/{startedAt}` per-build full reports, including
+in-progress upserts) — what was missing was only the admin's GLOBAL window over that record. Added:
+- `listAllDiagnostics` (DiagnosticsStore): every workspace's latest report across all users, most
+  recently active first — ONE `orderBy('savedAt','desc')` on the top-level collection (auto
+  single-field index; no composite/collection-group index that could silently FAILED_PRECONDITION),
+  metadata only. `workspaceOwnerUid` (pure) surfaces the owning uid from the workspace id.
+- Admin routes (all behind `verifyAdminToken`): `GET /api/admin/all-builds` (list + in-memory q
+  filter over uid/workspace/prompt/summary), `GET .../:workspaceId` (latest + history metadata),
+  `GET .../:workspaceId/download` (`?build=<id>` = that ONE build's full report; no param = the whole
+  0→100% session, stitched from history + latest, byte-capped via the SAME `capSessionReports` the
+  user-side stitch uses so the download always loads — omissions counted, never silent). Full
+  provider detail by design: this is the forensic admin surface, never user-reachable.
+- AdminDashboard → Build Reports tab → new "All builds — every user, no submit needed" section:
+  search (uid/workspace/prompt), rows with ok/fail dot + owner + time, expand → per-build history,
+  "⬇ Full session" and "⬇ This build" downloads (token rides the fetch; blob → .json file).
+6 new tests (uid extraction, token-gated routes, capped download invariant, index-safe query, UI
+wiring). No AppKnowledgeBase entry — admin-only surface, not a user-facing feature.

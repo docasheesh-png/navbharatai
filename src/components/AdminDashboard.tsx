@@ -143,6 +143,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [buildReportsLoading, setBuildReportsLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<{ meta: AdminBuildReportRow; report: any } | null>(null);
   const [selectedReportLoading, setSelectedReportLoading] = useState(false);
+  // ALL BUILDS browser (admin 2026-08-06) — every user's every build, no user submit needed.
+  interface AllBuildRow {
+    workspaceId: string; savedAt: number; ownerUid: string | null;
+    id: string; startedAt?: number; endedAt?: number; ok?: boolean;
+    summary?: string; rootCause?: string; prompt?: string;
+  }
+  const [allBuilds, setAllBuilds] = useState<AllBuildRow[]>([]);
+  const [allBuildsLoading, setAllBuildsLoading] = useState(false);
+  const [allBuildsSearch, setAllBuildsSearch] = useState('');
+  const [expandedWorkspace, setExpandedWorkspace] = useState<string | null>(null);
+  const [expandedHistory, setExpandedHistory] = useState<Array<{ id: string; startedAt: number; endedAt?: number; ok?: boolean; summary?: string; prompt?: string }>>([]);
+  const [expandedLoading, setExpandedLoading] = useState(false);
   // Build Reports — filters & sorting (admin 2026-08-01): who sent which report, when, free/paid.
   const [reportSearch, setReportSearch] = useState('');
   const [reportTierFilter, setReportTierFilter] = useState<ReportTierFilter>('all');
@@ -229,6 +241,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     finally { setSelectedReportLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
+
+  // ALL BUILDS browser helpers — the admin's window over EVERY workspace's durable reports.
+  const fetchAllBuilds = useCallback(async () => {
+    setAllBuildsLoading(true);
+    try {
+      const qs = allBuildsSearch.trim() ? `?q=${encodeURIComponent(allBuildsSearch.trim())}` : '';
+      const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
+      const d = await r.json();
+      setAllBuilds(Array.isArray(d?.builds) ? d.builds : []);
+    } catch (e) { console.error(e); setAllBuilds([]); }
+    finally { setAllBuildsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, allBuildsSearch]);
+
+  const expandWorkspaceBuilds = useCallback(async (workspaceId: string) => {
+    if (expandedWorkspace === workspaceId) { setExpandedWorkspace(null); setExpandedHistory([]); return; }
+    setExpandedWorkspace(workspaceId);
+    setExpandedLoading(true);
+    try {
+      const r = await fetch(`/api/admin/all-builds/${encodeURIComponent(workspaceId)}`, { headers });
+      const d = await r.json();
+      setExpandedHistory(Array.isArray(d?.history) ? d.history : []);
+    } catch (e) { console.error(e); setExpandedHistory([]); }
+    finally { setExpandedLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, expandedWorkspace]);
+
+  // Auth header rides on fetch (a plain <a href> cannot carry it), then the blob becomes the file.
+  const downloadWorkspaceReport = async (workspaceId: string, buildId?: string) => {
+    try {
+      const qs = buildId ? `?build=${encodeURIComponent(buildId)}` : '';
+      const r = await fetch(`/api/admin/all-builds/${encodeURIComponent(workspaceId)}/download${qs}`, { headers });
+      if (!r.ok) { toast('No report recorded for that build.'); return; }
+      const data = await r.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = buildId ? `build-${workspaceId}-${buildId}.json` : `build-session-${workspaceId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { console.error(e); toast('Download failed.'); }
+  };
 
   const downloadSelectedReport = () => {
     if (!selectedReport) return;
@@ -1230,6 +1287,84 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
                 </button>
+              </div>
+
+              {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
+                  WITHOUT the user pressing Report. The engine already records every build durably;
+                  this is the admin's global window over that record. */}
+              <div className="bg-[#161b22] border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <FileText className="w-4 h-4 text-indigo-400" />
+                  <h4 className="text-sm font-black text-white tracking-tight">All builds — every user, no submit needed</h4>
+                  <span className="text-[10px] text-[#8b949e] font-bold">full 0→100% report per build, straight from the engine's own record</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={allBuildsSearch}
+                    onChange={(e) => setAllBuildsSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void fetchAllBuilds(); }}
+                    placeholder="Search: user id, workspace, prompt words…"
+                    className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    onClick={() => void fetchAllBuilds()}
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
+                  </button>
+                </div>
+                {allBuilds.length === 0 && !allBuildsLoading && (
+                  <p className="text-[11px] text-[#8b949e]">Press Load to list the most recently active builds across all users.</p>
+                )}
+                <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
+                  {allBuilds.map((b) => (
+                    <div key={b.workspaceId} className="border border-white/5 rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
+                      >
+                        <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-zinc-500'}`} />
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[12px] font-bold text-white truncate">{b.prompt || b.summary || b.workspaceId}</span>
+                          <span className="block text-[10px] text-[#8b949e] font-mono truncate">
+                            {b.ownerUid ? `user ${b.ownerUid}` : 'anon'} · {b.savedAt ? new Date(b.savedAt).toLocaleString() : ''} · {b.workspaceId}
+                          </span>
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); } }}
+                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10"
+                        >
+                          ⬇ Full session
+                        </span>
+                      </button>
+                      {expandedWorkspace === b.workspaceId && (
+                        <div className="border-t border-white/5 bg-black/20 px-3 py-2 space-y-1">
+                          {expandedLoading && <p className="text-[11px] text-[#8b949e]">Loading builds…</p>}
+                          {!expandedLoading && expandedHistory.length === 0 && (
+                            <p className="text-[11px] text-[#8b949e]">Only the latest report exists for this workspace — use “Full session” above.</p>
+                          )}
+                          {!expandedLoading && expandedHistory.map((h) => (
+                            <div key={h.id} className="flex items-center gap-3 py-1">
+                              <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${h.ok === true ? 'bg-emerald-400' : h.ok === false ? 'bg-rose-400' : 'bg-zinc-500'}`} />
+                              <span className="flex-1 min-w-0 text-[11px] text-[#c9d1d9] truncate">
+                                {h.startedAt ? new Date(h.startedAt).toLocaleString() : h.id} — {h.prompt || h.summary || 'build'}
+                              </span>
+                              <button
+                                onClick={() => void downloadWorkspaceReport(b.workspaceId, h.id)}
+                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                              >
+                                ⬇ This build
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the headline engine number. A build that

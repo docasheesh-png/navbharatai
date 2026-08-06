@@ -366,13 +366,22 @@ export function buildBuildInstallCommand(): string {
  * ends in `true`, so a missing tool or an already-free port never fails the step.
  * PURE string builder so it is unit-testable without E2B.
  */
-export function buildPreKillPortCommand(port: number): string {
+export function buildPreKillPortCommand(port: number | number[]): string {
+  // MULTI-PORT (mitrify autopsy 2026-08-05): freeing only the port we WATCH is not enough. When the app
+  // binds a different port than the health check watches, the orphan holding the app's real port is
+  // never freed, so every restart hits the identical EADDRINUSE and recovery is exhausted by
+  // construction. The recovery now passes the port the error itself named alongside the watched one, so
+  // pass a LIST here. A single number behaves exactly as before.
+  const ports = Array.from(new Set((Array.isArray(port) ? port : [port]).filter((p) => Number.isInteger(p) && p > 0 && p <= 65535)));
+  if (!ports.length) return 'true';
   return [
-    `fuser -k ${port}/tcp 2>/dev/null`,
-    // lsof: kill whatever PID owns the TCP port.
-    `kill -9 $(lsof -ti tcp:${port} 2>/dev/null) 2>/dev/null`,
-    // ss (iproute2): parse `users:(("node",pid=1234,...))` → kill that pid.
-    `kill -9 $(ss -lptnH "sport = :${port}" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2) 2>/dev/null`,
+    ...ports.flatMap((p) => [
+      `fuser -k ${p}/tcp 2>/dev/null`,
+      // lsof: kill whatever PID owns the TCP port.
+      `kill -9 $(lsof -ti tcp:${p} 2>/dev/null) 2>/dev/null`,
+      // ss (iproute2): parse `users:(("node",pid=1234,...))` → kill that pid.
+      `kill -9 $(ss -lptnH "sport = :${p}" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2) 2>/dev/null`,
+    ]),
     `true`,
   ].join('; ');
 }

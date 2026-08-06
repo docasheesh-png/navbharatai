@@ -47,6 +47,64 @@ export interface DevServerDiagnosis {
    * classified correctly and still not work — a heal that runs and changes nothing.
    */
   corruptPackage?: string;
+  /**
+   * The port the log proves is ACTUALLY occupied, when that is knowable — see conflictingPortFromLog.
+   *
+   * WHY IT MUST TRAVEL WITH THE DIAGNOSIS (mitrify autopsy 2026-08-05): the recovery freed only the port
+   * the health check WATCHES. When the app bound a different port (an Express server ignoring the
+   * `--port` flag we appended and taking `process.env.PORT || 5000`), the orphan holding THAT port was
+   * never touched, so every restart hit the identical EADDRINUSE and "automatic recovery is exhausted"
+   * was structurally guaranteed — a retry loop around code that deterministically fails. Freeing the
+   * port the error itself names is the only recovery that can ever succeed.
+   */
+  conflictPort?: number;
+}
+
+/**
+ * Ports we must NEVER free, even when a log names them as occupied.
+ *
+ * Freeing a port means killing whatever owns it. These belong to the sandbox's own infrastructure — the
+ * app's database above all — so "recovering" one would take the app from "won't start" to "started and
+ * lost its data store", which is strictly worse than the failure we were repairing. If a log ever names
+ * one of these, we report the conflict honestly and free nothing.
+ */
+const PROTECTED_PORTS = new Set([5432, 3306, 6379, 27017, 1433, 9200]);
+
+/**
+ * The port that is genuinely occupied, read from the failure itself.
+ *
+ * ROOT CAUSE this replaces (mitrify autopsy 2026-08-05): the port used to be scraped with
+ * `/(?:port\s+|:)(\d{2,5})/` over the whole log tail, which takes the FIRST number that looks like a
+ * port — and a dev-server log always echoes its launch command first. On the reported build that echo
+ * was `tsx server/index.ts --host 0.0.0.0 --port 3000 --strictPort` while the real failure two lines
+ * later was `EADDRINUSE: address already in use 0.0.0.0:5000`. So the engine announced "Port 3000 is
+ * already in use", freed 3000, and left 5000 held — wrong port in the message AND wrong port in the fix.
+ *
+ * This reads the ERROR forms only (never the command echo), most-specific first, and refuses the digits
+ * of a dotted IP (`127.0.0.1:3000` must yield 3000, never 127). PURE.
+ */
+export function conflictingPortFromLog(log: string): number | null {
+  const text = stripAnsi(log || '').slice(-8000);
+  const patterns = [
+    // Node/libuv: `listen EADDRINUSE: address already in use 0.0.0.0:5000` | `EADDRINUSE :::3000`
+    /EADDRINUSE[^\n]*?[:\s]([0-9]{2,5})(?!\.?\d)/i,
+    // Vite/generic: `Port 5173 is (already) in use`
+    /\bport\s+([0-9]{2,5})\s+is\s+(?:already\s+)?in\s+use/i,
+    // Create React App: `Something is already running on port 4100.`
+    /already running on port\s+([0-9]{2,5})(?!\.?\d)/i,
+    // Bare bind error with no EADDRINUSE token: `address already in use :::8080`
+    /address already in use[^\n]*?[:\s]([0-9]{2,5})(?!\.?\d)/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const p = Number(m[1]);
+    if (!Number.isInteger(p) || p < 1 || p > 65535) continue;
+    // A protected port is a real answer — just not an actionable one. Stop here rather than falling
+    // through to a looser pattern that might produce a killable-looking number for the same conflict.
+    return PROTECTED_PORTS.has(p) ? null : p;
+  }
+  return null;
 }
 
 /**
@@ -247,8 +305,10 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   //    recovery plain-retried into the same conflict instead of freeing the port).
   if (/\bEADDRINUSE\b/i.test(text) || /port\s+\d+\s+is\s+(?:already\s+)?in\s+use/i.test(text) || /address already in use/i.test(text)
     || /already running on port\s+\d+/i.test(text)) {
-    const m = text.match(/(?:port\s+|:)(\d{2,5})\b/i);
-    return make('port_in_use', `Port ${m ? m[1] : '(the dev-server port)'} is already in use — freeing it and restarting.`);
+    // The port comes from the ERROR, never from the echoed launch command — see conflictingPortFromLog.
+    const conflict = conflictingPortFromLog(text);
+    const d = make('port_in_use', `Port ${conflict ?? '(the dev-server port)'} is already in use — freeing it and restarting.`);
+    return conflict ? { ...d, conflictPort: conflict } : d;
   }
 
   // 2) Wrong launch command — the script doesn't exist in package.json ("npm error Missing script:
@@ -423,7 +483,10 @@ export function userFacingPreviewFailure(diag: DevServerDiagnosis, port: number,
     case 'missing_script':
       return "The app is being started with the wrong command — its package.json doesn't have that script. Ask me to fix the start command.";
     case 'port_in_use':
-      return `Port ${port} was still being held by another process, so the app couldn't take it. Press Diagnose again in a few seconds.`;
+      // The port the ERROR named, when we know it — the watched port is only a fallback. Telling the
+      // user "Port 3000 was held" when the app actually failed to bind 5000 is a false statement about
+      // their own app, and it is the same wrong number that made the recovery free the wrong port.
+      return `Port ${diag.conflictPort ?? port} was still being held by another process, so the app couldn't take it. Press Diagnose again in a few seconds.`;
     case 'code_error':
       return "There's an error in the app's code that stops it from starting. Ask me to fix it and I'll find and repair it.";
     case 'out_of_memory':

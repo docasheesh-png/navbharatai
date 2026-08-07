@@ -126,7 +126,7 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
@@ -5879,6 +5879,46 @@ export function registerAgentV3Routes(app: Express): void {
               const extNote = externalServiceNote(declaredEnvVars);
               if (extNote) emitLive({ type: 'narration', agent: 'architect', text: extNote, ts: Date.now() });
             }
+            // THE MISSING SUBSYSTEM, now present (build report 32d4f48e — Mitrify): a provisioned
+            // database is EMPTY. That build's boot log said `relation "profiles" does not exist`
+            // twice while the preview was declared "✅ up" with 0 warnings — nothing ever ran the
+            // app's own migrations. Run them HERE, right after the DB exists and the .env is written,
+            // so the dev server boots against real tables. DATABASE_URL is passed explicitly because
+            // migration CLIs (drizzle-kit) do not load .env themselves. Best-effort + bounded: a
+            // migration failure is recorded honestly and the boot still proceeds.
+            const migration = needsDb && provided.DATABASE_URL ? detectMigrationCommand(importedFiles) : null;
+            if (migration) {
+              emitLive({ type: 'narration', agent: 'architect', text: `🗄️ Creating your app's database tables (${migration.label}) so pages that read data work in the preview…`, ts: Date.now() });
+              const mStartedAt = Date.now();
+              try {
+                const mcmd = `${shellEnvAssignment('DATABASE_URL', provided.DATABASE_URL)} ${migration.command}`;
+                const mres = await withTimeout(actuator.runCommand(workspaceId, mcmd), 150_000, 'import-db-migrate');
+                try {
+                  opts.diag?.recordCommand?.({
+                    command: migration.command,
+                    exitCode: typeof mres.exitCode === 'number' ? mres.exitCode : null,
+                    stdout: mres.stdout ?? '', stderr: mres.stderr ?? '',
+                    durationMs: Date.now() - mStartedAt,
+                  });
+                } catch { /* diagnostics best-effort */ }
+                const mok = mres.exitCode === 0;
+                opts.diag?.record({
+                  phase: 'preview', severity: mok ? 'info' : 'warning',
+                  code: mok ? 'IMPORT_DB_MIGRATIONS_APPLIED' : 'IMPORT_DB_MIGRATIONS_FAILED',
+                  message: mok
+                    ? `The app's own database migrations ran clean (${migration.label}, ${Math.round((Date.now() - mStartedAt) / 1000)}s) — its tables exist before the dev server boots.`
+                    : `The app's database migration step (${migration.label}) exited ${mres.exitCode} after ${Math.round((Date.now() - mStartedAt) / 1000)}s — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: mok,
+                });
+              } catch (e) {
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_FAILED',
+                  message: `The app's database migration step (${migration.label}) did not finish within its window — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
+            }
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
             // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
             // start → serve), never a hardcoded `npm run dev` — CoreUI's script is `start`, so the
@@ -5903,6 +5943,19 @@ export function registerAgentV3Routes(app: Express): void {
                 durationMs: Date.now() - bootStartedAt,
               });
             } catch { /* diagnostics are best-effort and must never break a boot */ }
+            // HONEST LAST LINE (report 32d4f48e): when the boot log itself PROVES missing tables
+            // (`relation "profiles" does not exist`), that evidence must never again sit unread in
+            // the command log while the tally reports zero problems. Recorded and told to the user —
+            // a preview that renders its shell but fails every data read is not a working preview.
+            const missingTable = schemaMissingFromLog(combined);
+            if (missingTable) {
+              opts.diag?.record({
+                phase: 'preview', severity: 'warning', code: 'DB_SCHEMA_MISSING',
+                message: `The boot log shows the database is missing its tables (first: "${missingTable}") — pages that read data will fail even where the preview renders. ${migration ? `The migration step (${migration.label}) ran — see its own entry for the outcome.` : 'No migration script was found in the project to create them.'}`,
+                autoResolved: false,
+              });
+              emitLive({ type: 'narration', agent: 'architect', text: `⚠️ Heads up: the app's database is missing its "${missingTable}" table — pages that read data may fail until the app's migrations run.`, ts: Date.now() });
+            }
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
               const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);

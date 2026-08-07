@@ -27454,3 +27454,25 @@ Gate: tsc clean both projects, full run 1099 files / 12,438 tests, exit 0.
   was guarded" and "what was measured" cannot drift.
 
 Gate: tsc clean both projects, full run 12,442/12,442.
+
+## 2026-08-07 — Autopsy of build report 32d4f48e (Mitrify import/survey): the DB-migration runner, built
+
+Report looked perfect (0 errors, 0 warnings, ok:true, Kimi-only weak build, noClaude honoured) — but its
+own `npm run dev` stdout said `relation "profiles" does not exist` TWICE (the app's ensureSchema repair
+AND its provider backfill both failed). The DB was provisioned + SELECT 1-verified, yet EMPTY: nothing
+ever ran the app's own migrations, so every data-reading page was broken behind a "✅ up" preview, and
+the tally said zero problems. This is the literal "missing DB-migration runner" subsystem CLAUDE.md
+Step-2 names as its canonical example. Built it:
+
+- `detectMigrationCommand` (ImportPreview.ts): the app's OWN mechanism wins — package.json scripts
+  (db:push / db:migrate / migrate:deploy / migrate / db:setup; Mitrify has db:push), else Prisma
+  migrate deploy (committed migrations) / db push. Null when the app has none.
+- Wired into the import preview boot AFTER the DB + .env exist, BEFORE the dev server: env-prefixed
+  (`shellEnvAssignment` — drizzle-kit does not load .env), 150s bound, full command output recorded,
+  honest IMPORT_DB_MIGRATIONS_APPLIED / _FAILED either way. Best-effort: boot proceeds regardless.
+- `schemaMissingFromLog` — the honest last line: the boot log is ALWAYS scanned for the pg/sqlite/mysql
+  "table missing" shapes; a hit records UNRESOLVED warning DB_SCHEMA_MISSING (so the tally can never
+  claim zero problems over this evidence again) + tells the user plainly.
+- 17 new tests incl. the report's verbatim evidence line and source-contract wiring checks.
+
+Gate: tsc clean both projects, full run 12,456/12,456.

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from './ImportPreview';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from './ImportPreview';
 
 describe('previewBootFailureAdvisory (honest DB state, admin 2026-07-24) — a failed boot names the real cause', () => {
   it('DB-needed + not provisioned → tells the user to connect their own database', () => {
@@ -276,5 +278,107 @@ describe('previewServeNarration with a NAMED cause (task 2) and a fix offer (tas
   it('without a named cause the old honest generic line stands, unchanged', () => {
     const v = previewServeNarration({ rendered: false, problems: ['the server returned 404 / "Cannot GET"'], port: 5000, needsDb: true, bootCause: null });
     expect(v.text).toContain("isn't serving the app's pages");
+  });
+});
+
+// THE MISSING SUBSYSTEM (build report 32d4f48e, 2026-08-07 — Mitrify import): the DB was provisioned
+// and SELECT 1-verified, the preview said "✅ up" with 0 warnings — and the boot log said
+// `relation "profiles" does not exist` twice, because nothing ever ran the app's own migrations.
+// These tests lock the runner (detect the app's OWN mechanism) and the honest last line (the log
+// evidence can never again sit unread while the tally says zero problems).
+describe('detectMigrationCommand — run the app\'s OWN migrations, never invent our own', () => {
+  it('the project script wins — Mitrify\'s real shape (drizzle db:push)', () => {
+    const files = {
+      'package.json': JSON.stringify({ scripts: { dev: 'tsx server/index.ts', 'db:push': 'drizzle-kit push' }, dependencies: { 'drizzle-orm': '1' } }),
+      'drizzle.config.ts': 'export default {}',
+    };
+    expect(detectMigrationCommand(files)).toEqual({ command: 'npm run db:push', label: 'npm run db:push' });
+  });
+
+  it('script preference order is deterministic (db:push before migrate)', () => {
+    const files = { 'package.json': JSON.stringify({ scripts: { migrate: 'x', 'db:push': 'y' } }) };
+    expect(detectMigrationCommand(files)!.command).toBe('npm run db:push');
+  });
+
+  it('Prisma with committed migrations → non-interactive, non-destructive deploy', () => {
+    const files = {
+      'package.json': JSON.stringify({ scripts: { dev: 'next dev' }, devDependencies: { prisma: '5' } }),
+      'prisma/schema.prisma': 'model User {}',
+      'prisma/migrations/0001_init/migration.sql': 'CREATE TABLE "User" ();',
+    };
+    expect(detectMigrationCommand(files)!.command).toBe('npx prisma migrate deploy');
+  });
+
+  it('Prisma with a schema but NO committed migrations → db push', () => {
+    const files = {
+      'package.json': JSON.stringify({ devDependencies: { prisma: '5' } }),
+      'prisma/schema.prisma': 'model User {}',
+    };
+    expect(detectMigrationCommand(files)!.command).toBe('npx prisma db push --skip-generate');
+  });
+
+  it('no mechanism → null (an app whose server self-manages schema is left alone)', () => {
+    expect(detectMigrationCommand({ 'package.json': JSON.stringify({ scripts: { dev: 'vite' } }) })).toBeNull();
+    expect(detectMigrationCommand({})).toBeNull();
+    expect(detectMigrationCommand({ 'package.json': 'not json' })).toBeNull();
+  });
+
+  it('an empty script value does not count', () => {
+    expect(detectMigrationCommand({ 'package.json': JSON.stringify({ scripts: { 'db:push': '  ' } }) })).toBeNull();
+  });
+});
+
+describe('shellEnvAssignment — the migration CLI sees the provisioned URL even without .env loading', () => {
+  it('quotes the value safely', () => {
+    expect(shellEnvAssignment('DATABASE_URL', 'postgresql://user:pw@localhost:5432/app'))
+      .toBe(`DATABASE_URL='postgresql://user:pw@localhost:5432/app'`);
+  });
+
+  it('escapes single quotes so a hostile value cannot break out', () => {
+    expect(shellEnvAssignment('X', "a'b")).toBe(`X='a'\\''b'`);
+  });
+});
+
+describe('schemaMissingFromLog — the honest last line reads what the log proves', () => {
+  it('recognises the VERBATIM evidence from report 32d4f48e', () => {
+    const log = '[ensureSchema] WARNING: schema repair failed: error: relation "profiles" does not exist\n    at /home/user/workspace/node_modules/pg/lib/client.js:545:17';
+    expect(schemaMissingFromLog(log)).toBe('profiles');
+  });
+
+  it('strips a schema qualifier and covers SQLite/MySQL shapes', () => {
+    expect(schemaMissingFromLog('error: relation "public.orders" does not exist')).toBe('orders');
+    expect(schemaMissingFromLog('SqliteError: no such table: users')).toBe('users');
+    expect(schemaMissingFromLog("ER_NO_SUCH_TABLE: Table 'shop.items' doesn't exist")).toBe('items');
+  });
+
+  it('a clean log proves nothing — null, no false alarm', () => {
+    expect(schemaMissingFromLog('serving on port 3000')).toBeNull();
+    expect(schemaMissingFromLog('')).toBeNull();
+    expect(schemaMissingFromLog(null)).toBeNull();
+  });
+});
+
+// Source contract: the runner + scanner are genuinely wired into the import boot (dead code is the
+// trap), the migration runs AFTER the DB/.env exist and BEFORE the dev server, and the scan records
+// an UNRESOLVED warning (autoResolved: false) so the report tally can never say "0 problems" again.
+describe('wiring — migrations run before the boot; the log scan cannot be silent', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('../routes/agentv3.ts', import.meta.url)), 'utf8');
+
+  it('the migration step exists, env-prefixed, bounded, and honestly recorded both ways', () => {
+    expect(SRC).toContain('detectMigrationCommand(importedFiles)');
+    expect(SRC).toContain("shellEnvAssignment('DATABASE_URL', provided.DATABASE_URL)");
+    expect(SRC).toContain("'import-db-migrate'");
+    expect(SRC).toContain("code: mok ? 'IMPORT_DB_MIGRATIONS_APPLIED' : 'IMPORT_DB_MIGRATIONS_FAILED'");
+  });
+
+  it('the migration runs BEFORE the dev-server boot command', () => {
+    expect(SRC.indexOf('detectMigrationCommand(importedFiles)')).toBeLessThan(SRC.indexOf("'import-preview-boot'"));
+  });
+
+  it('the schema scan reads the boot log and records an UNRESOLVED warning', () => {
+    expect(SRC).toContain('schemaMissingFromLog(combined)');
+    const at = SRC.indexOf("code: 'DB_SCHEMA_MISSING'");
+    expect(at).toBeGreaterThan(-1);
+    expect(SRC.slice(at, at + 700)).toContain('autoResolved: false');
   });
 });

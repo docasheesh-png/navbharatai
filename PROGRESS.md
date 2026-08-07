@@ -27416,3 +27416,27 @@ Gate: tsc clean both projects, SHUFFLED full run 1098 files / 12,423 tests, exit
 
 **Still open from the three:** per-app scoping and format validation for injected secrets (the vault is
 per-USER, so every app receives every key the user ever saved, unvalidated).
+
+## 2026-08-07 — FLEET LEARNING: one user's solved mistake now protects EVERY user (branch claude/ai-teacher-student-profiles-8bg002)
+
+Admin asked (after MistakeLedger shipped in #2166): "kya fable 5 isko aur jyada accha bana sakta hai?"
+The honest answer: the per-user ledger only helps a user who has already suffered the failure once.
+User #1001's first build still walks into the exact failure user #7 solved months ago. The aviation
+model fixes this — one investigated failure becomes a checklist item for every cockpit.
+
+Shipped `FleetMistakeLedger.ts` (+15 tests):
+- **Anonymous by construction**: keyed by `errorSignature` (already strips paths/numbers/quotes),
+  stored sample/fix pass `redactSecrets` + `redactPII` before writing, and the store is never given a
+  userId/workspaceId at all (a source-contract test asserts the call site passes none, and that the
+  store code never references an identifier).
+- **Doc-per-signature** in `fleet_mistakes_v3/{sha256(signature)}` — direct key gets, no queries, no
+  hot document; bounded lookups/writes per build (6 each).
+- **Same proven-fix law**: a fix is recorded only from a SUCCEEDED build; `repeatsAfterFix` now also
+  measures fleet-wide repeats, so "is the whole platform learning?" is a number, not a claim.
+- **Wiring**: read as a FALLBACK after the personal guard (personal history wins when it exists);
+  written next to the per-user recordBuild. Both inside the existing best-effort catches — the fleet
+  can never break or slow a build. Reuses `formatKnownMistakes` (now header-parameterized) so there is
+  ONE guidance format.
+- **Kill switch**: `AGENTV3_FLEET_LEDGER=off` (default on).
+
+Gate: tsc clean both projects, full run 1099 files / 12,438 tests, exit 0.

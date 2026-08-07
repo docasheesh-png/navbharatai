@@ -160,7 +160,11 @@ export function knownFixFor(ledger: MistakeLedger, errorText: string): MistakeRe
  * changes nothing, while "this exact failure has a proven fix — apply it" does. Returns '' when
  * nothing matches, so a build with no relevant history is byte-identical to today. PURE.
  */
-export function formatKnownMistakes(ledger: MistakeLedger, errorTexts: string[]): string {
+export function formatKnownMistakes(
+  ledger: MistakeLedger,
+  errorTexts: string[],
+  header = 'KNOWN MISTAKE — you have already solved this one. Do NOT rediscover it from scratch:',
+): string {
   const seen = new Set<string>();
   const hits: MistakeRecord[] = [];
   for (const text of errorTexts ?? []) {
@@ -173,10 +177,7 @@ export function formatKnownMistakes(ledger: MistakeLedger, errorTexts: string[])
     const repeated = h.repeatsAfterFix > 0 ? ` (this has already come back ${h.repeatsAfterFix}× after being fixed — do not let it happen again)` : '';
     return `• You have hit this exact failure before: ${h.sample}\n  PROVEN FIX — apply it now${repeated}: ${h.provenFix}`;
   });
-  return [
-    'KNOWN MISTAKE — you have already solved this one. Do NOT rediscover it from scratch:',
-    ...lines,
-  ].join('\n');
+  return [header, ...lines].join('\n');
 }
 
 /**

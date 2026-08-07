@@ -221,6 +221,7 @@ import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { mistakeLedgerStore } from '../AgentV3/MistakeLedger';
+import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -7998,6 +7999,12 @@ export function registerAgentV3Routes(app: Express): void {
           .map((e) => e.text);
         const guard = await mistakeLedgerStore.guardFor(userId, pastErrors);
         if (guard) buildPrompt = `${guard}\n\n---\n\n${buildPrompt}`;
+        // FLEET FALLBACK: the fleet may hold a proven fix the user has never personally earned
+        // (anonymous by construction — signature keys, sanitized text, no identity stored).
+        if (!guard && pastErrors.length > 0) {
+          const fleetGuard = await fleetMistakeLedgerStore.guardFor(pastErrors);
+          if (fleetGuard) buildPrompt = `${fleetGuard}\n\n---\n\n${buildPrompt}`;
+        }
       } catch { /* the guard is best-effort — never blocks a build */ }
 
       // Cross-Project Lesson Brain watermark: capture the time BEFORE the build runs. On a resumed
@@ -10672,6 +10679,9 @@ export function registerAgentV3Routes(app: Express): void {
             .slice(0, 10);
           if (errs.length > 0) {
             void mistakeLedgerStore.recordBuild(userId, { ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
+            // FLEET: the same outcome, recorded anonymously for every user — deliberately NO userId
+            // argument (the store cannot leak what it is never given). Sanitization happens inside.
+            void fleetMistakeLedgerStore.recordBuild({ ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
           }
         } catch { /* the ledger is best-effort — never affects the build result */ }
       }

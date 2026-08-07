@@ -177,9 +177,10 @@ describe('wiring — the ledger is actually consulted and actually updated', () 
   });
 
   it('both call sites are best-effort — the ledger can never break a build', () => {
+    // The window is wide enough to span the fleet-fallback block that now shares the same try/catch.
     const at = SRC.indexOf('mistakeLedgerStore.guardFor');
-    expect(SRC.slice(at, at + 400)).toContain('catch');
+    expect(SRC.slice(at, at + 700)).toContain('catch');
     const at2 = SRC.indexOf('mistakeLedgerStore.recordBuild');
-    expect(SRC.slice(at2, at2 + 400)).toContain('catch');
+    expect(SRC.slice(at2, at2 + 700)).toContain('catch');
   });
 });

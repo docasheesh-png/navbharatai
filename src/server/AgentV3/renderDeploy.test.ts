@@ -13,12 +13,13 @@ describe('renderDeploy — real Render backend deploy (slice 4, honest, no fake)
   });
 
   it('renderRequirement is honest about the missing key', () => {
-    // CORRECTED 2026-08-07. This used to assert the literal words "Set RENDER_API_KEY (Settings →
-    // Secrets & Keys)" — an instruction NOTHING implemented: the deploy read only `process.env`, so a
-    // user who saved that key in Settings and retried got the byte-identical refusal. The test was
+    // CORRECTED 2026-08-07. This used to assert the literal words "Set RENDER_API_KEY" followed by a
+    // path to the vault tile — an instruction NOTHING implemented: the deploy read only `process.env`,
+    // so a user who saved that key in Settings and retried got the byte-identical refusal. The test was
     // locking a false instruction in place. Now the vault really is read, so the sentence is true.
+    // (The path it named was also the OLD tile name, fixed in the same change — see settingsLabels.ts.)
     expect(renderRequirement({} as any, null)).toContain('RENDER_API_KEY');
-    expect(renderRequirement({} as any, null)).toContain('Settings → Secrets & Keys');
+    expect(renderRequirement({} as any, null)).toContain('Settings → Secrets & API Keys');
     expect(renderRequirement({ RENDER_API_KEY: 'rnd_x' } as any, null).toLowerCase()).toContain('configured');
   });
 

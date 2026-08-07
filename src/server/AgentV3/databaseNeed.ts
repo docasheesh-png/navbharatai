@@ -114,7 +114,7 @@ export interface DatabaseReadiness {
  * Is this app ready to be published, as far as data is concerned?
  *
  * `connected` accepts EITHER the explicit provider marker or any real credential, because a user who
- * pasted a `DATABASE_URL` into Secrets & Keys by hand never touched the Database screen and must not be
+ * pasted a `DATABASE_URL` into Secrets & API Keys by hand never touched the Database screen and must not be
  * told they have no database.
  */
 export function databaseReadiness(input: {

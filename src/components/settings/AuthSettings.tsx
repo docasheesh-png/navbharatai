@@ -5,7 +5,7 @@ import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
 
 // Authentication settings (admin 2026-07-29) — connect a login/signup provider for the apps
 // NavBharatAI Pro builds. Mirrors DatabaseSettings/StorageSettings: the chosen provider + credentials
-// are AES-encrypted in the Secrets & Keys vault (never in the browser), and the server's
+// are AES-encrypted in the Secrets & API Keys vault (never in the browser), and the server's
 // `userAuthContext` tells the builder to wire that exact provider for all auth. Clerk/Auth0 are
 // dedicated auth providers; Supabase/Firebase auth also comes with the Database connection.
 
@@ -122,9 +122,9 @@ export function AuthSettings({ userId }: AuthSettingsProps) {
       }
 
       setFormCreds({});
-      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys — NavBharatAI Pro wires this login provider into your app automatically when it builds.');
+      setSavedMsg('Saved! Credentials are encrypted in Secrets & API Keys — NavBharatAI Pro wires this login provider into your app automatically when it builds.');
     } catch {
-      setSavedMsg('Could not reach Secrets & Keys — check your connection and try again.');
+      setSavedMsg('Could not reach Secrets & API Keys — check your connection and try again.');
     } finally {
       setSaving(false);
       setTimeout(() => setSavedMsg(''), 6000);

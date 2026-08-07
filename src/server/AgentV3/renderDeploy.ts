@@ -22,7 +22,7 @@ export function renderConfigured(env: NodeJS.ProcessEnv = process.env): boolean 
  * THE USER'S OWN RENDER KEY WINS (root-caused 2026-08-07).
  *
  * The old gate asked only `process.env.RENDER_API_KEY`, while every message told the user to "Set
- * RENDER_API_KEY (Settings → Secrets & Keys)". Nothing ever read that vault entry — so a user who
+ * RENDER_API_KEY (Settings → Secrets & API Keys)". Nothing ever read that vault entry — so a user who
  * followed the instruction exactly, saved their key and retried, got the byte-identical refusal. The
  * app was giving an instruction it did not implement.
  *
@@ -62,9 +62,9 @@ export function renderRequirement(
 ): string {
   const env = (envOrVault ?? {}) as NodeJS.ProcessEnv;
   const resolved = resolveRenderKey(vaultSecrets, env);
-  if (resolved?.source === 'user') return 'Deploying to YOUR own Render account, using the key you saved in Settings → Secrets & Keys.';
+  if (resolved?.source === 'user') return 'Deploying to YOUR own Render account, using the key you saved in Settings → Secrets & API Keys.';
   if (resolved?.source === 'server') return 'Render is configured — a real deploy can run.';
-  return 'Save your own RENDER_API_KEY in Settings → Secrets & Keys to deploy your backend to Render (Render → Account Settings → API Keys).';
+  return 'Save your own RENDER_API_KEY in Settings → Secrets & API Keys to deploy your backend to Render (Render → Account Settings → API Keys).';
 }
 
 export interface RenderRequest {

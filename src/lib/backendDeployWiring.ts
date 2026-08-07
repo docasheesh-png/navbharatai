@@ -73,7 +73,7 @@ export function buildBackendConfigInjection(
     // it is wired to this panel now, so saying "coming next" would be a promise the app is already
     // keeping. For the hosts where no engine exists yet, the honest answer is still "you deploy it".
     managed
-      ? `🚀 NavBharatAI can trigger the deploy for you — save your ${plan.tokenEnv} in Settings → Secrets & Keys, then use "Deploy it for me" below.`
+      ? `🚀 NavBharatAI can trigger the deploy for you — save your ${plan.tokenEnv} in Settings → Secrets & API Keys, then use "Deploy it for me" below.`
       : `   NavBharatAI cannot trigger a ${plan.hostLabel} deploy yet — set ${plan.tokenEnv} on your host and deploy from there.`,
     `📌 ${plan.portNote}`,
     ...plan.steps.map((s, i) => `${i + 1}. ${s}`),

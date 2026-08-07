@@ -79,7 +79,9 @@ describe('The deploy runs on the USER\'s Render account, not ours', () => {
     // The old message said "Set RENDER_API_KEY (Settings → Secrets & Keys)" while the code read only
     // process.env, so a user who followed it exactly got the identical refusal back.
     const fn = braceBlock(engine, 'export function renderRequirement');
-    expect(fn).toContain('Settings → Secrets & Keys');
+    // And the path it names is the tile's REAL name — the old text sent people to "Secrets & Keys",
+    // a screen that does not exist. See settingsLabels.ts / settingsLabels.test.ts.
+    expect(fn).toContain('Settings → Secrets & API Keys');
     expect(route).toContain('error: renderRequirement(process.env, renderVault)');
   });
 });

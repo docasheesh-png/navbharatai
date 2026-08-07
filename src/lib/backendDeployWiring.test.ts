@@ -64,7 +64,7 @@ describe('backendDeployWiring — BYO-token setup is surfaced (slice 3 groundwor
     const inj = buildBackendConfigInjection('render', { 'package.json': '{"name":"api"}' })!;
     const joined = inj.logLines.join('\n');
     expect(joined).toContain('RENDER_API_KEY');           // the exact BYO token env
-    expect(joined).toContain('Settings → Secrets & Keys'); // where to put it in NavBharatAI
+    expect(joined).toContain('Settings → Secrets & API Keys'); // where to put it in NavBharatAI
     expect(inj.plan.tokenEnv).toBe('RENDER_API_KEY');
   });
   it('each host names its own token', () => {

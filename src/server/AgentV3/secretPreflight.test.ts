@@ -167,7 +167,7 @@ describe('preflightNarration — the three facts that were being blurred into on
   it('WHITE-LABEL LAW — no vendor or driver text ever reaches these lines', () => {
     const { loaded, problems } = preflightNarration([
       { name: 'DATABASE_URL', status: 'broken', message: 'Your database did not answer.', detail: 'ECONNREFUSED ep-snowy.neon.tech' },
-      { name: 'X', status: 'placeholder', message: 'X looks like an example value rather than a real one. Replace it in Settings → Secrets & Keys.' },
+      { name: 'X', status: 'placeholder', message: 'X looks like an example value rather than a real one. Replace it in Settings → Secrets & API Keys.' },
     ]);
     const all = [loaded, ...problems].join(' ');
     for (const banned of ['neon', 'ECONNREFUSED', 'supabase', 'postgres', 'pg_hba', 'Anthropic', 'Claude']) {

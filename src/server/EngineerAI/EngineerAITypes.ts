@@ -29,7 +29,7 @@ export interface EngineerTask {
   dbConfig?: DbProviderConfig;
   /**
    * Phase 5 — the user's GitHub personal-access token, read server-side from
-   * Secrets & Keys (GITHUB_TOKEN). Used for clone_repo/git_push. Never sent by
+   * Secrets & API Keys (GITHUB_TOKEN). Used for clone_repo/git_push. Never sent by
    * the client; injected by the route so the agent can push to the user's repos.
    */
   githubToken?: string;

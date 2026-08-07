@@ -3071,7 +3071,7 @@ export function registerAgentV3Routes(app: Express): void {
     if (platform !== 'render') { res.status(400).json({ error: `Backend one-click deploy isn't wired for "${platform}" yet — push to GitHub and connect it on your host (the config was already added).` }); return; }
     // THE USER'S OWN RENDER KEY, NOT OURS (root-caused 2026-08-07). The gate used to ask only
     // `renderConfigured()` — i.e. the SERVER's env — while the refusal it returned told the user to
-    // "Set RENDER_API_KEY (Settings → Secrets & Keys)". Nothing read that vault entry, so a user who
+    // "Set RENDER_API_KEY (Settings → Secrets & API Keys)". Nothing read that vault entry, so a user who
     // followed the instruction exactly got the identical refusal back: an instruction the app did not
     // implement. Beyond the wrong words, deploying every user's backend with one server-side key would
     // put all of them in a single Render account billed to whoever owns it — against the standing rule
@@ -7398,7 +7398,7 @@ export function registerAgentV3Routes(app: Express): void {
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
-      // Vault → App pipe (admin 2026-07-17): inject the user's OWN saved keys (Settings → Secrets & Keys)
+      // Vault → App pipe (admin 2026-07-17): inject the user's OWN saved keys (Settings → Secrets & API Keys)
       // into the .env of the app they build, so an app that needs an API key runs with the real key the
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
       // (loadUserVaultSecrets never reads process.env, so NavBharatAI's platform keys can never leak in).

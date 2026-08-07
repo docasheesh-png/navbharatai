@@ -27440,3 +27440,17 @@ Shipped `FleetMistakeLedger.ts` (+15 tests):
 - **Kill switch**: `AGENTV3_FLEET_LEDGER=off` (default on).
 
 Gate: tsc clean both projects, full run 1099 files / 12,438 tests, exit 0.
+
+### Polish (same day, same PR): the guard now PROVES itself in every admin report
+
+"Repeat rate poochhna" is only a real promise if the number is somewhere the admin can see. Added:
+- `MISTAKE_GUARD` (info) on the report timeline the moment a guard fires — source (personal/fleet),
+  how many proven fixes were recalled, and the personal ledger's live solved-count + repeat rate.
+- `GUARD_HELD` / `GUARD_REPEAT` at build end: did the guarded failures actually stay away? A repeat
+  DESPITE the guard is a warning naming the real conclusion (this class needs an upstream fix, not a
+  better reminder). Measured against ALL unresolved errors, never the ledger's bounded top-10 slice —
+  a guarded failure recurring as error #11 must not be reported as "held".
+- One selection rule (`matchedMistakes`) now feeds BOTH the guard text and its measurement, so "what
+  was guarded" and "what was measured" cannot drift.
+
+Gate: tsc clean both projects, full run 12,442/12,442.

@@ -111,8 +111,8 @@ describe('wiring — consulted as a fallback, updated anonymously', () => {
   const SRC = readFileSync(fileURLToPath(new URL('../routes/agentv3.ts', import.meta.url)), 'utf8');
 
   it('is READ only when the personal ledger had nothing (personal history wins)', () => {
-    expect(SRC).toContain('if (!guard && pastErrors.length > 0)');
-    expect(SRC).toContain('fleetMistakeLedgerStore.guardFor(pastErrors)');
+    expect(SRC).toContain('} else if (pastErrors.length > 0)');
+    expect(SRC).toContain('fleetMistakeLedgerStore.guardDetailFor(pastErrors)');
   });
 
   it('is WRITTEN with NO user id — the store cannot leak what it is never given', () => {
@@ -121,10 +121,10 @@ describe('wiring — consulted as a fallback, updated anonymously', () => {
   });
 
   it('both call sites live inside the existing best-effort catch blocks', () => {
-    const at = SRC.indexOf('fleetMistakeLedgerStore.guardFor');
-    expect(SRC.slice(at, at + 400)).toContain('catch');
+    const at = SRC.indexOf('fleetMistakeLedgerStore.guardDetailFor');
+    expect(SRC.slice(at, at + 1200)).toContain('catch');
     const at2 = SRC.indexOf('fleetMistakeLedgerStore.recordBuild');
-    expect(SRC.slice(at2, at2 + 400)).toContain('catch');
+    expect(SRC.slice(at2, at2 + 3000)).toContain('catch');
   });
 
   it('the store CODE never touches a user identifier (comments stripped before checking)', () => {

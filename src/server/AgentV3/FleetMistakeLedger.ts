@@ -32,6 +32,7 @@ import { redactSecrets, redactPII } from './SecretRedactor';
 import {
   mistakeKey,
   formatKnownMistakes,
+  matchedMistakes,
   MAX_GUARDS,
   type MistakeRecord,
 } from './MistakeLedger';
@@ -170,20 +171,32 @@ class FleetMistakeLedgerStore {
    * about them (or the switch is off), so an unmatched build is byte-identical to today. Never throws.
    */
   async guardFor(errorTexts: string[]): Promise<string> {
+    return (await this.guardDetailFor(errorTexts)).text;
+  }
+
+  /**
+   * The fleet guard PLUS the guarded signatures, so the caller can record the guard in the admin
+   * report and measure at build end whether a fleet-guarded failure recurred anyway. Never throws.
+   */
+  async guardDetailFor(errorTexts: string[]): Promise<{ text: string; signatures: string[] }> {
+    const none = { text: '', signatures: [] as string[] };
     try {
-      if (!fleetLedgerEnabled()) return '';
+      if (!fleetLedgerEnabled()) return none;
       const db = this.getDb();
-      if (!db || !errorTexts?.length) return '';
+      if (!db || !errorTexts?.length) return none;
       const sigs = uniqueSignatures(errorTexts, Math.max(MAX_FLEET_LOOKUPS, MAX_GUARDS));
-      if (sigs.length === 0) return '';
+      if (sigs.length === 0) return none;
       const snaps = await db.getAll(...sigs.map((s) => db.collection(FLEET_COLLECTION).doc(fleetDocId(s))));
       const records = snaps
         .map((s) => (s.exists ? (s.data() as FleetMistakeRecord) : null))
         .filter((r): r is FleetMistakeRecord => !!r && typeof r.signature === 'string');
-      if (records.length === 0) return '';
-      return formatFleetMistakes(records, errorTexts);
+      if (records.length === 0) return none;
+      // The formatter selects (dedupes/caps/solved-only) — report exactly what it selected.
+      const hits = matchedMistakes({ mistakes: [...records] }, errorTexts);
+      if (hits.length === 0) return none;
+      return { text: formatFleetMistakes(records, errorTexts), signatures: hits.map((h) => h.signature) };
     } catch {
-      return '';
+      return none;
     }
   }
 

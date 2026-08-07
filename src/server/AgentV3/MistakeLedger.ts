@@ -155,6 +155,23 @@ export function knownFixFor(ledger: MistakeLedger, errorText: string): MistakeRe
 }
 
 /**
+ * The SOLVED mistakes matched by the given error texts — deduped by signature, bounded by MAX_GUARDS.
+ * This is the ONE selection rule: the guidance block formats exactly this set, and the guard-
+ * effectiveness check at build end compares against exactly this set, so "what was guarded" and
+ * "what was measured" can never drift apart. PURE.
+ */
+export function matchedMistakes(ledger: MistakeLedger, errorTexts: string[]): MistakeRecord[] {
+  const seen = new Set<string>();
+  const hits: MistakeRecord[] = [];
+  for (const text of errorTexts ?? []) {
+    const hit = knownFixFor(ledger, text);
+    if (hit && !seen.has(hit.signature)) { seen.add(hit.signature); hits.push(hit); }
+    if (hits.length >= MAX_GUARDS) break;
+  }
+  return hits;
+}
+
+/**
  * The guidance block injected when a KNOWN mistake is recurring — the moment the loop finally pays off.
  * Deliberately imperative and specific: a lesson phrased as trivia ("we once had an issue with ports")
  * changes nothing, while "this exact failure has a proven fix — apply it" does. Returns '' when
@@ -165,13 +182,7 @@ export function formatKnownMistakes(
   errorTexts: string[],
   header = 'KNOWN MISTAKE — you have already solved this one. Do NOT rediscover it from scratch:',
 ): string {
-  const seen = new Set<string>();
-  const hits: MistakeRecord[] = [];
-  for (const text of errorTexts ?? []) {
-    const hit = knownFixFor(ledger, text);
-    if (hit && !seen.has(hit.signature)) { seen.add(hit.signature); hits.push(hit); }
-    if (hits.length >= MAX_GUARDS) break;
-  }
+  const hits = matchedMistakes(ledger, errorTexts);
   if (hits.length === 0) return '';
   const lines = hits.map((h) => {
     const repeated = h.repeatsAfterFix > 0 ? ` (this has already come back ${h.repeatsAfterFix}× after being fixed — do not let it happen again)` : '';
@@ -255,11 +266,30 @@ class MistakeLedgerStore {
    * with no relevant history is byte-identical to today. Never throws.
    */
   async guardFor(userId: string | null, errorTexts: string[]): Promise<string> {
+    return (await this.guardDetailFor(userId, errorTexts)).text;
+  }
+
+  /**
+   * The guard PLUS what it is made of, so the caller can (a) record in the admin report which
+   * signatures were guarded and the ledger's live repeat rate, and (b) check at build end whether a
+   * guarded failure recurred anyway — the number that proves the learning loop works. Never throws.
+   */
+  async guardDetailFor(
+    userId: string | null,
+    errorTexts: string[],
+  ): Promise<{ text: string; signatures: string[]; stats: ReturnType<typeof repeatStats> | null }> {
     try {
-      if (!userId || !errorTexts?.length) return '';
-      return formatKnownMistakes(await this.get(userId), errorTexts);
+      if (!userId || !errorTexts?.length) return { text: '', signatures: [], stats: null };
+      const ledger = await this.get(userId);
+      const hits = matchedMistakes(ledger, errorTexts);
+      if (hits.length === 0) return { text: '', signatures: [], stats: null };
+      return {
+        text: formatKnownMistakes(ledger, errorTexts),
+        signatures: hits.map((h) => h.signature),
+        stats: repeatStats(ledger),
+      };
     } catch {
-      return '';
+      return { text: '', signatures: [], stats: null };
     }
   }
 

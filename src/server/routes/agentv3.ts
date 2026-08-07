@@ -220,7 +220,7 @@ import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHea
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
-import { mistakeLedgerStore } from '../AgentV3/MistakeLedger';
+import { mistakeLedgerStore, mistakeKey } from '../AgentV3/MistakeLedger';
 import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
@@ -7992,18 +7992,37 @@ export function registerAgentV3Routes(app: Express): void {
       // This lookup is keyed by the ERROR SIGNATURES this project has actually hit, so a proven fix is
       // recalled by IDENTITY rather than by similarity, and cannot be missed because the wording
       // differs. '' when nothing matches ⇒ a project with no such history is byte-identical to today.
+      let mistakeGuardSigs: string[] = [];
       try {
         const pastErrors = getWorkspaceMemory(workspaceId).snapshot().episodes
           .filter((e) => e.kind === 'error')
           .slice(-25)
           .map((e) => e.text);
-        const guard = await mistakeLedgerStore.guardFor(userId, pastErrors);
-        if (guard) buildPrompt = `${guard}\n\n---\n\n${buildPrompt}`;
-        // FLEET FALLBACK: the fleet may hold a proven fix the user has never personally earned
-        // (anonymous by construction — signature keys, sanitized text, no identity stored).
-        if (!guard && pastErrors.length > 0) {
-          const fleetGuard = await fleetMistakeLedgerStore.guardFor(pastErrors);
-          if (fleetGuard) buildPrompt = `${fleetGuard}\n\n---\n\n${buildPrompt}`;
+        const detail = await mistakeLedgerStore.guardDetailFor(userId, pastErrors);
+        let guardSource: 'personal' | 'fleet' | null = null;
+        if (detail.text) {
+          buildPrompt = `${detail.text}\n\n---\n\n${buildPrompt}`;
+          mistakeGuardSigs = detail.signatures;
+          guardSource = 'personal';
+        } else if (pastErrors.length > 0) {
+          // FLEET FALLBACK: the fleet may hold a proven fix the user has never personally earned
+          // (anonymous by construction — signature keys, sanitized text, no identity stored).
+          const fleet = await fleetMistakeLedgerStore.guardDetailFor(pastErrors);
+          if (fleet.text) {
+            buildPrompt = `${fleet.text}\n\n---\n\n${buildPrompt}`;
+            mistakeGuardSigs = fleet.signatures;
+            guardSource = 'fleet';
+          }
+        }
+        // The guard is VISIBLE in the admin report from the moment it fires, with the ledger's live
+        // repeat rate — so "is the learning system working?" is answered by every report, by number.
+        if (guardSource) {
+          const s = detail.stats;
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'MISTAKE_GUARD', autoResolved: false,
+            message: `Known-mistake guard active (${guardSource}): ${mistakeGuardSigs.length} proven fix(es) recalled by error signature${
+              s ? `. Personal ledger: ${s.solved}/${s.total} solved, repeat rate ${Math.round(s.repeatRate * 100)}%` : ''}.`,
+          });
         }
       } catch { /* the guard is best-effort — never blocks a build */ }
 
@@ -10673,15 +10692,36 @@ export function registerAgentV3Routes(app: Express): void {
         // guesses starts confidently teaching wrong answers.
         try {
           const d = buildDiag.report();
-          const errs = (d.problems ?? [])
+          const unresolvedErrors = (d.problems ?? [])
             .filter((p) => p.severity === 'error' && p.autoResolved !== true)
-            .map((p) => p.message)
-            .slice(0, 10);
+            .map((p) => p.message);
+          const errs = unresolvedErrors.slice(0, 10);
           if (errs.length > 0) {
             void mistakeLedgerStore.recordBuild(userId, { ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
             // FLEET: the same outcome, recorded anonymously for every user — deliberately NO userId
             // argument (the store cannot leak what it is never given). Sanitization happens inside.
             void fleetMistakeLedgerStore.recordBuild({ ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
+          }
+          // GUARD EFFECTIVENESS: when a guard was injected at build start, measure whether the guarded
+          // failures actually stayed away. A guard that fires and the mistake recurs anyway is the
+          // learning system FAILING — that must surface as a warning in the report, never hide behind
+          // "a guard ran". A clean hold is recorded too, so the loop's wins are countable, not vibes.
+          if (mistakeGuardSigs.length > 0) {
+            // Measured against ALL unresolved errors, not the ledger's bounded slice — a guarded
+            // failure that recurred as error #11 must never be reported as "held".
+            const recurred = new Set(unresolvedErrors.map((e) => mistakeKey(e)));
+            const broke = mistakeGuardSigs.filter((sig) => recurred.has(sig));
+            buildDiag.record(
+              broke.length > 0
+                ? {
+                    phase: 'build', severity: 'warning', code: 'GUARD_REPEAT', autoResolved: false,
+                    message: `A known-fixed mistake recurred DESPITE the guard (${broke.length}/${mistakeGuardSigs.length} guarded signature(s) came back). The proven fix did not prevent the repeat — this failure class needs an upstream/architectural fix, not a better reminder.`,
+                  }
+                : {
+                    phase: 'build', severity: 'info', code: 'GUARD_HELD', autoResolved: true,
+                    message: `Known-mistake guard held: none of the ${mistakeGuardSigs.length} guarded failure(s) recurred in this build.`,
+                  },
+            );
           }
         } catch { /* the ledger is best-effort — never affects the build result */ }
       }

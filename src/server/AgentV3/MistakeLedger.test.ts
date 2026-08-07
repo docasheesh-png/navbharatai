@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import {
-  emptyLedger, mistakeKey, recordMistake, recordProvenFix, knownFixFor,
+  emptyLedger, mistakeKey, recordMistake, recordProvenFix, knownFixFor, matchedMistakes,
   formatKnownMistakes, repeatStats, worstRepeats, MAX_MISTAKES, MAX_GUARDS,
 } from './MistakeLedger';
 
@@ -102,6 +102,28 @@ describe('the counter that cannot be hidden — repeats AFTER a fix was known', 
   });
 });
 
+describe('matchedMistakes — ONE selection rule shared by the guard text and its measurement', () => {
+  it('returns exactly the solved, deduped, bounded set the formatter renders', () => {
+    let l = recordProvenFix(recordMistake(emptyLedger(), ERR_A), ERR_A, 'free the port');
+    l = recordMistake(l, ERR_B); // unsolved — must not be selected
+    const hits = matchedMistakes(l, [ERR_A, ERR_A_AGAIN, ERR_B]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].signature).toBe(mistakeKey(ERR_A));
+    expect(formatKnownMistakes(l, [ERR_A, ERR_A_AGAIN, ERR_B])).toContain('free the port');
+  });
+
+  it('stays bounded by MAX_GUARDS', () => {
+    let l = emptyLedger();
+    const errors: string[] = [];
+    for (let i = 0; i < MAX_GUARDS + 5; i++) {
+      const e = `Error: distinct failure ${i} in module beta${i}`;
+      errors.push(e);
+      l = recordProvenFix(recordMistake(l, e), e, `fix ${i}`);
+    }
+    expect(matchedMistakes(l, errors)).toHaveLength(MAX_GUARDS);
+  });
+});
+
 describe('formatKnownMistakes — the guidance that actually stops the repeat', () => {
   it('names the failure and gives the PROVEN fix as an instruction, not trivia', () => {
     let l = recordMistake(emptyLedger(), ERR_B);
@@ -159,12 +181,24 @@ describe('wiring — the ledger is actually consulted and actually updated', () 
   const SRC = readFileSync(fileURLToPath(new URL('../routes/agentv3.ts', import.meta.url)), 'utf8');
 
   it('is READ at build start, keyed by past ERRORS (not by the prompt)', () => {
-    expect(SRC).toContain('mistakeLedgerStore.guardFor(userId, pastErrors)');
+    expect(SRC).toContain('mistakeLedgerStore.guardDetailFor(userId, pastErrors)');
     expect(SRC).toContain("filter((e) => e.kind === 'error')");
   });
 
   it('the guard is prepended to the build prompt when it matches', () => {
-    expect(SRC).toContain('if (guard) buildPrompt =');
+    expect(SRC).toContain('buildPrompt = `${detail.text}\\n\\n---\\n\\n${buildPrompt}`');
+  });
+
+  it('the guard is VISIBLE in the admin report, with the live repeat rate', () => {
+    expect(SRC).toContain("code: 'MISTAKE_GUARD'");
+    expect(SRC).toContain('repeat rate');
+  });
+
+  it('guard EFFECTIVENESS is measured at build end — held or broke, never silent', () => {
+    expect(SRC).toContain("code: 'GUARD_REPEAT'");
+    expect(SRC).toContain("code: 'GUARD_HELD'");
+    // Measured against ALL unresolved errors, not the bounded slice fed to the ledger.
+    expect(SRC).toContain('new Set(unresolvedErrors.map((e) => mistakeKey(e)))');
   });
 
   it('is WRITTEN at build end from the report\'s REAL unresolved errors', () => {
@@ -177,10 +211,10 @@ describe('wiring — the ledger is actually consulted and actually updated', () 
   });
 
   it('both call sites are best-effort — the ledger can never break a build', () => {
-    // The window is wide enough to span the fleet-fallback block that now shares the same try/catch.
-    const at = SRC.indexOf('mistakeLedgerStore.guardFor');
-    expect(SRC.slice(at, at + 700)).toContain('catch');
+    // The window spans the fleet-fallback + report-visibility block sharing the same try/catch.
+    const at = SRC.indexOf('mistakeLedgerStore.guardDetailFor');
+    expect(SRC.slice(at, at + 1800)).toContain('catch');
     const at2 = SRC.indexOf('mistakeLedgerStore.recordBuild');
-    expect(SRC.slice(at2, at2 + 700)).toContain('catch');
+    expect(SRC.slice(at2, at2 + 3000)).toContain('catch');
   });
 });

@@ -27476,3 +27476,21 @@ Step-2 names as its canonical example. Built it:
 - 17 new tests incl. the report's verbatim evidence line and source-contract wiring checks.
 
 Gate: tsc clean both projects, full run 12,456/12,456.
+
+## 2026-08-07 — Port-mismatch fix (admin screenshot: preview URL on 3000, app on 5000)
+
+The Preview tab rendered E2B's "Closed Port Error" (port 3000) while Mitrify genuinely served on 5000.
+Two root causes, both killed:
+1. **Client precedence was backwards** (`url || foundUrl`): the SAVED historical URL outranked the
+   URL the Diagnose watchdog had just booted and page-verified — so even after the real port was
+   found, the iframe kept the dead URL forever. Now `foundUrl || url` (fresh verified truth wins),
+   and a NEW build's published `url` reclaims the lead by clearing `foundUrl` on prop change.
+2. **The app's port was ambient-dependent**: a `process.env.PORT || default` server binds whatever
+   the sandbox env implies — same app: 3000 in one sandbox, 5000 in the next, while its saved URL
+   stayed pinned to history. The import boot now writes a REAL `PORT=3000` into the dev .env (never
+   an empty placeholder — `PORT=` is its own hazard: defined-but-empty makes parseInt('') NaN), so
+   every boot of a PORT-honoring app binds the same port in every sandbox. Apps that ignore PORT are
+   untouched; the log-parsed port still wins downstream; the client fix covers hardcoded-port apps.
+Locked in tests/previewFreshUrl.test.ts (client precedence + reclaim + server pin + ordering).
+
+Gate: tsc clean both projects, full run 12,462/12,462.

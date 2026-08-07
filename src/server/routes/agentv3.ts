@@ -5872,6 +5872,14 @@ export function registerAgentV3Routes(app: Express): void {
             // (express-session throws "secret option required" on '' — the exact reason the Mitrify
             // preview died). Third-party keys are NEVER faked; they stay empty + honestly listed.
             Object.assign(provided, conjurableSecrets(declaredEnvVars));
+            // PIN THE PORT (admin screenshot 2026-08-07 — Mitrify preview URL said 3000, the app was
+            // on 5000): a server that reads `process.env.PORT || <default>` binds a DIFFERENT port
+            // depending on ambient sandbox env, so the same app landed on 3000 in one sandbox and
+            // 5000 in the next while its saved preview URL stayed pinned to history — E2B's "Closed
+            // Port Error" page rendered as the app. Writing PORT into the dev .env makes every boot
+            // of a PORT-honoring app bind the SAME port, in every sandbox, forever. Apps that ignore
+            // PORT (vite serves its own) are untouched, and the log-parsed port still wins downstream.
+            if (!('PORT' in provided)) provided.PORT = '3000';
             // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
             // provisioned DATABASE_URL + generated local secrets, plus empty placeholders for the rest.
             if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {

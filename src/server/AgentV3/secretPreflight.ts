@@ -2,9 +2,9 @@
 //
 // WHY THIS EXISTS (admin finding 3, 2026-08-06: "navbharatai ne credentials user se bina puche ... use
 // kiye ... credentials galat to hai hi"). The vault → app pipe injects every key a user saved in
-// Settings → Secrets & Keys into the `.env` of the app being built, and then announces, after the fact:
+// Settings → Secrets & API Keys into the `.env` of the app being built, and then announces, after the fact:
 //
-//     🔐 Loaded 3 of your saved keys (Settings → Secrets & Keys) into the app
+//     🔐 Loaded 3 of your saved keys (Settings → Secrets & API Keys) into the app
 //
 // That sentence is true about the COPY and silent about the TRUTH. A stale, mistyped or long-dead
 // connection string is copied in with exactly the same confident line as a working one, and the app is
@@ -162,9 +162,9 @@ export async function verifyInjectedSecrets(
     if (toCheck.has(name)) continue; // decided below, by a real connection
     const shape = classifySecretShape(name, value);
     if (shape === 'placeholder') {
-      verdicts.push({ name, status: 'placeholder', message: `${name} looks like an example value rather than a real one. Replace it in Settings → Secrets & Keys.` });
+      verdicts.push({ name, status: 'placeholder', message: `${name} looks like an example value rather than a real one. Replace it in Settings → Secrets & API Keys.` });
     } else if (shape === 'malformed') {
-      verdicts.push({ name, status: 'malformed', message: `${name} is not a valid address, so nothing can connect with it. Re-copy it in Settings → Secrets & Keys.` });
+      verdicts.push({ name, status: 'malformed', message: `${name} is not a valid address, so nothing can connect with it. Re-copy it in Settings → Secrets & API Keys.` });
     } else {
       verdicts.push({ name, status: 'unchecked', message: `${name} was loaded as you saved it.` });
     }
@@ -215,7 +215,7 @@ export function preflightNarration(verdicts: SecretVerdict[]): { loaded: string;
   const bad = verdicts.filter((v) => v.status === 'broken' || v.status === 'malformed' || v.status === 'placeholder');
 
   const proven = ok.length > 0 ? ` — ${ok.length} of them tested and working` : '';
-  const loaded = `🔐 Loaded ${total} of your saved key${total === 1 ? '' : 's'} (Settings → Secrets & Keys) into the app${proven}. No keys were ever pasted in chat.`;
+  const loaded = `🔐 Loaded ${total} of your saved key${total === 1 ? '' : 's'} (Settings → Secrets & API Keys) into the app${proven}. No keys were ever pasted in chat.`;
 
   const problems = bad.map((v) => {
     const consequence = /^DATABASE_URL$/i.test(v.name) || v.status === 'broken'

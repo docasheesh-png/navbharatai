@@ -117,7 +117,7 @@ export interface ProEngineOptions {
   sessionId?: string;
   /** User's own E2B API key — unlocks the top tier for large apps (billed to them). */
   userE2bKey?: string;
-  /** GitHub token for clone_repo + git_push actions (from user's Secrets & Keys). */
+  /** GitHub token for clone_repo + git_push actions (from user's Secrets & API Keys). */
   githubToken?: string;
   /** User's database credentials — injected into the sandbox .env automatically. */
   dbConfig?: DbProviderConfig;

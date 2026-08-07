@@ -94,8 +94,8 @@ Action args:
                   — hover: move the mouse over an element (reveals dropdown menus, tooltips). double_click: open/select (e.g. select a word, expand a tree item). select_option: choose a value in a <select> dropdown (pass the option value/label in "text").
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
-  clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & Keys) is used automatically for private repos.
-  git_push:       { "message": "commit message", "branch": "main" (optional) } — commits ALL current changes and pushes to the repo's origin on GitHub. Requires a GITHUB_TOKEN in Settings → App Settings → Secrets & Keys. Use clone_repo first (or set a remote) so origin is known.
+  clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & API Keys) is used automatically for private repos.
+  git_push:       { "message": "commit message", "branch": "main" (optional) } — commits ALL current changes and pushes to the repo's origin on GitHub. Requires a GITHUB_TOKEN in Settings → App Settings → Secrets & API Keys. Use clone_repo first (or set a remote) so origin is known.
   restore:        { "checkpointId": "ckpt_1234567890" }
   generate_tests: {} — scans the workspace source files and writes Vitest unit tests covering the main functions, utilities, and components. Also wires up "vitest run" as the package.json test script so tests run automatically on done. Call this ONCE after the core implementation is working but BEFORE done — tests act as a quality gate.
   done:           { "summary": "one sentence describing what was accomplished" }
@@ -750,7 +750,7 @@ export class EngineerAgentLoop {
         if (!githubToken) {
           observation =
             'git_push error: no GitHub token found. Ask the user to add a GITHUB_TOKEN in ' +
-            'Settings → App Settings → Secrets & Keys, then retry.';
+            'Settings → App Settings → Secrets & API Keys, then retry.';
         } else {
           const remoteRes = await this.actuator.runCommand(workspaceId, 'git remote get-url origin 2>&1')
             .catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));

@@ -64,13 +64,123 @@ export function buildBackendConfigInjection(
   const plan = backendDeployConfig(host, parseBackendAppInfo(files));
   const nextFiles = { ...files, ...plan.files };
   const added = Object.keys(plan.files).join(', ');
+  const managed = canOfferManagedDeploy(platformId);
   const logLines = [
     `✅ Added ${host === 'cloud-run' ? 'Cloud Run' : plan.hostLabel} deploy config to your project: ${added}.`,
     `ℹ️ This makes your BACKEND deploy-ready on ${plan.hostLabel} — separate from your frontend. We don't fake a deploy.`,
-    `🔑 It deploys to YOUR ${plan.hostLabel} account, never NavBharatAI's. To let NavBharatAI deploy it for you`,
-    `   (coming next), add your ${plan.tokenEnv} in Settings → Secrets & Keys; or deploy on your host yourself.`,
+    `🔑 It deploys to YOUR ${plan.hostLabel} account, never NavBharatAI's.`,
+    // The old line said NavBharatAI deploying it for you was "coming next". It arrived — and for Render
+    // it is wired to this panel now, so saying "coming next" would be a promise the app is already
+    // keeping. For the hosts where no engine exists yet, the honest answer is still "you deploy it".
+    managed
+      ? `🚀 NavBharatAI can trigger the deploy for you — save your ${plan.tokenEnv} in Settings → Secrets & API Keys, then use "Deploy it for me" below.`
+      : `   NavBharatAI cannot trigger a ${plan.hostLabel} deploy yet — set ${plan.tokenEnv} on your host and deploy from there.`,
     `📌 ${plan.portNote}`,
     ...plan.steps.map((s, i) => `${i + 1}. ${s}`),
   ];
   return { plan, nextFiles, logLines };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// MANAGED DEPLOY — the half that existed on the server and was never reachable (verified 2026-08-07).
+//
+// `renderDeploy.ts` really deploys a user's backend through the Render API, `POST
+// /api/agentv3/deploy-backend` really exposes it, and the admin really set `RENDER_API_KEY` in Cloud Run
+// on 2026-08-02. But NOTHING in the client ever called that route — a repo-wide grep for
+// 'deploy-backend' found the route definition and no caller at all. So the panel kept telling every user
+// "config added, now go and deploy it yourself", while the button that could do it for them did not
+// exist. Worse, the injection text above literally promised it was "coming next" — after it had shipped.
+//
+// A real capability with no way to reach it is the same rule-2 failure as a button that does nothing;
+// it just fails in the quieter direction. These pure helpers are that missing half.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Can NavBharatAI itself trigger the deploy for this host, or is it the user's own next step?
+ *
+ * Render ONLY, deliberately. Cloud Run and Railway have config generators but no server-side deploy
+ * engine, and offering a button that cannot deliver would be worse than the honest steps they get today.
+ * When their engines ship, they are added here — one place, not per call site. PURE.
+ */
+export function canOfferManagedDeploy(platformId: string): boolean {
+  return platformId === 'render';
+}
+
+/**
+ * The request body for `POST /api/agentv3/deploy-backend`, or null when this host has no engine.
+ *
+ * `repoUrl` is what Render matches a service by, so a missing/misshapen `owner/repo` yields null rather
+ * than a call that would come back "no matching service" for a reason the user cannot act on. PURE.
+ */
+export function managedDeployRequest(
+  platformId: string,
+  opts: { repoPath?: string; files?: Record<string, string>; workspaceId?: string; userId?: string | null; email?: string | null },
+): { platform: string; repoUrl: string; appName?: string; workspaceId: string; userId?: string; email?: string } | null {
+  if (!canOfferManagedDeploy(platformId)) return null;
+  const repoPath = String(opts.repoPath ?? '').trim().replace(/^\/+|\/+$/g, '');
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repoPath)) return null;
+  const workspaceId = String(opts.workspaceId ?? '').trim();
+  if (!workspaceId) return null;
+  const appName = parseBackendAppInfo(opts.files ?? {}).name;
+  return {
+    platform: platformId,
+    repoUrl: `https://github.com/${repoPath}`,
+    ...(appName ? { appName } : {}),
+    workspaceId,
+    ...(opts.userId ? { userId: opts.userId } : {}),
+    ...(opts.email ? { email: opts.email } : {}),
+  };
+}
+
+export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' | 'failed';
+
+/**
+ * Turn the route's response into an honest outcome + printable lines.
+ *
+ * Four outcomes, each needing DIFFERENT words because each has a different next action: it worked
+ * (here is the URL), the server has no key (an admin/setup matter, not the user's fault), the repo is
+ * not connected on Render yet (a genuine one-time step only the user can do), or it failed (say so).
+ * The server's own message is passed through — it names the exact step — and is never replaced by a
+ * generic line. PURE.
+ */
+export function managedDeployOutcome(
+  status: number,
+  body: { ok?: boolean; url?: string; serviceName?: string; reason?: string; error?: string; message?: string } | null,
+): { kind: ManagedDeployKind; lines: string[] } {
+  const serverSaid = String(body?.error ?? body?.message ?? '').trim();
+  if (status >= 200 && status < 300 && body?.ok && body.url) {
+    return {
+      kind: 'deployed',
+      lines: [
+        `🚀 Deploy triggered on your own Render account${body.serviceName ? ` for "${body.serviceName}"` : ''}.`,
+        `🔗 ${body.url}`,
+        'ℹ️ Render is building it now — the URL goes live when that finishes. Your account, your billing.',
+      ],
+    };
+  }
+  if (body?.reason === 'not-configured' || status === 503) {
+    return {
+      kind: 'not-configured',
+      lines: [
+        '⚠️ NavBharatAI cannot trigger Render deploys right now — the server has no Render key configured.',
+        serverSaid || 'Deploy from your Render dashboard instead; your render.yaml is already in the project.',
+      ],
+    };
+  }
+  if (body?.reason === 'no-service' || status === 409) {
+    return {
+      kind: 'needs-connect',
+      lines: [
+        'ℹ️ One step is still yours — Render needs the repo connected once before anything can deploy it.',
+        serverSaid || 'In Render → New → Blueprint, pick your repo (it already has render.yaml). Then try again.',
+      ],
+    };
+  }
+  return {
+    kind: 'failed',
+    lines: [
+      '❌ The Render deploy could not be started.',
+      serverSaid || 'Please try again in a moment, or deploy from your Render dashboard.',
+    ],
+  };
 }

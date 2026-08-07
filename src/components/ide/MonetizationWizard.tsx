@@ -24,7 +24,7 @@ import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
 //
 //  2. IT ASKED FOR SECRETS AND THEN DROPPED THEM ON THE FLOOR. A Razorpay Key Secret typed here went
 //     into a React state variable and nowhere else. Credentials now go to the same encrypted vault
-//     the Database screen writes to, so they appear in Settings → Secrets & Keys and the build engine
+//     the Database screen writes to, so they appear in Settings → Secrets & API Keys and the build engine
 //     can use them — and they are cleared from the browser as soon as they are stored.
 //
 //  3. THE RAZORPAY CODE IT GENERATED WAS EXPLOITABLE. It priced the order from `window.payAmount` and

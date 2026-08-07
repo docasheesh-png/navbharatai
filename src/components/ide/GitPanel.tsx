@@ -14,7 +14,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
 import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5DeployProvider } from '../../lib/deployCapability';
-import { isBackendDeployHost, buildBackendConfigInjection } from '../../lib/backendDeployWiring';
+import { isBackendDeployHost, buildBackendConfigInjection, canOfferManagedDeploy, managedDeployRequest, managedDeployOutcome } from '../../lib/backendDeployWiring';
+import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
+import { authedFetch } from '../../lib/authedFetch';
 
 interface GitPanelProps {
   token: string | null;
@@ -719,6 +721,63 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     setDeployStatus('unavailable'); // honest: config added, but the deploy itself is the user's next step
     const now = () => new Date().toLocaleTimeString();
     setDeployLogs(inj.logLines.map((line) => '[' + now() + '] ' + line));
+  };
+
+  /**
+   * DEPLOY IT FOR ME — the half that existed on the server and had no way in (root-caused 2026-08-07).
+   *
+   * `renderDeploy.ts` really deploys a backend and `POST /api/agentv3/deploy-backend` really exposes it,
+   * but a repo-wide grep for that path found the route and NO CALLER — so every user was told "config
+   * added, now go deploy it yourself" while the button that could do it for them did not exist. The
+   * injection text even promised it was "coming next", after it had already shipped.
+   *
+   * Honest at every branch, exactly like the engine behind it: no key ⇒ says which key and where; repo
+   * not connected on Render yet ⇒ names that one-time step (only the user can do it); success ⇒ reports
+   * that the deploy was TRIGGERED and is still building, never that the URL is already live.
+   */
+  const [managedDeploying, setManagedDeploying] = useState(false);
+  const canManagedDeploy = canOfferManagedDeploy(selectedPlatform);
+
+  const triggerManagedBackendDeploy = async () => {
+    const now = () => new Date().toLocaleTimeString();
+    const addLines = (lines: string[]) => setDeployLogs((prev) => [...prev, ...lines.map((l) => '[' + now() + '] ' + l)]);
+    const uid = firebaseUser?.uid || user?.uid || null;
+    const body = managedDeployRequest(selectedPlatform, {
+      repoPath: configs.github.repoName,
+      files,
+      workspaceId: getAgentV3WorkspaceId(uid),
+      userId: uid,
+      email: firebaseUser?.email || user?.email || null,
+    });
+    if (!body) {
+      // Refusing here rather than sending a call whose failure the user could not act on.
+      addLines(['⚠️ Set your repository as "owner/repo" in the GitHub settings above first — Render finds your service by its repo.']);
+      return;
+    }
+    setManagedDeploying(true);
+    addLines(['🚀 Asking Render to deploy your backend…']);
+    try {
+      // authedFetch, not a hand-rolled header: the repo has already paid for duplicated auth helpers
+      // once ("works in Settings, 401s everywhere else"). A Render deploy can take a while to answer,
+      // so the ceiling is raised above the 20s default rather than left to strand a real call.
+      const res = await authedFetch(
+        '/api/agentv3/deploy-backend',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+        60_000,
+      );
+      const json = await res.json().catch(() => null);
+      const outcome = managedDeployOutcome(res.status, json);
+      addLines(outcome.lines);
+      if (outcome.kind === 'deployed' && json?.url) {
+        setDeployedUrl(String(json.url));
+        setDeployStatus('deployed');
+        setActiveStep(3);
+      }
+    } catch (e) {
+      addLines(['❌ Could not reach NavBharatAI to start the deploy.', e instanceof Error ? e.message : String(e)]);
+    } finally {
+      setManagedDeploying(false);
+    }
   };
 
   // Run the real deploy action for the selected target, or honestly report it isn't available.
@@ -1584,6 +1643,37 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   )}
                   <div ref={consoleEndRef} />
                 </div>
+              </div>
+            )}
+
+            {/* DEPLOY IT FOR ME — only for a host whose deploy engine really exists, and only once the
+                config has actually been added. Never rendered for Cloud Run / Railway: they have config
+                generators and no engine, so a button there could not be honoured. */}
+            {canManagedDeploy && deployStatus === 'unavailable' && (
+              <div className="bg-indigo-950/20 border border-indigo-500/25 rounded-2xl p-4 space-y-2 shrink-0">
+                <div className="flex items-center gap-2 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                  <Rocket className="w-4 h-4" />
+                  NavBharatAI can deploy this for you
+                </div>
+                <p className="text-[10px] text-[#8b949e] leading-relaxed">
+                  It deploys to <span className="text-zinc-300 font-semibold">your own Render account</span> using the
+                  <code className="text-zinc-300"> RENDER_API_KEY</code> you saved in Settings → Secrets &amp; Keys —
+                  your account, your billing. Push to GitHub first, and connect the repo once in Render.
+                </p>
+                <button
+                  onClick={triggerManagedBackendDeploy}
+                  disabled={managedDeploying}
+                  className={cn(
+                    'w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer',
+                    managedDeploying
+                      ? 'bg-indigo-600/10 text-indigo-400/50 cursor-not-allowed'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-500',
+                  )}
+                >
+                  {managedDeploying
+                    ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Asking Render…</>)
+                    : (<><Rocket className="w-3.5 h-3.5" /> Deploy it for me</>)}
+                </button>
               </div>
             )}
 

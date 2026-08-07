@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  renderConfigured, renderRequirement, buildListServicesRequest, buildTriggerDeployRequest,
+  renderConfigured, renderRequirement, resolveRenderKey, renderDeployAvailable,
+  buildListServicesRequest, buildTriggerDeployRequest,
   parseRenderService, matchRenderService, deployBackendToRender, type RenderService,
 } from './renderDeploy';
 
@@ -12,8 +13,42 @@ describe('renderDeploy — real Render backend deploy (slice 4, honest, no fake)
   });
 
   it('renderRequirement is honest about the missing key', () => {
-    expect(renderRequirement({} as any)).toContain('Set RENDER_API_KEY');
-    expect(renderRequirement({ RENDER_API_KEY: 'rnd_x' } as any).toLowerCase()).toContain('configured');
+    // CORRECTED 2026-08-07. This used to assert the literal words "Set RENDER_API_KEY" followed by a
+    // path to the vault tile — an instruction NOTHING implemented: the deploy read only `process.env`,
+    // so a user who saved that key in Settings and retried got the byte-identical refusal. The test was
+    // locking a false instruction in place. Now the vault really is read, so the sentence is true.
+    // (The path it named was also the OLD tile name, fixed in the same change — see settingsLabels.ts.)
+    expect(renderRequirement({} as any, null)).toContain('RENDER_API_KEY');
+    expect(renderRequirement({} as any, null)).toContain('Settings → Secrets & API Keys');
+    expect(renderRequirement({ RENDER_API_KEY: 'rnd_x' } as any, null).toLowerCase()).toContain('configured');
+  });
+
+  it('renderRequirement names WHOSE account the deploy lands in — that is who gets the bill', () => {
+    const line = renderRequirement({ RENDER_API_KEY: 'rnd_server' } as any, { RENDER_API_KEY: 'rnd_user' });
+    expect(line).toContain('YOUR own Render account');
+  });
+
+  it('resolveRenderKey PREFERS the user\'s own key over the server\'s', () => {
+    // The standing rule: user apps run on the USER's account and billing. One server key for everyone
+    // would put every user's backend inside a single Render account paid for by whoever owns it.
+    expect(resolveRenderKey({ RENDER_API_KEY: 'rnd_user' }, { RENDER_API_KEY: 'rnd_server' } as any))
+      .toEqual({ key: 'rnd_user', source: 'user' });
+  });
+
+  it('falls back to the server key only when the user has none', () => {
+    expect(resolveRenderKey({}, { RENDER_API_KEY: 'rnd_server' } as any)).toEqual({ key: 'rnd_server', source: 'server' });
+    expect(resolveRenderKey(null, { RENDER_API_KEY: 'rnd_server' } as any)).toEqual({ key: 'rnd_server', source: 'server' });
+  });
+
+  it('a blank saved key is NOT a key — it must not shadow the working server one', () => {
+    expect(resolveRenderKey({ RENDER_API_KEY: '   ' }, { RENDER_API_KEY: 'rnd_server' } as any))
+      .toEqual({ key: 'rnd_server', source: 'server' });
+  });
+
+  it('no key anywhere is honestly null, and availability says so', () => {
+    expect(resolveRenderKey({}, {} as any)).toBeNull();
+    expect(renderDeployAvailable({}, {} as any)).toBe(false);
+    expect(renderDeployAvailable({ RENDER_API_KEY: 'rnd_user' }, {} as any)).toBe(true);
   });
 
   it('buildListServicesRequest hits the real Render endpoint with bearer auth (clamped limit)', () => {

@@ -34,7 +34,7 @@ export function deployBlockedReason(p: DeployPreconditions): string | null {
   }
   if (p.providerConfigured === false) {
     const who = p.providerName ? `${p.providerName} is` : 'This host is';
-    return `${who} not connected yet — add its access token in Settings → Secrets & Keys, then publish.`;
+    return `${who} not connected yet — add its access token in Settings → Secrets & API Keys, then publish.`;
   }
   return null;
 }

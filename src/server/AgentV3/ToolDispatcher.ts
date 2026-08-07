@@ -486,7 +486,7 @@ export class ToolDispatcher {
   }
 
   /**
-   * The user's OWN vault secrets (Settings → Secrets & Keys), decrypted, to inject into the environment
+   * The user's OWN vault secrets (Settings → Secrets & API Keys), decrypted, to inject into the environment
    * of the app they build (admin 2026-07-17). The composition root loads them (loadUserVaultSecrets) and
    * sets them here before the build runs. Empty = nothing to inject (no-op). These are the USER's keys —
    * never NavBharatAI's platform keys (the loader deliberately never reads process.env).
@@ -521,7 +521,7 @@ export class ToolDispatcher {
     this.onDatabaseUnavailable = fn;
   }
 
-  /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
+  /** Set by the composition root from the user's decrypted vault (Settings → Secrets & API Keys). */
   setUserSecrets(env: Record<string, string>): void {
     this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
     this.userSecretsEnv = env && typeof env === 'object' ? env : {};
@@ -574,7 +574,7 @@ export class ToolDispatcher {
       let verdicts: SecretVerdict[] = [];
       try { verdicts = await verifyInjectedSecrets(this.userSecretsEnv); } catch { verdicts = []; }
       if (verdicts.length === 0) {
-        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
+        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & API Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
       } else {
         const { loaded, problems } = preflightNarration(verdicts);
         this.events?.emit({ type: 'narration', agent: 'architect', text: loaded, ts: Date.now() });
@@ -2272,7 +2272,7 @@ export class ToolDispatcher {
         // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
         // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
         const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command));
-        // Inject the user's own vault secrets (Settings → Secrets & Keys) into the app's .env the first
+        // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
         await this.ensureUserSecretsEnvFile(effectiveCommand);
         // Provision a real local Postgres BEFORE a migrate/seed if the app targets postgres (MediConnect

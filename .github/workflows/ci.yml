@@ -11,6 +11,9 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Bounded well above the real cost (~10 min after the de-duplication below) so a genuine hang fails
+    # fast and legibly, instead of holding a runner for the six-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -60,10 +63,17 @@ jobs:
       - name: Typecheck (server modules - strict guardrail)
         run: npm run typecheck:server
 
-      - name: Test
-        run: npm test
-
-      - name: Coverage gate (P-TQA.1 — BLOCKS merge on a real coverage regression)
+      # ONE test run, not two (2026-08-06). This job ran `npm test` (`vitest run`) and then
+      # `npm run test:coverage` (`vitest run --coverage`) — the SAME 12,400 tests twice, the second time
+      # with coverage instrumentation, which is the slower of the two. The coverage run already produces
+      # the pass/fail signal, so the first was pure duplication and by far the largest cost in this job.
+      #
+      # WHY IT MATTERED ENOUGH TO CHANGE: two consecutive runs were cancelled at exactly 15.0 and 15.1
+      # minutes while a 13-minute run passed, so CI was sitting on a hard cap that comes from outside
+      # this file (there is no timeout-minutes here and ubuntu-latest defaults to 360). Every PR had
+      # become a coin flip. No gate is removed — the coverage gate still blocks on a real regression, and
+      # a failing test still fails this step exactly as before.
+      - name: Test + coverage gate (P-TQA.1 — runs the suite once; BLOCKS on a real coverage regression)
         run: npm run test:coverage
 
       - name: Build (frontend bundle + server bundle — catches build-only breaks)

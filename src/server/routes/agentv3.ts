@@ -163,7 +163,7 @@ import {
   MAX_SHELLS_PER_WORKSPACE,
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
-import { deployBackendToRender, renderConfigured } from '../AgentV3/renderDeploy';
+import { deployBackendToRender, resolveRenderKey, renderRequirement } from '../AgentV3/renderDeploy';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -3069,9 +3069,18 @@ export function registerAgentV3Routes(app: Express): void {
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Only Render is a wired backend host today; others still use the config-inject + GitHub-connect path.
     if (platform !== 'render') { res.status(400).json({ error: `Backend one-click deploy isn't wired for "${platform}" yet — push to GitHub and connect it on your host (the config was already added).` }); return; }
-    if (!renderConfigured()) { res.status(503).json({ ok: false, reason: 'not-configured', error: 'Set RENDER_API_KEY (Settings → Secrets & Keys) to deploy your backend to Render.' }); return; }
+    // THE USER'S OWN RENDER KEY, NOT OURS (root-caused 2026-08-07). The gate used to ask only
+    // `renderConfigured()` — i.e. the SERVER's env — while the refusal it returned told the user to
+    // "Set RENDER_API_KEY (Settings → Secrets & Keys)". Nothing read that vault entry, so a user who
+    // followed the instruction exactly got the identical refusal back: an instruction the app did not
+    // implement. Beyond the wrong words, deploying every user's backend with one server-side key would
+    // put all of them in a single Render account billed to whoever owns it — against the standing rule
+    // that user apps run on the USER's own account. Their key is preferred; ours only backstops.
+    const renderVault = userId ? await loadUserVaultSecrets(userId).catch(() => null) : null;
+    const renderKey = resolveRenderKey(renderVault);
+    if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
     try {
-      const result = await deployBackendToRender({ repoUrl, appName });
+      const result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
       res.status(result.ok ? 200 : 409).json(result);
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });

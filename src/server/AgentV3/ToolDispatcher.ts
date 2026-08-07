@@ -1,5 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
+import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -562,7 +563,23 @@ export class ToolDispatcher {
           try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ }
         }
       } catch { /* gitignore hardening is best-effort */ }
-      this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
+      // PROVE IT, THEN SAY IT (admin finding 3, 2026-08-06). The old line here announced the COPY —
+      // "Loaded 3 of your saved keys" — and said nothing about whether any of them work. A stale or
+      // mistyped connection string got the same confident sentence as a live one, and the user found out
+      // minutes later from a preview that would not load, with nothing tying the failure back to the
+      // screen that fixes it. Now the one class of secret we can genuinely verify is verified, and the
+      // narration distinguishes proven / broken / untested instead of blurring all three into a count.
+      // Bounded and best-effort: costs nothing when no connection string is saved, and a verification
+      // that itself fails degrades to "untested" — it never withholds a key the user chose to save.
+      let verdicts: SecretVerdict[] = [];
+      try { verdicts = await verifyInjectedSecrets(this.userSecretsEnv); } catch { verdicts = []; }
+      if (verdicts.length === 0) {
+        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
+      } else {
+        const { loaded, problems } = preflightNarration(verdicts);
+        this.events?.emit({ type: 'narration', agent: 'architect', text: loaded, ts: Date.now() });
+        for (const p of problems) this.events?.emit({ type: 'narration', agent: 'architect', text: p, ts: Date.now() });
+      }
     } catch { /* best-effort — never block the build; the app just runs without injected keys */ }
   }
 

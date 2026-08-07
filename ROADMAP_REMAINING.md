@@ -1,4 +1,18 @@
-# NavBharatAI — Remaining Roadmap (compiled + code-verified, 2026-07-20)
+# NavBharatAI — Remaining Roadmap (compiled + code-verified, 2026-07-20 · **re-verified 2026-08-07**)
+
+> ## ⚠️ RE-VERIFICATION, 2026-08-07 — NINE "OPEN" ITEMS WERE ALREADY BUILT
+>
+> Eighteen days of shipping went by without this file being re-checked, and it drifted the same way
+> `ROADMAP.md` did — which is precisely the failure this file was created to end. A fresh grep of the
+> live code found that **items 6, 9, 10, 11, 14, 15, 16 and 22 are shipped AND wired**, and item 8 is
+> half shipped. Each is corrected in place below with the file and the wiring line, so the next session
+> cannot spend a day rebuilding something that already works (the PR #1 / PR #4 failure mode).
+>
+> **The lesson is about the file, not the items:** a roadmap is stale the moment another session
+> merges. Safeguard #6 (re-grep before starting anything) is the real protection — treat every line
+> here as a hint to verify, never as fact. This block stays at the top as a standing warning.
+
+
 
 **One place. Only what is genuinely LEFT.** Every item below was cross-matched against the LIVE
 code (four parallel investigators grepping `src/server/AgentV3`, `src/server/lib`, `ToolCatalog.ts`,
@@ -17,6 +31,24 @@ worklist.
 shipped it since this audit). Every fix ships root-cause + regression test + `AppKnowledgeBase.ts` entry
 if user-facing, via branch → verification gate → PR → CI green → merge. **Never touch the moat**
 (multi-provider routing, billing honesty, white-label, coherence architecture).
+
+### What is GENUINELY left in 🟢 after the 2026-08-07 sweep (start here)
+
+Everything else in section 🟢 was verified shipped or is held for a stated reason. Ordered by value, not
+by number:
+
+| # | Item | Why it is still open |
+|---|---|---|
+| 8 | **AWS / Azure / Railway deploy providers** | Render shipped; these three are three provider modules. Highest-value remaining 🟢 — it widens where a user's app can actually live. |
+| 20 | **Service-split generator + named paradigms** (Clean/DDD/MVC/Hexagonal) | Coupling is already scored; no generator turns that score into a split. |
+| 13 | **Template-free scaffold fallback** | No `templateFree`/no-template-fallthrough module found — genuinely unconfirmed, verify before building. |
+| 4 | **Daily-spend quota gauge** (`/api/usage/tokens`) | Endpoint does not exist. Blocked on a product decision first: what IS the quota? |
+| 12 | **Design-to-code intermediate contract** (AP-8) | Vision base exists; the image → layout-contract step does not. |
+| 21 | **Pure-code polish** (per surface) | Individually unverified — check each against live code before starting; several neighbours in this list turned out to be done. |
+| 18 | **`--ignore-scripts` audit install** | Reclassified to a design choice, not a task — see the item. |
+
+**Deliberately NOT on this list:** item 2 (prompt-cache markers — moat, do not change autonomously) and
+item 7 (extra language runtimes — blocked on an E2B template rebuild, admin infra).
 
 ---
 
@@ -48,10 +80,10 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
    completed-but-500 fetch does not fire `requestfailed`), classified via the `http-status` rule. REMAINING
    (narrow): richer per-request structured capture (method/timing/body) — needs deeper daemon/E2B-template
    work, so honestly infra-adjacent, not a code-only slice.
-6. **Runtime route/API/auth/DB smoke-hitter (P-PIPE)** — after a successful backend build, hit key routes
-   (health, an auth flow, a DB read) and report honest pass/fail. OPEN (post-deploy liveness + browser
-   verify exist; a server-route smoke-hitter does not). *Borderline: the hitter logic is code; it needs a
-   live sandbox to run against (degrade honestly when absent).*
+6. **~~Runtime route/API/auth/DB smoke-hitter (P-PIPE)~~ — ✅ DONE (verified 2026-08-07).**
+   `src/server/AgentV3/RouteSmokeCheck.ts` (+ its test) is wired into the build: `routes/agentv3.ts`
+   imports it at ~182 and calls `planSmokeChecks(...)` over the integrity file set at ~9398. The
+   "a server-route smoke-hitter does not [exist]" line was stale.
 
 ### B. Breadth recipes & scaffolds (isolated, low-risk, clear upgrades)
 7. **More framework languages** — Rust/Cargo, Ruby/Rails, PHP/Laravel, C/C++/CMake. ⚠️ **RECLASSIFIED
@@ -60,30 +92,44 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
    create build options the sandbox CANNOT run (a "Rust" build that 403s = a fake feature, rule 2). Real
    fix needs the multi-GB template rebuilt + republished with those runtimes (`E2B_TEMPLATE_ID`) — admin
    infra, not a code-only slice. Do NOT add the registry entries until the template carries the runtime.
-8. **More deploy targets** — AWS, Azure, Railway, Render. OPEN (`DeployProviders` has Firebase/Vercel/
-   Netlify/Cloudflare/GH-Pages only). Each = a provider module.
-9. **GraphQL backend recipe** — OPEN (REST CRUD recipe exists; no GraphQL). A `generate_graphql` schema +
-   resolver recipe.
-10. **Frontend state/animation recipe** — state-management scaffold (Zustand/Context) + animation + optimistic-
-    update helpers. OPEN (LLM-driven only today; `generate_ui_states` covers loading/skeleton/empty).
-11. **Settings scaffold + in-app notification-center** — OPEN (`NotifyGenerator` is channel integration only;
-    no settings page / notification center generator).
+8. **More deploy targets** — ⚠️ **HALF DONE (verified 2026-08-07): Render SHIPPED.**
+   `src/server/AgentV3/renderDeploy.ts` (`deployBackendToRender` / `renderConfigured`, imported by
+   `routes/agentv3.ts` ~166) really deploys the user's Node/Express backend via the Render API, keyed by
+   `RENDER_API_KEY` (BYO-account, set in Cloud Run 2026-08-02) and reporting honestly when unset.
+   **STILL OPEN:** AWS, Azure, Railway — each a provider module.
+9. **~~GraphQL backend recipe~~ — ✅ DONE (verified 2026-08-07).** `generate_graphql` is a real registered
+   tool (`ToolCatalog.ts` ~1067, exposed in the catalog list ~2965).
+10. **~~Frontend state/animation recipe~~ — ✅ DONE (verified 2026-08-07).** The global-state generator
+    ships a typed `src/store/` zustand store and adds the dependency (`ToolCatalog.ts` ~2014).
+11. **~~Settings scaffold + in-app notification-center~~ — ✅ DONE (verified 2026-08-07).**
+    `generate_notification_center` is a registered tool (`ToolCatalog.ts` ~2332), referenced by the
+    activity-feed and audit-log tools as its companion.
 12. **Design-to-code (screenshot/Figma → component)** — the vision base exists (`visionDescribe`/`visionChain`
     feed image understanding into builds); the delta is an explicit **image → layout-contract → build** step
     + a Figma/screenshot recipe. PARTIAL → build the intermediate contract step (AP-8).
 13. **Template-free scaffold fallback** — when no template fits, auto framework-detect + emit a minimal free
     scaffold. PARTIAL (detection exists; the no-template fallthrough is unconfirmed).
-14. **Integration-test + real-mock generator** — today `generate_tests` emits skeletons with TODO asserts;
-    upgrade to real integration tests + working mocks (not stubs). PARTIAL.
-15. **Developer-guide generator** — human "how this app is structured / how to run & extend" doc. PARTIAL
-    (`generate_readme`/`generate_architecture_docs` exist; no dedicated dev-guide).
-16. **Cap-2: auto-run E2E by default** — `generate_e2e` (Playwright) exists but is on-request; force-run a
-    starter E2E after a successful build (like the U-2 defaults / auto-test pass). PARTIAL.
+14. **~~Integration-test + real-mock generator~~ — ✅ DONE (verified 2026-08-07).**
+    `generate_integration_tests` is a registered tool (`ToolCatalog.ts` ~423, catalog list ~2897),
+    separate from the old skeleton-emitting `generate_tests`.
+15. **~~Developer-guide generator~~ — ✅ DONE (verified 2026-08-07).** `generate_dev_guide`
+    (`ToolCatalog.ts` ~194, catalog list ~2890) — a dedicated dev guide, not just README/architecture.
+16. **~~Cap-2: auto-run E2E by default~~ — ✅ DONE (verified 2026-08-07, and it was the admin's own
+    explicit ask).** `src/server/AgentV3/e2eAutoScaffold.ts` decides when to force a starter E2E
+    (`shouldAutoScaffoldE2e` / `e2eAutoScaffoldNote`, imported at `routes/agentv3.ts` ~176) and
+    `planE2eScaffold` writes it at ~9968 — no longer on-request only.
 17. **~~Ansible IaC target~~ — ✅ DONE (stale audit line, verified 2026-07-21).** `generateAnsiblePlaybook`
     (playbook.yml + inventory.ini + README) is already in `IaCGenerator.ts` and wired into `generateIaC`
     alongside K8s/Helm/Terraform.
-18. **`--ignore-scripts` on the audit/scan install (P-SEC.4 half)** — add to the CI **audit/scan** job only
-    (NOT the deploy install — postinstall builds are legit there). Small, safe. OPEN in CI.
+18. **`--ignore-scripts` on the audit/scan install (P-SEC.4 half)** — ⚠️ **RECLASSIFIED: not applicable as
+    written (verified 2026-08-07).** The item assumes a separate audit/scan job. `ci.yml` has ONE job
+    (`build-and-test`) whose single `npm ci` feeds the audit gate, the typecheck, the build AND the
+    tests — and esbuild/protobufjs/@firebase-util need their postinstall to produce a working build.
+    Adding `--ignore-scripts` there would break the build to harden an install that must run scripts
+    anyway. A real version of this needs a SEPARATE audit-only job with its own install; worth doing
+    only if the extra ~1 min of CI is judged a fair price. Left open as a DESIGN choice, not a task.
+    *(Live evidence that the audit gate matters: on 2026-08-07 a new js-yaml advisory made it fail in
+    55 s and every PR in the repo went red until the dependency was pinned — PR #2171.)*
 
 ### C. Domain & polish (real, pick per surface)
 19. **Packaged domain recipes** — ✅ **DONE (2026-07-21) — a strong batch shipped:** `generate_crm` (sales
@@ -100,8 +146,9 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
     the failing file · "cannot find module X → install suggestion" · 429 countdown · logout-on-inactivity ·
     server-side upload MIME validation · block secrets in generated code. *(Verify each vs live code first —
     some may already exist.)*
-22. **Generated-comment language guard** — generated code sometimes carries Hindi comments (a CLAUDE.md
-    violation); add a prompt/lint guard. OPEN.
+22. **~~Generated-comment language guard~~ — ✅ DONE (verified 2026-08-07).**
+    `src/server/AgentV3/CommentLanguageAnalysis.ts` (`scanProjectCommentLanguage` /
+    `commentLanguageSummary`) is imported and used by `ToolDispatcher.ts` (~63), with its own test file.
 
 ---
 

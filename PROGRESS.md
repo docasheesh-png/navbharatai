@@ -27478,3 +27478,124 @@ suite — the exact command CI now runs — is **1098 files / 12,423 tests, exit
 15.1 and 15.2 minutes, and halving the test work did not move that number — which is strong evidence
 the cap is a fixed external limit rather than our workload. Visible only from GitHub → Settings →
 Actions or the billing page.
+
+---
+
+## 2026-08-07 — Three corrections, a repo-wide CI blocker, and "a saved key is not a working key"
+
+### CORRECTION 1 — there is no 15-minute CI cap. My previous entry (directly above) is wrong.
+
+The entry above ends: *"three cancellations at 15.0, 15.1 and 15.2 minutes … strong evidence the cap is
+a fixed external limit rather than our workload."* That is not what the data says, and the reason it
+read that way is that I was looking at the wrong API.
+
+The **check-runs** API reports several of these runs as `cancelled`. The **`actions/runs`** API — the
+authoritative one — reports them as `failure`, with real durations across the same window of:
+
+    24.0 · 15.9 · 15.2 · 15.1 · 6.2 minutes   (failures)
+    14.2 · 12.3 · 11.4 · 9.8 · 9.4 minutes    (successes)
+
+A 24-minute failure and a 6-minute failure both disprove a fixed 15-minute cut-off. The 15.x cluster is
+simply where the job landed when it ran the whole suite twice. **The admin does NOT need to check
+Actions settings or billing for a cap** — that advice, given twice, was built on the misread and is
+withdrawn here rather than left standing.
+
+The real cause was the one already fixed: the `SimpleBuilder` test crossing vitest's 5000ms default
+under coverage instrumentation. `testTimeout: 20_000` stands.
+
+### CORRECTION 2 — the credentials in the admin's `.env` screenshot were test placeholders.
+
+The admin confirmed both the connection string and the payment values in that screenshot were fake, not
+theirs. My repeated recommendation to rotate the database password was based on assuming they were real
+and is withdrawn. The `.env` masking fix (#2168) is unaffected — it stands on its own evidence and
+protects real users from exactly this class of screenshot leak.
+
+The DEFECT the screenshot exposed is still real and is fixed below: a saved credential was trusted
+without ever being tested.
+
+### GitHub Actions dropped a webhook — 8.5 hours with no runs at all, on any branch
+
+Push `b7ba4de0` produced **no workflow run** (`total_count: 0`) while PR #2171 sat open on that exact
+head, and the most recent run repo-wide was 8.5 hours old. The CI workflow was `state: active`, so
+nothing was disabled — GitHub simply never delivered the `synchronize` event.
+
+Fix: close and reopen the PR. The `reopened` event fired a run within seconds. Worth remembering — a
+repo that has gone completely silent on Actions is more often a dropped event than a billing limit, and
+close/reopen is the cheap, non-destructive test that distinguishes them.
+
+### A new js-yaml advisory was blocking EVERY pull request in the repository
+
+That first recovered run failed in **55 seconds**, before a single test:
+
+    ❌ NEW high/critical vulnerabilities (not allowlisted):
+       • js-yaml [high]
+
+Nothing here changed. A new advisory landed against js-yaml 4.0.0–4.3.0, and `firebase-tools` pins 4.3.0
+both directly and through `@apidevtools/json-schema-ref-parser`. From that moment every PR in the repo
+was red before it ran — including the two whose job was to get CI green.
+
+Fixed with an `overrides` pin to **4.3.1** (same major, no API change) rather than an allowlist entry.
+Allowlisting is for a vulnerability we have ACCEPTED; this one is simply fixed, and recording it as
+"accepted" would be a lie that outlives the fix. `npm run audit:gate`: high 3 → 2, "No new
+high/critical vulnerabilities."
+
+### THE FIX — prove a saved credential before the build is built around it (admin finding 3)
+
+The vault → app pipe copied every saved key into the app's `.env` and announced:
+
+    🔐 Loaded 3 of your saved keys (Settings → Secrets & Keys) into the app
+
+**That sentence is true about the COPY and silent about the TRUTH.** A stale, mistyped or long-dead
+connection string received exactly the same confident line as a live one, and the entire build —
+install, migrate, preview — was then stacked on top of it. The user found out ten minutes later from a
+preview that would not load, with nothing tying the failure back to the screen that fixes it.
+
+The root cause is NOT the copy. The user really did ask for those keys, and silently withholding one
+would be a second, quieter version of the same bug. The root cause is that **the one class of secret we
+can genuinely verify was never verified**, in the one place where verifying it is cheap and not
+verifying it costs an entire build.
+
+`src/server/AgentV3/secretPreflight.ts` runs a real `SELECT 1` at the moment the keys are written, and
+separates the three facts the old count was blurring into one:
+
+| verdict | meaning |
+|---|---|
+| **proven** | connected and answered |
+| **broken** | refused / unreachable / no such database — named with the screen that fixes it |
+| **untested** | an API key; testing it would spend the user's money, so we do not claim it works |
+
+Honesty properties, each test-locked:
+
+* **A key is never withheld.** Keys are written FIRST; the preflight only decides what the user is TOLD.
+* **A loopback URL is `untested`, not `broken`** — it is reachable only from inside the sandbox that owns
+  it. Probing it from this server would fail for a reason that is OURS, and reporting that as "your
+  database is broken" would be a confident lie about our own network topology.
+* **A Mongo/MySQL URL is `untested`** — we have no transport that opens one, and claiming to have tested
+  a connection we cannot open is the exact dishonesty this file exists to remove.
+* **Our failure is never reported as their broken credential.**
+* `looksLikePlaceholder` is deliberately narrow — `your-api-key` is a fill-in, `mysecretpassword` is
+  somebody's actual password. A false positive here is worse than saying nothing, so the rule requires a
+  SEPARATOR after `your`/`my`.
+* White-label law: a test asserts no vendor name or driver text can reach these lines.
+
+Bounded: zero cost when nothing checkable is saved, at most 2 connections, one 12s deadline for the whole
+preflight, and a preflight that throws degrades to the old line rather than blocking the build or losing
+the narration.
+
+30 tests (22 unit + 8 source-level wiring locks). `AppKnowledgeBase.ts` updated so a user asking "my key
+is not working" learns what NavBharatAI actually checks — and what it honestly does not.
+
+Verification gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1100 files /
+12,453 tests, exit 0**.
+
+### Open, recorded rather than guessed
+
+**Workspace-empty alarm (admin finding 2 — "files 3 baar puri delete ho kar bar bar bani").** Checking
+the live code first (safeguard #6) showed this is largely ALREADY shipped: `buildDiag.recordDataLoss`
+fires when the File Guardian repairs a wiped workspace, distinguishing "sandbox recycled/empty" from
+"files missing from sandbox", and #2169's session summary tallies `dataLossTotal` ACROSS a session — so
+"the workspace was found empty N times" now genuinely reaches the report. The remaining gap is narrow
+and real: **the detector only runs at TURN START**, when the guardian executes, so a wipe occurring
+MID-build is not noticed until the next turn begins. Deliberately NOT built on speculation — it needs a
+real report showing a mid-build collapse to establish whether that path is being hit at all. Recorded
+here as an open root cause instead of a guessed fix.

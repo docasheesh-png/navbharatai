@@ -27381,6 +27381,29 @@ an alarm when a workspace empties; and per-app scoping plus format validation fo
 
 Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,411 tests, exit 0.
 
+## 2026-08-06 — World-best preview, slice 3: console drawer + ask-AI-about-element (admin: "duniya ke sabhi app builder ke preview analyse karo, acche points joro")
+
+**The analysis first (redundant-work check saved this from being a rebuild):** surveying Lovable /
+Bolt / v0 / Replit preview systems against ours showed we ALREADY have most of the field's best —
+dual live+in-browser modes, real-device responsive viewports, a style-toolbar Visual Editor with
+drag/resize and AST-backed saves, Fix-with-AI with a free deep-refresh first, failover, diagnosis,
+build-time page-opening with Web Vitals/a11y. Two genuine gaps remained, both now shipped:
+- **Console drawer** (Replit ships devtools; Bolt leaves users at F12): ReactPreview's boot script
+  now MIRRORS every console.log/info/warn/error + window 'error' + unhandledrejection up to the
+  panel (bounded 600 chars/entry; the app's own console untouched — orig.apply). PreviewSurface
+  renders a terminal-icon toggle with a red error-count badge and a drawer (ring buffer, last 200);
+  every error row has one-tap "Fix with AI" riding the EXISTING onFixError flow. No F12, ever.
+- **Ask-AI-about-element** (Lovable's signature): the Visual Editor selection already carries its
+  exact source location (file:line:column via the data-nbai-src stamp) — a new "Ask AI" button in
+  the selection toolbar hands that reference to the chat (AgentV3Panel prefills "I selected the
+  <tag> in file (line, column). Change this exact element as follows: " and brings the chat into
+  view). The user says WHAT to change; the engine edits exactly THAT element — never a guess from a
+  description. This beats a plain visual editor: it is the bridge from designer-click to AI-edit.
+Deliberately NOT rebuilt: multi-select (follow-up candidate), HMR (still the recorded open item).
+Tests: tests/previewWorldBest.test.ts (mirror levels + bounds + non-breaking wrap; drawer ring
+buffer + Fix-with-AI handoff; Ask-AI carries line/column; panel prefill invariant). KB updated
+(agentv3_preview names both features honestly).
+
 ## 2026-08-06 (20) — the session, not the turn: two complaints, one root cause
 
 The admin's "58 minutes, not 18" and "files wiped three times and nothing said so" turned out to be the
@@ -27667,3 +27690,49 @@ directly), `VAJRA_V4_DESIGN.md`, `RUNBOOK.md`, `security_spec.md`, `MOBILE_PUBLI
 
 **Open root cause carried forward:** the (b) routes above still need per-route triage before anything is
 built or deleted. Recorded honestly rather than mass-"fixed" on a guess.
+
+## 2026-08-07/08 — OTP login broken by the form's own submit handler (+ a false diagnosis, + a time-bomb test)
+
+**Report (admin, screenshot):** the MOBILE NUMBER screen showing `[auth/invalid-email]` and, beneath
+it, a five-line essay telling an admin to go fix the GOOGLE provider's configuration. "Google/Apple
+login sahi chal raha hai, OTP me gadbad ho gaya."
+
+**Root cause 1 — the real breakage.** The phone inputs live inside the SAME `<form onSubmit={handleSubmit}>`
+as email/password, and `handleSubmit` ran the EMAIL path unconditionally — its phone guard was an
+empty comment stub that caught nothing. So pressing the phone keyboard's **"Go"** key (implicit form
+submission — visible in the very screenshot) called `signInWithEmailAndPassword` with an EMPTY email
+→ `auth/invalid-email`. Nothing about phone auth was broken; the form never let it run. Fixed at the
+class: `handleSubmit` now routes by the tab the user is on, and "Go" does the RIGHT thing rather than
+merely being blocked — it sends the OTP, or verifies it once sent, delegating to the SAME handlers
+the buttons call (one implementation per action, nothing to drift).
+
+**Root cause 2 — a confidently WRONG diagnosis (rule 5).** Every failure appended `diagnoseAuth`,
+which probes with an ANONYMOUS sign-up; its perfectly normal `ADMIN_ONLY_OPERATION` reply is rendered
+by `explainAuthReason` as a Google-provider configuration essay. So a phone user's empty-email error
+produced a wall of red text pointing at the wrong console. New pure `shouldDeepDiagnose(code)` keeps
+the probe for the opaque config/internal class it was built for and suppresses it for errors the
+input already explains (invalid-email, wrong-password, invalid-verification-code, …).
+
+**Root cause 3 — found by the gate, not by a user.** `tests/hostingPlanSweep.test.ts` failed today:
+its fixtures are frozen at a fixed NOW while `sweepOneWallet` read the REAL clock, so "expires in 2
+days" silently became "expires in 8 hours" as the calendar advanced. That exposed a genuine PRODUCT
+bug behind it: the reminder loop fired the LARGEST reached window first, so a plan with 8 hours left
+was announced as "just a heads-up 5 days ahead" and the truthful 1-day note followed on the next
+sweep — two notifications, the first factually false, for the common case of a dormant account swept
+late. Now the SMALLEST reached window wins (the only one that describes reality) and every larger,
+now-moot window is burned in the same write; the normal 5-day → 1-day cadence is unchanged. The
+sweep's `now` is an injectable dependency, so a test can never rot with the wall clock again.
+
+Tests: `tests/authOtpSubmit.test.ts` (6) + 2 new sweep cases (final-day reminder, normal cadence).
+Full gate: 12,493 tests, both tsc, build + budget green.
+
+## 2026-08-08 — CI red: a NEW nanoid advisory, fixed at the version, not the allowlist
+
+The OTP push went red on the **security audit gate** (a real failure this time, not the runner
+flakiness of 2026-08-06): `nanoid [high]` — GHSA-2v37-7h3g-55p8, "custom generators can loop
+indefinitely when size is zero", affecting `<3.3.17`. It reached us transitively (postcss → nanoid
+3.3.16) and `fixAvailable: true`. Fixed the way the js-yaml advisory was fixed in #2171 — a version
+override (`nanoid: ^3.3.17`, resolves to 3.3.18) — NOT an allowlist entry. The allowlist is for
+advisories that are genuinely accepted or unfixable; using it on a one-line-fixable dependency would
+be exactly the surface patch rule 4 forbids, and would leave the loop live in the build toolchain.
+Audit gate + license gate + full suite green after the bump.

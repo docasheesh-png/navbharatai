@@ -198,20 +198,37 @@ export function decidePlanSweepStep(
   const renewal = computeLazyRenewal(w, nowIso);
   if (renewal.renewed) return { wallet: renewal.wallet, applied: true, action: { kind: 'renewed' } };
 
-  // 2) reminders, largest window first, one per window per period.
+  // 2) reminders — fire the SMALLEST reached window, and burn every larger one with it.
+  //
+  // ROOT CAUSE this closes (caught by the sweep suite on 2026-08-08, when the real clock crossed
+  // into a fixture's final day): the loop used to fire the LARGEST reached window first. For a plan
+  // with 8 HOURS left — a dormant account whose first sweep lands late, which is the common case,
+  // not an edge one — that sent "just a heads-up 5 days ahead" when five days did not exist, and
+  // then sent the 1-day reminder on the very next sweep: two notifications minutes apart, the first
+  // of them factually false. A reminder that misstates the remaining time is worse than no reminder
+  // (rule 5 — the system must tell the truth about its own state).
+  //
+  // Now: the smallest reached window wins (it is the only one that describes reality), and every
+  // LARGER window is marked spent in the same write, because a "5 days ahead" warning is moot once
+  // fewer than 5 days remain and must never fire late. The normal cadence is untouched: a plan swept
+  // regularly still gets its 5-day note, then its 1-day note.
   if (exp > nowMs) {
-    for (const days of HOSTING_PLAN_REMINDER_DAYS) {
-      if (exp - nowMs > days * DAY) continue;               // window not reached yet
-      if ((p.remindedFor ?? {})[String(days)] === p.expiresAt) continue; // already sent for this period
-      const price = hostingPlanPriceInr();
-      const needed = inrToDebitTokens(price);
-      const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
-      const shortTokens = Math.max(0, needed - balance);
-      const shortfallInr = shortTokens > 0 ? Math.ceil((shortTokens * price) / needed) : 0;
-      const plan: HostingPlanRecord = { ...p, remindedFor: { ...(p.remindedFor ?? {}), [String(days)]: p.expiresAt } };
-      return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'remind', days, shortfallInr } };
-    }
-    return { wallet: w, applied: false, action: null };
+    const remindedFor = p.remindedFor ?? {};
+    const reached = HOSTING_PLAN_REMINDER_DAYS
+      .filter((days) => exp - nowMs <= days * DAY)
+      .sort((a, b) => a - b); // smallest (most urgent, most accurate) first
+    const days = reached.find((d) => remindedFor[String(d)] !== p.expiresAt);
+    if (days === undefined) return { wallet: w, applied: false, action: null };
+    const price = hostingPlanPriceInr();
+    const needed = inrToDebitTokens(price);
+    const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+    const shortTokens = Math.max(0, needed - balance);
+    const shortfallInr = shortTokens > 0 ? Math.ceil((shortTokens * price) / needed) : 0;
+    // Burn the fired window AND every larger one — they can no longer be told truthfully.
+    const burned = { ...remindedFor };
+    for (const d of HOSTING_PLAN_REMINDER_DAYS) if (d >= days) burned[String(d)] = p.expiresAt;
+    const plan: HostingPlanRecord = { ...p, remindedFor: burned };
+    return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'remind', days, shortfallInr } };
   }
 
   // 3) expired: inside grace = wait (a lazy renewal can still save it); past grace = lapse once.

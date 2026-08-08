@@ -3881,6 +3881,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   setWorkspaceFiles((prev) => (prev ? { ...prev, [path]: content } : prev));
                   onFilesSync?.({ [path]: content });
                 }}
+                onAskAiAboutElement={(context) => {
+                  // World-best-preview (2026-08-06): the user picked an EXACT element in the preview
+                  // (the selection carries its true source location). Prefill the chat with that
+                  // reference and bring the chat into view — the user just says WHAT to change, and
+                  // the engine edits exactly that element instead of guessing from a description.
+                  setPrompt(`I selected the ${context} in the preview. Change this exact element as follows: `);
+                  setShowWorkspace(false);
+                }}
               />
             </div>
           )}

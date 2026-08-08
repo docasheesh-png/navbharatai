@@ -81,22 +81,49 @@ export function chatTurnCost(usage: ChatTurnUsage | null | undefined, usdInr: nu
 
 /**
  * Add up several turns of one request — a tool that makes three model calls should bill once, for all
- * three. `measured` is true when ANY turn was measured, so a partially-reported request still bills
- * for the part we can prove rather than being written off entirely.
+ * three.
+ *
+ * THE MARKUP IS APPLIED ONCE, TO THE TOTAL — and that is the whole point of this function (defect found
+ * in the pre-launch audit, 2026-08-07). The old version summed each turn's ALREADY-MARKED-UP `billedUsd`,
+ * which is not the same number, because `tieredMarkupUsd` is a CONCAVE curve: the first $1 of real cost
+ * is charged at 4× and everything above it at 3×. Marking up each call separately gives every call its
+ * own cheap-rate first dollar, so the threshold is granted N times instead of once:
+ *
+ *     three calls of $0.50   per-call markup then sum → $6.00
+ *                            markup of the $1.50 total → $5.50   ← the real price
+ *
+ * The error is always in the same direction — the user is OVERCHARGED — and it grows with the number of
+ * calls, so the App Debugger (which fans out over batches of files, a dozen calls per action) was the
+ * worst case. `aiTurnCharge.ts` documented the correct behaviour in its own comment while the code did
+ * the opposite; both now agree.
+ *
+ * `measured` is true when ANY turn was measured, so a partially-reported request still bills for the
+ * part we can prove rather than being written off entirely.
  */
-export function sumChatTurnCosts(costs: ChatTurnCost[]): ChatTurnCost {
+export function sumChatTurnCosts(costs: ChatTurnCost[], usdInr: number): ChatTurnCost {
   const list = (costs || []).filter(Boolean);
   if (!list.length) return ZERO;
-  const total = list.reduce(
-    (a, c) => ({
-      measured: a.measured || !!c.measured,
-      realUsd: a.realUsd + (Number(c.realUsd) || 0),
-      billedUsd: a.billedUsd + (Number(c.billedUsd) || 0),
-      billedInr: a.billedInr + (Number(c.billedInr) || 0),
-      inputTokens: a.inputTokens + (Number(c.inputTokens) || 0),
-      outputTokens: a.outputTokens + (Number(c.outputTokens) || 0),
-    }),
-    { ...ZERO },
-  );
-  return { ...total, billedInr: Math.round(total.billedInr * 100) / 100 };
+
+  let measured = false;
+  let realUsd = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const c of list) {
+    measured = measured || !!c.measured;
+    realUsd += Number(c.realUsd) || 0;
+    inputTokens += Number(c.inputTokens) || 0;
+    outputTokens += Number(c.outputTokens) || 0;
+  }
+  if (!measured) return ZERO;
+
+  const billedUsd = tieredMarkupUsd(realUsd);
+  const rupees = Number.isFinite(usdInr) && usdInr > 0 ? usdInr : 0;
+  return {
+    measured: true,
+    realUsd,
+    billedUsd,
+    billedInr: Math.round(billedUsd * rupees * 100) / 100,
+    inputTokens,
+    outputTokens,
+  };
 }

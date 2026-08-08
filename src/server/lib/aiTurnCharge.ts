@@ -112,7 +112,7 @@ export function decideAiChargeForTurns(
   usdInr: number,
   env: NodeJS.ProcessEnv = process.env,
 ): AiChargeDecision {
-  const cost = sumChatTurnCosts((usages || []).map((u) => chatTurnCost(u, usdInr)));
+  const cost = sumChatTurnCosts((usages || []).map((u) => chatTurnCost(u, usdInr)), usdInr);
   const no = (reason: AiChargeReason): AiChargeDecision => ({ charge: false, reason, billedInr: 0, cost });
 
   if (!aiWalletSpendEnabled(env)) return no('disabled');

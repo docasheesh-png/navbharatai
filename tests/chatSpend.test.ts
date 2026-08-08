@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { chatTurnCost, sumChatTurnCosts, type ChatTurnUsage } from '../src/server/lib/chatSpend';
+import { tieredMarkupUsd } from '../src/server/AgentV3/providerRates';
 import { readProviderUsage } from '../src/server/AI/Router/ProviderTypes';
 
 // Everything outside the v5 builder — the 70+ professionals, Doctor AI, the Other-AI tools — was
@@ -79,7 +80,7 @@ describe('a request that makes several model calls bills once', () => {
   it('adds the calls up', () => {
     const a = chatTurnCost(turn({ inputTokens: 1_000_000, outputTokens: 0 }), USD_INR);
     const b = chatTurnCost(turn({ inputTokens: 1_000_000, outputTokens: 0 }), USD_INR);
-    const total = sumChatTurnCosts([a, b]);
+    const total = sumChatTurnCosts([a, b], USD_INR);
     expect(total.inputTokens).toBe(2_000_000);
     expect(total.realUsd).toBeCloseTo(a.realUsd * 2, 6);
   });
@@ -87,14 +88,14 @@ describe('a request that makes several model calls bills once', () => {
   it('still bills the measured part when only some calls reported usage', () => {
     const measured = chatTurnCost(turn(), USD_INR);
     const unknown = chatTurnCost(null, USD_INR);
-    const total = sumChatTurnCosts([unknown, measured, unknown]);
+    const total = sumChatTurnCosts([unknown, measured, unknown], USD_INR);
     expect(total.measured).toBe(true);
     expect(total.billedInr).toBeCloseTo(measured.billedInr, 2);
   });
 
   it('an empty list is unmeasured, not free', () => {
-    expect(sumChatTurnCosts([]).measured).toBe(false);
-    expect(sumChatTurnCosts(null as unknown as []).measured).toBe(false);
+    expect(sumChatTurnCosts([], USD_INR).measured).toBe(false);
+    expect(sumChatTurnCosts(null as unknown as [], USD_INR).measured).toBe(false);
   });
 });
 
@@ -117,5 +118,56 @@ describe('reading usage off whatever shape the provider sent', () => {
 
   it('treats a negative count as not reported', () => {
     expect(readProviderUsage({ prompt_tokens: -1, completion_tokens: -2 })).toBeUndefined();
+  });
+});
+
+/**
+ * THE MARKUP IS APPLIED ONCE, TO THE REQUEST TOTAL (defect found in the pre-launch audit, 2026-08-07).
+ *
+ * `sumChatTurnCosts` used to add up each turn's ALREADY-MARKED-UP `billedUsd`. `tieredMarkupUsd` is a
+ * CONCAVE curve — the first $1 of real cost at 4×, everything above it at 3× — so marking each call up
+ * separately handed every call its own cheap-rate first dollar. The threshold was granted N times
+ * instead of once, and the error was always in the same direction: THE USER WAS OVERCHARGED, by more
+ * the more calls the request made. The App Debugger, which fans out over batches of files, was the
+ * worst case; `aiTurnCharge.ts` had documented the correct behaviour in its own comment while the code
+ * did the opposite.
+ *
+ * Caught before AI_WALLET_SPEND was ever switched on, so no user was ever billed by it. These exist so
+ * it cannot return once real money is moving.
+ */
+describe('the tiered markup applies to the request total, not to each call', () => {
+  // Derived from the SAME curve the code uses — a hardcoded dollar figure would be silently invalidated
+  // by an env rate change (AGENTV3_MARKUP_SMALL / _LARGE / _THRESHOLD_USD are all tunable).
+  const costOf = (realUsd: number) => ({
+    measured: true, realUsd, billedUsd: tieredMarkupUsd(realUsd),
+    billedInr: Math.round(tieredMarkupUsd(realUsd) * USD_INR * 100) / 100,
+    inputTokens: 10, outputTokens: 10,
+  });
+
+  it('three calls that TOGETHER cross the threshold are priced as one request of their total', () => {
+    const total = sumChatTurnCosts([costOf(0.5), costOf(0.5), costOf(0.5)], USD_INR);
+    expect(total.realUsd).toBeCloseTo(1.5, 10);
+    expect(total.billedUsd).toBeCloseTo(tieredMarkupUsd(1.5), 10);
+  });
+
+  it('and that is strictly CHEAPER than the old per-call sum — this is the overcharge, gone', () => {
+    const calls = [costOf(0.5), costOf(0.5), costOf(0.5)];
+    const oldWay = calls.reduce((a, c) => a + c.billedUsd, 0);
+    expect(sumChatTurnCosts(calls, USD_INR).billedUsd).toBeLessThan(oldWay);
+  });
+
+  it('a single call is unchanged — the fix must not move the common case', () => {
+    const one = costOf(0.3);
+    expect(sumChatTurnCosts([one], USD_INR).billedUsd).toBeCloseTo(one.billedUsd, 10);
+  });
+
+  it('ten sub-token calls are ONE honest charge, not ten roundings', () => {
+    const tiny = Array.from({ length: 10 }, () => costOf(0.0001));
+    expect(sumChatTurnCosts(tiny, USD_INR).billedUsd).toBeCloseTo(tieredMarkupUsd(0.001), 10);
+  });
+
+  it('a missing or broken exchange rate yields ₹0, never NaN on someone\'s bill', () => {
+    expect(sumChatTurnCosts([costOf(0.5)], 0).billedInr).toBe(0);
+    expect(Number.isNaN(sumChatTurnCosts([costOf(0.5)], NaN).billedInr)).toBe(false);
   });
 });

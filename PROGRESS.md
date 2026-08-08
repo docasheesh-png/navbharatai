@@ -27599,3 +27599,71 @@ and real: **the detector only runs at TURN START**, when the guardian executes, 
 MID-build is not noticed until the next turn begins. Deliberately NOT built on speculation — it needs a
 real report showing a mid-build collapse to establish whether that path is being hit at all. Recorded
 here as an open root cause instead of a guessed fix.
+
+---
+
+## 2026-08-07 — Five roadmaps became one, and a money bug was caught before it could charge anyone
+
+**Admin instruction (verbatim order):** audit `AI_WALLET_SPEND` FIRST, then consolidate every roadmap
+into one file and delete the rest, then fix what is left / half-done / switched off, then guide the admin.
+
+### 1. The wallet audit — one real defect, found before the flag was ever on
+
+The admin asked for a full audit before flipping `AI_WALLET_SPEND=on` in Cloud Run. It found a genuine
+overcharge:
+
+`tieredMarkupUsd` is a CONCAVE curve (first $1 of real cost at 4×, the rest at 3×) and prices one
+REQUEST. `sumChatTurnCosts` was summing each turn's ALREADY-MARKED-UP `billedUsd`, handing every
+individual model call its own cheap-rate first dollar — the threshold granted N times instead of once.
+
+    three calls of $0.50   per-call markup then sum -> $6.00
+                           markup of the $1.50 total -> $5.50   <- the real price
+
+Always the same direction: **the user overcharged**, worse the more calls a request makes. The App
+Debugger (fans out over batches of files, a dozen calls per action) was the worst case. `aiTurnCharge.ts`
+had documented the CORRECT behaviour in its own comment while the code did the opposite.
+
+Why it hid: `sumChatTurnCosts` had tests for token addition, the partially-measured case and the empty
+list — but none for the markup, the one thing it exists to get right. Nine tests now encode it, derived
+from the same curve the code uses so an env rate change cannot silently invalidate them.
+
+**No user was ever billed by it** — the flag has never been on. That is exactly what the audit was for.
+
+Everything else in the money path checked out, with evidence: no double-charge path (the zone-billed
+routes — design/appDebug/debug/screenshot — and the explicitly-billed routes — professionals/sda — are
+disjoint sets); a failed action is never charged (the charge sits inside `try`, after the answer, never
+awaited); an unmeasured provider charges ZERO rather than a guess; the empty-wallet refusal happens
+before any provider call while an unreadable balance fails OPEN; the daily rollup row is dated on the
+server clock; `warm.ts` builds routers but sends no prompt, so it spends nothing.
+
+### 2. Five roadmap files → one `ROADMAP.md`
+
+`ROADMAP_REMAINING.md`, `ROADMAP_NO1.md`, `FEATURE_ROADMAP.md` and `CAPABILITY_AUDIT.md` are DELETED.
+Everything real in them was carried into `ROADMAP.md`; everything already built was dropped rather than
+carried forward. (Historical references to those filenames survive above in this append-only log — that
+is the record of what was true at the time, and is left untouched.)
+
+They had drifted badly. A single sweep against live code found **nine items marked OPEN that were
+already shipped AND wired** (RouteSmokeCheck, generate_graphql, the zustand store generator,
+generate_notification_center, generate_integration_tests, generate_dev_guide, e2eAutoScaffold,
+CommentLanguageAnalysis, plus Render deploy half-shipped). `ROADMAP_NO1.md`'s entire Phase 2 — the Data
+GUI, items 2.1 through 2.5 — was complete while the file listed all five as to-do. `CAPABILITY_AUDIT.md`
+carried five ❌ rows for features that exist. Item 16, "E2E auto-run by default", was something the admin
+had personally requested and which had already been delivered.
+
+Kept separate on purpose: `NAVBHARATAI_PRO_V3_DESIGN.md` (CLAUDE.md points at its decisions D2/D5/D6
+directly), `VAJRA_V4_DESIGN.md`, `RUNBOOK.md`, `security_spec.md`, `MOBILE_PUBLISHING.md`.
+
+### 3. The new file records two things the old ones never did
+
+- **§0 — built but switched off.** Of 217 server flags, 21 are opt-in and the admin has enabled four.
+  The rest are finished features sitting dark, `AI_WALLET_SPEND` and `AGENTV3_PARALLEL_BUILD` chief among
+  them. No roadmap had ever listed dormancy as a category of remaining work.
+- **§3 — unreachable routes.** Of 313 `/api` routes, 74 have no client reference. Triaged into
+  intentional (admin-gated `observability.ts`), dead duplicate (`professionals.ts`'s list route) and real
+  candidates (`design.ts`, the P-CGE batch, `appmaker.ts`, `pro.ts`) — with an explicit warning to check
+  for a duplicate builder TOOL before building any UI, since putting a screen over a drifted copy would
+  be worse than leaving it hidden.
+
+**Open root cause carried forward:** the (b) routes above still need per-route triage before anything is
+built or deleted. Recorded honestly rather than mass-"fixed" on a guess.

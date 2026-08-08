@@ -92,8 +92,19 @@ Ordered by what a user would actually feel.
    more provider modules, same shape as `renderDeploy.ts`.
 5. **Visual template gallery.** Sixteen starters exist but as *text only*. Screenshots + categories +
    "build this" kills cold-start and drops weak-tier cost toward zero.
-6. **Regional languages** — Tamil, Telugu, Bangla, Marathi, Gujarati, Kannada. The one ❌ in the India
-   section, and the India-first moat is the whole differentiator against Lovable/Bolt/v0.
+6. **Regional languages** — ⚠️ **RE-SCOPED 2026-08-08; the old "prompt + UI, 3–4 PR" line was wrong in
+   both directions.** The *prompt* half is **already shipped**: `LANGUAGE_RULE` in
+   `AgentV3/systemPrompt.ts` names Tamil/Bengali/Marathi explicitly, sits at the top of every prompt
+   that produces user-facing text (build, plan and chat), and is test-locked in `systemPrompt.test.ts`.
+   A user who writes in Tamil already gets Tamil replies and Tamil narration *from the model*.
+   **What is actually left is bigger than 3–4 PRs**, because it is not a prompt problem at all:
+   - **~118 hardcoded English strings that OUR SERVER emits** during a build (`ToolDispatcher.ts` +
+     `routes/agentv3.ts` — "🔐 Loaded 3 of your saved keys…", "🗄️ Creating your app's tables…", every
+     honest failure line added this session). No prompt rule can touch these; they never pass through a
+     model. A Tamil user gets Tamil from the AI and English from the platform, in the same feed.
+   - **NavBharatAI's own UI** — every button, label and settings screen. A real i18n pass.
+   Do the SERVER NARRATION first: it is the jarring half (the AI speaks your language, the app does
+   not), it is bounded and countable, and it needs one message catalogue rather than a framework.
 
 ---
 

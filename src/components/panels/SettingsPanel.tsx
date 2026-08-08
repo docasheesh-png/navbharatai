@@ -7,9 +7,11 @@ import {
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail,
+  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { LEGAL_DOCS } from '../../content/legal';
+import { LegalDocPage } from './LegalDocPage';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
@@ -456,6 +458,16 @@ export function SettingsPanel({
                       { id: 'logs', label: 'Logs', icon: Activity },
                     ],
                   },
+                  {
+                    // Legal & Trust (admin 2026-08-08): every document a user, an enterprise reviewer
+                    // or Play Store needs, one tap from Settings. The tiles are DRIVEN by the legal
+                    // registry, so a new document there appears here with no edit.
+                    title: 'Legal & Trust',
+                    color: 'text-amber-400',
+                    icon: Scale as any,
+                    desc: 'Privacy, terms, data processing, security and our NDA template',
+                    items: LEGAL_DOCS.map((d) => ({ id: d.id, label: d.title.replace(' (DPA)', '').replace('Security at NavBharatAI', 'Security Documents').replace(' (NDA)', ''), icon: FileText as any })),
+                  },
                   // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
                   // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card
                   // (admin 2026-07-23) — see src/components/home/homeToolGroups.ts. Settings now keeps
@@ -550,6 +562,10 @@ export function SettingsPanel({
                   <p className="text-[9px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v5.0.0</p>
                 </div>
               </motion.div>
+            )}
+
+            {settingsScreen.startsWith('legal_') && (
+              <LegalDocPage docId={settingsScreen} />
             )}
 
             {settingsScreen === 'general' && (

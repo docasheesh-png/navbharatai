@@ -27982,3 +27982,36 @@ is a control; keyboard users get stepping from the arrow keys for free.
 
 31 new tests (`tests/songcraft.test.ts`, `tests/textSize.test.ts`).
 Gate: tsc clean both projects, real `npm run build` green, full run 12,662/12,662.
+
+## 2026-08-08 — Legal & Trust: five full documents, each on its own page, buttons in Settings
+
+Admin (from a competitors-checklist reel): Privacy Policy, Terms of Service, DPA, Security documents,
+NDA — "sabhi ke liye ek alag page banao, setting me sabhi ke button dedo", at 10x the detail of the
+earlier summary. Shipped:
+
+- `src/content/legal/` — five documents written against the app's REAL behaviour, not a template:
+  DPDP Act rights + grievance contact + Singapore cross-border disclosure + clinical-data rules
+  (Privacy); tokens-as-prepaid-credit, failed-build-never-charged, user OWNS built apps, 7-day
+  unused-token refunds, Doctor-AI-is-for-doctors, New Delhi jurisdiction (Terms); processor duties,
+  72-hour breach clock, sub-processor CATEGORIES with the named list under NDA — the standard
+  enterprise resolution of the white-label tension, chosen as the safe default (DPA); a four-part
+  security set whose every claim maps to a real control in the code, including an honest "we do NOT
+  yet claim SOC 2/ISO" section (Security); a mutual fill-and-sign template with intentional blanks
+  (NDA). Every file carries a NOT-LEGAL-ADVICE note for lawyer review.
+- ONE registry (`content/legal/index.ts`) drives everything: the Settings "Legal & Trust" card builds
+  its five tiles from `LEGAL_DOCS.map(...)`, and every `legal_*` screen renders `LegalDocPage` — a
+  document cannot exist without a button nor a button without a page. `SettingsScreen` union extended.
+- Privacy table converted to bullets after checking the renderer: react-markdown here has no GFM
+  plugin, so a md table would have rendered as raw pipe characters.
+- AppKnowledgeBase `legal_trust` entry (Hinglish keywords: gopniyata, niyam, refund, kanoon…).
+- 34 tests (`tests/legalDocs.test.ts`): per-document completeness sections, the WHITE-LABEL law as a
+  regression test (no AI vendor/model name in any legal page — Cashfree/Google/Apple allowed), the
+  honesty notes, and full wiring contracts.
+
+Assumed defaults for the admin to confirm/change (announced, per the 60-second rule): refunds =
+unused purchased tokens, 7 days; governing courts = New Delhi; grievance/security/DPA/NDA contact =
+info@navbharatai.com; log retention 90 days; account-deletion window 30 days; DPA breach notice 72h.
+Follow-up worth doing when asked: PUBLIC (no-login) URLs for privacy+terms — Play Console asks for a
+public privacy-policy link.
+
+Gate: tsc clean both projects, real build green, full run 12,696/12,696.

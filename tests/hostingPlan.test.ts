@@ -160,6 +160,7 @@ describe('purchase + status over the injected db seam', () => {
     const status = await readHostingPlanStatus(db, 'u1');
     expect(status.active).toBe(true);
     expect(status.plan?.id).toBe(HOSTING_PLAN_ID);
+
   });
 
   it('reading an EXPIRED auto-renew plan renews it lazily in the same transaction', async () => {
@@ -226,5 +227,68 @@ describe('plan wiring', () => {
     expect(card).toContain('Database — Free');
     const kb = readFileSync(join(__dirname, '..', 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
     expect(kb).toContain("id: 'hosting_plan'");
+  });
+});
+
+/**
+ * SIBLINGS OF THE 2026-08-08 TIME BOMB.
+ *
+ * `sweepOneWallet` hardcoded `new Date()` around a core that already took a time, so its fixture
+ * silently changed meaning as the calendar moved and the suite failed days after the code was written.
+ * `hostingPlanSweep` fixed that by making `now` a dependency. A grep for the same shape (rule 3 — hunt
+ * the siblings) found these two wrappers with the identical defect, and `purchaseHostingPlan` was
+ * already under test, so the next failure was only a matter of which date it landed on.
+ */
+describe('the clock is an input, not an ambient fact', () => {
+  it('purchaseHostingPlan dates the plan from the INJECTED time', async () => {
+    const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS) };
+    const r = await purchaseHostingPlan(fakeAdminDb(docs), 'u1', NOW);
+    if (!r.ok) throw new Error(r.error);
+    // Pinned to the fixture's clock, so this assertion means the same thing on any future day.
+    expect(Date.parse(r.plan.expiresAt)).toBe(NOW_MS + HOSTING_PLAN_DAYS * DAY);
+  });
+
+  it('buying twice EXTENDS and charges twice — deliberately, and the injected clock proves it', async () => {
+    // My first version of this test asserted the second purchase was free. It is not, and that is
+    // correct: an active plan extends from its CURRENT expiry so paying early never loses days, which
+    // means a second purchase buys a second period at a second price. The idempotency ref is keyed on
+    // the PERIOD START, so what it protects against is replaying the SAME period — not paying again.
+    // Pinned here because the period start comes from the clock: a wrapper reading the real clock could
+    // key two same-instant calls differently and turn a genuine replay into a double charge.
+    const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(3 * PRICE_TOKENS) };
+    const db = fakeAdminDb(docs);
+    const first = await purchaseHostingPlan(db, 'u1', NOW);
+    const second = await purchaseHostingPlan(db, 'u1', NOW);
+    if (!first.ok || !second.ok) throw new Error('purchase failed');
+    expect(second.tokenBalance).toBe(first.tokenBalance - PRICE_TOKENS); // a second period, a second charge
+    expect(Date.parse(second.plan.expiresAt)).toBe(NOW_MS + 2 * HOSTING_PLAN_DAYS * DAY); // 30 + 30
+  });
+
+  it('readHostingPlanStatus judges ACTIVE by the injected clock, not today\'s date', async () => {
+    // This assertion is what caught the fix being HALF done: `nowIso` was threaded into the lazy
+    // renewal but not into the active check, so a caller could pass a time, watch the renewal honour
+    // it, and still get `active` computed from the real date.
+    //
+    // The wallet is drained to EXACTLY the plan price on purpose. Lazy auto-renew is real — at a far
+    // future date a funded wallet simply renews and is correctly still active — so a balance that
+    // cannot cover a renewal is the only way to observe the clock deciding expiry. (My first two
+    // attempts at this test asserted the wrong thing for exactly that reason.)
+    const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(PRICE_TOKENS) };
+    const db = fakeAdminDb(docs);
+    const bought = await purchaseHostingPlan(db, 'u1', NOW);
+    if (!bought.ok) throw new Error(bought.error);
+    expect((await readHostingPlanStatus(db, 'u1', NOW)).active).toBe(true);
+
+    const farFuture = new Date(NOW_MS + 400 * DAY).toISOString();
+    expect((await readHostingPlanStatus(db, 'u1', farFuture)).active).toBe(false);
+  });
+
+  it('omitting the time still uses the real clock — the production path is unchanged', async () => {
+    const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS) };
+    const r = await purchaseHostingPlan(fakeAdminDb(docs), 'u1');
+    if (!r.ok) throw new Error(r.error);
+    const expiresIn = Date.parse(r.plan.expiresAt) - Date.now();
+    expect(expiresIn).toBeGreaterThan((HOSTING_PLAN_DAYS - 1) * DAY);
+    expect(expiresIn).toBeLessThanOrEqual(HOSTING_PLAN_DAYS * DAY);
   });
 });

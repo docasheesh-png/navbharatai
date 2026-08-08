@@ -31,29 +31,49 @@ below, and everything that turned out to be already built was removed rather tha
 
 ## 0 · ⚙️ ALREADY BUILT, JUST SWITCHED OFF — the cheapest wins on this page
 
-Nothing to build. These are finished, tested, merged features sitting behind a default-OFF flag. Of the
-217 flags in the server, 21 are opt-in; the admin has already turned on four (`LINT_GATE`,
-`INTEGRITY_GATE`, `REQUIREMENT_AWARE`, `REVIEW_AUTOFIX_WARNINGS`). These are the rest.
+Nothing to build. These are finished, tested, merged features sitting behind a default-OFF flag. The
+admin has already turned on four (`LINT_GATE`, `INTEGRITY_GATE`, `REQUIREMENT_AWARE`,
+`REVIEW_AUTOFIX_WARNINGS`). These are the rest — **each one now audited against live code, not guessed
+at from the shape of its `env` check** (see the correction box below for why that distinction matters).
 
-| Flag | What turning it on gives you | Note |
+| Flag | What turning it on gives you | Audit verdict (2026-08-07) |
 |---|---|---|
-| **`AI_WALLET_SPEND`** | The whole one-wallet law — every assistant and tool draws the SAME balance a build does. The admin's own 2026-08-01 mandate. | ⚠️ Wait for the 2026-08-07 markup fix to reach production first — see §5. |
-| **`AGENTV3_PARALLEL_BUILD`** | Frontend and backend built at the same time (#1790). | Roadmap always said "flip it and measure". Measure on the admin account first. |
-| `AGENTV3_STREAMING_PREVIEW` | Preview appears while the build is still running. | User-visible speed. |
-| `AGENTV3_REVIEW_FASTLANE` | Faster reviewer pass. | |
-| `AGENTV3_DEPHEALTH_GATE` | Dependency-health gate on a finished build. | |
-| `AGENTV3_PRETTIER_GATE` | Formatting gate. | Cosmetic; lowest value. |
-| `AGENTV3_OBSERVABILITY_INJECT` | Auto-inject error handler + request logger + `/health` into built apps. | |
-| `AGENTV3_REDTEAM` | Adversarial self-review pass. | Costs an extra LLM pass. |
-| `AGENTV3_WEAK_CHECKPOINT` | Mid-build checkpoints on the weak tier. | |
-| `AGENTV3_VACCINE_PCT`, `AGENTV3_FEATURE_HEAL_PCT` | Both sit at 0 = off. | Percentages, not on/off. |
-| `AGENTV3_CACHE_PREFIX` | Prompt-cache stable prefix. | Benefit unmeasurable without provider cache telemetry — leave off. |
-| `AGENTV3_INLINE_BABEL` | | Verify what it does before touching. |
+| **`AGENTV3_PARALLEL_BUILD`** | Frontend and backend built at the same time (#1790). | ✅ **SAFE — audited by construction.** ONE `parallelBuild` value drives the write-lock, the dispatch decision AND the architect prompt (`agentv3.ts` ~5595), so "parallel on but lock off" cannot exist. Sub-agents get the SAME locked actuator (`makeSubAgentSpawn({ actuator })`); the other eight `buildActuator()` calls belong to unrelated routes, none inside the build stream. Same-path writes serialize, disjoint paths run concurrently. *The SPEEDUP itself is unmeasured — that needs a real large build.* |
+| **`AGENTV3_DEPHEALTH_GATE`** | CVE + strong-copyleft advisory on a finished build. | ✅ **SAFE.** Advisory-only: appends to the summary of an already-`ok` build inside a `try/catch` (`AgentRunner.ts` ~662). Cannot block or fail a build. |
+| `AGENTV3_OBSERVABILITY_INJECT` | Adds a `/health` route to an Express app that lacks one. | ✅ **SAFE.** Purely additive, build-end, never blocks. It does modify the user's app, which is the only thing to be aware of. |
+| `AGENTV3_PRETTIER_GATE` | "N files need formatting" note on the summary. | ✅ Safe — same advisory shape. Lowest value on this page. |
+| `AGENTV3_STREAMING_PREVIEW` | The preview appears tens of seconds sooner. | ⚠️ **REAL TRADE-OFF, not a pure win.** `SimpleBuilder.ts` ~845 hands files to the preview **before** the verify+repair loop, so a user can briefly see an app that is then repaired. How often that happens is unmeasured. Weigh it against "the user judges by what they SEE". |
+| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ⚠️ **SAFE but COSTS MONEY.** Correctly routed — inherits `healRunnerRoutingOpts` + `noClaude`, so a weak build stays on GLM/Kimi (never Sonnet/Opus). Well bounded: successful artifact builds only, 12-case hard cap, needs ≥120 s of budget left, abortable. But it is an extra LLM pass on **every successful build** — a money decision, not a technical one. |
+| **`AI_WALLET_SPEND`** | The whole one-wallet law — every assistant and tool draws the SAME balance a build does. The admin's own 2026-08-01 mandate. | ✅ **NOW SAFE — because the audit found and fixed a real bug.** The tiered markup was applied PER CALL and then summed, so a multi-call request was systematically OVERCHARGED (three $0.50 calls billed $6.00 instead of $5.50; worst on the App Debugger, which fans out over file batches). Fixed + test-locked in #2175. Everything else verified clean: no double-charge path, failed actions never charged, unmeasured turns charge zero, empty wallet refused before any provider call, balance-unreadable fails open, server-clock rollup. **Turn on only once #2175 is live.** |
+| **`AGENTV3_WEAK_CHECKPOINT`** | Mid-build course-correction on the weak tier. | ✅ **SAFE and FREE — the best remaining flag.** Runs the DETERMINISTIC readiness scan (no LLM call, so no cost) every 20 steps and steers only on the two blockers that are real regardless of how incomplete the app is: a server-only Node builtin in browser code, and a high-severity security finding. Mid-build false alarms ("unresolved import", "score below floor") are explicitly excluded — steering on those would burn the weak model's scarce steps. Bounded: not before step 15, max 2 nudges. A contract test runs the REAL `Readiness` producer so a wording change cannot silently disable the filter. It helps the tier that struggles most, at zero cost. |
+| **`AGENTV3_VACCINE`** | After a successful build, the platform RUNS the app's own test suite itself and reports honest pass/fail. | ✅ **SAFE, and the cost is a shell command — NOT an LLM call.** `run_tests` is a tool the agent may simply skip; this makes it a system reflex, so *a green build whose own tests fail can never be reported as verified*. That is an honesty hole closed, not a feature added. No suite ⇒ honest no-op, never a fake pass. A failing suite is a WARNING finding, never a hard fail. Budget-gated (needs ≥90 s left) and abortable. **Repair only runs if `FEATURE_HEAL` is also on** (`vaxHealMax = featureHealEnabled ? 1 : 0`) — so on its own it costs no model tokens at all. |
+| `AGENTV3_FEATURE_HEAL` | When the app rendered but a requested control is missing, one bounded pass adds it. | ⚠️ **SAFE but COSTS MONEY** — an extra LLM repair pass. Note it also unlocks the vaccine's repair budget, so turning it on changes two things, not one. Slice 1 already RECORDS the missing-feature finding without it. |
+| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but COSTS MONEY** — same shape as `REDTEAM`: better quality, one extra LLM pass per fast-lane build. |
+| `AGENTV3_CACHE_PREFIX` | Prompt-cache stable prefix. | 🚫 **Leave off.** Routing moat, and the benefit is unmeasurable without provider cache-hit telemetry. |
 | `AGENTV3_ASK_USER` | The clarify card. | 👤 The admin declined this deliberately — friction vs zero-UI. Not a task. |
 
-**Claude's job here:** before recommending any of these ON, audit it the way `AI_WALLET_SPEND` was
-audited on 2026-08-07 — that audit found a real overcharge bug that had never run. A flag that has never
-been on has never been tested by reality.
+### ⚠️ How this table used to get things WRONG (corrected 2026-08-07)
+
+The flag inventory was built by pattern-matching `env.X === 'on'`, and that method mislabelled things in
+**both** directions. Recorded here so the next sweep does not repeat it — *read what a flag does; never
+classify one by the shape of its condition.*
+
+- **`AGENTV3_INLINE_BABEL` is not a dormant feature — it is a REVERSE kill switch, and OFF is the
+  correct state.** Turning it on restores the old behaviour of inlining a 2.85 MB compiler into every
+  preview load, which was deliberately removed. It exists only as an instant revert if the same-origin
+  asset AND both CDNs fail. It should never appear on a "turn these on" list.
+- **`AGENTV3_VACCINE_PCT` and `AGENTV3_FEATURE_HEAL_PCT` are not features — they are rollout dials.**
+  `inFlagRollout(master, pct, key)` returns false whenever the MASTER is off, whatever the percentage
+  says. "They sit at 0 = off" described the wrong thing entirely.
+- **The masters themselves were MISSED.** `AGENTV3_FEATURE_HEAL` and `AGENTV3_VACCINE` are the actual
+  opt-in features, and the scan never listed them because only their `_PCT` dials matched the pattern.
+  Both are now audited in the table above — and `VACCINE` turned out to be one of the best flags on the
+  page, so the scan's blind spot had been hiding a free win, not just a name.
+
+**Claude's job here:** never recommend a flag ON without auditing it the way `AI_WALLET_SPEND` was on
+2026-08-07 — that audit found a real overcharge precisely *because* the flag had never been on.
+**A flag that has never been on has never been tested by reality.** Every flag in the table above has
+now been audited against live code; there is no ⬜ left in this section.
 
 ---
 
@@ -161,22 +181,48 @@ Each of these is genuinely useful today; the remainder is usually infra-shaped.
 
 Claude cannot reach any of these. Ordered by urgency.
 
-1. **Do NOT switch `AI_WALLET_SPEND` on yet.** The 2026-08-07 audit found the tiered markup was being
-   applied per model-call instead of once per request, which **overcharged** users on any multi-call
-   action (worst on the App Debugger). Fixed, tested, and heading to production. Turn the flag on only
-   after that deploy is live — otherwise the first version real users meet is the one that overcharges.
-2. **VirusTotal licensing** — the free API is, by their terms, not for commercial products, and
-   NavBharatAI is one. Fine for testing; needs a paid plan or another scanner (MetaDefender) before the
-   Nav App Store carries real traffic.
-3. **Widen the cost-routing canary** — `AGENTV3_COST_ROUTING_USERS` is still scoped to one account.
-   Clear it once the `deliveredVia` telemetry looks right.
-4. **Define the spend quota** so the daily gauge in §2 can be built.
-5. **E2B template rebuild** — the fullstack image ships Node/Python/Java/Go only. Rust, Ruby, PHP and
-   C/C++ frameworks cannot be offered until the multi-GB template is rebuilt and republished; adding the
-   registry entries first would create build options the sandbox cannot run (a fake feature, rule 2).
-6. **A GitHub Actions look** — CI produced no run at all for 8.5 hours on 2026-08-06/07. It recovered on
-   a PR close/reopen, so it was a dropped webhook rather than a spending limit, but it is worth a glance
-   at the Actions billing page.
+### The Cloud Run switches, in the order to flip them
+
+1. **`AGENTV3_PARALLEL_BUILD=on` — flip this first.** Audited by construction (see §0): one value drives
+   the lock, the dispatch and the prompt, and sub-agents share the locked actuator, so there is no path
+   where parallel writers run unlocked. Nothing to wait for. Then watch one large build: if it is not
+   faster, unset it — the flag is a clean revert with no state to undo.
+2. **`AGENTV3_WEAK_CHECKPOINT=on`** — the best free win on this page. Costs nothing (the scan is
+   deterministic, not an LLM call) and helps the free tier, which struggles most. See §0 for why its
+   false-alarm filter is trustworthy.
+3. **`AGENTV3_VACCINE=on`** — the platform runs the built app's OWN test suite and reports honest
+   pass/fail, so a green build whose tests fail can no longer be called verified. On its own it spends
+   no model tokens (the repair budget only opens if `FEATURE_HEAL` is on too), and with no suite it is
+   a silent no-op.
+4. **`AGENTV3_DEPHEALTH_GATE=on`** — free safety information (CVE + copyleft on the finished app),
+   advisory-only, cannot block a build. `AGENTV3_OBSERVABILITY_INJECT=on` is the same shape if you want
+   built apps to carry a `/health` route.
+5. **`AI_WALLET_SPEND=on` — but only after the current deploy lands.** The 2026-08-07 audit found the
+   tiered markup was applied per model-call and then summed, which **overcharged** users on any
+   multi-call action (three $0.50 calls billed $6.00 instead of $5.50; worst on the App Debugger).
+   Fixed and test-locked in #2175, merged 2026-08-07 → Cloud Run auto-deploys it. Turn the flag on after
+   that build shows green in Cloud Build, so the first version real users meet is the corrected one.
+   Nobody was ever billed by the bug — the flag had never been on, which is exactly why it survived.
+6. **Judgement calls, not recommendations:** `AGENTV3_STREAMING_PREVIEW` buys tens of seconds of
+   perceived speed but can briefly show an app before it is verified; `AGENTV3_REDTEAM` really hardens
+   the app's inputs but adds an LLM pass to every successful build. Both are safe; both are trade-offs
+   only you can price.
+### Everything else on the admin's plate
+
+- **VirusTotal licensing** — the free API is, by their terms, not for commercial products, and
+  NavBharatAI is one. Fine for testing; needs a paid plan or another scanner (MetaDefender) before the
+  Nav App Store carries real traffic.
+- **Widen the cost-routing canary** — `AGENTV3_COST_ROUTING_USERS` is still scoped to one account.
+  Clear it once the `deliveredVia` telemetry looks right.
+- **Define the spend quota** so the daily gauge in §2 can be built. This is a product decision, and the
+  endpoint cannot be designed sensibly until it is made.
+- **E2B template rebuild** — the fullstack image ships Node/Python/Java/Go only. Rust, Ruby, PHP and
+  C/C++ frameworks cannot be offered until the multi-GB template is rebuilt and republished; adding the
+  registry entries first would create build options the sandbox cannot run (a fake feature, rule 2).
+- **A GitHub Actions look** — CI produced no run at all for 8.5 hours on 2026-08-06/07. It recovered on
+  a PR close/reopen, so it was a dropped webhook rather than a spending limit, but it is worth a glance
+  at the Actions billing page. Separately, six Dependabot PRs are open; four of them bump the Actions
+  that are currently emitting the "Node 20 is deprecated" warning in every CI log.
 
 **Explicitly declined by the admin (not tasks):** `AGENTV3_ASK_USER` · `.exe` / `.dmg` desktop signing ·
 Redis / Terraform / Cloud Armor / SIEM · Pro tier-gating.

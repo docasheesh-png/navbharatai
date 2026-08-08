@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { installDomTranslateGuard } from './lib/domTranslateGuard';
+import { clampFontScale, FONT_SCALE_STORAGE_KEY } from './lib/a11y';
 
 // FIRST, before React touches the DOM: make removeChild/insertBefore resilient so Google Translate (Chrome's
 // "Translate to Hindi", very common on this India-facing app) can't crash React with "Failed to execute
@@ -62,9 +63,12 @@ try {
     localStorage.getItem('navbharat_reduce_motion') === 'true'; // legacy fallback
   if (reduce) document.documentElement.classList.add('nb-reduce-motion');
 
-  const fontScale = parseFloat(localStorage.getItem('navbharat_font_scale') || '1');
+  // The clamp comes from a11y.ts — the ONE definition of the safe range. It used to be re-implemented
+  // here with 0.9/1.4 inlined, so widening the range in a11y.ts would have left this boot path pinning
+  // every user back to 140 % until React hydrated (a visible jump, and a setting that looked ignored).
+  const fontScale = parseFloat(localStorage.getItem(FONT_SCALE_STORAGE_KEY) || '1');
   if (Number.isFinite(fontScale) && fontScale !== 1) {
-    document.documentElement.style.setProperty('--nb-font-scale', String(Math.min(1.4, Math.max(0.9, fontScale))));
+    document.documentElement.style.setProperty('--nb-font-scale', String(clampFontScale(fontScale)));
   }
 } catch { /* storage unavailable — default to animations on, font-scale 1 */ }
 

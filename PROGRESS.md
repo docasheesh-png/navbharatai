@@ -27945,3 +27945,40 @@ the same effect from the server side:
 escaping, shared-cache invariant, cold-vs-warm page). Honest note: the FIRST-ever render of a new
 dependency set still pays the old waterfall (crawl runs in background); every render after — every
 reload, every reopen, every other user on the instance — gets the burst.
+
+## 2026-08-08 — Songcraft in chat + Text Size in the slide-out menu (50–200 %)
+
+Two admin asks, shipped together.
+
+**1. Songs worth hearing (`src/server/AI/songcraft.ts`).** "Gaana likhwaye to realistic gaane likhe —
+emotions, joy, rhythm itni acchi ki log madhosh ho jaye." Asked plainly for lyrics, a model reaches for
+the same rhymes every time (pyaar/bahaar, dil/manzil, chaand/raat) and NAMES emotions instead of showing
+them — it rhymes, scans badly and moves nobody. So the fix is a CRAFT BRIEF of checkable rules, not an
+adjective: a real mukhda/antara shape, a steady syllable count per stanza (±2) with a held rhyme scheme,
+ONE concrete photographable image per line, the emotion word banned where an image can do the work,
+Indian-life detail (barish, tiffin, mandir ki ghanti), joy=movement / sadness=stillness, and the
+worn-out rhyme pairs explicitly forbidden. Honours the standing no-interrogation rule: it WRITES, then
+offers one line of adjustment. Injected ONLY on a real song request (`isSongRequest`), so every other
+conversation's prompt and cost stay byte-identical; applies to every tier — a free user's song gets the
+same craft as a paid one.
+  - **Root-caused a real i18n bug while testing it:** the tokenizer used `[^\p{L}\p{N}]`, and Devanagari
+    matras are category **Mn (marks), not letters** — so "गाना" was shredded into "ग न" and every
+    Devanagari request silently failed to match. Now `\p{M}` is included. Swept the repo for siblings:
+    `SlugGenerator` already had it right; no other tokenizer is affected.
+
+**2. Text Size, 50 %–200 %, one tap away (`TextSizeSlider.tsx`).** The control a user reaches for when
+they are ALREADY struggling to read was three taps deep in Settings, and capped at a timid 90–140 %.
+Now a real slider in the ☰ menu's System Matrix, spanning 50–200 % with a live percentage and a Reset.
+Settings keeps its +/− stepper — the control was ADDED where it is needed, not moved away from where it
+is documented. A slider (not +/−) because the range is now 15 steps: fifteen taps is a chore, one drag
+is a control; keyboard users get stepping from the arrow keys for free.
+  - **Root-caused a DRIFTED DUPLICATE:** `main.tsx` applies the stored scale before React mounts (no
+    flash of unscaled text) and re-implemented the clamp with `0.9`/`1.4` inlined. Widening `a11y.ts`
+    alone would have pinned every user back to 140 % on boot and then jumped them to their real size
+    after hydration — a setting that looks broken. `main.tsx` now imports `clampFontScale` +
+    `FONT_SCALE_STORAGE_KEY`: one definition, test-locked so it cannot drift again.
+  - `AppKnowledgeBase.ts` entry `text_size` added (both paths, the real range, Hinglish keywords) so
+    every AI in the app can answer "font bada kaise karun?".
+
+31 new tests (`tests/songcraft.test.ts`, `tests/textSize.test.ts`).
+Gate: tsc clean both projects, real `npm run build` green, full run 12,662/12,662.

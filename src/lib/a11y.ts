@@ -25,9 +25,18 @@ export const FOCUSABLE_SELECTOR = [
   '[contenteditable="true"]',
 ].join(',');
 
-/** Font-scale bounds — a modest, layout-safe accessibility zoom range (90 %–140 %). */
-export const FONT_SCALE_MIN = 0.9;
-export const FONT_SCALE_MAX = 1.4;
+/**
+ * Font-scale bounds — a real accessibility zoom range, 50 %–200 % (admin 2026-08-08: "50% to 200%
+ * tak font size ho"). It was a cautious 90–140 %, which is narrower than what the platform's own
+ * accessibility settings offer, so a user who needs genuinely large text could not get it here.
+ *
+ * THIS IS THE ONLY DEFINITION. `main.tsx` applies the stored scale before React mounts (to avoid a
+ * flash of unscaled text) and used to re-implement this clamp with the numbers inlined — so widening
+ * the range here alone would have left the boot path silently pinning every user back to 140 % until
+ * hydration. It now imports `clampFontScale` from this module: one definition, no drift.
+ */
+export const FONT_SCALE_MIN = 0.5;
+export const FONT_SCALE_MAX = 2;
 export const FONT_SCALE_DEFAULT = 1;
 export const FONT_SCALE_STEP = 0.1;
 

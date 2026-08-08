@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Info, Lock, Settings, Heart, X, Globe, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
+import { TextSizeSlider } from './TextSizeSlider';
 import type { ThemeMode } from '../../lib/theme';
 import type { ViewType, ChatSession } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -284,6 +285,13 @@ export function SidebarNav({
                         <Heart className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
                         <span className="text-[10px] font-black text-white uppercase tracking-widest">Donate</span>
                       </button>
+                    </div>
+
+                    {/* Text size — one tap from anywhere (admin 2026-08-08). The user who needs this
+                        is already struggling to read the screen; three taps into Settings was
+                        backwards. Settings keeps its +/- stepper for precise adjustment. */}
+                    <div className="pt-1">
+                      <TextSizeSlider />
                     </div>
                   </div>
                 </div>

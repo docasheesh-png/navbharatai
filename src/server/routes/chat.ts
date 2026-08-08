@@ -8,6 +8,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
+import { songcraftFor } from '../AI/songcraft';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
 import { fetchPollinationsImage, imageMarkdown } from '../lib/imageGen';
@@ -267,6 +268,13 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       const appCtx = AppContextInjector.getRelevantContext(message, chatSurface);
       if (appCtx) systemPrompt = `${systemPrompt}\n\n${appCtx}`;
     }
+
+    // SONGCRAFT (admin 2026-08-08): when the user asks for a song, append the craft brief — real
+    // structure (mukhda/antara), a singable syllable rhythm, one concrete image per line, and the
+    // worn-out rhymes banned. Injected ONLY for an actual song request, so every other conversation's
+    // prompt — and its cost — is byte-identical to before. Applies to every chat tier: a free user's
+    // song deserves the same craft as a paid one.
+    systemPrompt = `${systemPrompt}${songcraftFor(message)}`;
 
     // Every chat tier credits its creators consistently (single source of truth).
     systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;

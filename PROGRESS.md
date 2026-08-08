@@ -27381,6 +27381,29 @@ an alarm when a workspace empties; and per-app scoping plus format validation fo
 
 Gate: tsc clean both projects, SHUFFLED full run 1097 files / 12,411 tests, exit 0.
 
+## 2026-08-06 — World-best preview, slice 3: console drawer + ask-AI-about-element (admin: "duniya ke sabhi app builder ke preview analyse karo, acche points joro")
+
+**The analysis first (redundant-work check saved this from being a rebuild):** surveying Lovable /
+Bolt / v0 / Replit preview systems against ours showed we ALREADY have most of the field's best —
+dual live+in-browser modes, real-device responsive viewports, a style-toolbar Visual Editor with
+drag/resize and AST-backed saves, Fix-with-AI with a free deep-refresh first, failover, diagnosis,
+build-time page-opening with Web Vitals/a11y. Two genuine gaps remained, both now shipped:
+- **Console drawer** (Replit ships devtools; Bolt leaves users at F12): ReactPreview's boot script
+  now MIRRORS every console.log/info/warn/error + window 'error' + unhandledrejection up to the
+  panel (bounded 600 chars/entry; the app's own console untouched — orig.apply). PreviewSurface
+  renders a terminal-icon toggle with a red error-count badge and a drawer (ring buffer, last 200);
+  every error row has one-tap "Fix with AI" riding the EXISTING onFixError flow. No F12, ever.
+- **Ask-AI-about-element** (Lovable's signature): the Visual Editor selection already carries its
+  exact source location (file:line:column via the data-nbai-src stamp) — a new "Ask AI" button in
+  the selection toolbar hands that reference to the chat (AgentV3Panel prefills "I selected the
+  <tag> in file (line, column). Change this exact element as follows: " and brings the chat into
+  view). The user says WHAT to change; the engine edits exactly THAT element — never a guess from a
+  description. This beats a plain visual editor: it is the bridge from designer-click to AI-edit.
+Deliberately NOT rebuilt: multi-select (follow-up candidate), HMR (still the recorded open item).
+Tests: tests/previewWorldBest.test.ts (mirror levels + bounds + non-breaking wrap; drawer ring
+buffer + Fix-with-AI handoff; Ask-AI carries line/column; panel prefill invariant). KB updated
+(agentv3_preview names both features honestly).
+
 ## 2026-08-06 (20) — the session, not the turn: two complaints, one root cause
 
 The admin's "58 minutes, not 18" and "files wiped three times and nothing said so" turned out to be the

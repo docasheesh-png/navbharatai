@@ -1991,6 +1991,28 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_animation',
+      description:
+        'Add a dependency-free MOTION pack so the app feels alive instead of assembled: a motion.css of '
+        + 'entrance animations (nb-fade-in / nb-slide-up / nb-slide-down / nb-scale-in, with a --nb-i '
+        + 'stagger variable for lists), interaction feedback (nb-press on buttons, nb-lift on cards), a '
+        + 'useInView hook (reveal on scroll via IntersectionObserver, self-disconnecting), useReducedMotion, '
+        + 'and a <Reveal> component combining them. NO animation library is added — everything is CSS '
+        + 'transform/opacity, so there is zero bundle cost and it stays smooth on low-end phones. Every '
+        + 'effect switches itself off under prefers-reduced-motion (motion causes real nausea for some '
+        + 'people) while the content still shows instantly. Optionally pass include to emit a subset.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset by name (e.g. ["Reveal"]); default = the full pack. Dependencies are pulled in automatically.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_ui_states',
       description:
         'Add a dependency-free React UI-states pack: a Spinner + Skeleton (loading placeholders), EmptyState, an ' +
@@ -2972,6 +2994,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_backup',
   'analyze_requirements',
   'generate_i18n',
+  'generate_animation',
   'generate_ui_states',
   'generate_state',
   'generate_image_optimization',

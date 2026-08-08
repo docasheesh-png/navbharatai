@@ -119,7 +119,7 @@ Ordered by what a user would actually feel.
   nothing turns that score into a split.
 - **Design-to-code intermediate contract** (AP-8) — the vision pipeline exists; the
   image → layout-contract → build step does not.
-- **Template-free scaffold fallback** — no such module found; verify before building.
+- ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.
 - **Community gallery / remix** — both Lovable and v0 have it.
 - **Scaling / load estimates with real numbers** — today's critique is qualitative only.
 - **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.
@@ -183,7 +183,7 @@ Each of these is genuinely useful today; the remainder is usually infra-shaped.
 | **Codemod scale** | relevance-scoped, 2000-file cap, honest truncation | auto-loop when the shortlist itself exceeds 2000 files (rare) |
 | **AP-5 Prompt cache** | stable-prefix structure built | per-provider cache markers — ⚠️ **moat, do not change autonomously** |
 | **AP-7 Edit mode** | works | 80% of user time is *after* the first build; make edits as smart as builds |
-| **AP-9 Requirement coverage** | works | false positives ("login not found" when it was) |
+| **AP-9 Requirement coverage** | works; root-caused TWICE already (`Registration.tsx` not matching `/register/`; `components/admin/` dropped by basename-only matching) and now matches full paths + component names + routes | ⚠️ **NEEDS EVIDENCE, not more guessing (2026-08-08).** The "false positives" line has no reproduction behind it. The one gap visible in the code is deliberate — the surface is paths and names, never file CONTENTS — and loosening that would trade false positives for FALSE NEGATIVES (reporting a feature as built because the word appears in a comment), which is strictly worse. Do not touch this without a real build report showing a specific feature wrongly flagged; then fix that case. |
 | **GA-5 / GA-6 / GA-7 / GA-8 / GA-10 / GA-12 / GA-13 / GA-14 / GA-15** | main engine in each | narrow tails; **verify each against live code before starting** — several neighbours in this list turned out to be finished |
 
 ---

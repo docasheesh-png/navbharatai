@@ -134,7 +134,7 @@ describe('sweepOneWallet', () => {
       setSuspended: async (d, r) => { events.push(`suspend ${d}=${r}`); },
       notify: async (uid, msg) => { events.push(`notify ${uid}: ${msg.slice(0, 40)}`); },
     });
-    const action = await sweepOneWallet(fakeAdminDb(docs), 'u1');
+    const action = await sweepOneWallet(fakeAdminDb(docs), 'u1', NOW);
     expect(action).toEqual({ kind: 'lapse' });
     expect(events).toContain('detach mitrify.in');
     expect(events).toContain('suspend mitrify.in=plan_lapsed');
@@ -148,8 +148,11 @@ describe('sweepOneWallet', () => {
     const notes: string[] = [];
     _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); } });
     const db = fakeAdminDb(docs);
-    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
-    expect(await sweepOneWallet(db, 'u1')).toBeNull(); // marker persisted — no double-send
+    // The clock is PINNED to the fixture's NOW — with the real clock this test was a time bomb: it
+    // passed until real time crossed into the fixture plan's 1-day reminder window, then failed
+    // deterministically (the second sweep legitimately fired the more-urgent 1-day reminder).
+    expect(await sweepOneWallet(db, 'u1', NOW)).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
+    expect(await sweepOneWallet(db, 'u1', NOW)).toBeNull(); // marker persisted — no double-send
     expect(notes).toHaveLength(1);
   });
 });

@@ -222,6 +222,7 @@ import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { mistakeLedgerStore, mistakeKey } from '../AgentV3/MistakeLedger';
 import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
+import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from '../AgentV3/PortDiscovery';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -3319,30 +3320,52 @@ export function registerAgentV3Routes(app: Express): void {
       const boundPort = port ?? effectivePort;
       if (up) {
         sendStage('Resolving the public preview URL', 95);
-        let previewUrl: string | undefined;
-        try { previewUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, boundPort), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
         // EARN IT (admin 2026-08-03): a bound port is not the app serving. VISIT the home route and only
         // report "preview restored" when it renders — otherwise Diagnose was greenlighting a server that
         // returns "Cannot GET" on its own client routes (the exact full-stack bug).
-        let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
-        if (previewUrl) {
-          try { served = analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, previewUrl), 30_000, 'preview-diagnose-verify')).html); }
-          catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
+        const visit = async (cand: number): Promise<{ url?: string; served: { rendered: boolean; problems: string[] } }> => {
+          let url: string | undefined;
+          try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, cand), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
+          // No URL ⇒ keep the pre-flip semantics (port up, page unverifiable, benefit of the doubt).
+          if (!url) return { served: { rendered: true, problems: [] } };
+          try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, url), 30_000, 'preview-diagnose-verify')).html) }; }
+          catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
+        };
+        let winner = await visit(boundPort);
+        let winnerPort = boundPort;
+        // FLIP SYSTEM (admin 2026-08-07: "ek par na chale to dusra, dusre par na chale to teesra?").
+        // Engages ONLY when the first port's page did not render — then the sandbox OS is asked which
+        // TCP ports are REALLY listening (a fact, not a guess) and each remaining candidate is visited
+        // until one genuinely renders the app. The happy path costs nothing extra; a blind cascade of
+        // guesses is exactly what this avoids — every flip target is evidence (a listening port), and
+        // every verdict is earned (a rendered page).
+        if (winner.url && !winner.served.rendered) {
+          let listening: number[] = [];
+          try {
+            listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'preview-port-scan')).stdout);
+          } catch { /* the scan is best-effort — without it the flip simply has no extra candidates */ }
+          for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening })) {
+            if (cand === winnerPort) continue;
+            const attempt = await visit(cand);
+            if (attempt.url && attempt.served.rendered) { winner = attempt; winnerPort = cand; break; }
+          }
         }
+        const previewUrl = winner.url;
+        const served = winner.served;
         finish({
           ok: served.rendered,
           portListening: true,
-          port: boundPort,
+          port: winnerPort,
           previewUrl,
           reason: !previewUrl
-            ? `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
+            ? `Dev server is up on port ${winnerPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
             : served.rendered
-              ? `Dev server is up on port ${boundPort} — preview restored.`
+              ? `Dev server is up on port ${winnerPort} — preview restored.`
               // Task 2 (2026-08-05): the boot log is right here in `combined` — when it NAMES the
               // cause (half-boot on an unreachable database, a missing key), say THAT instead of
               // pointing the user into the log to find something we already computed.
               : halfBootCause(combined)
-                ?? `Dev server is up on port ${boundPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
+                ?? `Dev server is up on port ${winnerPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
           detail: combined.slice(-4000),
         });
         return;

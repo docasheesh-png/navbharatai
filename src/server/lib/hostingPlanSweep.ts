@@ -81,14 +81,19 @@ export function reattachedMessage(domains: string[]): string {
  * Sweep ONE wallet doc: transactional decision, then the decided side effects. Exported for tests
  * and for the lazy paths. Returns the action taken (null = nothing due). Never throws.
  */
-export async function sweepOneWallet(db: any, walletDocId: string): Promise<PlanSweepAction> {
+export async function sweepOneWallet(db: any, walletDocId: string, nowIso = new Date().toISOString()): Promise<PlanSweepAction> {
   try {
     const ref = doc(db, 'user_token_wallets', walletDocId);
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       if (!snap.exists()) return { action: null as PlanSweepAction, userId: walletDocId, expiresAt: '' };
       const current = snap.data();
-      const step = decidePlanSweepStep(current, new Date().toISOString());
+      // `nowIso` is an injectable seam (default: real time) — the reminder/grace windows are date
+      // arithmetic, so a test pinning its plan dates but not the clock becomes a time bomb that
+      // starts failing the day the real clock crosses a window boundary (found 2026-08-08: a test
+      // written 2026-08-06 with a fixed NOW deterministically failed once real time entered the
+      // 1-day reminder window of its fixture).
+      const step = decidePlanSweepStep(current, nowIso);
       if (step.applied) t.set(ref, step.wallet);
       const plan = step.wallet.hostingPlan as HostingPlanRecord | undefined;
       return { action: step.action, userId: (current.userId as string) || walletDocId, expiresAt: plan?.expiresAt ?? '' };

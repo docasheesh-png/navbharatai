@@ -27494,3 +27494,23 @@ Two root causes, both killed:
 Locked in tests/previewFreshUrl.test.ts (client precedence + reclaim + server pin + ordering).
 
 Gate: tsc clean both projects, full run 12,462/12,462.
+
+## 2026-08-08 — The FLIP SYSTEM (admin idea, adapted) + the time-bomb test defused
+
+**Flip system (admin: "ek par na chale to dusra, dusre par na chale to teesra?").** Built, adapted per
+the external-suggestion rule: not a blind port cascade (more guessing), but EVIDENCE-first discovery
+in `PortDiscovery.ts`: ask the sandbox OS which TCP ports are REALLY listening (/proc/net/tcp — no
+ss/netstat dependency), rank candidates (log-parsed → script → expected → listening, common-dev
+first), exclude infra ports (the provisioned PostgreSQL 5432 must never be published as "the app"),
+then VISIT each candidate and publish only a port whose page actually rendered. Wired into the
+Diagnose path (watchdog + button both use it); engages ONLY when the first port's page did not render
+— the happy path costs nothing. 11 new tests + source contracts.
+
+**Time-bomb test root-caused (yesterday's "unidentified flaky" solved).** tests/hostingPlanSweep.test.ts
+pinned its plan dates to a fixed NOW (2026-08-06) but `sweepOneWallet` read the REAL clock — the test
+passed until real time crossed into the fixture's 1-day reminder window, then failed deterministically
+(the sweep legitimately fired the more-urgent reminder). Class fix: `sweepOneWallet` now takes an
+injectable `nowIso` seam (default real time — production unchanged), the test pins the clock at both
+call sites. The "flaky" was never flaky — it was a date boundary.
+
+Gate: tsc clean both projects, full run 12,473/12,473.

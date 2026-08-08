@@ -27890,3 +27890,32 @@ surface ignored every theme. Class fix, one file:
 its compat rule so the reported symptom cannot silently return.
 
 Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,607/12,607.
+
+## 2026-08-08 — Doctor AI (SDA) chat: the chrome was eating a third of the phone screen
+
+Admin (with screenshots): "page ka space bina baat ki cheezo se ghira hua hai … quick tool hide bhi kar
+do na, fir bhi itna sara space occupy hai … visibility maximum chahiye." Two distinct defects:
+
+1. **Hiding Quick Tools did not STICK.** `useState(true)` re-opened the panel on every mount, so the
+   doctor re-hid it every single visit — a control whose choice the app forgets is broken, not merely
+   inconvenient. New pure `sdaChrome.ts` remembers it (localStorage, injectable + never throws, so
+   Safari private mode cannot break the chat). No saved choice ⇒ CLOSED on a phone (≤640px), open on a
+   wide screen, where the tools cost nothing.
+2. **Permanent chrome ate ~a third of the viewport.** Three rows removed/merged, nothing de-featured:
+   - The one-sentence disclaimer owned a full-width row directly above the tools row → the two are now
+     ONE row (toggle left, disclaimer right). **The disclaimer is still always on screen** — clinical
+     safety text is never hidden behind a tap — with the full legal wording in its `title`.
+   - The emoji legend row ("Docs / Dictate / Talk to SDA / Clinical Tools") was DELETED: every entry
+     captioned a control visible in that very row (paperclip, mic, speaker — each already carrying a
+     tooltip) and the tools toggle one row above. A caption for buttons the eye can already see.
+   - Header compacted on phones only (stethoscope tile + the second title line hide below `sm`,
+     padding tightened); the wide layout is unchanged.
+
+Net: ~3 rows of permanent chrome back to the conversation, plus the tools panel no longer defaulting
+open on phones. 12 regression tests (`tests/sdaChrome.test.ts`) covering the preference in both
+directions, storage-failure fallbacks, and source contracts that the legend is gone AND the safety text
+is still rendered. Note the test caught a self-inflicted trap: the first version of the deletion comment
+quoted the removed string verbatim, which defeated the "it is gone" assertion — same class as the
+PROGRESS.md conflict-marker trap recorded 2026-08-08.
+
+Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,619/12,619.

@@ -183,7 +183,7 @@ Each of these is genuinely useful today; the remainder is usually infra-shaped.
 | **Codemod scale** | relevance-scoped, 2000-file cap, honest truncation | auto-loop when the shortlist itself exceeds 2000 files (rare) |
 | **AP-5 Prompt cache** | stable-prefix structure built | per-provider cache markers — ⚠️ **moat, do not change autonomously** |
 | **AP-7 Edit mode** | works | 80% of user time is *after* the first build; make edits as smart as builds |
-| **AP-9 Requirement coverage** | works | false positives ("login not found" when it was) |
+| **AP-9 Requirement coverage** | works; root-caused TWICE already (`Registration.tsx` not matching `/register/`; `components/admin/` dropped by basename-only matching) and now matches full paths + component names + routes | ⚠️ **NEEDS EVIDENCE, not more guessing (2026-08-08).** The "false positives" line has no reproduction behind it. The one gap visible in the code is deliberate — the surface is paths and names, never file CONTENTS — and loosening that would trade false positives for FALSE NEGATIVES (reporting a feature as built because the word appears in a comment), which is strictly worse. Do not touch this without a real build report showing a specific feature wrongly flagged; then fix that case. |
 | **GA-5 / GA-6 / GA-7 / GA-8 / GA-10 / GA-12 / GA-13 / GA-14 / GA-15** | main engine in each | narrow tails; **verify each against live code before starting** — several neighbours in this list turned out to be finished |
 
 ---

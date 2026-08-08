@@ -90,3 +90,37 @@ describe('data-theme wiring — the single source of truth, desktop AND mobile (
     expect(appTsx).toMatch(/document\.documentElement\.setAttribute\(\s*['"]data-theme['"]\s*,\s*theme\s*\)/);
   });
 });
+
+// ADMIN REPORT 2026-08-08: "Pro v5 ke andar theme badalne se background dark hi rahta hai."
+// Root cause: the compat layer mapped -900/-800 but never the -950 family — and the v5 panel's ROOT
+// is `bg-zinc-950`, so the whole surface ignored every theme. Hover variants (`hover:bg-zinc-800`)
+// are distinct classes and were escaping too: on a light theme, hovering any v5 button flashed dark.
+describe('theme-compat.css — the darkest chrome family follows the theme (Pro v5 report)', () => {
+  it('maps the whole -950 family (all five gray scales) to the base surface', () => {
+    for (const scale of ['zinc', 'neutral', 'gray', 'slate', 'stone']) {
+      expect(compat).toMatch(new RegExp(`html\\[data-theme\\]\\s*\\.bg-${scale}-950\\b`));
+    }
+    expect(compat).toMatch(/\.bg-zinc-950[\s\S]{0,400}var\(--surface-base\)/);
+  });
+
+  it('maps the near-solid and translucent -950 variants the panels actually use', () => {
+    expect(compat).toMatch(/\.bg-zinc-950\\\/95/);
+    expect(compat).toMatch(/\.bg-zinc-950\\\/40[\s\S]{0,120}var\(--surface-raised\)/);
+  });
+
+  it('hover states of the mapped neutrals are remapped too (no dark flash on light themes)', () => {
+    expect(compat).toMatch(/\.hover\\:bg-zinc-800:hover/);
+    expect(compat).toMatch(/\.hover\\:bg-zinc-900:hover[\s\S]{0,200}var\(--surface-card\)/);
+  });
+
+  it('the v5 panel root literal is genuinely covered (the reported symptom cannot return)', () => {
+    const panel = read('src/components/agentv3/AgentV3Panel.tsx');
+    expect(panel).toMatch(/bg-zinc-950/); // the root still uses the literal…
+    expect(compat).toMatch(/html\[data-theme\]\s*\.bg-zinc-950\b/); // …and the compat layer remaps it.
+  });
+
+  it('the fixed-dark escape hatch exists but no surface currently claims it (the comment tells the truth)', () => {
+    expect(compat).toMatch(/\[data-fixed-dark\]/);
+    expect(compat).toMatch(/currently used by NO surface/);
+  });
+});

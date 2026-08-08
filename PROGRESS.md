@@ -27775,3 +27775,30 @@ four concrete TRIGGERS that make it real (a shared/global cache · a warmed/bulk
 cross-instance Redis cache · periodic latency spikes on a TTL boundary), and the implementation shape
 (one shared `jitteredTtl()` helper — never per call site — paired with single-flight, which is the
 stronger half). Recorded so a future session builds it on evidence, not on a hunch.
+
+### CI was SILENTLY not running (root-caused 2026-08-08) + the nanoid advisory
+
+Two separate things kept PR #2173 from ever going green, and the first one is a systemic trap worth
+recording for every session:
+
+1. **A conflicted PR gets NO CI at all — silently.** GitHub runs `pull_request` workflows against the
+   PR's *merge* commit; when the branch conflicts with main, that merge commit cannot be created, so no
+   workflow run is ever queued. Not red, not pending — **absent**. The branch's last real run was
+   2026-08-06; seven pushes after that produced nothing while `mergeable_state` sat at `dirty`, and an
+   "empty commit to re-trigger" (which had worked before) could not help, because the conflict was the
+   cause. Also note `pull_request_read/get_status` returns *legacy commit statuses* and reads
+   `total_count: 0` even when Actions ran — **`get_check_runs` is the correct probe.** Fixed by merging
+   main (twice — main moved mid-gate), resolving PROGRESS.md keep-both and accepting #2175's roadmap
+   consolidation (`ROADMAP_REMAINING.md` deleted → the TTL-jitter entry moved into the new `ROADMAP.md`).
+2. **`nanoid` [high] GHSA-2v37-7h3g-55p8** then failed the audit gate (repo-wide, not from this branch):
+   `postcss` pulls `nanoid@3.3.16`. Fixed with an `overrides: {"nanoid": "^3.3.18"}` version bump — a real
+   fix, NOT an allowlist entry (the allowlist is for accepted/unfixable advisories; using it on a
+   one-line-fixable dependency would be a surface patch). Gate verified locally: "No new high/critical".
+
+**Known overlap (honest):** PR #2170 (another session, branch `claude/new-session-fhcwo7`) independently
+fixes the SAME nanoid advisory AND the same hostingPlanSweep wall-clock test rot — and its version of the
+sweep fix is a SUPERSET of mine (it also fixes the real ordering bug where the largest reached reminder
+window fired first, so a plan with 8 hours left was announced as "5 days ahead"). Whichever lands second
+should take #2170's sweep implementation and drop the duplicate rather than merging two half-fixes.
+
+Gate: tsc clean both projects, full run 12,540/12,540, audit gate green.

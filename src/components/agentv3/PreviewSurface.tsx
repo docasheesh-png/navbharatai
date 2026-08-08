@@ -248,7 +248,21 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     }
   }, [workspaceId, userId, email, framework]);
 
-  const effectiveUrl = url || foundUrl;
+  // FRESH TRUTH WINS (admin screenshot 2026-08-07, Mitrify on the wrong port): the saved historical
+  // URL used to outrank the Diagnose-VERIFIED one (`url || foundUrl`), so after the watchdog found
+  // the app genuinely serving on its REAL port, the iframe kept rendering E2B's "Closed Port Error"
+  // page from the stale port forever. `foundUrl` is only ever set from a diagnose that booted the app
+  // and SAW a page render — when it exists, it is the newest verified truth. A NEW build's published
+  // `url` becomes the newest truth in its turn: the effect below clears `foundUrl` the moment the
+  // `url` prop changes, so a stale diagnose result can never shadow a fresh build either.
+  const effectiveUrl = foundUrl || url;
+  const lastUrlProp = useRef(url);
+  useEffect(() => {
+    if (url !== lastUrlProp.current) {
+      lastUrlProp.current = url;
+      if (url) setFoundUrl('');
+    }
+  }, [url]);
   // Arm the live-iframe working strip whenever the live view (re)loads a URL; the iframe's own
   // onLoad clears it — real load state, not a timer.
   useEffect(() => { if (mode === 'live' && effectiveUrl) setLiveLoading(true); }, [mode, effectiveUrl, liveReloadKey]);

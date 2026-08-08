@@ -149,6 +149,7 @@ import { prettierGateResult, prettierAdvisory } from './PrettierGate';
 import { injectObservabilityFixes } from './ObservabilityInjector';
 import { wireOrphanPages } from './orphanPageWiring';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
+import { planProductionMigration, isProductionSafeCommand, migrationOutcome } from './productionMigration';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
@@ -225,6 +226,7 @@ import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
+import { generateMotion } from '../lib/MotionGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -696,6 +698,62 @@ export class ToolDispatcher {
    *
    * Returns whether the app now has a real database. Never throws.
    */
+  /**
+   * Apply the app's own migrations to the DURABLE database it will live on, right after a publish.
+   *
+   * Returns a user-facing sentence to append to the deploy result, or '' when there is nothing worth
+   * saying. NEVER throws and never fails the deploy: the app is already live at this point, and a
+   * migration problem must be reported, not converted into a failed publish.
+   *
+   * The safety decision is NOT made here — `planProductionMigration` owns it, and it refuses anything
+   * that is not a documented forward-only apply verb. This method only carries out an already-approved
+   * plan and reports honestly on what the commands really did.
+   */
+  private async migrateProductionDatabase(): Promise<string> {
+    // The live database is whatever the app's own .env says, which is where the vault's DATABASE_URL
+    // and any rescue/provisioning result all land — one source of truth, the same one the running app
+    // will use. A sandbox-local URL is not a production database and is skipped by the planner.
+    let envNow = '';
+    try { envNow = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'prod-migrate-env'); } catch { return ''; }
+    const productionUrl = dotEnvValue(envNow, 'DATABASE_URL');
+    if (!productionUrl || !isUserOwnedDatabaseUrl(productionUrl)) return '';
+
+    let files: string[] = [];
+    try { files = await this.actuator.listFiles(this.workspaceId); } catch { return ''; }
+    let pkgRaw: string | undefined;
+    try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+
+    const decision = planProductionMigration({ plans: detectMigrationPlan(files, pkgRaw), productionUrl });
+    // A refusal is only worth a sentence when the user can act on it. "This app has no migration tool"
+    // is true but useless noise on a successful publish, so it stays silent.
+    if (!decision.ok) return decision.reason === 'no-migrations' || decision.reason === 'no-database' ? '' : ` ${decision.message}`;
+
+    this.events?.emit({ type: 'narration', agent: 'architect', text: `🗄️ ${decision.summary}`, ts: Date.now() });
+    // No env override, and that is deliberate. The app's `.env` ALREADY holds this exact URL — that is
+    // where it was read from a few lines above — so the migration tools pick it up on their own. The
+    // alternative, prefixing the command with `DATABASE_URL=…`, would write the user's live database
+    // password into `buildDiag.recordCommand`, which stores the raw command string UNREDACTED. That is
+    // the same leak class as the plaintext `.env` display fixed earlier today; not worth re-opening to
+    // save a line.
+    let lastOutput = '';
+    for (const command of decision.commands) {
+      // Re-checked at the moment of execution, not only at planning time. The plan and the run are
+      // separated by awaits, and this is the last line before a command touches live data.
+      if (!isProductionSafeCommand(command)) return ' Your app\'s database setup was skipped as a precaution.';
+      let exitCode = 1;
+      try {
+        const r = await withTimeout(this.actuator.runCommand(this.workspaceId, command), 180_000, 'prod-migrate');
+        exitCode = typeof r?.exitCode === 'number' ? r.exitCode : 1;
+        lastOutput = String(r?.stdout ?? '') + String(r?.stderr ?? '');
+      } catch {
+        return ' Your app is published, but its database tables could not be set up just now — it will not be able to save data until they are.';
+      }
+      const step = migrationOutcome(exitCode, lastOutput);
+      if (step.outcome === 'failed') return ` ${step.message}`;
+    }
+    return ` ${migrationOutcome(0, lastOutput).message}`;
+  }
+
   private async rescueDatabase(): Promise<boolean> {
     if (!this.onDatabaseUnavailable) return false;
     let env: Record<string, string> | null = null;
@@ -5058,6 +5116,29 @@ export class ToolDispatcher {
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
       }
 
+      case 'generate_animation': {
+        // The audit's last frontend ❌ — micro-interactions were LLM-authored ad hoc, so most builds got
+        // a different hand-rolled transition or none at all. Pure generator in MotionGenerator.ts:
+        // dependency-free CSS (transform/opacity only, so it stays smooth on low-end phones) plus a
+        // scroll-reveal hook, and every effect self-disables under prefers-reduced-motion.
+        const motionRec = (input as Record<string, unknown>) || {};
+        const motionInclude = Array.isArray(motionRec.include)
+          ? motionRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const motion = generateMotion(motionInclude);
+        const motionWritten: string[] = [];
+        for (const [path, content] of Object.entries(motion.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          motionWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('motion pack');
+        return `Wired a motion pack:\n${motionWritten.join('\n')}\n\n${motion.instructions}`;
+      }
+
       case 'generate_state': {
         // Roadmap BUILD-NOW #9 — GLOBAL state management (Zustand store + selector hooks). Distinct from
         // generate_ui_states' LOCAL useOptimisticList. Pure generator in FrontendStateGenerator.ts. No env keys.
@@ -6973,7 +7054,21 @@ export class ToolDispatcher {
             clearTimeout(timer);
           }
         } catch { /* liveness is best-effort — never affects the deploy result */ }
-        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''}${liveLine} This stays live after the sandbox stops.`;
+        // THE PRODUCTION DATABASE (admin's own "asli gap: PRODUCTION DB"). The sandbox's Postgres dies
+        // with the build, so a published app points at the user's durable database — which has NO
+        // TABLES IN IT. The page loads and then every signup, order and booking fails against a schema
+        // that was never created there. Everything up to this point was already built (provisioning,
+        // connecting, Studio, the publish gate); this is the step that was missing.
+        //
+        // Runs the app's OWN migrations, with DATABASE_URL pointed at the live database for these
+        // commands only — the sandbox `.env` is untouched, so the preview keeps its throwaway DB. Every
+        // command is re-checked against the production allowlist at the moment it would run
+        // (productionMigration.ts): `prisma migrate deploy` is allowed, `migrate reset` can never be.
+        // Best-effort by design — a migration problem must not turn a successful publish into a
+        // failure, so it degrades to an honest line telling the user their app is live but cannot yet
+        // save data.
+        const migrationLine = await this.migrateProductionDatabase().catch(() => '');
+        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''}${liveLine}${migrationLine} This stays live after the sandbox stops.`;
       }
 
       case 'console_errors': {

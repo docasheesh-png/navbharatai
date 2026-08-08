@@ -27736,6 +27736,190 @@ override (`nanoid: ^3.3.17`, resolves to 3.3.18) — NOT an allowlist entry. The
 advisories that are genuinely accepted or unfixable; using it on a one-line-fixable dependency would
 be exactly the surface patch rule 4 forbids, and would leave the loop live in the build toolchain.
 Audit gate + license gate + full suite green after the bump.
+## 2026-08-07 — FLEET LEARNING: one user's solved mistake now protects EVERY user (branch claude/ai-teacher-student-profiles-8bg002)
+
+Admin asked (after MistakeLedger shipped in #2166): "kya fable 5 isko aur jyada accha bana sakta hai?"
+The honest answer: the per-user ledger only helps a user who has already suffered the failure once.
+User #1001's first build still walks into the exact failure user #7 solved months ago. The aviation
+model fixes this — one investigated failure becomes a checklist item for every cockpit.
+
+Shipped `FleetMistakeLedger.ts` (+15 tests):
+- **Anonymous by construction**: keyed by `errorSignature` (already strips paths/numbers/quotes),
+  stored sample/fix pass `redactSecrets` + `redactPII` before writing, and the store is never given a
+  userId/workspaceId at all (a source-contract test asserts the call site passes none, and that the
+  store code never references an identifier).
+- **Doc-per-signature** in `fleet_mistakes_v3/{sha256(signature)}` — direct key gets, no queries, no
+  hot document; bounded lookups/writes per build (6 each).
+- **Same proven-fix law**: a fix is recorded only from a SUCCEEDED build; `repeatsAfterFix` now also
+  measures fleet-wide repeats, so "is the whole platform learning?" is a number, not a claim.
+- **Wiring**: read as a FALLBACK after the personal guard (personal history wins when it exists);
+  written next to the per-user recordBuild. Both inside the existing best-effort catches — the fleet
+  can never break or slow a build. Reuses `formatKnownMistakes` (now header-parameterized) so there is
+  ONE guidance format.
+- **Kill switch**: `AGENTV3_FLEET_LEDGER=off` (default on).
+
+Gate: tsc clean both projects, full run 1099 files / 12,438 tests, exit 0.
+
+### Polish (same day, same PR): the guard now PROVES itself in every admin report
+
+"Repeat rate poochhna" is only a real promise if the number is somewhere the admin can see. Added:
+- `MISTAKE_GUARD` (info) on the report timeline the moment a guard fires — source (personal/fleet),
+  how many proven fixes were recalled, and the personal ledger's live solved-count + repeat rate.
+- `GUARD_HELD` / `GUARD_REPEAT` at build end: did the guarded failures actually stay away? A repeat
+  DESPITE the guard is a warning naming the real conclusion (this class needs an upstream fix, not a
+  better reminder). Measured against ALL unresolved errors, never the ledger's bounded top-10 slice —
+  a guarded failure recurring as error #11 must not be reported as "held".
+- One selection rule (`matchedMistakes`) now feeds BOTH the guard text and its measurement, so "what
+  was guarded" and "what was measured" cannot drift.
+
+Gate: tsc clean both projects, full run 12,442/12,442.
+
+## 2026-08-07 — Autopsy of build report 32d4f48e (Mitrify import/survey): the DB-migration runner, built
+
+Report looked perfect (0 errors, 0 warnings, ok:true, Kimi-only weak build, noClaude honoured) — but its
+own `npm run dev` stdout said `relation "profiles" does not exist` TWICE (the app's ensureSchema repair
+AND its provider backfill both failed). The DB was provisioned + SELECT 1-verified, yet EMPTY: nothing
+ever ran the app's own migrations, so every data-reading page was broken behind a "✅ up" preview, and
+the tally said zero problems. This is the literal "missing DB-migration runner" subsystem CLAUDE.md
+Step-2 names as its canonical example. Built it:
+
+- `detectMigrationCommand` (ImportPreview.ts): the app's OWN mechanism wins — package.json scripts
+  (db:push / db:migrate / migrate:deploy / migrate / db:setup; Mitrify has db:push), else Prisma
+  migrate deploy (committed migrations) / db push. Null when the app has none.
+- Wired into the import preview boot AFTER the DB + .env exist, BEFORE the dev server: env-prefixed
+  (`shellEnvAssignment` — drizzle-kit does not load .env), 150s bound, full command output recorded,
+  honest IMPORT_DB_MIGRATIONS_APPLIED / _FAILED either way. Best-effort: boot proceeds regardless.
+- `schemaMissingFromLog` — the honest last line: the boot log is ALWAYS scanned for the pg/sqlite/mysql
+  "table missing" shapes; a hit records UNRESOLVED warning DB_SCHEMA_MISSING (so the tally can never
+  claim zero problems over this evidence again) + tells the user plainly.
+- 17 new tests incl. the report's verbatim evidence line and source-contract wiring checks.
+
+Gate: tsc clean both projects, full run 12,456/12,456.
+
+## 2026-08-07 — Port-mismatch fix (admin screenshot: preview URL on 3000, app on 5000)
+
+The Preview tab rendered E2B's "Closed Port Error" (port 3000) while Mitrify genuinely served on 5000.
+Two root causes, both killed:
+1. **Client precedence was backwards** (`url || foundUrl`): the SAVED historical URL outranked the
+   URL the Diagnose watchdog had just booted and page-verified — so even after the real port was
+   found, the iframe kept the dead URL forever. Now `foundUrl || url` (fresh verified truth wins),
+   and a NEW build's published `url` reclaims the lead by clearing `foundUrl` on prop change.
+2. **The app's port was ambient-dependent**: a `process.env.PORT || default` server binds whatever
+   the sandbox env implies — same app: 3000 in one sandbox, 5000 in the next, while its saved URL
+   stayed pinned to history. The import boot now writes a REAL `PORT=3000` into the dev .env (never
+   an empty placeholder — `PORT=` is its own hazard: defined-but-empty makes parseInt('') NaN), so
+   every boot of a PORT-honoring app binds the same port in every sandbox. Apps that ignore PORT are
+   untouched; the log-parsed port still wins downstream; the client fix covers hardcoded-port apps.
+Locked in tests/previewFreshUrl.test.ts (client precedence + reclaim + server pin + ordering).
+
+Gate: tsc clean both projects, full run 12,462/12,462.
+
+## 2026-08-08 — The FLIP SYSTEM (admin idea, adapted) + the time-bomb test defused
+
+**Flip system (admin: "ek par na chale to dusra, dusre par na chale to teesra?").** Built, adapted per
+the external-suggestion rule: not a blind port cascade (more guessing), but EVIDENCE-first discovery
+in `PortDiscovery.ts`: ask the sandbox OS which TCP ports are REALLY listening (/proc/net/tcp — no
+ss/netstat dependency), rank candidates (log-parsed → script → expected → listening, common-dev
+first), exclude infra ports (the provisioned PostgreSQL 5432 must never be published as "the app"),
+then VISIT each candidate and publish only a port whose page actually rendered. Wired into the
+Diagnose path (watchdog + button both use it); engages ONLY when the first port's page did not render
+— the happy path costs nothing. 11 new tests + source contracts.
+
+**Time-bomb test root-caused (yesterday's "unidentified flaky" solved).** tests/hostingPlanSweep.test.ts
+pinned its plan dates to a fixed NOW (2026-08-06) but `sweepOneWallet` read the REAL clock — the test
+passed until real time crossed into the fixture's 1-day reminder window, then failed deterministically
+(the sweep legitimately fired the more-urgent reminder). Class fix: `sweepOneWallet` now takes an
+injectable `nowIso` seam (default real time — production unchanged), the test pins the clock at both
+call sites. The "flaky" was never flaky — it was a date boundary.
+
+Gate: tsc clean both projects, full run 12,473/12,473.
+
+### Roadmap note (2026-08-08): cache TTL jitter recorded as a TRIGGER-gated future item
+
+Admin asked that "abhi zaroorat nahi" not become "bhool gaye". Written into `ROADMAP.md`
+(section 2, marked ⏳ trigger-gated — moved there when PR #2175 consolidated five roadmaps into one) with the honest reason it is NOT built now (every TTL cache today is per-user/per-workspace,
+so expiries are already staggered by the users' own arrival times — jitter would buy nothing and cost
+determinism), the RETRY-side jitter we DO have (`ClaudeClient` backoff, `AIRouter` ±20% cooldown), the
+four concrete TRIGGERS that make it real (a shared/global cache · a warmed/bulk-rebuilt cache · a
+cross-instance Redis cache · periodic latency spikes on a TTL boundary), and the implementation shape
+(one shared `jitteredTtl()` helper — never per call site — paired with single-flight, which is the
+stronger half). Recorded so a future session builds it on evidence, not on a hunch.
+
+### CI was SILENTLY not running (root-caused 2026-08-08) + the nanoid advisory
+
+Two separate things kept PR #2173 from ever going green, and the first one is a systemic trap worth
+recording for every session:
+
+1. **A conflicted PR gets NO CI at all — silently.** GitHub runs `pull_request` workflows against the
+   PR's *merge* commit; when the branch conflicts with main, that merge commit cannot be created, so no
+   workflow run is ever queued. Not red, not pending — **absent**. The branch's last real run was
+   2026-08-06; seven pushes after that produced nothing while `mergeable_state` sat at `dirty`, and an
+   "empty commit to re-trigger" (which had worked before) could not help, because the conflict was the
+   cause. Also note `pull_request_read/get_status` returns *legacy commit statuses* and reads
+   `total_count: 0` even when Actions ran — **`get_check_runs` is the correct probe.** Fixed by merging
+   main (twice — main moved mid-gate), resolving PROGRESS.md keep-both and accepting #2175's roadmap
+   consolidation (`ROADMAP_REMAINING.md` deleted → the TTL-jitter entry moved into the new `ROADMAP.md`).
+2. **`nanoid` [high] GHSA-2v37-7h3g-55p8** then failed the audit gate (repo-wide, not from this branch):
+   `postcss` pulls `nanoid@3.3.16`. Fixed with an `overrides: {"nanoid": "^3.3.18"}` version bump — a real
+   fix, NOT an allowlist entry (the allowlist is for accepted/unfixable advisories; using it on a
+   one-line-fixable dependency would be a surface patch). Gate verified locally: "No new high/critical".
+
+**Known overlap (honest):** PR #2170 (another session, branch `claude/new-session-fhcwo7`) independently
+fixes the SAME nanoid advisory AND the same hostingPlanSweep wall-clock test rot — and its version of the
+sweep fix is a SUPERSET of mine (it also fixes the real ordering bug where the largest reached reminder
+window fired first, so a plan with 8 hours left was announced as "5 days ahead"). #2170 landed first (main 35e3e3b9), so this branch DID exactly that: `git checkout origin/main --`
+for both sweep files (their `_deps.now()` seam is cleaner than my `nowIso` parameter — it covers every
+call site, not one), and main's `nanoid: ^3.3.17` range adopted over my `^3.3.18` (it resolves to
+3.3.18 anyway — zero divergence from main for an identical fix). Two half-fixes were NOT merged.
+
+Gate: tsc clean both projects, full run 12,540/12,540, audit gate green.
+
+## 2026-08-08 — Pro v5 theme bug: the -950 family never followed the theme (admin report)
+
+Admin: "Pro v5 ke andar theme badalne se background dark hi rahta hai." Root cause was one missing
+shade family in the DNA theming layer: `theme-compat.css` remapped -900/-800 and the GitHub hexes,
+but the v5 panel's ROOT is `bg-zinc-950` — a literal the layer never covered, so the entire v5
+surface ignored every theme. Class fix, one file:
+- The whole darkest family (`zinc/neutral/gray/slate/stone-950`) + near-solid variants (/90 /95 /80)
+  → `--surface-base`; translucent -950 wells (/40 /60) and the -700 chrome → `--surface-raised`.
+- HOVER states were a sibling escape: `hover:bg-zinc-800` is a DIFFERENT class from `bg-zinc-800`,
+  so on light themes every hover flashed dark. All mapped-neutral hover forms now remap too.
+- Honesty: the `[data-fixed-dark]` comment claimed Pro v3.0 / Doctor AI / Voice use the exemption —
+  none ever set the attribute. Comment corrected (escape hatch kept, currently unused by anything).
+5 new regression tests in tests/themeSystem.test.ts, including one that pins the v5 root literal to
+its compat rule so the reported symptom cannot silently return.
+
+Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,607/12,607.
+
+## 2026-08-08 — Doctor AI (SDA) chat: the chrome was eating a third of the phone screen
+
+Admin (with screenshots): "page ka space bina baat ki cheezo se ghira hua hai … quick tool hide bhi kar
+do na, fir bhi itna sara space occupy hai … visibility maximum chahiye." Two distinct defects:
+
+1. **Hiding Quick Tools did not STICK.** `useState(true)` re-opened the panel on every mount, so the
+   doctor re-hid it every single visit — a control whose choice the app forgets is broken, not merely
+   inconvenient. New pure `sdaChrome.ts` remembers it (localStorage, injectable + never throws, so
+   Safari private mode cannot break the chat). No saved choice ⇒ CLOSED on a phone (≤640px), open on a
+   wide screen, where the tools cost nothing.
+2. **Permanent chrome ate ~a third of the viewport.** Three rows removed/merged, nothing de-featured:
+   - The one-sentence disclaimer owned a full-width row directly above the tools row → the two are now
+     ONE row (toggle left, disclaimer right). **The disclaimer is still always on screen** — clinical
+     safety text is never hidden behind a tap — with the full legal wording in its `title`.
+   - The emoji legend row ("Docs / Dictate / Talk to SDA / Clinical Tools") was DELETED: every entry
+     captioned a control visible in that very row (paperclip, mic, speaker — each already carrying a
+     tooltip) and the tools toggle one row above. A caption for buttons the eye can already see.
+   - Header compacted on phones only (stethoscope tile + the second title line hide below `sm`,
+     padding tightened); the wide layout is unchanged.
+
+Net: ~3 rows of permanent chrome back to the conversation, plus the tools panel no longer defaulting
+open on phones. 12 regression tests (`tests/sdaChrome.test.ts`) covering the preference in both
+directions, storage-failure fallbacks, and source contracts that the legend is gone AND the safety text
+is still rendered. Note the test caught a self-inflicted trap: the first version of the deletion comment
+quoted the removed string verbatim, which defeated the "it is gone" assertion — same class as the
+PROGRESS.md conflict-marker trap recorded 2026-08-08.
+
+Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,619/12,619.
+
 
 ## 2026-08-08 — Preview warmup: the "Bolt feels instant" slice (world-best slice 4)
 

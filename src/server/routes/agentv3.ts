@@ -126,7 +126,7 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
@@ -220,7 +220,9 @@ import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHea
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
-import { mistakeLedgerStore } from '../AgentV3/MistakeLedger';
+import { mistakeLedgerStore, mistakeKey } from '../AgentV3/MistakeLedger';
+import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
+import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from '../AgentV3/PortDiscovery';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -3327,30 +3329,52 @@ export function registerAgentV3Routes(app: Express): void {
       const boundPort = port ?? effectivePort;
       if (up) {
         sendStage('Resolving the public preview URL', 95);
-        let previewUrl: string | undefined;
-        try { previewUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, boundPort), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
         // EARN IT (admin 2026-08-03): a bound port is not the app serving. VISIT the home route and only
         // report "preview restored" when it renders — otherwise Diagnose was greenlighting a server that
         // returns "Cannot GET" on its own client routes (the exact full-stack bug).
-        let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
-        if (previewUrl) {
-          try { served = analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, previewUrl), 30_000, 'preview-diagnose-verify')).html); }
-          catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
+        const visit = async (cand: number): Promise<{ url?: string; served: { rendered: boolean; problems: string[] } }> => {
+          let url: string | undefined;
+          try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, cand), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
+          // No URL ⇒ keep the pre-flip semantics (port up, page unverifiable, benefit of the doubt).
+          if (!url) return { served: { rendered: true, problems: [] } };
+          try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, url), 30_000, 'preview-diagnose-verify')).html) }; }
+          catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
+        };
+        let winner = await visit(boundPort);
+        let winnerPort = boundPort;
+        // FLIP SYSTEM (admin 2026-08-07: "ek par na chale to dusra, dusre par na chale to teesra?").
+        // Engages ONLY when the first port's page did not render — then the sandbox OS is asked which
+        // TCP ports are REALLY listening (a fact, not a guess) and each remaining candidate is visited
+        // until one genuinely renders the app. The happy path costs nothing extra; a blind cascade of
+        // guesses is exactly what this avoids — every flip target is evidence (a listening port), and
+        // every verdict is earned (a rendered page).
+        if (winner.url && !winner.served.rendered) {
+          let listening: number[] = [];
+          try {
+            listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'preview-port-scan')).stdout);
+          } catch { /* the scan is best-effort — without it the flip simply has no extra candidates */ }
+          for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening })) {
+            if (cand === winnerPort) continue;
+            const attempt = await visit(cand);
+            if (attempt.url && attempt.served.rendered) { winner = attempt; winnerPort = cand; break; }
+          }
         }
+        const previewUrl = winner.url;
+        const served = winner.served;
         finish({
           ok: served.rendered,
           portListening: true,
-          port: boundPort,
+          port: winnerPort,
           previewUrl,
           reason: !previewUrl
-            ? `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
+            ? `Dev server is up on port ${winnerPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
             : served.rendered
-              ? `Dev server is up on port ${boundPort} — preview restored.`
+              ? `Dev server is up on port ${winnerPort} — preview restored.`
               // Task 2 (2026-08-05): the boot log is right here in `combined` — when it NAMES the
               // cause (half-boot on an unreachable database, a missing key), say THAT instead of
               // pointing the user into the log to find something we already computed.
               : halfBootCause(combined)
-                ?? `Dev server is up on port ${boundPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
+                ?? `Dev server is up on port ${winnerPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
           detail: combined.slice(-4000),
         });
         return;
@@ -5880,12 +5904,60 @@ export function registerAgentV3Routes(app: Express): void {
             // (express-session throws "secret option required" on '' — the exact reason the Mitrify
             // preview died). Third-party keys are NEVER faked; they stay empty + honestly listed.
             Object.assign(provided, conjurableSecrets(declaredEnvVars));
+            // PIN THE PORT (admin screenshot 2026-08-07 — Mitrify preview URL said 3000, the app was
+            // on 5000): a server that reads `process.env.PORT || <default>` binds a DIFFERENT port
+            // depending on ambient sandbox env, so the same app landed on 3000 in one sandbox and
+            // 5000 in the next while its saved preview URL stayed pinned to history — E2B's "Closed
+            // Port Error" page rendered as the app. Writing PORT into the dev .env makes every boot
+            // of a PORT-honoring app bind the SAME port, in every sandbox, forever. Apps that ignore
+            // PORT (vite serves its own) are untouched, and the log-parsed port still wins downstream.
+            if (!('PORT' in provided)) provided.PORT = '3000';
             // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
             // provisioned DATABASE_URL + generated local secrets, plus empty placeholders for the rest.
             if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {
               try { await actuator.writeFile(workspaceId, '.env', buildDevEnvContent(declaredEnvVars, provided)); } catch { /* env write best-effort */ }
               const extNote = externalServiceNote(declaredEnvVars);
               if (extNote) emitLive({ type: 'narration', agent: 'architect', text: extNote, ts: Date.now() });
+            }
+            // THE MISSING SUBSYSTEM, now present (build report 32d4f48e — Mitrify): a provisioned
+            // database is EMPTY. That build's boot log said `relation "profiles" does not exist`
+            // twice while the preview was declared "✅ up" with 0 warnings — nothing ever ran the
+            // app's own migrations. Run them HERE, right after the DB exists and the .env is written,
+            // so the dev server boots against real tables. DATABASE_URL is passed explicitly because
+            // migration CLIs (drizzle-kit) do not load .env themselves. Best-effort + bounded: a
+            // migration failure is recorded honestly and the boot still proceeds.
+            const migration = needsDb && provided.DATABASE_URL ? detectMigrationCommand(importedFiles) : null;
+            if (migration) {
+              emitLive({ type: 'narration', agent: 'architect', text: `🗄️ Creating your app's database tables (${migration.label}) so pages that read data work in the preview…`, ts: Date.now() });
+              const mStartedAt = Date.now();
+              try {
+                const mcmd = `${shellEnvAssignment('DATABASE_URL', provided.DATABASE_URL)} ${migration.command}`;
+                const mres = await withTimeout(actuator.runCommand(workspaceId, mcmd), 150_000, 'import-db-migrate');
+                try {
+                  opts.diag?.recordCommand?.({
+                    command: migration.command,
+                    exitCode: typeof mres.exitCode === 'number' ? mres.exitCode : null,
+                    stdout: mres.stdout ?? '', stderr: mres.stderr ?? '',
+                    durationMs: Date.now() - mStartedAt,
+                  });
+                } catch { /* diagnostics best-effort */ }
+                const mok = mres.exitCode === 0;
+                opts.diag?.record({
+                  phase: 'preview', severity: mok ? 'info' : 'warning',
+                  code: mok ? 'IMPORT_DB_MIGRATIONS_APPLIED' : 'IMPORT_DB_MIGRATIONS_FAILED',
+                  message: mok
+                    ? `The app's own database migrations ran clean (${migration.label}, ${Math.round((Date.now() - mStartedAt) / 1000)}s) — its tables exist before the dev server boots.`
+                    : `The app's database migration step (${migration.label}) exited ${mres.exitCode} after ${Math.round((Date.now() - mStartedAt) / 1000)}s — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: mok,
+                });
+              } catch (e) {
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_FAILED',
+                  message: `The app's database migration step (${migration.label}) did not finish within its window — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
             }
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
             // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
@@ -5911,6 +5983,19 @@ export function registerAgentV3Routes(app: Express): void {
                 durationMs: Date.now() - bootStartedAt,
               });
             } catch { /* diagnostics are best-effort and must never break a boot */ }
+            // HONEST LAST LINE (report 32d4f48e): when the boot log itself PROVES missing tables
+            // (`relation "profiles" does not exist`), that evidence must never again sit unread in
+            // the command log while the tally reports zero problems. Recorded and told to the user —
+            // a preview that renders its shell but fails every data read is not a working preview.
+            const missingTable = schemaMissingFromLog(combined);
+            if (missingTable) {
+              opts.diag?.record({
+                phase: 'preview', severity: 'warning', code: 'DB_SCHEMA_MISSING',
+                message: `The boot log shows the database is missing its tables (first: "${missingTable}") — pages that read data will fail even where the preview renders. ${migration ? `The migration step (${migration.label}) ran — see its own entry for the outcome.` : 'No migration script was found in the project to create them.'}`,
+                autoResolved: false,
+              });
+              emitLive({ type: 'narration', agent: 'architect', text: `⚠️ Heads up: the app's database is missing its "${missingTable}" table — pages that read data may fail until the app's migrations run.`, ts: Date.now() });
+            }
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
               const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
@@ -8000,13 +8085,38 @@ export function registerAgentV3Routes(app: Express): void {
       // This lookup is keyed by the ERROR SIGNATURES this project has actually hit, so a proven fix is
       // recalled by IDENTITY rather than by similarity, and cannot be missed because the wording
       // differs. '' when nothing matches ⇒ a project with no such history is byte-identical to today.
+      let mistakeGuardSigs: string[] = [];
       try {
         const pastErrors = getWorkspaceMemory(workspaceId).snapshot().episodes
           .filter((e) => e.kind === 'error')
           .slice(-25)
           .map((e) => e.text);
-        const guard = await mistakeLedgerStore.guardFor(userId, pastErrors);
-        if (guard) buildPrompt = `${guard}\n\n---\n\n${buildPrompt}`;
+        const detail = await mistakeLedgerStore.guardDetailFor(userId, pastErrors);
+        let guardSource: 'personal' | 'fleet' | null = null;
+        if (detail.text) {
+          buildPrompt = `${detail.text}\n\n---\n\n${buildPrompt}`;
+          mistakeGuardSigs = detail.signatures;
+          guardSource = 'personal';
+        } else if (pastErrors.length > 0) {
+          // FLEET FALLBACK: the fleet may hold a proven fix the user has never personally earned
+          // (anonymous by construction — signature keys, sanitized text, no identity stored).
+          const fleet = await fleetMistakeLedgerStore.guardDetailFor(pastErrors);
+          if (fleet.text) {
+            buildPrompt = `${fleet.text}\n\n---\n\n${buildPrompt}`;
+            mistakeGuardSigs = fleet.signatures;
+            guardSource = 'fleet';
+          }
+        }
+        // The guard is VISIBLE in the admin report from the moment it fires, with the ledger's live
+        // repeat rate — so "is the learning system working?" is answered by every report, by number.
+        if (guardSource) {
+          const s = detail.stats;
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'MISTAKE_GUARD', autoResolved: false,
+            message: `Known-mistake guard active (${guardSource}): ${mistakeGuardSigs.length} proven fix(es) recalled by error signature${
+              s ? `. Personal ledger: ${s.solved}/${s.total} solved, repeat rate ${Math.round(s.repeatRate * 100)}%` : ''}.`,
+          });
+        }
       } catch { /* the guard is best-effort — never blocks a build */ }
 
       // Cross-Project Lesson Brain watermark: capture the time BEFORE the build runs. On a resumed
@@ -10675,12 +10785,36 @@ export function registerAgentV3Routes(app: Express): void {
         // guesses starts confidently teaching wrong answers.
         try {
           const d = buildDiag.report();
-          const errs = (d.problems ?? [])
+          const unresolvedErrors = (d.problems ?? [])
             .filter((p) => p.severity === 'error' && p.autoResolved !== true)
-            .map((p) => p.message)
-            .slice(0, 10);
+            .map((p) => p.message);
+          const errs = unresolvedErrors.slice(0, 10);
           if (errs.length > 0) {
             void mistakeLedgerStore.recordBuild(userId, { ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
+            // FLEET: the same outcome, recorded anonymously for every user — deliberately NO userId
+            // argument (the store cannot leak what it is never given). Sanitization happens inside.
+            void fleetMistakeLedgerStore.recordBuild({ ok: result.ok, errors: errs, fix: result.ok ? d.rootCause ?? null : null });
+          }
+          // GUARD EFFECTIVENESS: when a guard was injected at build start, measure whether the guarded
+          // failures actually stayed away. A guard that fires and the mistake recurs anyway is the
+          // learning system FAILING — that must surface as a warning in the report, never hide behind
+          // "a guard ran". A clean hold is recorded too, so the loop's wins are countable, not vibes.
+          if (mistakeGuardSigs.length > 0) {
+            // Measured against ALL unresolved errors, not the ledger's bounded slice — a guarded
+            // failure that recurred as error #11 must never be reported as "held".
+            const recurred = new Set(unresolvedErrors.map((e) => mistakeKey(e)));
+            const broke = mistakeGuardSigs.filter((sig) => recurred.has(sig));
+            buildDiag.record(
+              broke.length > 0
+                ? {
+                    phase: 'build', severity: 'warning', code: 'GUARD_REPEAT', autoResolved: false,
+                    message: `A known-fixed mistake recurred DESPITE the guard (${broke.length}/${mistakeGuardSigs.length} guarded signature(s) came back). The proven fix did not prevent the repeat — this failure class needs an upstream/architectural fix, not a better reminder.`,
+                  }
+                : {
+                    phase: 'build', severity: 'info', code: 'GUARD_HELD', autoResolved: true,
+                    message: `Known-mistake guard held: none of the ${mistakeGuardSigs.length} guarded failure(s) recurred in this build.`,
+                  },
+            );
           }
         } catch { /* the ledger is best-effort — never affects the build result */ }
       }

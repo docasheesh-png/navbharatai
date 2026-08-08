@@ -102,12 +102,8 @@ import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
-import { registerConventionRoutes } from './src/server/routes/convention';
 import { registerBuildEstimateRoutes } from './src/server/routes/buildEstimate';
-import { registerDocsRoutes } from './src/server/routes/docs';
-import { registerOpenApiRoutes } from './src/server/routes/openapi';
 import { registerRetrospectiveRoutes } from './src/server/routes/retrospective';
-import { registerTestGenRoutes } from './src/server/routes/testgen';
 import { registerDesignRoutes } from './src/server/routes/design';
 import { registerDeployArtifactsRoutes } from './src/server/routes/deployArtifacts';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
@@ -601,18 +597,10 @@ setInterval(() => {
   registerObservabilityRoutes(app);
   // P-PME.2 — release-notes generator (stateless blueprint-diff → structured notes).
   registerReleaseNotesRoutes(app);
-  // P-CGE.3 — convention & naming check (stateless file/identifier/import analysis).
-  registerConventionRoutes(app);
   // P-PME.4 — build-time estimate / deadline prediction (stateless complexity+history → ETA).
   registerBuildEstimateRoutes(app);
-  // P-CGE.2 — documentation generators (stateless blueprint/routes/signatures → README/API/TSDoc).
-  registerDocsRoutes(app);
-  // P-CGE.5 — OpenAPI generator (stateless route specs → OpenAPI 3.0.3 document).
-  registerOpenApiRoutes(app);
   // P-PME.5 — build retrospective engine (stateless failed-build → classification + warnings).
   registerRetrospectiveRoutes(app);
-  // P-CGE.4 — test scaffold generator (stateless function/route/mock defs → Vitest skeletons).
-  registerTestGenRoutes(app);
   // P-DESIGN.5 — AI design pass (real multi-model FREE router): suggestions + palette/type-scale.
   registerDesignRoutes(app);
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).

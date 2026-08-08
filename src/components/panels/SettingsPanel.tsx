@@ -10,7 +10,9 @@ import {
   Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { LEGAL_DOCS } from '../../content/legal';
+// META only — the ~45 KB of document bodies must never enter the main chunk (bundle budget);
+// LegalDocPage dynamic-imports the full registry into its own lazy chunk.
+import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
@@ -466,7 +468,7 @@ export function SettingsPanel({
                     color: 'text-amber-400',
                     icon: Scale as any,
                     desc: 'Privacy, terms, data processing, security and our NDA template',
-                    items: LEGAL_DOCS.map((d) => ({ id: d.id, label: d.title.replace(' (DPA)', '').replace('Security at NavBharatAI', 'Security Documents').replace(' (NDA)', ''), icon: FileText as any })),
+                    items: LEGAL_META.map((d) => ({ id: d.id, label: d.title.replace(' (DPA)', '').replace('Security at NavBharatAI', 'Security Documents').replace(' (NDA)', ''), icon: FileText as any })),
                   },
                   // The 5 builder-tool groups (AI Tools, Developer Tools, Design & Build, Publish &
                   // Deploy, Monetization & Team) were MOVED to the home page's "Other AI" card

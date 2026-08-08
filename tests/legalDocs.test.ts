@@ -167,9 +167,29 @@ describe('wiring — registry drives Settings; a doc cannot exist without a butt
   const types = readFileSync(join(process.cwd(), 'src/types/index.ts'), 'utf8');
   const kb = readFileSync(join(process.cwd(), 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
 
-  it('the Legal & Trust group builds its tiles FROM the registry (no hand-typed second list)', () => {
+  it('the Legal & Trust group builds its tiles FROM the registry metadata (no hand-typed second list)', () => {
     expect(settings).toContain("title: 'Legal & Trust'");
-    expect(settings).toContain('LEGAL_DOCS.map');
+    expect(settings).toContain('LEGAL_META.map');
+  });
+
+  it('BUNDLE DISCIPLINE: the heavy bodies never enter the main chunk', () => {
+    // SettingsPanel may import only the meta module; the full registry (with ~45 KB of bodies) is
+    // dynamic-imported by LegalDocPage. A static import here re-breaks the CI bundle budget.
+    expect(settings).toContain("from '../../content/legal/meta'");
+    expect(settings).not.toMatch(/from '\.\.\/\.\.\/content\/legal';/);
+    const page = readFileSync(join(process.cwd(), 'src/components/panels/LegalDocPage.tsx'), 'utf8');
+    expect(page).toContain("import('../../content/legal')");
+    expect(page).not.toMatch(/^import \{[^}]*legalDocById[^}]*\} from/m);
+  });
+
+  it('meta and the full registry can never drift (same ids, titles, dates)', async () => {
+    const { LEGAL_META } = await import('../src/content/legal/meta');
+    expect(LEGAL_META.map((m) => m.id)).toEqual(LEGAL_DOCS.map((d) => d.id));
+    for (let i = 0; i < LEGAL_META.length; i++) {
+      expect(LEGAL_META[i].title).toBe(LEGAL_DOCS[i].title);
+      expect(LEGAL_META[i].subtitle).toBe(LEGAL_DOCS[i].subtitle);
+      expect(LEGAL_META[i].updated).toBe(LEGAL_DOCS[i].updated);
+    }
   });
 
   it('every legal_* id renders the LegalDocPage screen', () => {

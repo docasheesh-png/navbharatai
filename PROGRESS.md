@@ -28015,3 +28015,25 @@ Follow-up worth doing when asked: PUBLIC (no-login) URLs for privacy+terms — P
 public privacy-policy link.
 
 Gate: tsc clean both projects, real build green, full run 12,696/12,696.
+
+### Same PR, two more root causes: the zoom that missed the chat, and the bundle the docs broke
+
+**1. Text Size zoom missed the AI messages (admin screenshot).** The zoom scales the ROOT font size,
+so rem-based utilities follow it — but the app carries ~1,800 arbitrary `text-[Npx]` utilities, and px
+is immune to the root. The chat bubbles were sized in px: the one surface a user most needs to READ
+was the one the zoom could not touch. Class fix, one file (`src/styles/font-scale-compat.css`, same
+unlayered-cascade discipline as theme-compat.css): every px text utility in use remapped to its exact
+rem equivalent (byte-identical at 100%, scaling at every other zoom), the px line-height in use
+remapped too (fixed leading + scaled text = overlapping lines), the one responsive variant preserved
+via a later media rule. ANTI-ROT: the test greps the REAL component tree and fails if any px text
+utility exists that the compat file does not cover — the sweep immediately proved itself by catching
+four half-pixel sizes (7.5/8.5/9.5/10.5/11.5px) the manual survey missed.
+
+**2. The legal docs broke the CI bundle budget (653.5 KB > 650 KB main chunk).** Root cause: ~45 KB of
+document text statically imported by SettingsPanel landed in the MAIN chunk — every user downloading
+five legal documents to open a chat. Fix is the class, not the budget: `content/legal/meta.ts` (titles
+only, few hundred bytes) feeds the Settings tiles; LegalDocPage dynamic-imports the full registry into
+its own lazy chunk. Main chunk: 653.5 → 635.3 KB. Test-locked: SettingsPanel may never statically
+import the heavy index again, and meta ↔ registry can never drift.
+
+Gate: tsc clean, real build green, bundle budget green locally, full run 12,703/12,703.

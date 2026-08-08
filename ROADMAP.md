@@ -119,7 +119,7 @@ Ordered by what a user would actually feel.
   nothing turns that score into a split.
 - **Design-to-code intermediate contract** (AP-8) — the vision pipeline exists; the
   image → layout-contract → build step does not.
-- **Template-free scaffold fallback** — no such module found; verify before building.
+- ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.
 - **Community gallery / remix** — both Lovable and v0 have it.
 - **Scaling / load estimates with real numbers** — today's critique is qualitative only.
 - **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.

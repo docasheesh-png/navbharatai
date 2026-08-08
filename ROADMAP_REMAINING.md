@@ -169,6 +169,30 @@ infra/decision remains.
 - **External accounts/keys** — Sentry · multi-target deploy tokens · email channel (P-BRE.7) · ClamAV/VirusTotal
   (P-DATA.6) · TOTP/WebAuthn/hCaptcha+AbuseIPDB/GeoIP (P-SEC.3/.8/.13).
 - **Pro tier-gating** — monetization decision (kept open until the app is ~90%), not a code gap.
+- **Cache TTL jitter (admin-requested 2026-08-08 — "kabhi to pad sakti hai, roadmap me likh do").**
+  **What:** add a small random spread (±10–20%) to each cache entry's expiry instead of one exact TTL, so
+  many entries never expire in the same instant and stampede the source together (a "thundering herd").
+  **Why it is NOT built now (honest, rule 3 — do not build this prematurely):** jitter only pays when MANY
+  entries expire SIMULTANEOUSLY. Today every TTL cache in the app (`PromptCache`, `WorkspaceMemory`,
+  `WorkspaceRegistry`, `ProjectPlanStore`, `BuildQueueStore`, `ShareStore`, `hostingPlan`, `WorkspaceLock`,
+  `IdempotencyGenerator`) is keyed PER USER / PER WORKSPACE and each entry is created when that user acts —
+  so the expiries are already naturally staggered by the users' own arrival times. Adding jitter now would
+  buy nothing measurable and would make cache lifetimes non-deterministic (harder to reason about + to test)
+  — cost with no gain. Note the RETRY side already HAS jitter where it genuinely matters (`ClaudeClient.ts`
+  backoff, `AIRouter.ts` ±20% cooldown — the 429-storm path).
+  **BUILD IT THE DAY ANY OF THESE IS TRUE (the trigger — a future session should check these, not guess):**
+  (1) a SHARED/global cache is introduced (one entry served to all users — e.g. a global template list, the
+  fleet mistake ledger's hot signatures, a pricing/config blob, a shared model/catalog response); (2) a cache
+  is WARMED or rebuilt in bulk (a startup pre-fill, a cron refresh, a post-deploy warm-up — every entry is
+  then born in the same second and dies in the same second); (3) a cross-instance cache lands (Redis /
+  Memorystore — see P6 above), where one expiry storm hits every Cloud Run instance at once; or (4) real
+  traffic shows periodic latency/error spikes at regular intervals matching a TTL boundary.
+  **How (small, ~1 file):** one shared helper `jitteredTtl(baseMs, spread = 0.15)` in `src/server/lib/`,
+  used by every cache's expiry computation — never sprinkled per call site (same one-choke-point discipline
+  as `enforceNoClaude` / `publicEngineName`), plus a test asserting the spread stays inside its bounds and
+  never yields a non-positive or unbounded TTL. Pair it with single-flight (one refill per key, others wait)
+  — jitter spreads the herd, single-flight makes even a simultaneous herd cost ONE fetch; together they are
+  the complete fix, and single-flight is the stronger half.
 
 ---
 

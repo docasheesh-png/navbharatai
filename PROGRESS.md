@@ -27514,3 +27514,14 @@ injectable `nowIso` seam (default real time — production unchanged), the test 
 call sites. The "flaky" was never flaky — it was a date boundary.
 
 Gate: tsc clean both projects, full run 12,473/12,473.
+
+### Roadmap note (2026-08-08): cache TTL jitter recorded as a TRIGGER-gated future item
+
+Admin asked that "abhi zaroorat nahi" not become "bhool gaye". Written into `ROADMAP_REMAINING.md`
+(🔒 FUTURE) with the honest reason it is NOT built now (every TTL cache today is per-user/per-workspace,
+so expiries are already staggered by the users' own arrival times — jitter would buy nothing and cost
+determinism), the RETRY-side jitter we DO have (`ClaudeClient` backoff, `AIRouter` ±20% cooldown), the
+four concrete TRIGGERS that make it real (a shared/global cache · a warmed/bulk-rebuilt cache · a
+cross-instance Redis cache · periodic latency spikes on a TTL boundary), and the implementation shape
+(one shared `jitteredTtl()` helper — never per call site — paired with single-flight, which is the
+stronger half). Recorded so a future session builds it on evidence, not on a hunch.

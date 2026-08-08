@@ -27599,3 +27599,38 @@ and real: **the detector only runs at TURN START**, when the guardian executes, 
 MID-build is not noticed until the next turn begins. Deliberately NOT built on speculation — it needs a
 real report showing a mid-build collapse to establish whether that path is being hit at all. Recorded
 here as an open root cause instead of a guessed fix.
+
+## 2026-08-07/08 — OTP login broken by the form's own submit handler (+ a false diagnosis, + a time-bomb test)
+
+**Report (admin, screenshot):** the MOBILE NUMBER screen showing `[auth/invalid-email]` and, beneath
+it, a five-line essay telling an admin to go fix the GOOGLE provider's configuration. "Google/Apple
+login sahi chal raha hai, OTP me gadbad ho gaya."
+
+**Root cause 1 — the real breakage.** The phone inputs live inside the SAME `<form onSubmit={handleSubmit}>`
+as email/password, and `handleSubmit` ran the EMAIL path unconditionally — its phone guard was an
+empty comment stub that caught nothing. So pressing the phone keyboard's **"Go"** key (implicit form
+submission — visible in the very screenshot) called `signInWithEmailAndPassword` with an EMPTY email
+→ `auth/invalid-email`. Nothing about phone auth was broken; the form never let it run. Fixed at the
+class: `handleSubmit` now routes by the tab the user is on, and "Go" does the RIGHT thing rather than
+merely being blocked — it sends the OTP, or verifies it once sent, delegating to the SAME handlers
+the buttons call (one implementation per action, nothing to drift).
+
+**Root cause 2 — a confidently WRONG diagnosis (rule 5).** Every failure appended `diagnoseAuth`,
+which probes with an ANONYMOUS sign-up; its perfectly normal `ADMIN_ONLY_OPERATION` reply is rendered
+by `explainAuthReason` as a Google-provider configuration essay. So a phone user's empty-email error
+produced a wall of red text pointing at the wrong console. New pure `shouldDeepDiagnose(code)` keeps
+the probe for the opaque config/internal class it was built for and suppresses it for errors the
+input already explains (invalid-email, wrong-password, invalid-verification-code, …).
+
+**Root cause 3 — found by the gate, not by a user.** `tests/hostingPlanSweep.test.ts` failed today:
+its fixtures are frozen at a fixed NOW while `sweepOneWallet` read the REAL clock, so "expires in 2
+days" silently became "expires in 8 hours" as the calendar advanced. That exposed a genuine PRODUCT
+bug behind it: the reminder loop fired the LARGEST reached window first, so a plan with 8 hours left
+was announced as "just a heads-up 5 days ahead" and the truthful 1-day note followed on the next
+sweep — two notifications, the first factually false, for the common case of a dormant account swept
+late. Now the SMALLEST reached window wins (the only one that describes reality) and every larger,
+now-moot window is burned in the same write; the normal 5-day → 1-day cadence is unchanged. The
+sweep's `now` is an injectable dependency, so a test can never rot with the wall clock again.
+
+Tests: `tests/authOtpSubmit.test.ts` (6) + 2 new sweep cases (final-day reminder, normal cadence).
+Full gate: 12,493 tests, both tsc, build + budget green.

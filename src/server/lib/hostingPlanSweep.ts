@@ -40,6 +40,14 @@ export interface SweepDeps {
   attachDomain: (workspaceId: string, domain: string) => Promise<unknown>;
   linksForUser: (userId: string) => Promise<DomainLinkRecord[]>;
   setSuspended: (domain: string, reason: string | null) => Promise<unknown>;
+  /**
+   * The clock the sweep judges plans against. Injectable because the decision is entirely about
+   * TIME: with the real clock hard-wired, a fixture's "expires in 2 days" silently became "expires
+   * in 8 hours" as the calendar moved, and the suite only failed days after the code was written
+   * (it did, on 2026-08-08). A test that rots with the wall clock is not a test — this makes the
+   * sweep's `now` an input like every other dependency.
+   */
+  now: () => Date;
 }
 
 const realDeps: SweepDeps = {
@@ -48,6 +56,7 @@ const realDeps: SweepDeps = {
   attachDomain: (workspaceId, domain) => attachCustomDomain(workspaceId, domain),
   linksForUser: (userId) => firebaseDomainLinksForUser(userId),
   setSuspended: (domain, reason) => setDomainSuspended(domain, reason),
+  now: () => new Date(),
 };
 
 let _deps: SweepDeps = realDeps;
@@ -88,7 +97,7 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
       const snap = await t.get(ref);
       if (!snap.exists()) return { action: null as PlanSweepAction, userId: walletDocId, expiresAt: '' };
       const current = snap.data();
-      const step = decidePlanSweepStep(current, new Date().toISOString());
+      const step = decidePlanSweepStep(current, _deps.now().toISOString());
       if (step.applied) t.set(ref, step.wallet);
       const plan = step.wallet.hostingPlan as HostingPlanRecord | undefined;
       return { action: step.action, userId: (current.userId as string) || walletDocId, expiresAt: plan?.expiresAt ?? '' };

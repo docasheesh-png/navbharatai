@@ -7,6 +7,48 @@
 
 import { firebaseConfig } from '../config/firebase';
 
+/**
+ * Should a failed sign-in ALSO run the deep server probe (`diagnoseAuth`) and show its verdict?
+ *
+ * ROOT CAUSE this closes (admin report 2026-08-07, OTP screen): the probe was appended to EVERY
+ * auth failure. For an error the user's own input already explains — an empty/invalid email, a
+ * missing password — the probe fires an ANONYMOUS sign-up, gets the perfectly normal
+ * ADMIN_ONLY_OPERATION back, and `explainAuthReason` turns that into a five-line essay about the
+ * GOOGLE provider's configuration. So a phone-tab user saw a wall of red text telling an admin to
+ * go fix Google sign-in — a false diagnosis pointing at the wrong console, for a failure that had
+ * nothing to do with Google. A wrong explanation is worse than none: it sends the reader hunting in
+ * the wrong place (rule 5 — the system must tell the truth about its own state).
+ *
+ * The probe is genuinely useful for the CONFIG/INTERNAL class (that is what it was built for), so
+ * it stays for exactly those. PURE + unit-tested.
+ */
+export function shouldDeepDiagnose(code: string | null | undefined): boolean {
+  const c = (code || '').trim().toLowerCase();
+  if (!c) return true; // no code at all — an opaque failure is exactly what the probe is for
+  // Errors whose cause is the submitted input or a known account state: self-explanatory already.
+  const selfExplanatory = [
+    'auth/invalid-email',
+    'auth/missing-email',
+    'auth/missing-password',
+    'auth/wrong-password',
+    'auth/user-not-found',
+    'auth/invalid-credential',
+    'auth/invalid-login-credentials',
+    'auth/email-already-in-use',
+    'auth/weak-password',
+    'auth/user-disabled',
+    'auth/too-many-requests',
+    'auth/network-request-failed',
+    'auth/popup-closed-by-user',
+    'auth/cancelled-popup-request',
+    'auth/invalid-phone-number',
+    'auth/missing-phone-number',
+    'auth/invalid-verification-code',
+    'auth/code-expired',
+  ];
+  return !selfExplanatory.includes(c);
+}
+
 export function explainAuthReason(message: string): string {
   const m = (message || '').toUpperCase();
   if (!m) return '';

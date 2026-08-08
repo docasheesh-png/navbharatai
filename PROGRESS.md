@@ -27657,3 +27657,14 @@ sweep's `now` is an injectable dependency, so a test can never rot with the wall
 
 Tests: `tests/authOtpSubmit.test.ts` (6) + 2 new sweep cases (final-day reminder, normal cadence).
 Full gate: 12,493 tests, both tsc, build + budget green.
+
+## 2026-08-08 — CI red: a NEW nanoid advisory, fixed at the version, not the allowlist
+
+The OTP push went red on the **security audit gate** (a real failure this time, not the runner
+flakiness of 2026-08-06): `nanoid [high]` — GHSA-2v37-7h3g-55p8, "custom generators can loop
+indefinitely when size is zero", affecting `<3.3.17`. It reached us transitively (postcss → nanoid
+3.3.16) and `fixAvailable: true`. Fixed the way the js-yaml advisory was fixed in #2171 — a version
+override (`nanoid: ^3.3.17`, resolves to 3.3.18) — NOT an allowlist entry. The allowlist is for
+advisories that are genuinely accepted or unfixable; using it on a one-line-fixable dependency would
+be exactly the surface patch rule 4 forbids, and would leave the loop live in the build toolchain.
+Audit gate + license gate + full suite green after the bump.

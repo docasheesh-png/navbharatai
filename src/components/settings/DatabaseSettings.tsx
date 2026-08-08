@@ -36,7 +36,7 @@ interface DatabaseSettingsProps {
 }
 
 // The ONLY thing kept in localStorage now (SECURITY): the chosen provider marker — never the
-// real credential values (those live ONLY in the encrypted Secrets & Keys vault).
+// real credential values (those live ONLY in the encrypted Secrets & API Keys vault).
 interface DbMarker { provider: DbProvider; platformName?: string }
 
 function readMarker(userId: string): DbMarker | null {
@@ -51,14 +51,14 @@ function readMarker(userId: string): DbMarker | null {
 
 export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps) {
   const [provider, setProvider] = useState<DbProvider>(() => readMarker(userId)?.provider ?? 'supabase');
-  // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & Keys.
+  // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & API Keys.
   const [formCreds, setFormCreds] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
   const [activeMarker, setActiveMarker] = useState<DbMarker | null>(() => readMarker(userId));
 
   // SECURITY MIGRATION (A): if an older build left plaintext credentials in localStorage, purge them
-  // now — keep only the provider marker. The real values already live encrypted in Secrets & Keys.
+  // now — keep only the provider marker. The real values already live encrypted in Secrets & API Keys.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(`engineer_db_${userId}`);
@@ -88,7 +88,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
     try { localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(marker)); } catch {}
     setActiveMarker(marker);
 
-    // Sync to the encrypted Secrets & Keys vault (upsert only the values the user entered + the
+    // Sync to the encrypted Secrets & API Keys vault (upsert only the values the user entered + the
     // provider marker; blank fields are left untouched so nothing is accidentally wiped).
     setSaving(true);
     try {
@@ -110,9 +110,9 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
 
       // Clear the sensitive inputs from memory once they are safely in the encrypted vault.
       setFormCreds({});
-      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys — NavBharatAI Pro v5.0 uses them automatically when it builds your app.');
+      setSavedMsg('Saved! Credentials are encrypted in Secrets & API Keys — NavBharatAI Pro v5.0 uses them automatically when it builds your app.');
     } catch {
-      setSavedMsg('Could not reach Secrets & Keys — check your connection and try again.');
+      setSavedMsg('Could not reach Secrets & API Keys — check your connection and try again.');
     } finally {
       setSaving(false);
       setTimeout(() => setSavedMsg(''), 6000);

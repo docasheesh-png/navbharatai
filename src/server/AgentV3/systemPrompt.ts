@@ -704,7 +704,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  app needs a real key, tell the user plainly: (1) WHICH key(s) it needs and what each is for, using',
     '  the EXACT env-var name the code reads (e.g. VITE_STRIPE_PUBLISHABLE_KEY, OPENAI_API_KEY, DATABASE_URL);',
     '  (2) WHERE to get each one — the provider\'s dashboard, with the page/URL and the short steps to create it;',
-    '  (3) to add each one in **Settings → Secrets & Keys** using that exact name. Reassure them that keys',
+    '  (3) to add each one in **Settings → Secrets & API Keys** using that exact name. Reassure them that keys',
     '  saved there are injected into the app automatically at build time (never shown to you, never in chat),',
     '  and the app will work on the next build once they are added. Always use a PLACEHOLDER in .env.example',
     '  and in code defaults — never invent or hardcode a real-looking key.',

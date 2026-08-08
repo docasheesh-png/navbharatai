@@ -881,7 +881,7 @@ export function SettingsPanel({
             )}
 
             {/* Authentication (admin 2026-07-29): connect a login/signup provider (Clerk / Auth0 /
-                Supabase / Firebase). Credentials are encrypted in Secrets & Keys; the server's
+                Supabase / Firebase). Credentials are encrypted in Secrets & API Keys; the server's
                 userAuthContext tells the builder to wire that exact provider for all login/session.
                 Supabase/Firebase auth also comes with the Database connection. */}
             {settingsScreen === 'auth' && (
@@ -901,7 +901,7 @@ export function SettingsPanel({
             )}
 
             {/* Storage (admin 2026-07-29): connect a STANDALONE file-storage provider (S3-compatible /
-                Cloudinary) for real uploads. Credentials are encrypted in Secrets & Keys; the server's
+                Cloudinary) for real uploads. Credentials are encrypted in Secrets & API Keys; the server's
                 userStorageContext + StorageGenerator wire real direct-to-storage uploads into the built
                 app. Firebase/Supabase storage already comes with the Database connection. */}
             {settingsScreen === 'storage' && (

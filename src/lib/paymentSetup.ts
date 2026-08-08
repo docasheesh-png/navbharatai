@@ -144,7 +144,7 @@ export function methodSpec(id: PayMethod): PayMethodSpec {
  * The vault names each value is stored under.
  *
  * Mirrors what the Database screen already does, so every credential in NavBharatAI lives in the one
- * encrypted vault under a predictable env-var name — and shows up in Settings → Secrets & Keys
+ * encrypted vault under a predictable env-var name — and shows up in Settings → Secrets & API Keys
  * automatically, wherever the user happened to type it.
  *
  * The VITE_ prefix marks the values that are SAFE in the browser bundle (a Razorpay Key Id and an

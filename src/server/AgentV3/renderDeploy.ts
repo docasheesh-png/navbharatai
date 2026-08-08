@@ -18,11 +18,53 @@ export function renderConfigured(env: NodeJS.ProcessEnv = process.env): boolean 
   return typeof env.RENDER_API_KEY === 'string' && env.RENDER_API_KEY.trim().length > 0;
 }
 
-/** The honest requirement line shown when Render can't deploy yet. Pure. */
-export function renderRequirement(env: NodeJS.ProcessEnv = process.env): string {
-  return renderConfigured(env)
-    ? 'Render is configured — a real deploy can run.'
-    : 'Set RENDER_API_KEY (Settings → Secrets & Keys) to deploy your backend to Render.';
+/**
+ * THE USER'S OWN RENDER KEY WINS (root-caused 2026-08-07).
+ *
+ * The old gate asked only `process.env.RENDER_API_KEY`, while every message told the user to "Set
+ * RENDER_API_KEY (Settings → Secrets & API Keys)". Nothing ever read that vault entry — so a user who
+ * followed the instruction exactly, saved their key and retried, got the byte-identical refusal. The
+ * app was giving an instruction it did not implement.
+ *
+ * It matters beyond the wrong words. NavBharatAI's standing rule is that user apps run on the USER's
+ * own accounts and billing; deploying every user's backend with one server-side key would put all of
+ * them inside a single Render account paid for by whoever owns that key. So the user's own key is
+ * PREFERRED, and the server key is only the fallback. PURE.
+ */
+export function resolveRenderKey(
+  vaultSecrets?: Record<string, string> | null,
+  env: NodeJS.ProcessEnv = process.env,
+): { key: string; source: 'user' | 'server' } | null {
+  const user = String(vaultSecrets?.RENDER_API_KEY ?? '').trim();
+  if (user) return { key: user, source: 'user' };
+  const server = String(env.RENDER_API_KEY ?? '').trim();
+  if (server) return { key: server, source: 'server' };
+  return null;
+}
+
+/** True when SOMETHING can deploy — the user's own key or the server's. PURE. */
+export function renderDeployAvailable(
+  vaultSecrets?: Record<string, string> | null,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return resolveRenderKey(vaultSecrets, env) !== null;
+}
+
+/**
+ * The honest requirement line shown when Render can't deploy yet.
+ *
+ * When a key IS available it names WHOSE account the deploy will land in, because that determines who
+ * gets the bill — "Render is configured" hid the one fact the user most needed. PURE.
+ */
+export function renderRequirement(
+  envOrVault: NodeJS.ProcessEnv | null = process.env,
+  vaultSecrets?: Record<string, string> | null,
+): string {
+  const env = (envOrVault ?? {}) as NodeJS.ProcessEnv;
+  const resolved = resolveRenderKey(vaultSecrets, env);
+  if (resolved?.source === 'user') return 'Deploying to YOUR own Render account, using the key you saved in Settings → Secrets & API Keys.';
+  if (resolved?.source === 'server') return 'Render is configured — a real deploy can run.';
+  return 'Save your own RENDER_API_KEY in Settings → Secrets & API Keys to deploy your backend to Render (Render → Account Settings → API Keys).';
 }
 
 export interface RenderRequest {
@@ -119,7 +161,7 @@ export async function deployBackendToRender(
 ): Promise<RenderDeployResult> {
   const apiKey = (opts.apiKey ?? process.env.RENDER_API_KEY ?? '').trim();
   if (!apiKey) {
-    return { ok: false, reason: 'not-configured', message: renderRequirement({ RENDER_API_KEY: '' } as NodeJS.ProcessEnv) };
+    return { ok: false, reason: 'not-configured', message: renderRequirement({ RENDER_API_KEY: '' } as NodeJS.ProcessEnv, null) };
   }
   let services: RenderService[] = [];
   try {

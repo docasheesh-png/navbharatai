@@ -30,7 +30,7 @@ describe('deployBlockedReason — a publish never fails silently', () => {
   it('names the unconfigured provider and where to fix it', () => {
     const r = deployBlockedReason({ running: false, workspaceId: 'w1', providerConfigured: false, providerName: 'Vercel' });
     expect(r).toContain('Vercel');
-    expect(r).toContain('Settings → Secrets & Keys');
+    expect(r).toContain('Settings → Secrets & API Keys');
   });
 
   it('still answers when the provider name is unknown (no "undefined" in user text)', () => {

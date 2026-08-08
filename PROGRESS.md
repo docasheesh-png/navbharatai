@@ -27417,6 +27417,188 @@ Gate: tsc clean both projects, SHUFFLED full run 1098 files / 12,423 tests, exit
 **Still open from the three:** per-app scoping and format validation for injected secrets (the vault is
 per-USER, so every app receives every key the user ever saved, unvalidated).
 
+## 2026-08-06 (21) — CI was running the whole test suite TWICE, and had drifted onto a 15-minute cap
+
+Two consecutive CI runs were cancelled at **exactly 15.1 and 15.0 minutes**, while a run that finished in
+~13 minutes passed. That is a cap, not flakiness — and it comes from OUTSIDE the workflow: `ci.yml` has no
+`timeout-minutes` and `ubuntu-latest` defaults to 360. Every PR had become a coin flip, which blocks
+everything.
+
+**The cause of the drift was ours.** The job ran `npm test` (`vitest run`) and then
+`npm run test:coverage` (`vitest run --coverage`) — **the same 12,400 tests twice**, the second time with
+coverage instrumentation, which is the slower of the two. The coverage run already produces the pass/fail
+signal, so the first was pure duplication and by far the largest cost in the job. This session added ~400
+tests, which is what pushed a long-standing waste over the edge.
+
+De-duplicated to one run. **No gate is removed**: the coverage gate still blocks on a real regression, and
+a failing test still fails the step exactly as before. The change is safe by construction —
+`vitest run --coverage` is already proven on this codebase by the CI run that passed with both steps; this
+only DELETES a step.
+
+Also added `timeout-minutes: 30` — bounded well above the real cost so a genuine hang fails fast and
+legibly instead of holding a runner for the six-hour default.
+
+**Still for the admin:** where the 15-minute cap comes from (GitHub → Settings → Actions, or a billing
+limit). Halving the test time takes us off the edge, but if the cap is real it will be hit again as the
+suite grows. That is visible only from the org settings, which this session cannot read.
+
+## 2026-08-06 (22) — CI would have failed anyway: instrumentation speed was deciding pass/fail
+
+Measuring instead of guessing changed the whole picture, and corrected my own claim from the previous
+entry (that de-duplicating the test run would take CI off the 15-minute edge — it did not: the next run
+was cancelled at 15.2 min with ONE test run).
+
+**Two measured facts:**
+
+1. **The coverage run alone costs 363s (~6 min) locally**, so on a 2-core runner it plausibly fills the
+   whole 15 minutes by itself. Removing the plain `npm test` saved the FASTER of the two runs; the long
+   pole was always the instrumented one. My earlier prediction was wrong and is corrected here rather
+   than left standing.
+
+2. **A test FAILED under coverage that passes without it.** `SimpleBuilder` "emits a REAL per-file
+   progress line…" takes **1158ms alone** and **5665ms under coverage in a full run** — over vitest's
+   **5000ms default**. It asserts nothing about time. So CI would have gone RED even if it had not been
+   cancelled.
+
+**That second one is a CLASS, not a test.** After the de-duplication, CI's ONLY test run is the
+instrumented one, where everything is 2–5× slower. At a 5s default, **instrumentation speed decides
+pass/fail rather than correctness**, and every test that drifts near the line becomes a red build that
+teaches people to re-run rather than to look — the same lesson as the fixed-width source windows earlier
+today.
+
+FIX: `testTimeout` / `hookTimeout` = **20s**, set explicitly with the reasoning in the config. Far above
+real work, far below "a hang nobody notices" — a genuinely stuck test still fails, just later, and
+durations are still printed so a test creeping toward the number is still worth chasing. This is not
+hiding a slow test; it is removing a limit that was never about correctness.
+
+Verified: the previously-failing test now passes under coverage (3332ms), and the FULL instrumented
+suite — the exact command CI now runs — is **1098 files / 12,423 tests, exit 0 in 363s**.
+
+**Still for the admin, unchanged:** where the 15-minute cap comes from. Three cancellations at 15.0,
+15.1 and 15.2 minutes, and halving the test work did not move that number — which is strong evidence
+the cap is a fixed external limit rather than our workload. Visible only from GitHub → Settings →
+Actions or the billing page.
+
+---
+
+## 2026-08-07 — Three corrections, a repo-wide CI blocker, and "a saved key is not a working key"
+
+### CORRECTION 1 — there is no 15-minute CI cap. My previous entry (directly above) is wrong.
+
+The entry above ends: *"three cancellations at 15.0, 15.1 and 15.2 minutes … strong evidence the cap is
+a fixed external limit rather than our workload."* That is not what the data says, and the reason it
+read that way is that I was looking at the wrong API.
+
+The **check-runs** API reports several of these runs as `cancelled`. The **`actions/runs`** API — the
+authoritative one — reports them as `failure`, with real durations across the same window of:
+
+    24.0 · 15.9 · 15.2 · 15.1 · 6.2 minutes   (failures)
+    14.2 · 12.3 · 11.4 · 9.8 · 9.4 minutes    (successes)
+
+A 24-minute failure and a 6-minute failure both disprove a fixed 15-minute cut-off. The 15.x cluster is
+simply where the job landed when it ran the whole suite twice. **The admin does NOT need to check
+Actions settings or billing for a cap** — that advice, given twice, was built on the misread and is
+withdrawn here rather than left standing.
+
+The real cause was the one already fixed: the `SimpleBuilder` test crossing vitest's 5000ms default
+under coverage instrumentation. `testTimeout: 20_000` stands.
+
+### CORRECTION 2 — the credentials in the admin's `.env` screenshot were test placeholders.
+
+The admin confirmed both the connection string and the payment values in that screenshot were fake, not
+theirs. My repeated recommendation to rotate the database password was based on assuming they were real
+and is withdrawn. The `.env` masking fix (#2168) is unaffected — it stands on its own evidence and
+protects real users from exactly this class of screenshot leak.
+
+The DEFECT the screenshot exposed is still real and is fixed below: a saved credential was trusted
+without ever being tested.
+
+### GitHub Actions dropped a webhook — 8.5 hours with no runs at all, on any branch
+
+Push `b7ba4de0` produced **no workflow run** (`total_count: 0`) while PR #2171 sat open on that exact
+head, and the most recent run repo-wide was 8.5 hours old. The CI workflow was `state: active`, so
+nothing was disabled — GitHub simply never delivered the `synchronize` event.
+
+Fix: close and reopen the PR. The `reopened` event fired a run within seconds. Worth remembering — a
+repo that has gone completely silent on Actions is more often a dropped event than a billing limit, and
+close/reopen is the cheap, non-destructive test that distinguishes them.
+
+### A new js-yaml advisory was blocking EVERY pull request in the repository
+
+That first recovered run failed in **55 seconds**, before a single test:
+
+    ❌ NEW high/critical vulnerabilities (not allowlisted):
+       • js-yaml [high]
+
+Nothing here changed. A new advisory landed against js-yaml 4.0.0–4.3.0, and `firebase-tools` pins 4.3.0
+both directly and through `@apidevtools/json-schema-ref-parser`. From that moment every PR in the repo
+was red before it ran — including the two whose job was to get CI green.
+
+Fixed with an `overrides` pin to **4.3.1** (same major, no API change) rather than an allowlist entry.
+Allowlisting is for a vulnerability we have ACCEPTED; this one is simply fixed, and recording it as
+"accepted" would be a lie that outlives the fix. `npm run audit:gate`: high 3 → 2, "No new
+high/critical vulnerabilities."
+
+### THE FIX — prove a saved credential before the build is built around it (admin finding 3)
+
+The vault → app pipe copied every saved key into the app's `.env` and announced:
+
+    🔐 Loaded 3 of your saved keys (Settings → Secrets & Keys) into the app
+
+**That sentence is true about the COPY and silent about the TRUTH.** A stale, mistyped or long-dead
+connection string received exactly the same confident line as a live one, and the entire build —
+install, migrate, preview — was then stacked on top of it. The user found out ten minutes later from a
+preview that would not load, with nothing tying the failure back to the screen that fixes it.
+
+The root cause is NOT the copy. The user really did ask for those keys, and silently withholding one
+would be a second, quieter version of the same bug. The root cause is that **the one class of secret we
+can genuinely verify was never verified**, in the one place where verifying it is cheap and not
+verifying it costs an entire build.
+
+`src/server/AgentV3/secretPreflight.ts` runs a real `SELECT 1` at the moment the keys are written, and
+separates the three facts the old count was blurring into one:
+
+| verdict | meaning |
+|---|---|
+| **proven** | connected and answered |
+| **broken** | refused / unreachable / no such database — named with the screen that fixes it |
+| **untested** | an API key; testing it would spend the user's money, so we do not claim it works |
+
+Honesty properties, each test-locked:
+
+* **A key is never withheld.** Keys are written FIRST; the preflight only decides what the user is TOLD.
+* **A loopback URL is `untested`, not `broken`** — it is reachable only from inside the sandbox that owns
+  it. Probing it from this server would fail for a reason that is OURS, and reporting that as "your
+  database is broken" would be a confident lie about our own network topology.
+* **A Mongo/MySQL URL is `untested`** — we have no transport that opens one, and claiming to have tested
+  a connection we cannot open is the exact dishonesty this file exists to remove.
+* **Our failure is never reported as their broken credential.**
+* `looksLikePlaceholder` is deliberately narrow — `your-api-key` is a fill-in, `mysecretpassword` is
+  somebody's actual password. A false positive here is worse than saying nothing, so the rule requires a
+  SEPARATOR after `your`/`my`.
+* White-label law: a test asserts no vendor name or driver text can reach these lines.
+
+Bounded: zero cost when nothing checkable is saved, at most 2 connections, one 12s deadline for the whole
+preflight, and a preflight that throws degrades to the old line rather than blocking the build or losing
+the narration.
+
+30 tests (22 unit + 8 source-level wiring locks). `AppKnowledgeBase.ts` updated so a user asking "my key
+is not working" learns what NavBharatAI actually checks — and what it honestly does not.
+
+Verification gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1100 files /
+12,453 tests, exit 0**.
+
+### Open, recorded rather than guessed
+
+**Workspace-empty alarm (admin finding 2 — "files 3 baar puri delete ho kar bar bar bani").** Checking
+the live code first (safeguard #6) showed this is largely ALREADY shipped: `buildDiag.recordDataLoss`
+fires when the File Guardian repairs a wiped workspace, distinguishing "sandbox recycled/empty" from
+"files missing from sandbox", and #2169's session summary tallies `dataLossTotal` ACROSS a session — so
+"the workspace was found empty N times" now genuinely reaches the report. The remaining gap is narrow
+and real: **the detector only runs at TURN START**, when the guardian executes, so a wipe occurring
+MID-build is not noticed until the next turn begins. Deliberately NOT built on speculation — it needs a
+real report showing a mid-build collapse to establish whether that path is being hit at all. Recorded
+here as an open root cause instead of a guessed fix.
 ## 2026-08-07 — FLEET LEARNING: one user's solved mistake now protects EVERY user (branch claude/ai-teacher-student-profiles-8bg002)
 
 Admin asked (after MistakeLedger shipped in #2166): "kya fable 5 isko aur jyada accha bana sakta hai?"

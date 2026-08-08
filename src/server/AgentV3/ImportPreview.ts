@@ -136,7 +136,7 @@ export function previewBootFailureAdvisory(opts: {
     const more = opts.externalVars.length - shown.length;
     parts.push(
       `It also expects real values for ${opts.externalVars.length} external service${opts.externalVars.length === 1 ? '' : 's'} ` +
-      `(${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}) — a server that hard-requires one of these on startup won't boot until you add them in **Settings → Secrets & Keys**.`,
+      `(${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}) — a server that hard-requires one of these on startup won't boot until you add them in **Settings → Secrets & API Keys**.`,
     );
   }
   if (parts.length === 0) return '';

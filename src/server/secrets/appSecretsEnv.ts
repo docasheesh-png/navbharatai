@@ -1,6 +1,6 @@
 // Merge a user's vault secrets into an app's .env file (admin 2026-07-17).
 //
-// NavBharatAI Pro v5 guides a user to store an app's required keys in Settings → Secrets & Keys (never
+// NavBharatAI Pro v5 guides a user to store an app's required keys in Settings → Secrets & API Keys (never
 // in chat). At build time the engine writes those keys into the app's `.env` so the app actually runs
 // with real credentials. This module is the PURE, dependency-free merge/serialize logic (the actuator
 // file I/O lives in ToolDispatcher).

@@ -5,7 +5,7 @@ import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
 
 // Storage settings (admin 2026-07-29) — connect a STANDALONE file-storage provider for uploads.
 // Mirrors DatabaseSettings exactly: the chosen provider + credentials are AES-encrypted in the
-// Secrets & Keys vault (never in the browser), and the server's `userStorageContext` + the real
+// Secrets & API Keys vault (never in the browser), and the server's `userStorageContext` + the real
 // `StorageGenerator` recipe pick them up so NavBharatAI Pro wires real direct-to-storage uploads
 // into the built app. Firebase/Supabase storage already comes with the Database connection — this
 // screen is for S3-compatible (AWS S3 / Cloudflare R2 / Supabase Storage / MinIO) and Cloudinary.
@@ -64,7 +64,7 @@ interface StorageSettingsProps {
 
 export function StorageSettings({ userId }: StorageSettingsProps) {
   const [provider, setProvider] = useState<StorageProvider>(() => readMarker(userId)?.provider ?? 's3');
-  // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & Keys.
+  // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & API Keys.
   const [formCreds, setFormCreds] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
@@ -115,9 +115,9 @@ export function StorageSettings({ userId }: StorageSettingsProps) {
       }
 
       setFormCreds({});
-      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys — NavBharatAI Pro wires this storage into your app automatically when it builds.');
+      setSavedMsg('Saved! Credentials are encrypted in Secrets & API Keys — NavBharatAI Pro wires this storage into your app automatically when it builds.');
     } catch {
-      setSavedMsg('Could not reach Secrets & Keys — check your connection and try again.');
+      setSavedMsg('Could not reach Secrets & API Keys — check your connection and try again.');
     } finally {
       setSaving(false);
       setTimeout(() => setSavedMsg(''), 6000);

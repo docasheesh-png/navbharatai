@@ -16,10 +16,10 @@ describe('previewBootFailureAdvisory (honest DB state, admin 2026-07-24) — a f
     expect(msg).toMatch(/provisioned a temporary local one/i);
     expect(msg).toMatch(/Drizzle/);
   });
-  it('external secrets → names them and points to Settings → Secrets & Keys', () => {
+  it('external secrets → names them and points to Settings → Secrets & API Keys', () => {
     const msg = previewBootFailureAdvisory({ needsDb: false, provider: null, externalVars: ['GOOGLE_CLIENT_ID', 'CASHFREE_APP_ID'], dbProvisioned: false });
     expect(msg).toMatch(/GOOGLE_CLIENT_ID/);
-    expect(msg).toMatch(/Settings → Secrets & Keys/);
+    expect(msg).toMatch(/Settings → Secrets & API Keys/);
   });
   it('needs neither a DB nor external secrets → empty (caller keeps the generic line)', () => {
     expect(previewBootFailureAdvisory({ needsDb: false, provider: null, externalVars: [], dbProvisioned: false })).toBe('');

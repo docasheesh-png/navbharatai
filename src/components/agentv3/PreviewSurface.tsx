@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2 } from 'lucide-react';
+import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
@@ -122,7 +122,7 @@ export function veRgbToHex(color: string): string {
   return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
 }
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -492,6 +492,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadSignal]);
 
+  // CONSOLE DRAWER (world-best-preview, 2026-08-06): the preview's mirrored console — every log/warn/
+  // error the running app prints, streamed up from the iframe (see ReactPreview's console mirror).
+  // What Replit surfaces via embedded devtools and Bolt leaves to F12, here is one tap — and every
+  // error row carries "Fix with AI". A ring buffer so a chatty app can never grow it unbounded.
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleEntries, setConsoleEntries] = useState<Array<{ level: string; text: string; at: number }>>([]);
+  const consoleErrorCount = consoleEntries.reduce((n, e) => n + (e.level === 'error' ? 1 : 0), 0);
+  useEffect(() => {
+    const onConsoleMsg = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewConsole?: boolean; level?: string; text?: string } | null;
+      if (!d || d.__nbaiPreviewConsole !== true || typeof d.text !== 'string') return;
+      const level = d.level === 'error' || d.level === 'warn' || d.level === 'info' ? d.level : 'log';
+      setConsoleEntries((prev) => [...prev, { level, text: d.text!, at: Date.now() }].slice(-200));
+    };
+    window.addEventListener('message', onConsoleMsg);
+    return () => window.removeEventListener('message', onConsoleMsg);
+  }, []);
+
   // Capture in-browser preview failures (postMessage'd up from the sandboxed srcdoc iframe) into the
   // build's diagnostics report, so a build that "succeeded" but doesn't render shows the REAL preview
   // error in the downloadable report — no separate screenshot needed. Best-effort, fire-and-forget.
@@ -799,10 +817,48 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             {editMode ? 'Editing…' : 'Edit'}
           </button>
         )}
+        <button
+          onClick={() => setConsoleOpen((v) => !v)}
+          className={`relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+          title="Console — everything your app prints, right here (no F12 needed)"
+        >
+          <Terminal className="w-3.5 h-3.5" />
+          {consoleErrorCount > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
+              {consoleErrorCount > 99 ? '99+' : consoleErrorCount}
+            </span>
+          )}
+        </button>
         <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
+      {consoleOpen && (
+        <div className="border-b border-zinc-800 bg-black/60 text-[11px] font-mono">
+          <div className="max-h-40 overflow-y-auto px-3 py-1.5 space-y-0.5">
+            {consoleEntries.length === 0 && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
+            {consoleEntries.map((c, i) => (
+              <div key={`${c.at}-${i}`} className="flex items-start gap-2">
+                <span className={`flex-1 min-w-0 whitespace-pre-wrap break-words ${c.level === 'error' ? 'text-rose-300' : c.level === 'warn' ? 'text-amber-300' : 'text-zinc-300'}`}>
+                  {c.text}
+                </span>
+                {c.level === 'error' && onFixError && (
+                  <button
+                    onClick={() => onFixError(c.text)}
+                    className="shrink-0 px-1.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 text-[10px]"
+                    title="Hand this error to the AI to fix"
+                  >
+                    Fix with AI
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-end px-3 py-1 border-t border-zinc-800/60">
+            <button onClick={() => setConsoleEntries([])} className="text-[10px] text-zinc-500 hover:text-zinc-300">Clear</button>
+          </div>
+        </div>
+      )}
       {editMode && selection && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
           <span className="font-mono text-zinc-500">&lt;{selection.tag || 'el'}&gt;</span>
@@ -825,6 +881,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           </div>
           <span className="text-zinc-600 hidden sm:inline">drag = move · corner = resize</span>
           <div className="flex-1" />
+          {onAskAiAboutElement && (
+            // THE Lovable-class move (world-best-preview, 2026-08-06): the selection already knows its
+            // exact source location (file:line:column via the data-nbai-src stamp) — hand it to the
+            // chat so the user just says WHAT to change and the engine edits exactly THAT element.
+            <button
+              onClick={() => onAskAiAboutElement(`<${selection.tag || 'element'}> in ${selection.file} (line ${selection.line}, column ${selection.column})`)}
+              className="flex items-center gap-1 px-2 h-6 rounded border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10"
+              title="Tell the AI what to change about this exact element"
+            >
+              <Sparkles className="w-3 h-3" /> Ask AI
+            </button>
+          )}
           <button onClick={() => postToIframe({ __nbaiEditText: true })} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Edit this element's text (or double-click it)">Edit text</button>
           <button onClick={() => { setSelection(null); postToIframe({ __nbaiDeselect: true }); }} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Deselect">Done</button>
         </div>

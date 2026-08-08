@@ -530,6 +530,35 @@ ${babelTag}
     // (cross-origin srcdoc → postMessage is the only channel). Best-effort; the iframe still shows it.
     try { (window.parent || window.top).postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: String(msg) }, '*'); } catch (e) {}
   }
+  // CONSOLE MIRROR (world-best-preview, 2026-08-06): every console line + runtime error is streamed
+  // up to the host so the panel can show a REAL console drawer (what Replit gives via devtools and
+  // Bolt's users dig out of F12 — here it is one tap, and each error carries a "Fix with AI"). The
+  // app's own console still works untouched; this only mirrors. Bounded per message; best-effort.
+  (function () {
+    function mirror(level, args) {
+      try {
+        var parts = [];
+        for (var i = 0; i < args.length; i++) {
+          var a = args[i];
+          if (typeof a === 'string') parts.push(a);
+          else if (a instanceof Error) parts.push(a.message + (a.stack ? '\\n' + String(a.stack).split('\\n').slice(0, 4).join('\\n') : ''));
+          else { try { parts.push(JSON.stringify(a)); } catch (e2) { parts.push(String(a)); } }
+        }
+        (window.parent || window.top).postMessage({ __nbaiPreviewConsole: true, level: level, text: parts.join(' ').slice(0, 600) }, '*');
+      } catch (e) { /* mirroring must never break the app */ }
+    }
+    var orig = { log: console.log, info: console.info, warn: console.warn, error: console.error };
+    ['log', 'info', 'warn', 'error'].forEach(function (level) {
+      console[level] = function () { mirror(level, arguments); return orig[level].apply(console, arguments); };
+    });
+    window.addEventListener('error', function (e) {
+      mirror('error', [String(e.message || 'Script error') + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : '')]);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
+    });
+  })();
   function dirname(p) { var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
   function normalize(p) {
     var parts = p.split('/'), out = [];

@@ -25,7 +25,7 @@ import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
-import { explainAuthReason } from '../lib/authDiagnostics';
+import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
 
 /**
@@ -394,11 +394,23 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (authMethod === 'phone' && !isLogin) {
-        // Signup with phone already verified? 
-        // Logic for signup with email + phone together 
+    // ROOT CAUSE FIX (admin report 2026-08-07 — "OTP me gadbad ho gaya", screenshot showed
+    // `[auth/invalid-email]` on the MOBILE NUMBER screen): this handler ran the EMAIL sign-in
+    // unconditionally. The phone inputs live inside the same <form>, so pressing the phone
+    // keyboard's "Go" key (implicit form submission — exactly what the screenshot caught) landed
+    // here and called signInWithEmailAndPassword with an EMPTY email → auth/invalid-email. The old
+    // guard above was an empty comment stub, so it caught nothing.
+    //
+    // Fixed at the CLASS, not the instance: the form now routes by the tab the user is actually on,
+    // and "Go" does the RIGHT thing rather than merely being blocked — on the phone tab it sends
+    // the OTP, and once the code has been sent it verifies it. Both delegate to the SAME handlers
+    // the buttons use, so there is one implementation per action and nothing can drift.
+    if (authMethod === 'phone' && isLogin) {
+      if (isOtpSent && otp.length === 6) { await handleVerifyOtp(); return; }
+      if (!isOtpSent) { await handleSendOtp(); return; }
+      return; // OTP sent but not fully typed — Enter must never fall through to the email path
     }
-    
+
     setError('');
     setLoading(true);
     try {
@@ -428,6 +440,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       onClose();
     } catch (err: any) {
       mark(`failed: ${String(err?.message || err).slice(0, 80)}`);
+      // Only run the deep server probe for failures it can actually explain. For a self-explanatory
+      // input error the probe's ADMIN_ONLY_OPERATION reply used to be rendered as a Google-provider
+      // configuration essay — a confident WRONG diagnosis (see shouldDeepDiagnose).
+      if (!shouldDeepDiagnose(err?.code)) { setError(describeAuthError(err)); return; }
       setError(`${describeAuthError(err)} · diagnosing…`);
       setError(`${describeAuthError(err)}\n${await diagnoseAuth(email, password)}`);
     } finally {

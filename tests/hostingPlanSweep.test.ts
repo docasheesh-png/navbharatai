@@ -32,6 +32,12 @@ const wallet = (tokens: number, hostingPlan: Record<string, unknown> | undefined
   walletLedger: [], ...(hostingPlan ? { hostingPlan } : {}),
 });
 
+/**
+ * FROZEN CLOCK (2026-08-08): every fixture below states its expiry relative to NOW, but the sweep
+ * used to read the REAL clock — so "expires in 2 days" quietly became "expires in 8 hours" as the
+ * calendar advanced, and the suite failed days after the code was written. `now` is a dependency
+ * now, and each time-sensitive test pins it, so these tests mean the same thing forever.
+ */
 afterEach(() => {
   _setSweepDepsForTests(null);
   _clearPlanCacheForTests();
@@ -134,7 +140,7 @@ describe('sweepOneWallet', () => {
       setSuspended: async (d, r) => { events.push(`suspend ${d}=${r}`); },
       notify: async (uid, msg) => { events.push(`notify ${uid}: ${msg.slice(0, 40)}`); },
     });
-    const action = await sweepOneWallet(fakeAdminDb(docs), 'u1', NOW);
+    const action = await sweepOneWallet(fakeAdminDb(docs), 'u1');
     expect(action).toEqual({ kind: 'lapse' });
     expect(events).toContain('detach mitrify.in');
     expect(events).toContain('suspend mitrify.in=plan_lapsed');
@@ -146,14 +152,40 @@ describe('sweepOneWallet', () => {
   it('a due reminder notifies once and persists the marker', async () => {
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS, plan(2)) };
     const notes: string[] = [];
-    _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); } });
+    _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); }, now: () => new Date(NOW_MS) });
     const db = fakeAdminDb(docs);
-    // The clock is PINNED to the fixture's NOW — with the real clock this test was a time bomb: it
-    // passed until real time crossed into the fixture plan's 1-day reminder window, then failed
-    // deterministically (the second sweep legitimately fired the more-urgent 1-day reminder).
-    expect(await sweepOneWallet(db, 'u1', NOW)).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
-    expect(await sweepOneWallet(db, 'u1', NOW)).toBeNull(); // marker persisted — no double-send
+    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
+    expect(await sweepOneWallet(db, 'u1')).toBeNull(); // marker persisted — no double-send
     expect(notes).toHaveLength(1);
+  });
+
+  it('a plan already inside its FINAL day sends the 1-day reminder — never a false "5 days ahead"', async () => {
+    // THE 2026-08-08 bug: the largest reached window fired first, so a plan with 8 hours left was
+    // announced as "5 days ahead" and the truthful 1-day note followed minutes later. A dormant
+    // account swept late is the common case, not an edge one.
+    const eightHours = 8 / 24;
+    const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS, plan(eightHours)) };
+    const notes: string[] = [];
+    _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); }, now: () => new Date(NOW_MS) });
+    const db = fakeAdminDb(docs);
+    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 1, shortfallInr: 0 });
+    expect(notes[0]).toContain('1 day');
+    expect(notes[0]).not.toContain('5 days');
+    // The moot 5-day window is burned in the same write, so it can never fire late with wrong text.
+    expect(await sweepOneWallet(db, 'u1')).toBeNull();
+    expect(notes).toHaveLength(1);
+  });
+
+  it('the normal cadence is untouched: 5-day note first, then the 1-day note as expiry nears', async () => {
+    const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS, plan(4)) };
+    const notes: string[] = [];
+    let clock = NOW_MS;
+    _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); }, now: () => new Date(clock) });
+    const db = fakeAdminDb(docs);
+    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
+    clock = NOW_MS + 3.5 * DAY;                      // now inside the final day
+    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 1, shortfallInr: 0 });
+    expect(notes).toHaveLength(2);
   });
 });
 

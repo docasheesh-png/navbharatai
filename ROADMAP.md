@@ -94,6 +94,21 @@ Ordered by what a user would actually feel.
 - **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.
 - 👤 **Daily-spend quota gauge** (`/api/usage/tokens`) — the endpoint does not exist, but building it
   needs the admin to define what the quota IS first. A decision, then a small build.
+- ⏳ **Cache TTL jitter** (admin-requested 2026-08-08: "kabhi to pad sakti hai, roadmap me likh do") —
+  spread each cache entry's expiry by ±10–20% so many entries never expire in the same instant and
+  stampede the source together. **Do NOT build it yet, and this is not laziness:** every TTL cache today
+  (`PromptCache`, `WorkspaceMemory`, `WorkspaceRegistry`, `ProjectPlanStore`, `BuildQueueStore`,
+  `ShareStore`, `hostingPlan`, `WorkspaceLock`, `IdempotencyGenerator`) is keyed per-user/per-workspace
+  and each entry is born when that user acts, so expiries are already staggered by the users' own arrival
+  times — jitter would buy nothing measurable and would cost determinism. (The RETRY side already has
+  jitter where it genuinely matters: `ClaudeClient` backoff, `AIRouter` ±20% cooldown — the 429-storm path.)
+  **BUILD IT THE DAY any of these is true:** (1) a SHARED/global cache appears (one entry served to all
+  users); (2) a cache is warmed or rebuilt in BULK (startup pre-fill, cron refresh, post-deploy warm-up —
+  every entry then born and dying in the same second); (3) a cross-instance cache lands (Redis/Memorystore),
+  where one expiry storm hits every Cloud Run instance at once; or (4) real traffic shows periodic latency
+  spikes on a TTL boundary. **Shape:** one shared `jitteredTtl(baseMs, spread)` helper used by every cache
+  — never per call site — paired with single-flight (one refill per key, others wait). Single-flight is the
+  stronger half: jitter spreads the herd, single-flight makes even a simultaneous herd cost ONE fetch.
 
 ---
 

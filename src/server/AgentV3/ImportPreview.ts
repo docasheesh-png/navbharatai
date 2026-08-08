@@ -258,6 +258,76 @@ export function halfBootCause(bootLog: string | null | undefined): string | null
 }
 
 /**
+ * THE MISSING SUBSYSTEM: a DB-migration runner (build report 32d4f48e, 2026-08-07 — Mitrify import).
+ *
+ * That build provisioned PostgreSQL, verified it with a real SELECT 1, declared the preview "✅ up" —
+ * and its own boot log said `relation "profiles" does not exist` twice (the app's schema-repair and
+ * its provider backfill both failed). The database EXISTED but was EMPTY: nothing ever ran the app's
+ * own migrations, so every page that reads data was broken behind a healthy-looking preview, and the
+ * report counted 0 warnings. "DB provisioned" is not "DB usable" — the same earn-the-verdict rule as
+ * everything else.
+ *
+ * This detects the imported app's OWN migration mechanism so the boot can run it right after the
+ * database is provisioned: the project's script wins (it encodes the author's intent — Mitrify has
+ * `db:push`), falling back to Prisma's committed-migrations deploy (non-interactive, non-destructive).
+ * Returns null when the project has no mechanism we can run — then the schema scan below is the
+ * honest last line. PURE.
+ */
+export interface MigrationPlan {
+  command: string;
+  /** For honest narration — the project's own name for the step, never our invention. */
+  label: string;
+}
+
+const MIGRATION_SCRIPT_NAMES = ['db:push', 'db:migrate', 'migrate:deploy', 'migrate', 'db:setup'];
+
+export function detectMigrationCommand(files: Record<string, string>): MigrationPlan | null {
+  const pkgRaw = files['package.json'];
+  let pkg: { scripts?: Record<string, unknown>; dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> } = {};
+  if (typeof pkgRaw === 'string') {
+    try { pkg = JSON.parse(pkgRaw); } catch { /* not valid JSON — fall through to file signals */ }
+  }
+  const scripts = pkg.scripts ?? {};
+  for (const name of MIGRATION_SCRIPT_NAMES) {
+    if (typeof scripts[name] === 'string' && (scripts[name] as string).trim()) {
+      return { command: `npm run ${name}`, label: `npm run ${name}` };
+    }
+  }
+  // Prisma without a script: `migrate deploy` applies the app's own committed migrations — it never
+  // prompts and never drops data, so it is safe to run unattended on the fresh sandbox database.
+  const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  const hasPrismaMigrations = Object.keys(files).some((p) => /^prisma\/migrations\//.test(p));
+  if (Object.prototype.hasOwnProperty.call(deps, 'prisma') && (hasPrismaMigrations || 'prisma/schema.prisma' in files)) {
+    return { command: hasPrismaMigrations ? 'npx prisma migrate deploy' : 'npx prisma db push --skip-generate', label: 'Prisma migrations' };
+  }
+  return null;
+}
+
+/** A safe `NAME='value'` shell prefix so the migration tool sees the provisioned DATABASE_URL even
+ *  when the project's config does not load `.env` itself (drizzle-kit famously does not). PURE. */
+export function shellEnvAssignment(name: string, value: string): string {
+  return `${name}='${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The honest last line: did the boot log prove the database is missing its tables? Matches the
+ * Postgres / SQLite / MySQL "table missing" shapes and returns the FIRST missing table's name — the
+ * exact evidence (`relation "profiles" does not exist`) that sat unread in report 32d4f48e's command
+ * log while the tally said zero problems. PURE.
+ */
+export function schemaMissingFromLog(log: string | null | undefined): string | null {
+  const s = String(log ?? '');
+  if (!s) return null;
+  const m =
+    s.match(/relation "([^"]+)" does not exist/i) ??
+    s.match(/no such table:?\s+"?([A-Za-z0-9_.]+)"?/i) ??
+    s.match(/Table '([^']+)' doesn't exist/i);
+  if (!m) return null;
+  // Strip a schema/db qualifier ("public.profiles" → "profiles") for a readable name.
+  return m[1].includes('.') ? m[1].slice(m[1].lastIndexOf('.') + 1) : m[1];
+}
+
+/**
  * EARN the "live preview is up" verdict (admin 2026-08-03, "Cannot GET /customer/home"): a port being
  * up is NOT the app serving. The boot must actually VISIT the home route and read the rendered HTML;
  * this turns that (already-classified) result into the honest user-facing narration.

@@ -226,6 +226,7 @@ import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
+import { generateMotion } from '../lib/MotionGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5113,6 +5114,29 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ui-states');
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'generate_animation': {
+        // The audit's last frontend ❌ — micro-interactions were LLM-authored ad hoc, so most builds got
+        // a different hand-rolled transition or none at all. Pure generator in MotionGenerator.ts:
+        // dependency-free CSS (transform/opacity only, so it stays smooth on low-end phones) plus a
+        // scroll-reveal hook, and every effect self-disables under prefers-reduced-motion.
+        const motionRec = (input as Record<string, unknown>) || {};
+        const motionInclude = Array.isArray(motionRec.include)
+          ? motionRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const motion = generateMotion(motionInclude);
+        const motionWritten: string[] = [];
+        for (const [path, content] of Object.entries(motion.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          motionWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('motion pack');
+        return `Wired a motion pack:\n${motionWritten.join('\n')}\n\n${motion.instructions}`;
       }
 
       case 'generate_state': {

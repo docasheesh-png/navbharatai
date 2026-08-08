@@ -21,6 +21,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
+import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -326,7 +327,21 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   // time import() runs they are already in the HTTP cache. This is a pure scheduling win with no new
   // failure mode: a preload that 404s or is never used is a console note, and the real import() still
   // walks its full three-rung CDN fallback. It shortens the wait — it cannot change the outcome.
-  const preloadTags = buildModulePreloads(imports);
+  //
+  // FULL-GRAPH PRELOADS + SERVER WARMUP (admin 2026-08-08, "Bolt me preview turant, hamare me
+  // 13s"): top-level preloads still leave the browser DISCOVERING each package's internal chunks
+  // one parse at a time — a dependent-round-trip waterfall that dominates load time on mobile RTT.
+  // The server crawls the graph once (warming the shared mirror cache as it goes) and, when the
+  // crawl is done, the page ships a preload for EVERY module — entries and chunks — so the whole
+  // graph arrives in one parallel burst. Cold path is unchanged (today's top-level preloads);
+  // the crawl runs in the background and the next render gets the full set.
+  const originClean = origin ? origin.replace(/\/$/, '') : '';
+  const importUrls = Object.values(imports).map((u) => (originClean && u.startsWith(originClean) ? u.slice(originClean.length) : u));
+  startDepWarmup(importUrls);
+  const warmUrls = getWarmDepUrls(importUrls);
+  const preloadTags = warmUrls
+    ? buildWarmPreloads(warmUrls)
+    : buildModulePreloads(imports);
   // Path aliases (@/… → local src) so imported shadcn/Vite/Next apps resolve locally, not via esm.sh.
   const aliasesJson = JSON.stringify(buildAliasMap(vfs, entry)).replace(/<\//g, '<\\/');
   const css = baseStyles(vfs);
@@ -1130,6 +1145,34 @@ export function buildModulePreloads(imports: Record<string, string>): string {
     if (urls.length >= MAX_MODULE_PRELOADS) break;
   }
   return urls
+    .map((u) => `<link rel="modulepreload" href="${u.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" crossorigin />`)
+    .join('\n');
+}
+
+/**
+ * Preload tags for a WARMED graph — every module the server's crawl discovered, entries and chunks
+ * alike, in BFS order (what loads first preloads first). This is what collapses the mobile
+ * dependency waterfall to one parallel burst. Exported for testing.
+ *
+ * The higher cap is deliberate and safe here: unlike guesses, these URLs are KNOWN-used (the crawl
+ * found each one imported by the graph), they are same-origin mirror hits already warm in the
+ * server cache, and on a precompiled page there is no compiler competing for the connections.
+ * Only mirror-relative (`/api/esm/...`) and http(s) URLs are emitted — same injection guard as
+ * buildModulePreloads.
+ */
+export const MAX_WARM_PRELOADS = WARMUP_MAX_MODULES;
+
+export function buildWarmPreloads(urls: string[]): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of urls) {
+    if (!u || seen.has(u)) continue;
+    if (!u.startsWith('/api/esm/') && !/^https?:\/\//i.test(u)) continue;
+    seen.add(u);
+    out.push(u);
+    if (out.length >= MAX_WARM_PRELOADS) break;
+  }
+  return out
     .map((u) => `<link rel="modulepreload" href="${u.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" crossorigin />`)
     .join('\n');
 }

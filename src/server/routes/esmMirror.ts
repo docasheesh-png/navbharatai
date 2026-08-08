@@ -123,59 +123,88 @@ type UpstreamFetch = (url: string, init: { signal: AbortSignal }) => Promise<{
   arrayBuffer(): Promise<ArrayBuffer>;
 }>;
 
+/**
+ * The ONE cache the live route serves from. Module-level so the dep-graph warmup
+ * (PreviewDepWarmup.ts) can fill the SAME store the user's preview reads — a warmup into a private
+ * cache would warm nothing. Tests keep isolation by passing their own cache via opts.
+ */
+export const sharedMirrorCache = new MirrorCache();
+
+export type MirroredFetchResult =
+  | { ok: true; body: Buffer; contentType: string }
+  | { ok: false; status: 400 | 404 | 502 };
+
+/**
+ * Fetch one module through the mirror pipeline — cache → esm.sh → import-rewrite → cache — WITHOUT
+ * an HTTP request/response. Extracted from the route handler so the server itself (the warmup
+ * crawler) can pull modules through the identical path a browser request takes: same key shape,
+ * same rewrite, same cache — one implementation, and the route below calls this too. The failure
+ * statuses stay honest (400 unsafe path, 404 upstream not-found, 502 anything else) so the route's
+ * answers are byte-for-byte what they were before the extraction.
+ */
+export async function fetchMirroredModule(
+  pathWithQuery: string,
+  opts?: { fetchImpl?: UpstreamFetch; cache?: MirrorCache },
+): Promise<MirroredFetchResult> {
+  const cache = opts?.cache ?? sharedMirrorCache;
+  const doFetch: UpstreamFetch = opts?.fetchImpl ?? (fetch as unknown as UpstreamFetch);
+  const qi = pathWithQuery.indexOf('?');
+  const path = qi >= 0 ? pathWithQuery.slice(0, qi) : pathWithQuery;
+  const query = qi >= 0 ? pathWithQuery.slice(qi) : '';
+  if (!isSafeMirrorPath(path)) return { ok: false, status: 400 };
+  const key = path + query;
+  const hit = cache.get(key);
+  if (hit) return { ok: true, body: hit.body, contentType: hit.contentType };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+    let upstream;
+    try {
+      upstream = await doFetch(`${UPSTREAM}/${path}${query}`, { signal: controller.signal });
+    } finally { clearTimeout(timer); }
+    if (!upstream.ok) return { ok: false, status: upstream.status === 404 ? 404 : 502 };
+    const contentType = upstream.headers.get('content-type') || 'application/javascript; charset=utf-8';
+    const raw = Buffer.from(await upstream.arrayBuffer());
+    let body = raw;
+    if (/javascript|ecmascript/i.test(contentType)) {
+      body = Buffer.from(await rewriteAbsoluteImports(raw.toString('utf8')), 'utf8');
+    }
+    cache.set(key, { body, contentType });
+    return { ok: true, body, contentType };
+  } catch {
+    return { ok: false, status: 502 };
+  }
+}
+
 export function registerEsmMirrorRoutes(
   app: Express,
   opts?: { fetchImpl?: UpstreamFetch; cache?: MirrorCache },
 ): void {
-  const cache = opts?.cache ?? new MirrorCache();
+  // Default to the SHARED cache (not a fresh private one) so the warmup crawler and this route
+  // read and write the same store — the whole point of warming.
+  const cache = opts?.cache ?? sharedMirrorCache;
   const doFetch: UpstreamFetch = opts?.fetchImpl ?? (fetch as unknown as UpstreamFetch);
 
   app.get('/api/esm/*', (req: Request, res: Response) => {
     void (async () => {
       const path = String(req.params[0] ?? '');
-      if (!isSafeMirrorPath(path)) { res.status(400).json({ error: 'invalid module path' }); return; }
       // Query participates in identity (?external=react,react-dom changes the produced module).
       const qi = req.originalUrl.indexOf('?');
       const query = qi >= 0 ? req.originalUrl.slice(qi) : '';
-      const key = path + query;
-
-      const setHeaders = (contentType: string) => {
-        res.setHeader('Content-Type', contentType);
-        // Version-pinned URLs never change content — let the BROWSER keep them for a year. This
-        // header is the "reopen after weeks with zero network" layer.
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        // The preview iframe is sandboxed (opaque origin) and these are public npm bytes.
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-      };
-
-      const hit = cache.get(key);
-      if (hit) { setHeaders(hit.contentType); res.send(hit.body); return; }
-
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-        let upstream;
-        try {
-          upstream = await doFetch(`${UPSTREAM}/${path}${query}`, { signal: controller.signal });
-        } finally { clearTimeout(timer); }
-        if (!upstream.ok) {
-          // A concise honest failure — the preview loader's next rung takes over from here.
-          res.status(upstream.status === 404 ? 404 : 502).json({ error: `upstream ${upstream.status}` });
-          return;
-        }
-        const contentType = upstream.headers.get('content-type') || 'application/javascript; charset=utf-8';
-        const raw = Buffer.from(await upstream.arrayBuffer());
-        let body = raw;
-        if (/javascript|ecmascript/i.test(contentType)) {
-          body = Buffer.from(await rewriteAbsoluteImports(raw.toString('utf8')), 'utf8');
-        }
-        cache.set(key, { body, contentType });
-        setHeaders(contentType);
-        res.send(body);
-      } catch {
-        res.status(502).json({ error: 'upstream unreachable' });
+      const result = await fetchMirroredModule(path + query, { fetchImpl: doFetch, cache });
+      if (!result.ok) {
+        // A concise honest failure — the preview loader's next rung takes over from here.
+        res.status(result.status).json({ error: result.status === 400 ? 'invalid module path' : `upstream ${result.status}` });
+        return;
       }
+      res.setHeader('Content-Type', result.contentType);
+      // Version-pinned URLs never change content — let the BROWSER keep them for a year. This
+      // header is the "reopen after weeks with zero network" layer.
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      // The preview iframe is sandboxed (opaque origin) and these are public npm bytes.
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.send(result.body);
     })();
   });
 }

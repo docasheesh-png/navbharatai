@@ -27736,3 +27736,28 @@ override (`nanoid: ^3.3.17`, resolves to 3.3.18) — NOT an allowlist entry. The
 advisories that are genuinely accepted or unfixable; using it on a one-line-fixable dependency would
 be exactly the surface patch rule 4 forbids, and would leave the loop live in the build toolchain.
 Audit gate + license gate + full suite green after the bump.
+
+## 2026-08-08 — Preview warmup: the "Bolt feels instant" slice (world-best slice 4)
+
+**Report (admin, LTE screenshot): "Loading preview… 7/10 packages · 13s — Bolt me turant, hamare me
+kyu nahi?"** Measured the real bottleneck first: NOT compiling (server-precompiled, #2138), NOT
+serial fetching (the loader Promise.all's, and modulepreload already covered top-level entries).
+It is a TWO-LEVEL WATERFALL: (1) a package's internal chunk imports are only discoverable after its
+entry module arrives and parses — a chain of dependent round trips at mobile RTT; (2) the mirror's
+in-memory cache dies with the instance, i.e. on EVERY deploy (~10 today), so those round trips also
+paid mirror→esm.sh upstream latency. Bolt avoids both by keeping node_modules on the device; we get
+the same effect from the server side:
+- **`fetchMirroredModule` extracted** from the /api/esm route (one pipeline — the route now calls
+  it) + **`sharedMirrorCache`** as the route's default store, so warming actually warms what users
+  read. Honest statuses preserved (400/404/502 byte-identical).
+- **`PreviewDepWarmup.ts`**: bounded BFS crawl (96 modules / depth 5 / 2MB scan) of the mirror
+  graph through that same pipeline — fetching IS the warming. Memoized per dependency-set (1h),
+  in-flight-deduped, VITEST-guarded, 100% best-effort (a failed warmup = exactly today's behavior).
+- **Full-graph preloads**: when the crawl is done, buildReactPreview ships a
+  `<link rel="modulepreload">` for EVERY discovered module — entries AND chunks, BFS order,
+  same-origin, injection-guarded (`buildWarmPreloads`, cap = crawl bound) — so the phone fetches the
+  whole graph in ONE parallel burst instead of walking it. Cold path byte-identical to today.
+12 new tests (extraction, BFS + bounds + skip-on-failure, memo/dedupe/key, preload emission caps +
+escaping, shared-cache invariant, cold-vs-warm page). Honest note: the FIRST-ever render of a new
+dependency set still pays the old waterfall (crawl runs in background); every render after — every
+reload, every reopen, every other user on the instance — gets the burst.

@@ -251,7 +251,7 @@ async function canonicalId(db: any, uid: string): Promise<string> {
  * a store failure reports `active: false` with `plan: null` (callers decide their own fail
  * direction — see hostingPlanProbe).
  */
-export async function readHostingPlanStatus(db: any, userId: string): Promise<HostingPlanStatus> {
+export async function readHostingPlanStatus(db: any, userId: string, nowIso?: string): Promise<HostingPlanStatus> {
   const base: HostingPlanStatus = {
     enabled: hostingPlansEnabled(), active: false, plan: null,
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
@@ -264,13 +264,21 @@ export async function readHostingPlanStatus(db: any, userId: string): Promise<Ho
       const snap = await t.get(ref);
       if (!snap.exists()) return null;
       const current = snap.data();
-      const renewal = computeLazyRenewal(current, new Date().toISOString());
+      const renewal = computeLazyRenewal(current, nowIso ?? new Date().toISOString());
       if (renewal.applied) t.set(ref, renewal.wallet);
       return renewal.wallet;
     });
     if (!wallet) return base;
     const plan = (wallet.hostingPlan as HostingPlanRecord | undefined) ?? null;
-    return { ...base, active: hostingPlanActive(wallet), plan: plan && plan.id === HOSTING_PLAN_ID ? plan : null };
+    // The SAME clock decides "is it active" as decided the renewal above. Threading `nowIso` into only
+    // one of the two left this function half-injectable: a caller could pass a time, watch the renewal
+    // honour it, and still get an `active` computed from today's real date. Caught by its own test.
+    const nowMs = nowIso ? Date.parse(nowIso) : undefined;
+    return {
+      ...base,
+      active: hostingPlanActive(wallet, Number.isFinite(nowMs as number) ? (nowMs as number) : undefined),
+      plan: plan && plan.id === HOSTING_PLAN_ID ? plan : null,
+    };
   } catch {
     return base;
   }
@@ -280,8 +288,20 @@ export type PlanPurchaseResult =
   | { ok: true; plan: HostingPlanRecord; tokenBalance: number; charged: boolean }
   | { ok: false; error: string; reason: 'insufficient' | 'disabled' | 'unavailable'; shortfallTokens?: number };
 
-/** Atomic purchase: debit + grant in one transaction on the wallet doc. Never throws. */
-export async function purchaseHostingPlan(db: any, userId: string): Promise<PlanPurchaseResult> {
+/**
+ * Atomic purchase: debit + grant in one transaction on the wallet doc. Never throws.
+ *
+ * `nowIso` is injectable for the same reason `hostingPlanSweep` made its `now` a dependency: a wrapper
+ * that reads the real clock while its pure core TAKES a time makes every test of the wrapper rot with
+ * the calendar. That is not hypothetical — the sweep's own test did exactly that on 2026-08-08, passing
+ * for days after it was written and then failing repo-wide when wall-clock time crossed a threshold in
+ * a fixture nobody had touched.
+ *
+ * These two wrappers are the SIBLINGS of that bug, found by grepping for the same shape (rule 3): both
+ * wrap a time-injectable core while hardcoding `new Date()`, and `purchaseHostingPlan` is itself under
+ * test — so the next bomb was already armed. Production keeps the real clock by default.
+ */
+export async function purchaseHostingPlan(db: any, userId: string, nowIso?: string): Promise<PlanPurchaseResult> {
   if (!hostingPlansEnabled()) {
     return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
   }
@@ -294,7 +314,7 @@ export async function purchaseHostingPlan(db: any, userId: string): Promise<Plan
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
-      const result = computePlanPurchase(current, new Date().toISOString());
+      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString());
       if (result.ok) t.set(ref, result.wallet);
       return result;
     });

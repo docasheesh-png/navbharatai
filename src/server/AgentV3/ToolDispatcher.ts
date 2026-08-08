@@ -181,6 +181,7 @@ import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
+import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -4204,6 +4205,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('invoicing starter');
         const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an Invoicing / billing backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
+      }
+
+      case 'generate_helpdesk': {
+        // Breadth recipe (domain vertical) — Helpdesk / ticketing (server/helpdesk/): a real HelpdeskService
+        // with a ticket STATE-MACHINE (invalid jumps → 409), priority-driven SLA breach detection, and an
+        // append-only thread, plus an Express router. Pure gen in HelpdeskGenerator.ts.
+        const hdcfg = generateHelpdeskIntegration();
+        const hdWritten: string[] = [];
+        for (const [path, content] of Object.entries(hdcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          hdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('helpdesk starter');
+        const hdDeps = hdcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
       }
 
       case 'generate_events': {

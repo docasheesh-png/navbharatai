@@ -45,16 +45,3 @@ export function resolveImportWorkspaceId(input: ImportTargetInput): string | nul
 export function importTargetUnavailableMessage(): string {
   return 'I could not open a workspace for this import — please reload the page and try again. Nothing was uploaded, so your file is untouched.';
 }
-
-/**
- * A short, honest progress label for the import. `fraction` is 0..1 across the upload phase.
- *
- * Exists because the panel tracked progress in state and then never rendered it: a 161 MB upload takes
- * minutes, and a screen that shows one static line for minutes is indistinguishable from a crash. This
- * is the difference between "working" and "frozen" for the person watching.
- */
-export function zipImportProgressLabel(phase: 'uploading' | 'extracting', fraction: number): string {
-  if (phase === 'extracting') return 'Unpacking your project on the server…';
-  const pct = Math.max(0, Math.min(100, Math.round((Number.isFinite(fraction) ? fraction : 0) * 100)));
-  return `Uploading… ${pct}%`;
-}

@@ -12,8 +12,8 @@ import {
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { authedFetch } from '../../lib/authedFetch';
-import { uploadZipProject } from '../../lib/zipProjectUpload';
-import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
+import { importProjectArchive } from '../../lib/masterZipImport';
+import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
@@ -1257,9 +1257,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const started = Date.now();
     setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
     try {
-      const result = await uploadZipProject(file, targetWorkspaceId, (p) => {
-        setZipProgress(zipImportProgressLabel(p.phase, p.fraction));
+      // MASTER HANDLER: reads the archive in the BROWSER and uploads only the surviving source, falling
+      // back to the chunked server upload (and saying so) when the browser genuinely cannot. A 161 MB or
+      // 1 GB project now crosses the network as a few MB of source, because node_modules/media/junk are
+      // dropped before they cost bandwidth — and the server was going to discard them on arrival anyway.
+      const result = await importProjectArchive(file, targetWorkspaceId, userId, email, (p) => {
+        setZipProgress(p.label);
       });
+      // The tree is already in hand on the browser path — paint Files immediately instead of making the
+      // user wait on a round trip for data this tab just read itself.
+      if (result.files) { try { onFilesSync?.(result.files); } catch { /* the read-back below still covers it */ } }
       // The success line now STATES what did not come in. A green tick over a silently-gutted project
       // is the product lying about its own result — the exact thing the second and third absolute rules
       // forbid. `dropSummary` is '' for a clean import, so a complete project reads exactly as before.

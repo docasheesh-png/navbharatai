@@ -27873,3 +27873,53 @@ call site, not one), and main's `nanoid: ^3.3.17` range adopted over my `^3.3.18
 3.3.18 anyway — zero divergence from main for an identical fix). Two half-fixes were NOT merged.
 
 Gate: tsc clean both projects, full run 12,540/12,540, audit gate green.
+
+---
+
+## 2026-08-05 — master import handler, part 2: the browser path is now the DEFAULT
+
+Part 1 (#2105) built the browser reader. This wires it in, so a real import actually takes it.
+
+### `src/lib/masterZipImport.ts` (new) — one entry point, two transports
+`importProjectArchive()` ALWAYS tries the browser first, because reading locally is better on every
+axis: the tree is known before any network call, `node_modules`/media/junk cost no bandwidth, the
+server never holds a gigabyte in its memory-backed `/tmp`, and the multi-instance chunk-scatter risk
+disappears along with the chunked upload. The surviving source is POSTed to the EXISTING
+`/api/agentv3/import-files`, chunked through the EXISTING `chunkFilesForSync` — no new endpoint and no
+second chunker (a large monorepo's source can still exceed the per-request cap even after node_modules
+is gone).
+
+### The fallback is deliberate, and deliberately narrow
+`readZipInBrowser` can legitimately fail — a browser without the APIs zip.js needs, a phone that runs
+out of memory, a corrupt central directory. Deleting the server path would turn each into a dead end,
+so it stays. But `shouldFallBackToServer()` refuses to retry a **password-protected** archive: that is a
+real answer, not a transport failure, and uploading 1 GB to reach the same verdict five minutes later
+is strictly worse for the user than saying it now. The degrade is also SPOKEN ("Opening it here did not
+work — uploading the archive instead…") so a sudden multi-minute upload is never unexplained.
+
+### Honesty carried through
+- `partialSaveWarning()` — a part-failed batch send says so explicitly ("do not assume the whole project
+  is in yet"). A partial import must never read as a whole one.
+- An archive whose every entry is filtered out is answered immediately with the reason, instead of
+  uploading first and reaching the same verdict on the server.
+- The browser path hands `files` straight to `onFilesSync`, so Files paints from data this tab already
+  read rather than waiting on a round trip for it.
+
+### Dead code removed rather than left lying around
+`zipImportProgressLabel()` was superseded by the master handler's own labels and survived only in its
+own test. Deleted: two labellers for one flow is how two paths start telling the same user different
+things.
+
+### Verification
+`tsc` (frontend + server) clean; full suite green.
+
+### Note on how part 1 landed
+PR #2105 was merged by the admin after someone resolved a conflict outside this session. Verified
+afterwards rather than assumed: all three part-1 files are present on `main`, and the other session's
+`SKIP_DIR_RE` additions (`.local`, `.claude`, `.cursor`, `.windsurf`, `.continue`, `.codeium`, `.aider`)
+were re-checked BY BEHAVIOUR through the shared module — all seven still skip, and `src/App.tsx` is
+still kept.
+
+### Remaining in the handler
+Part 3 — File System Access "Open Folder" (two-way, no upload at all on desktop Chrome/Edge).
+Part 4 — the connect-time audit.

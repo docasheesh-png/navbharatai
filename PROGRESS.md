@@ -27873,3 +27873,20 @@ call site, not one), and main's `nanoid: ^3.3.17` range adopted over my `^3.3.18
 3.3.18 anyway — zero divergence from main for an identical fix). Two half-fixes were NOT merged.
 
 Gate: tsc clean both projects, full run 12,540/12,540, audit gate green.
+
+## 2026-08-08 — Pro v5 theme bug: the -950 family never followed the theme (admin report)
+
+Admin: "Pro v5 ke andar theme badalne se background dark hi rahta hai." Root cause was one missing
+shade family in the DNA theming layer: `theme-compat.css` remapped -900/-800 and the GitHub hexes,
+but the v5 panel's ROOT is `bg-zinc-950` — a literal the layer never covered, so the entire v5
+surface ignored every theme. Class fix, one file:
+- The whole darkest family (`zinc/neutral/gray/slate/stone-950`) + near-solid variants (/90 /95 /80)
+  → `--surface-base`; translucent -950 wells (/40 /60) and the -700 chrome → `--surface-raised`.
+- HOVER states were a sibling escape: `hover:bg-zinc-800` is a DIFFERENT class from `bg-zinc-800`,
+  so on light themes every hover flashed dark. All mapped-neutral hover forms now remap too.
+- Honesty: the `[data-fixed-dark]` comment claimed Pro v3.0 / Doctor AI / Voice use the exemption —
+  none ever set the attribute. Comment corrected (escape hatch kept, currently unused by anything).
+5 new regression tests in tests/themeSystem.test.ts, including one that pins the v5 root literal to
+its compat rule so the reported symptom cannot silently return.
+
+Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,607/12,607.

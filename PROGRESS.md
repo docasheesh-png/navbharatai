@@ -27946,6 +27946,98 @@ escaping, shared-cache invariant, cold-vs-warm page). Honest note: the FIRST-eve
 dependency set still pays the old waterfall (crawl runs in background); every render after — every
 reload, every reopen, every other user on the instance — gets the burst.
 
+## 2026-08-08 — Songcraft in chat + Text Size in the slide-out menu (50–200 %)
+
+Two admin asks, shipped together.
+
+**1. Songs worth hearing (`src/server/AI/songcraft.ts`).** "Gaana likhwaye to realistic gaane likhe —
+emotions, joy, rhythm itni acchi ki log madhosh ho jaye." Asked plainly for lyrics, a model reaches for
+the same rhymes every time (pyaar/bahaar, dil/manzil, chaand/raat) and NAMES emotions instead of showing
+them — it rhymes, scans badly and moves nobody. So the fix is a CRAFT BRIEF of checkable rules, not an
+adjective: a real mukhda/antara shape, a steady syllable count per stanza (±2) with a held rhyme scheme,
+ONE concrete photographable image per line, the emotion word banned where an image can do the work,
+Indian-life detail (barish, tiffin, mandir ki ghanti), joy=movement / sadness=stillness, and the
+worn-out rhyme pairs explicitly forbidden. Honours the standing no-interrogation rule: it WRITES, then
+offers one line of adjustment. Injected ONLY on a real song request (`isSongRequest`), so every other
+conversation's prompt and cost stay byte-identical; applies to every tier — a free user's song gets the
+same craft as a paid one.
+  - **Root-caused a real i18n bug while testing it:** the tokenizer used `[^\p{L}\p{N}]`, and Devanagari
+    matras are category **Mn (marks), not letters** — so "गाना" was shredded into "ग न" and every
+    Devanagari request silently failed to match. Now `\p{M}` is included. Swept the repo for siblings:
+    `SlugGenerator` already had it right; no other tokenizer is affected.
+
+**2. Text Size, 50 %–200 %, one tap away (`TextSizeSlider.tsx`).** The control a user reaches for when
+they are ALREADY struggling to read was three taps deep in Settings, and capped at a timid 90–140 %.
+Now a real slider in the ☰ menu's System Matrix, spanning 50–200 % with a live percentage and a Reset.
+Settings keeps its +/− stepper — the control was ADDED where it is needed, not moved away from where it
+is documented. A slider (not +/−) because the range is now 15 steps: fifteen taps is a chore, one drag
+is a control; keyboard users get stepping from the arrow keys for free.
+  - **Root-caused a DRIFTED DUPLICATE:** `main.tsx` applies the stored scale before React mounts (no
+    flash of unscaled text) and re-implemented the clamp with `0.9`/`1.4` inlined. Widening `a11y.ts`
+    alone would have pinned every user back to 140 % on boot and then jumped them to their real size
+    after hydration — a setting that looks broken. `main.tsx` now imports `clampFontScale` +
+    `FONT_SCALE_STORAGE_KEY`: one definition, test-locked so it cannot drift again.
+  - `AppKnowledgeBase.ts` entry `text_size` added (both paths, the real range, Hinglish keywords) so
+    every AI in the app can answer "font bada kaise karun?".
+
+31 new tests (`tests/songcraft.test.ts`, `tests/textSize.test.ts`).
+Gate: tsc clean both projects, real `npm run build` green, full run 12,662/12,662.
+
+## 2026-08-08 — Legal & Trust: five full documents, each on its own page, buttons in Settings
+
+Admin (from a competitors-checklist reel): Privacy Policy, Terms of Service, DPA, Security documents,
+NDA — "sabhi ke liye ek alag page banao, setting me sabhi ke button dedo", at 10x the detail of the
+earlier summary. Shipped:
+
+- `src/content/legal/` — five documents written against the app's REAL behaviour, not a template:
+  DPDP Act rights + grievance contact + Singapore cross-border disclosure + clinical-data rules
+  (Privacy); tokens-as-prepaid-credit, failed-build-never-charged, user OWNS built apps, 7-day
+  unused-token refunds, Doctor-AI-is-for-doctors, New Delhi jurisdiction (Terms); processor duties,
+  72-hour breach clock, sub-processor CATEGORIES with the named list under NDA — the standard
+  enterprise resolution of the white-label tension, chosen as the safe default (DPA); a four-part
+  security set whose every claim maps to a real control in the code, including an honest "we do NOT
+  yet claim SOC 2/ISO" section (Security); a mutual fill-and-sign template with intentional blanks
+  (NDA). Every file carries a NOT-LEGAL-ADVICE note for lawyer review.
+- ONE registry (`content/legal/index.ts`) drives everything: the Settings "Legal & Trust" card builds
+  its five tiles from `LEGAL_DOCS.map(...)`, and every `legal_*` screen renders `LegalDocPage` — a
+  document cannot exist without a button nor a button without a page. `SettingsScreen` union extended.
+- Privacy table converted to bullets after checking the renderer: react-markdown here has no GFM
+  plugin, so a md table would have rendered as raw pipe characters.
+- AppKnowledgeBase `legal_trust` entry (Hinglish keywords: gopniyata, niyam, refund, kanoon…).
+- 34 tests (`tests/legalDocs.test.ts`): per-document completeness sections, the WHITE-LABEL law as a
+  regression test (no AI vendor/model name in any legal page — Cashfree/Google/Apple allowed), the
+  honesty notes, and full wiring contracts.
+
+Assumed defaults for the admin to confirm/change (announced, per the 60-second rule): refunds =
+unused purchased tokens, 7 days; governing courts = New Delhi; grievance/security/DPA/NDA contact =
+info@navbharatai.com; log retention 90 days; account-deletion window 30 days; DPA breach notice 72h.
+Follow-up worth doing when asked: PUBLIC (no-login) URLs for privacy+terms — Play Console asks for a
+public privacy-policy link.
+
+Gate: tsc clean both projects, real build green, full run 12,696/12,696.
+
+### Same PR, two more root causes: the zoom that missed the chat, and the bundle the docs broke
+
+**1. Text Size zoom missed the AI messages (admin screenshot).** The zoom scales the ROOT font size,
+so rem-based utilities follow it — but the app carries ~1,800 arbitrary `text-[Npx]` utilities, and px
+is immune to the root. The chat bubbles were sized in px: the one surface a user most needs to READ
+was the one the zoom could not touch. Class fix, one file (`src/styles/font-scale-compat.css`, same
+unlayered-cascade discipline as theme-compat.css): every px text utility in use remapped to its exact
+rem equivalent (byte-identical at 100%, scaling at every other zoom), the px line-height in use
+remapped too (fixed leading + scaled text = overlapping lines), the one responsive variant preserved
+via a later media rule. ANTI-ROT: the test greps the REAL component tree and fails if any px text
+utility exists that the compat file does not cover — the sweep immediately proved itself by catching
+four half-pixel sizes (7.5/8.5/9.5/10.5/11.5px) the manual survey missed.
+
+**2. The legal docs broke the CI bundle budget (653.5 KB > 650 KB main chunk).** Root cause: ~45 KB of
+document text statically imported by SettingsPanel landed in the MAIN chunk — every user downloading
+five legal documents to open a chat. Fix is the class, not the budget: `content/legal/meta.ts` (titles
+only, few hundred bytes) feeds the Settings tiles; LegalDocPage dynamic-imports the full registry into
+its own lazy chunk. Main chunk: 653.5 → 635.3 KB. Test-locked: SettingsPanel may never statically
+import the heavy index again, and meta ↔ registry can never drift.
+
+Gate: tsc clean, real build green, bundle budget green locally, full run 12,703/12,703.
+
 ## 2026-08-09 — DNS record cards now answer the registrar's own form (the "Type me kya choose karu?" freeze)
 
 Admin, with a live Hostinger screenshot beside our connect page: the registrar's add-record form

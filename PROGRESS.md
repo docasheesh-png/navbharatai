@@ -28375,3 +28375,82 @@ safe placeholder; a real user-provided value is still honoured.
 the superseding decision and the reasoning recorded in place — the client half of that fix (the real
 cause) is untouched and still asserted. 4 new tests in `tests/importAutopsyMitrify.test.ts` (28 total).
 Gate: tsc clean both projects, full run 12,807/12,807.
+
+---
+
+## 2026-08-09 — The platform speaks the user's language too (ROADMAP item 6, half 1)
+
+**Root cause, stated exactly.** `LANGUAGE_RULE` makes the MODEL mirror the user's language, and it works.
+What it cannot reach is the ~157 narration lines OUR SERVER emits during a build ("🗄️ Provisioning a
+local PostgreSQL…", "🔧 Added 2 missing import(s)…") — they never pass through a model, so no prompt rule
+can translate them. A Hindi user reads Hindi from the AI and English from the platform, in one feed. The
+roadmap's own line said to do this half first because it is the jarring half.
+
+**Fixed as a CLASS, not as strings** (fourth rule, step 2). Every such line is now an ID with typed
+parameters in `AgentV3/narrationCatalogue.ts`; call sites hold an id, never a sentence. 🔒 Completeness is
+enforced by the COMPILER — `Catalogue` is a mapped type over every id, so a language table missing one
+line fails `tsc`. A half-translated language cannot ship, and a new id cannot be added without translating
+it everywhere. That is what keeps "fully working / not built yet" true per-language.
+
+**Language decided from the user's own words, by SCRIPT** (`lib/narrationLanguage.ts`) — deterministic,
+free, and incapable of disagreeing with itself between two lines of one build. A 20% share threshold, and
+code/paths/urls stripped first, so `Build a dashboard app and label it डैशबोर्ड` stays English while
+`मुझे Firebase के साथ ऐप बनाओ` is Hindi. **Romanised Hinglish resolves to ENGLISH on purpose**: the model
+answers such a prompt in English too, and Devanagari output there would make the platform disagree with
+the AI in the very same feed — the exact bug this closes. Other Indian scripts are RECOGNISED but resolve
+to English rather than being served Hindi they did not ask for; adding Tamil later is one complete
+catalogue plus one line, nothing else moves.
+
+**Siblings hunted** (rule 3): sub-agents emit into the SAME feed, so `SubAgent.ts` threads the build's
+language into every child dispatcher — a child left on the default would have put English lines back into
+a Hindi build.
+
+23 tests (`tests/narrationLanguage.test.ts`), including completeness across every supported language, a
+"Hindi is not a copy-paste of English" check, identifiers/paths/package names never translated, and the
+white-label assertion that no vendor or model name can reach a narration line. Three existing source-lock
+tests (`dbProvisionVerify`, `userDatabaseWins`, `secretPreflightWiring`) now lock the branch AND the
+catalogue's words — strictly stronger than the string match they replaced, not weakened to pass.
+
+Scope, honestly: this slice covers the 23 lines in `ToolDispatcher.ts`. The ~131 in `routes/agentv3.ts`
+are the next slice; until they land, a Hindi build shows Hindi for the dispatcher's lines and English for
+the route's. `AppKnowledgeBase.ts` states that limit plainly rather than promising the whole feed.
+
+Verification gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1120 files /
+12,774 tests, exit 0**.
+
+### Correction, same day, BEFORE the merge — I had built a SECOND language detector
+
+The slice above shipped its own script counter (`detectScript`, ranges table, 0.20 threshold). Then a
+read of the surrounding code — the redundant-work check that safeguard #6 exists for, done late — found
+`AgentV3/LanguageDetect.detectLanguageHint`: the SAME script counting, at threshold **0.15**, already
+deciding the app's generated-text language and the weak-tier notice, and already handling romanised
+Indic via `detectRomanizedIndic`.
+
+Two detectors would have drifted, and the drift had a specific victim: a prompt landing between 0.15 and
+0.20 Devanagari would take the AI to Hindi and leave the platform in English — **the exact defect this
+work exists to remove**, reintroduced by the fix for it. Caught before merge; the duplicate is deleted
+and `narrationLanguage.ts` now owns NO detection at all, only the mapping onto languages we can write.
+A source-level test asserts it holds no script table, code-point range or threshold, so the duplicate
+cannot grow back.
+
+**What the evidence then corrected in the design** (two assumptions I had written down were simply wrong):
+
+1. `mujhe ek todo app banao…` does NOT come back as romanised Hindi — `detectRomanizedIndic` refuses it
+   because ordinary English words outnumber the markers. The English narration is right, but not for the
+   reason first recorded.
+2. `Build a dashboard app and label it डैशबोर्ड` DOES come back as Hindi from the shared detector. So
+   delegating wholesale would have made the platform speak Hindi while the model — mirroring the user's
+   own words per `LANGUAGE_RULE` — replied in English. A new mismatch, in place of the old one.
+
+The reconciliation is that the two consumers ask different questions of one measurement. The app's text
+language is right to be generous; the platform's own voice must track the language the model REPLIES in,
+which is stricter. So `LanguageHint` now exposes `scriptShare` (additive, no behaviour change for any
+existing caller — the value was already computed for the threshold), and narration requires a MAJORITY
+(`NARRATION_SCRIPT_SHARE` 0.5) of the SAME count. One counter, one table, two documented bars.
+
+Also corrected: Marathi. It shares the Devanagari block, `devanagariLanguage` already separates it from
+Hindi, and mapping `mr` onto the Hindi catalogue would be exactly the confident-wrong-language failure
+this module warns about. It falls through to English until a Marathi catalogue exists.
+
+Gate after the correction: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1123 files
+/ 12,848 tests, exit 0**.

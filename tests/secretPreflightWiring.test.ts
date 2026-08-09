@@ -1,3 +1,4 @@
+import { narrationText } from '../src/server/AgentV3/narrationCatalogue';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -31,7 +32,10 @@ describe('The preflight runs at the moment the keys reach the app', () => {
   it('a preflight that throws degrades to the old honest line instead of losing the narration', () => {
     expect(fn).toContain('catch { verdicts = []; }');
     expect(fn).toContain('if (verdicts.length === 0) {');
-    expect(fn).toContain('Loaded ${names.length} of your saved key');
+    // The sentence moved into the narration catalogue (ROADMAP item 6) so it can be spoken in the
+    // user's own language. The degradation still narrates the SAME fact, with the same count.
+    expect(fn).toContain("this.narrate('secrets.loaded', { count: names.length })");
+    expect(narrationText('en', 'secrets.loaded', { count: 3 })).toContain('Loaded 3 of your saved key');
   });
 
   it('every problem it finds is actually emitted, not just computed', () => {

@@ -34,6 +34,20 @@ export interface NbaiDomainConnectProps {
   onBack: () => void;
 }
 
+/**
+ * A DNS record name the way a REGISTRAR's add-record form wants it (admin 2026-08-08, Hostinger
+ * screenshot): those forms take names RELATIVE to the domain — the apex is "@", a subdomain is just
+ * its prefix — while the hosting API hands back fully-qualified names. Pure, exported for tests.
+ */
+export function relativeRecordName(name: string, domain: string): string {
+  const fq = (name || '').replace(/\.$/, '').toLowerCase();
+  const d = (domain || '').replace(/\.$/, '').toLowerCase();
+  if (!fq || !d) return name;
+  if (fq === d) return '@';
+  if (fq.endsWith(`.${d}`)) return fq.slice(0, -(d.length + 1));
+  return name;
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
@@ -304,8 +318,23 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">{rec.type}</span>
                 {rec.note && <span className="text-[10px] text-zinc-500">{rec.note}</span>}
               </div>
+              {/* TYPE as a first-class copyable field (admin 2026-08-08, Hostinger screenshot): the
+                  registrar's add-record form leads with a "Type" dropdown, and a small corner badge
+                  did not read as the answer to it — users froze at "Choose type". Same Field row as
+                  Name/Value, so the form maps 1:1: Type → Type, Name → Name, Value → Value. */}
+              <Field label="Type" value={rec.type} k={`t${i}`} copied={copied} onCopy={copy} />
               <Field label="Name" value={rec.name} k={`n${i}`} copied={copied} onCopy={copy} />
               <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
+              <p className="text-[10px] text-zinc-500">
+                At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, put the Name and Value above in their boxes, and leave TTL as-is.
+                {/* Registrar forms want RELATIVE names (Hostinger, GoDaddy, …): the apex is "@", a
+                    subdomain is just its prefix. Saying it here kills the second freeze of the same
+                    form — a full name pasted into a relative box gets rejected or silently doubled
+                    (mitrify.in.mitrify.in). */}
+                {relativeRecordName(rec.name, cleanDomain) !== rec.name && (
+                  <> If the Name box rejects the full name, type <span className="font-bold text-zinc-300">{relativeRecordName(rec.name, cleanDomain)}</span> instead — it means the same thing there.</>
+                )}
+              </p>
             </div>
           ))}
 

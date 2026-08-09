@@ -9,8 +9,12 @@ import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, wher
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
 import { getSecretValue } from '../lib/secrets';
 import { sendSafeError } from '../lib/httpError';
-import { verifyPaymentInternal } from '../lib/payments';
+import { verifyPaymentInternal, computeCreditedWallet } from '../lib/payments';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
+import {
+  storeBillingEnabled, storePlatformConfigured, storePacks, packForProduct, storeTransactionDocId,
+} from '../lib/storeBilling';
+import { verifyStorePurchase } from '../lib/storeVerify';
 import {
   isAcceptablePassPayment, professionalPassPriceInr, professionalPassDays,
 } from '../professionals/professionalPaid';
@@ -494,6 +498,106 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     } catch (err: any) {
       console.error('[COUPON] Redemption failed:', err.message);
       return sendSafeError(res, 500, 'Coupon redemption failed. Please try again.', err, 'coupon redeem');
+    }
+  });
+
+  /**
+   * STORE BILLING — Apple / Google in-app purchases (admin 2026-08-09: "app direct apple ya google
+   * se payment le sake"). The NATIVE funding rail for the same one wallet Cashfree funds on web.
+   *
+   * The device sends only an opaque handle. This route asks the STORE whether that purchase is real
+   * (verifyStorePurchase), takes the product id from the STORE'S answer, prices it from OUR
+   * catalogue, and credits through the SAME `computeCreditedWallet` every other purchase uses. A
+   * client cannot choose its own price, cannot replay a purchase (the store transaction id IS the
+   * `payment_transactions` doc id), and cannot credit a refunded or pending purchase — the verifier
+   * refuses those before this route ever sees money.
+   */
+  app.get('/api/payment/store/packs', async (_req: Request, res: Response) => {
+    // The app asks what to show; honest about whether buying can work at all on this server.
+    res.json({
+      enabled: storeBillingEnabled(),
+      apple: storePlatformConfigured('apple'),
+      google: storePlatformConfigured('google'),
+      packs: storePacks(),
+    });
+  });
+
+  app.post('/api/payment/store/verify', paymentLimiter, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Payments are temporarily unavailable. Please try again.' });
+    if (!storeBillingEnabled()) return res.status(503).json({ error: 'In-app purchases are not enabled yet.' });
+
+    // A purchase belongs to a REAL account — the wallet it credits is identified by the verified
+    // token, never by anything in the body (the same rule create-order follows).
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Please sign in before buying.' });
+
+    const platform = req.body?.platform === 'apple' ? 'apple' : req.body?.platform === 'google' ? 'google' : null;
+    if (!platform) return res.status(400).json({ error: 'A valid platform is required.' });
+    const str = (v: unknown, max = 4096) => (typeof v === 'string' && v.length <= max ? v.trim() : '');
+    const input = {
+      transactionId: str(req.body?.transactionId, 256),
+      productId: str(req.body?.productId, 256),
+      purchaseToken: str(req.body?.purchaseToken),
+    };
+
+    try {
+      const verified = await verifyStorePurchase(platform, input);
+      if (!verified.ok) {
+        // The store's reason is for OUR log; the user gets a plain sentence. A failed verification
+        // is never a credit, and never an ambiguous "maybe" the client could retry into money.
+        console.error(`[STORE ${platform}] verification refused: ${verified.reason}`);
+        return res.status(402).json({ error: 'That purchase could not be verified with the store. If money was taken, it will be refunded automatically by the store.' });
+      }
+
+      const pack = packForProduct(verified.productId);
+      if (!pack) {
+        console.error(`[STORE ${platform}] verified purchase of UNKNOWN product ${verified.productId}`);
+        return res.status(400).json({ error: 'That product is no longer available. Please contact support.' });
+      }
+
+      const docId = storeTransactionDocId(platform, verified.transactionId);
+      const txRef = doc(db, 'payment_transactions', docId);
+      const existing = await getDoc(txRef);
+      if (existing.exists() && existing.data()?.paymentStatus === 'SUCCESS') {
+        // Idempotent: the store re-delivers purchases on relaunch, and the app retries on flaky
+        // networks. Both must be safe.
+        return res.json({ alreadyProcessed: true, balanceAdded: existing.data()?.balanceAdded ?? pack.priceInr });
+      }
+
+      const nowIso = new Date().toISOString();
+      const txData = {
+        transactionId: docId,
+        userId,
+        amountPaid: pack.priceInr,
+        balanceAdded: pack.priceInr,
+        isVishwakarmaOrder: true,   // the wallet-credit shape every top-up uses
+        buyPass: false,
+        paymentProvider: platform === 'apple' ? 'APPLE_IAP' : 'GOOGLE_PLAY',
+        paymentStatus: 'SUCCESS',
+        paymentReference: verified.transactionId,
+        productId: verified.productId,
+        createdAt: nowIso,
+      };
+
+      const wallet = await runTransaction(db, async (tx: any) => {
+        const walletRef = doc(db, 'user_token_wallets', userId);
+        const walletSnap = await tx.get(walletRef);
+        const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
+        const { wallet: credited } = computeCreditedWallet(walletData, txData as any, null, nowIso);
+        tx.set(walletRef, credited);
+        tx.set(txRef, txData);
+        return credited;
+      });
+
+      return res.json({
+        ok: true,
+        balanceAdded: pack.priceInr,
+        tokenBalance: wallet.tokenBalance,
+        currentBalance: wallet.remaining_balance,
+      });
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'We could not finish that purchase. If money was taken, the store will refund it automatically.', err, 'store purchase verify');
     }
   });
 }

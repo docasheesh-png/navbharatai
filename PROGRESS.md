@@ -28081,3 +28081,32 @@ indigo "Check now" button; the raw states remain as dim mono detail (support sti
 are never the headline; a second Check sits at the bottom for the user who scrolled to copy records
 (same handler — one implementation, test-pinned). Honesty preserved: nothing says "Live" except the
 API's own `active` flag, even when all three sub-states read ACTIVE (test-pinned).
+
+## 2026-08-09 — Store billing slice 1: Apple + Google purchase verification and wallet credit (admin: "apple/google payment setup karwao")
+
+Both stores REQUIRE their own billing for digital goods bought inside the app, and our wallet top-up
+is exactly that — this is the NATIVE funding rail for the SAME one wallet Cashfree funds on web (one
+money model, two rails; the credit itself flows through the existing `computeCreditedWallet`).
+
+Shipped (server, dormant behind `STORE_BILLING`):
+- **`storeBilling.ts`** — the pack catalogue as DATA (stores need fixed price points, unlike the
+  web's free-form amount): ₹99/₹249/₹499/₹999 defaults, `STORE_PACKS` JSON override, and junk config
+  falls back to the defaults rather than leaving the app with nothing to sell. `packForProduct` is
+  the single place a product becomes money — an UNKNOWN id (a retired store product) credits nothing.
+- **`storeVerify.ts`** — real verification against Apple's App Store Server API (ES256 JWT from the
+  admin's .p8; production tried first with automatic SANDBOX fallback on 404, because a TestFlight
+  purchase is not fraud; refunded/revoked refuses) and Google's Play Developer API (service-account
+  JWT → access token → purchases.products.get; ONLY `purchaseState 0` credits — a PENDING UPI
+  purchase is not money). Injectable fetch, so money code is provable in CI where neither store exists.
+- **`/api/payment/store/verify`** — verified uid required; the product comes from the STORE's answer
+  and is priced from OUR catalogue (a client cannot buy ₹99 and claim ₹999); the store transaction
+  id IS the `payment_transactions` doc id, so a re-delivered or retried purchase credits exactly
+  once; credit happens in a Firestore transaction. `/api/payment/store/packs` reports honestly
+  whether each platform is actually configured. 21 tests, written around the ways it could WRONGLY
+  credit (forged token, client-chosen product, refund, pending, replay).
+
+**Still to come (slice 2), and honestly blocked on the admin's console work:** the native plugin +
+buy UI + platform routing (web → Cashfree, native → store). Products must exist in App Store Connect
+and Play Console before that code can be exercised at all, and Apple's "Agreements, Tax, and
+Banking" + Google's payments profile take days to approve — so the admin checklist was handed over
+first, in parallel with this slice.

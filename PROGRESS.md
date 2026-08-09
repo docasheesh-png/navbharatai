@@ -28546,3 +28546,50 @@ which persisted whatever the turn produced, good or broken.
 Tests: 22 in `tests/greenGuard.test.ts` (8 new for layer 2) — the injection surface, the cap, exactly
 two green setters each beside a real-browser verification, attempt-kept-before-undo ordering, the
 fall-through save, and the flag gate. Gate: tsc clean both projects, full run 12,876/12,876.
+
+---
+
+## 2026-08-09 — ROUTE FINGERPRINT: the largest remaining way a working app got broken
+
+**Admin, right after Green Guard shipped:** "jo jo bacha hai usko bhi smart fix karo."
+
+**THE HOLE.** Green Guard judged "green" by opening ONE url — the home page. So an edit that left the
+home page rendering while breaking `/admin`, `/checkout` or `/profile` ended the turn GREEN, the broken
+state became the new LAST KNOWN GOOD, and the guard cheerfully protected the damage. Worse than a
+missed catch: the guard actively preserved the regression. This is the failure a user finds days later.
+
+**THE SMART PART IS THE SAMPLE, NOT THE SWEEP.** A real app declares hundreds of routes (the Mitrify
+report counted 186); visiting them all would add minutes to every build — a worse product than the bug.
+Instead: only the app's own VISITABLE pages are considered (an `/api` endpoint is not a screen, a
+`:id` route has no real value to substitute, an asset is not a page); a small DETERMINISTIC sample is
+taken (home first, then shallowest-then-alphabetical, capped at 5) so the same app yields the same
+routes every turn and two records are always comparable; and the check runs ONLY on a turn that already
+looks green, so a failing build pays nothing extra.
+
+**THE COMPARISON IS DELIBERATELY ASYMMETRIC**, and that is what keeps it from false-failing honest
+builds: a route that rendered before and does not now is a REGRESSION; a route that NEVER rendered is
+not held against the turn (it may need a login, seed data, or may not exist yet); and a route that was
+not reachable this turn is simply NOT MEASURED, never "broken" — the same honesty rule the preview
+verdict follows (an unmeasured thing must not be reported as a failure).
+
+**A regression VETOES green** (`previewGreen = false`), which hands the turn straight to Green Guard's
+restore — so the damage is undone instead of enshrined — and records `ROUTE_REGRESSION` naming the
+exact pages, with the line the admin needs: "the home page still loaded, so it would have passed
+unnoticed."
+
+The fingerprint lives under its OWN key (`<workspaceId>::greenmeta`), never inside the snapshot, so a
+restore can never write our bookkeeping file into the user's app. A corrupt record degrades to "no
+fingerprint" rather than throwing. Independent kill switch `AGENTV3_ROUTE_FINGERPRINT=off` — the extra
+page visits can be stopped without disabling Green Guard.
+
+**STILL OPEN (unchanged, stated again rather than quietly dropped):**
+1. A deliberate long rewrite that legitimately does not render yet is still rolled back. The attempt is
+   preserved under `<workspaceId>::attempt` and the user is told, but there is no one-sentence way to
+   ask for it back — that escape hatch is the next slice.
+2. The 153-second silent window and the 8m46s read-only survey remain unexplained.
+3. Everything from today is unverified in production; the proof is the next real build report.
+
+Tests: 19 in `tests/routeFingerprint.test.ts` — the sample's determinism and bounds, every not-a-page
+and not-visitable rejection, the caught bug (home fine + /admin broken), the three asymmetry rules,
+corrupt-record tolerance, and wiring assertions that the check only runs on a green turn and that a
+regression vetoes green. Gate: tsc clean both projects, full run 12,895/12,895.

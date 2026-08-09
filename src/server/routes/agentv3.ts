@@ -128,6 +128,7 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand } from '../AgentV3/GreenGuard';
+import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
@@ -10960,6 +10961,47 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
         if (Object.keys(toSave).length > 0) {
+          // ── ROUTE FINGERPRINT (admin 2026-08-09: "jo jo bacha hai usko bhi smart fix karo") ──────
+          // Green Guard judged "green" from ONE url — the home page. So an edit that left the home page
+          // rendering while breaking /admin ended the turn GREEN, the broken state became the new last
+          // known good, and the guard protected the damage. That is the largest remaining way a working
+          // app gets quietly broken, and the one a user finds days later.
+          //
+          // Here the pages that worked LAST time are re-opened. Losing one VETOES green, which hands the
+          // turn straight to Green Guard's restore. Deliberately cheap and deliberately asymmetric:
+          // it runs only on a turn that already looks green (a failing build pays nothing), it opens at
+          // most MAX_CHECK_ROUTES pages, and a page that never rendered is NOT held against this turn —
+          // only losing something we ourselves watched working counts.
+          let routeChecks: Array<{ route: string; rendered: boolean }> = [];
+          if (previewGreen && routeFingerprintEnabled() && lastPreviewUrl && actuator.browseUrl && !abort.signal.aborted) {
+            try {
+              const fpKey = fingerprintWorkspaceKey(workspaceId);
+              const previous = decodeFingerprint(await loadWorkspaceFiles(fpKey).catch(() => ({})));
+              // Watch the SAME pages as last time first, so two records are always comparable; top up
+              // from the project's own declared routes when there is nothing recorded yet.
+              const declared = getWorkspaceMemory(workspaceId).snapshot()?.graph?.routes ?? [];
+              const toCheck = pickCheckRoutes(previous?.ok?.length ? previous.ok : declared);
+              for (const r of toCheck) {
+                if (abort.signal.aborted) break;
+                const url = r === '/' ? lastPreviewUrl : `${lastPreviewUrl.replace(/\/$/, '')}${r}`;
+                try {
+                  const html = (await withTimeout(actuator.browseUrl(workspaceId, url), 20_000, 'route-fingerprint')).html;
+                  routeChecks.push({ route: r, rendered: analyzePreviewHtml(html).rendered });
+                } catch { /* unreachable ≠ broken by this turn — simply not measured */ }
+              }
+              const broken = regressedRoutes(previous, routeChecks);
+              if (broken.length > 0) {
+                previewGreen = false; // veto: Green Guard now restores instead of protecting the damage
+                buildDiag.record({
+                  phase: 'preview', severity: 'warning', code: 'ROUTE_REGRESSION',
+                  message: regressionMessage(broken), autoResolved: false,
+                });
+              } else if (routeChecks.some((c) => c.rendered)) {
+                // Record what worked, under its OWN key so a restore never writes it into the app.
+                await saveWorkspaceFiles(fpKey, encodeFingerprint(buildFingerprint(routeChecks, Date.now()))).catch(() => {});
+              }
+            } catch { /* the fingerprint is an extra safety net — it must never break a build */ }
+          }
           // ── GREEN GUARD, LAYER 2 (admin 2026-08-09) ──────────────────────────────────────────────
           // "Pehli build me working app ban jati hai — baad me edit kar ke kharab kyu kiya jata hai?"
           // Because THIS line saves whatever the turn produced, good or broken: the durable project has

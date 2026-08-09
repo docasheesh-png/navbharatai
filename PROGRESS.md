@@ -28168,3 +28168,69 @@ stores collect and remit). `STORE_FEE_PCT` exists so the admin retunes from the 
 report, which is the only honest source for the final rate. The transaction record now stores
 `storePriceInr` / `storeFeePct` / `storeNetInr` alongside the credit, so a payout can be reconciled
 without re-deriving anything.
+---
+
+## 2026-08-09 — Reported build = the WHOLE session (0 → 100), with per-part Download AND Copy
+
+**Admin ask (verbatim):** "jab koi user app bana kar report kare, to puri report, sabhi edit sath
+0 to 100 admin ko send ho! Admin ke pas option ho kitne part download/copy karne hai — 1st, 2nd,
+3rd … all. Aur sirf download ka option aa raha hai, copy bhi add karo! Aur han, build report JSON
+me hi copy hi, text me nhi."
+
+**Root cause of what was wrong (not a UI gap — a DATA gap).** Pressing "Report" submitted exactly
+ONE report: whichever build the user happened to be looking at. Every earlier build and every edit
+of that session — the part that actually explains how the app got into its final state — was never
+sent. So the admin inbox held the last frame of a film, and no autopsy (rule 5) could see the
+sequence that produced it. Adding buttons to that record would have divided nothing into parts.
+
+**Fix, in order:**
+1. `report-to-admin` now gathers the workspace's whole durable history (up to 20 builds) plus the
+   report in hand, dedupes by `startedAt`, orders oldest → newest, and stores it. Best-effort: if
+   the history read fails the record is byte-identical to what it was before — a submit can never
+   fail because of this.
+2. `AdminBuildReportRecord` gained `session { builds, count, omittedBuilds }` and `meta.sessionParts`.
+   Every build is trimmed for storage and the set is byte-capped by the SAME `capSessionReports` the
+   user-side stitch uses — the newest is always kept, dropped ones are COUNTED, never silently lost.
+   A single-build session stores no `session` block at all (an "All" and a "1st part" that are the
+   same bytes is a choice with nothing behind it).
+3. New PURE `src/components/adminReportParts.ts` owns the numbering, the labels and — the part that
+   matters — the payload BOUNDARY: `'all'` = the entire record; an index = that ONE build wrapped
+   with the identifying meta and `part {index, of, label}`, so a pasted part is never an anonymous
+   blob and never the whole session wearing a part label. Nonsense/out-of-range keys return `''` so
+   the button disables instead of copying "undefined".
+4. **Copy everywhere Download exists**, and the payload is JSON — the report modal (part picker +
+   Copy JSON + Download JSON), the all-builds session row, and every single build inside it. New
+   shared `src/lib/copyText.ts`: `navigator.clipboard` does not exist in a non-secure context and
+   `writeText` REJECTS when the document is unfocused — both look identical to a user who pastes and
+   gets their old clipboard back, so it falls back to `execCommand` and returns an honest boolean.
+   The UI reports "copied" only when a copy genuinely happened (rule 3).
+5. Copy and Download now share ONE loader (`fetchWorkspaceReportJson`) and one saver
+   (`saveJsonFile`), so the two buttons cannot drift into handing over different bytes. The modal's
+   `<pre>` renders the SAME string the buttons hand over — what you see is what you copy.
+6. Numbering is by BUILD order: the expanded list arrives newest-first, so its ordinal counts from
+   the far end — "1st part" there is the same build as "1st part" in the oldest → newest session
+   download. A report carrying more than one build shows a "N parts" badge in the inbox list.
+
+Tests: 25 new in `tests/adminReportParts.test.ts` — ordinal edge cases (11th/21st/23rd), the session
+genuinely reaching the record, the focused build surviving the byte cap with the omission COUNTED,
+every part boundary (including "a part is not the session"), every part parsing as JSON, and the
+clipboard's honest false. `tests/adminAllBuilds.test.ts`'s download contract updated to assert both
+halves of the split (auth header on the fetch, blob + filename on the save) rather than weakened.
+Gate: tsc clean both projects, real build green, bundle 637.4/650 KB, full run 12,775/12,775.
+
+**Same-day follow-up — the session budget was sized for the WRONG SINK (caught pre-merge).**
+The first cut fitted the session with `capSessionReports`, whose 6 MB budget was chosen for an HTTP
+download. This record goes into a **Firestore document**, whose hard limit is **1 MiB**. A normal
+multi-build session would therefore have produced an oversized document, Firestore would have
+REJECTED the write, and the admin would have received **nothing** — including the focused build that
+arrived fine before the change. A feature meant to give the admin more would have given less.
+Root cause (rule 4): a shared helper was reused without re-deriving its budget for the new sink.
+Fix: the session's allowance is now DERIVED — `1 MiB − (the focused report + meta) − 96 KB headroom`
+for Firestore's own field-name/UTF-8 accounting — and fitted by a new `fitSessionToDocument`, which
+is deliberately NOT `capSessionReports`: that one keeps the newest build "even if huge" (right for a
+download, fatal against a hard limit), this one drops oldest-first and will store ZERO builds rather
+than lose the write. The `session` block is kept even when empty, because `omittedBuilds` is the only
+place the admin learns earlier builds existed; `partsSummary` says so instead of "Single build".
+Siblings swept: the two other `capSessionReports` call sites are both HTTP bodies — 6 MB is correct
+there, no change. Regression tests encode both failures (the whole record must fit a document; a
+session where not even one build fits still declares its omission).

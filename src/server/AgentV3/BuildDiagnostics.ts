@@ -407,6 +407,16 @@ export class BuildDiagnostics {
    * while one is present (real report 8a6e4585). Reads the already-computed, full-workspace readiness
    * result — no re-analysis. Pure query; never throws.
    */
+  /**
+   * Did the readiness gate leave an UNRESOLVED blocker? Used so a recorded claim about the build can
+   * never over-claim past what the build itself reported (real report 02be22e3: a snapshot was recorded
+   * as "a verified working app" while the same report said "NOT READY · 5 incomplete features").
+   * Pure query; never throws.
+   */
+  hasUnresolvedReadinessBlocker(): boolean {
+    return this.issues.some((i) => i.code === 'READINESS_BLOCKER' && i.autoResolved !== true);
+  }
+
   hasRuntimeCrashBlocker(): boolean {
     return this.issues.some(
       (i) =>

@@ -60,11 +60,30 @@ export function decideGreenGuard(input: {
   after: GreenState | null | undefined;
   /** False for the very first build of a workspace — there is nothing to protect yet. */
   hasSnapshot: boolean;
+  /**
+   * The build's own readiness verdict, when it has one. NOT part of the decision — a snapshot that
+   * LOADS is worth protecting even when the app is unfinished, because the alternative is protecting
+   * nothing. It exists so the recorded reason cannot over-claim; see below.
+   */
+  ready?: boolean;
 }): GreenDecision {
   const afterGreen = input.after?.green === true;
   const beforeGreen = input.before?.green === true;
   if (afterGreen) {
-    return { action: 'save', reason: 'The turn ended with a verified working app — recorded as the last known good state.' };
+    // SAY ONLY WHAT WAS MEASURED (real build report 02be22e3, 2026-08-09). The first live run of this
+    // guard recorded "The turn ended with a verified working app" on a build whose OWN health said
+    // "NOT READY · 66/100 — 5 incomplete features (placeholder code)". Both lines were in one report,
+    // contradicting each other. What the guard actually verified is narrow and specific: the app was
+    // opened in a real browser and it rendered. That is worth protecting — and it is NOT the same
+    // claim as "working". The readiness verdict rides along so the baseline's real quality is visible
+    // instead of hidden behind a green word.
+    const caveat = input.ready === false
+      ? ' The app loads, but the build also reported unfinished work — this is the best known state, not a finished one.'
+      : '';
+    return {
+      action: 'save',
+      reason: `The app was opened in a real browser and rendered — recorded as the last known good state.${caveat}`,
+    };
   }
   if (beforeGreen && input.hasSnapshot) {
     return { action: 'restore', reason: 'The app was verified working before this turn and is not working after it — the last known good state was restored.' };

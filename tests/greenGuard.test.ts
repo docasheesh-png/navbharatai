@@ -26,6 +26,35 @@ describe('LAYER 1 — a verified working app becomes the last known good', () =>
     // Even when a snapshot already exists — the newest working state is the one worth keeping.
     expect(decideGreenGuard({ before: { green: true }, after: { green: true }, hasSnapshot: true }).action).toBe('save');
   });
+
+  /**
+   * FIRST LIVE RUN, real build report 02be22e3 (2026-08-09) — the guard worked, and its WORDING did not.
+   * It recorded "The turn ended with a verified working app" on a build whose own health said
+   * "NOT READY · 66/100 — 5 incomplete features (placeholder code)". Two lines of one report
+   * contradicting each other is exactly the failure class this project keeps killing.
+   */
+  it('says only what it MEASURED — "opened in a real browser and rendered", not "working"', () => {
+    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false });
+    expect(d.reason).toMatch(/opened in a real browser and rendered/);
+    expect(d.reason).not.toMatch(/verified working app/);
+  });
+
+  it('an unfinished build is still protected, but the record says so', () => {
+    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, ready: false });
+    // Still saved: a snapshot that LOADS is worth protecting — the alternative is protecting nothing.
+    expect(d.action).toBe('save');
+    expect(d.reason).toMatch(/best known state, not a finished one/);
+  });
+
+  it('a build with no unresolved blocker carries no caveat', () => {
+    expect(decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, ready: true }).reason)
+      .not.toMatch(/best known state/);
+  });
+
+  it('WIRING: the readiness verdict really reaches the record', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('ready: !buildDiag.hasUnresolvedReadinessBlocker()');
+  });
 });
 
 describe('LAYER 2 — a turn can never leave the user worse off than they started', () => {

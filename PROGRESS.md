@@ -28417,3 +28417,40 @@ the route's. `AppKnowledgeBase.ts` states that limit plainly rather than promisi
 
 Verification gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1120 files /
 12,774 tests, exit 0**.
+
+### Correction, same day, BEFORE the merge — I had built a SECOND language detector
+
+The slice above shipped its own script counter (`detectScript`, ranges table, 0.20 threshold). Then a
+read of the surrounding code — the redundant-work check that safeguard #6 exists for, done late — found
+`AgentV3/LanguageDetect.detectLanguageHint`: the SAME script counting, at threshold **0.15**, already
+deciding the app's generated-text language and the weak-tier notice, and already handling romanised
+Indic via `detectRomanizedIndic`.
+
+Two detectors would have drifted, and the drift had a specific victim: a prompt landing between 0.15 and
+0.20 Devanagari would take the AI to Hindi and leave the platform in English — **the exact defect this
+work exists to remove**, reintroduced by the fix for it. Caught before merge; the duplicate is deleted
+and `narrationLanguage.ts` now owns NO detection at all, only the mapping onto languages we can write.
+A source-level test asserts it holds no script table, code-point range or threshold, so the duplicate
+cannot grow back.
+
+**What the evidence then corrected in the design** (two assumptions I had written down were simply wrong):
+
+1. `mujhe ek todo app banao…` does NOT come back as romanised Hindi — `detectRomanizedIndic` refuses it
+   because ordinary English words outnumber the markers. The English narration is right, but not for the
+   reason first recorded.
+2. `Build a dashboard app and label it डैशबोर्ड` DOES come back as Hindi from the shared detector. So
+   delegating wholesale would have made the platform speak Hindi while the model — mirroring the user's
+   own words per `LANGUAGE_RULE` — replied in English. A new mismatch, in place of the old one.
+
+The reconciliation is that the two consumers ask different questions of one measurement. The app's text
+language is right to be generous; the platform's own voice must track the language the model REPLIES in,
+which is stricter. So `LanguageHint` now exposes `scriptShare` (additive, no behaviour change for any
+existing caller — the value was already computed for the threshold), and narration requires a MAJORITY
+(`NARRATION_SCRIPT_SHARE` 0.5) of the SAME count. One counter, one table, two documented bars.
+
+Also corrected: Marathi. It shares the Devanagari block, `devanagariLanguage` already separates it from
+Hindi, and mapping `mr` onto the Hindi catalogue would be exactly the confident-wrong-language failure
+this module warns about. It falls through to English until a Marathi catalogue exists.
+
+Gate after the correction: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1123 files
+/ 12,848 tests, exit 0**.

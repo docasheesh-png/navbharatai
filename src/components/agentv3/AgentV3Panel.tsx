@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
+import { SecretRequestCard } from './SecretRequestCard';
+import { saveSecret } from '../../lib/secretsApi';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
@@ -3275,6 +3277,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   </button>
                 )}
               </div>
+            )}
+            {state.pendingSecrets && (
+              <SecretRequestCard
+                prompt={state.pendingSecrets.prompt}
+                secrets={state.pendingSecrets.secrets}
+                onSave={async (vals) => {
+                  // Straight to the encrypted vault over the authenticated API — the value never goes
+                  // back up the build stream, which is stored in the transcript and the admin report.
+                  if (!userId) return false;
+                  for (const [name, value] of Object.entries(vals)) {
+                    await saveSecret(userId, name, value);
+                  }
+                  return true;
+                }}
+                onDone={(saved) => { respond(state.pendingSecrets!.callId, saved); }}
+              />
             )}
             {state.pendingPermission && (
               <div className="px-3 py-2.5 bg-amber-950/50 border border-amber-900 rounded">

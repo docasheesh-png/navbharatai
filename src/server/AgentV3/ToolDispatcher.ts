@@ -3,6 +3,7 @@ import { narrationText, type NarrationId, type NarrationParams } from './narrati
 import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
+import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -544,6 +545,31 @@ export class ToolDispatcher {
   /** Wire the fallback above. The composition root supplies it only when it can really deliver. */
   setDatabaseFallback(fn: () => Promise<Record<string, string> | null>): void {
     this.onDatabaseUnavailable = fn;
+  }
+
+  /**
+   * Ask the USER for credentials the app needs, mid-build.
+   *
+   * Injected for the same reason as the database fallback: the dispatcher must not know about the
+   * vault, Firestore or the approval plumbing — only that "someone can ask the user for these names".
+   * The composition root supplies it when there is a verified user to ask.
+   *
+   * Returns the env pairs that were saved (read back from the vault by the caller), or null if the
+   * user skipped, the ask timed out, or nothing could be saved. THE VALUES NEVER TRAVEL THROUGH THE
+   * BUILD'S EVENT STREAM — the client writes them straight to the encrypted vault and the caller reads
+   * them back server-side (see secretRequest.ts).
+   */
+  private onSecretsNeeded?: (asks: SecretAsk[]) => Promise<Record<string, string> | null>;
+
+  /** Wire the ask above. Supplied only when there is a verified user whose vault we can write to. */
+  setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<Record<string, string> | null>): void {
+    this.onSecretsNeeded = fn;
+  }
+
+  /** Names already in the user's vault, so the build never asks twice for the same key. */
+  private savedSecretNames: string[] = [];
+  setSavedSecretNames(names: string[]): void {
+    this.savedSecretNames = Array.isArray(names) ? names : [];
   }
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & API Keys). */
@@ -5121,6 +5147,83 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ui-states');
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'request_secrets': {
+        // ASK THE USER FOR A KEY, MID-BUILD (admin 2026-08-08). Previously the build either wrote a
+        // placeholder and carried on toward a feature that could never work, or finished and told the
+        // user afterwards which keys to go and paste. Both put the dead end AFTER the build.
+        //
+        // The VALUE never passes through here: the popup writes it straight to the encrypted vault
+        // through the authenticated secrets API, and this only learns the names and reads them back.
+        // Sending a live credential up the build's event stream would put it in the transcript and the
+        // admin report, both of which are stored.
+        const reqRec = (input as Record<string, unknown>) || {};
+        const rawAsks = Array.isArray(reqRec.secrets) ? (reqRec.secrets as Array<Partial<SecretAsk>>) : [];
+        const plan = planSecretRequest(rawAsks, this.savedSecretNames);
+
+        // Report the filtered-out names to the AGENT rather than dropping them silently — it needs to
+        // know a key it planned for is already present (so it can wire it) or was refused (so it stops
+        // planning around it).
+        const notes: string[] = [];
+        if (plan.alreadyHave.length) notes.push(`Already saved (no need to ask): ${plan.alreadyHave.join(', ')}.`);
+        if (plan.rejected.length) notes.push(`Refused — not a usable app key: ${plan.rejected.join(', ')}. Do not ask for NavBharatAI's own provider keys.`);
+        if (plan.ask.length === 0) {
+          return notes.length ? notes.join(' ') : 'request_secrets: nothing to ask for — the app already has every key it named.';
+        }
+        if (!this.onSecretsNeeded) {
+          // An offer we cannot honour is worse than none: without a verified user there is no vault to
+          // save into, so say so instead of showing a popup that would lose the input.
+          return `Cannot ask for keys in this session (no signed-in user). Tell the user to add ${plan.ask.map((a) => a.name).join(', ')} in Settings → Secrets & API Keys. ${notes.join(' ')}`.trim();
+        }
+
+        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔑 ${secretRequestPrompt(plan)}`, ts: Date.now() });
+        let saved: Record<string, string> | null = null;
+        try { saved = await this.onSecretsNeeded(plan.ask); } catch { saved = null; }
+
+        const askedNames = plan.ask.map((a) => a.name);
+        if (!saved || Object.keys(saved).length === 0) {
+          const line = secretRequestResult('skipped', askedNames);
+          this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
+          // The build CONTINUES. Skipping is a real answer, and the agent is told to leave the feature
+          // visibly disabled rather than fake it.
+          return `${line} Build the rest of the app normally and leave that feature as a visibly disabled "needs setup" state — never a fake success. ${notes.join(' ')}`.trim();
+        }
+
+        // Merge into the app's .env NOW. The vault is only read at build START, so a key saved
+        // mid-build would otherwise not exist for the running app until the next build — which is
+        // exactly the gap `rescueDatabase` was written to close for the database.
+        let wrote = false;
+        try {
+          let existing = '';
+          try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'secrets-env-read'); } catch { existing = ''; }
+          const merged = mergeDotEnv(existing, saved);
+          await this.actuator.writeFile(this.workspaceId, '.env', merged);
+          try { this.onFileWrite?.('.env', merged); } catch { /* durable record is best-effort */ }
+          // The user's real keys must never reach their git repo.
+          try {
+            let gi = '';
+            try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'secrets-gi-read'); } catch { gi = ''; }
+            const nextGi = gitignoreWithEnv(gi);
+            if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
+          } catch { /* gitignore hardening is best-effort */ }
+          wrote = true;
+        } catch { wrote = false; }
+
+        // Keep the in-memory set current so a later ask in the SAME build does not re-request these.
+        this.savedSecretNames = [...this.savedSecretNames, ...Object.keys(saved)];
+
+        const savedNames = Object.keys(saved);
+        if (!wrote) {
+          // Saved to the vault but not written to this sandbox — true, and the difference matters: the
+          // key is safe and will apply next build, but the app running right now still lacks it.
+          const line = `🔐 Saved ${savedNames.join(', ')} to your keys. They could not be written into the running app just now — they will apply on the next build.`;
+          this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
+          return `${line} ${notes.join(' ')}`.trim();
+        }
+        const okLine = secretRequestResult('saved', savedNames);
+        this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
+        return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
       }
 
       case 'generate_animation': {

@@ -901,8 +901,10 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const respond = useCallback(async (requestId: string, approved: boolean) => {
-    // Clear the gate immediately so the UI is responsive; the build resumes.
-    setState((prev) => ({ ...prev, pendingPermission: undefined }));
+    // Clear the gate immediately so the UI is responsive; the build resumes. BOTH interactive gates
+    // are cleared here: a secrets popup answers through this same route, and leaving it mounted after
+    // the answer would show the user a form for keys they have already saved.
+    setState((prev) => ({ ...prev, pendingPermission: undefined, pendingSecrets: undefined }));
     try {
       await fetch('/api/agentv3/respond', {
         method: 'POST',

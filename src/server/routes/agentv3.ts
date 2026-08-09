@@ -127,6 +127,7 @@ import { importFailureNarration, importFailureModelReason } from '../AgentV3/imp
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
+import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand } from '../AgentV3/GreenGuard';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
@@ -9922,6 +9923,12 @@ export function registerAgentV3Routes(app: Express): void {
       // leaves `ok:false` untouched (never a fake success). Recorded as RENDER_RESCUE so the admin can
       // see how often the upstream ok-verdict was wrong and chase that cause too (rule 5, 50/50 law).
       let renderRescued = false;
+      // GREEN GUARD (admin 2026-08-09: "app banne ke baad kharab nahi honi chahiye"). The single
+      // EARNED green signal for this turn: set only where the preview was genuinely opened in a real
+      // browser and rendered. Both places that call recordPreviewVerified() set it, and nothing else
+      // may — a build that merely "finished" is not proof the app works, and protecting a state we
+      // never verified would be the same lie in a new place.
+      let previewGreen = false;
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -9942,6 +9949,7 @@ export function registerAgentV3Routes(app: Express): void {
           if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker })) {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
+            previewGreen = true; // real browser, real render — the one thing worth protecting
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
@@ -9977,6 +9985,7 @@ export function registerAgentV3Routes(app: Express): void {
             // so the deferred previewOk signal is now TRUE — upgrade OUTCOME_BUILD_PARTIAL → BUILD_SUCCESS
             // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
             // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
+            previewGreen = true; // opened in a real browser, rendered, and no console errors
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             // APP HEALTH CULTURE (slice 1, admin 2026-07-12 "culture, not just stain"): the app RENDERS
             // — now check it actually has the interactive features the user asked for (Add/Delete/Filter…
@@ -10951,7 +10960,63 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
         if (Object.keys(toSave).length > 0) {
-          saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // ── GREEN GUARD, LAYER 2 (admin 2026-08-09) ──────────────────────────────────────────────
+          // "Pehli build me working app ban jati hai — baad me edit kar ke kharab kyu kiya jata hai?"
+          // Because THIS line saves whatever the turn produced, good or broken: the durable project has
+          // always been "the last turn", never "the last WORKING turn". So a bad edit overwrote the good
+          // app, whose only other copy was a git commit in a sandbox that gets recycled.
+          //
+          // Now: a turn that ended VERIFIED-GREEN is also kept as the last known good; a turn that ended
+          // broken on an app that WAS green is put back. The property this buys is the one EndgameRepair
+          // already proves for a single repair pass — a turn can help or do nothing, never harm.
+          //
+          // The failed attempt is NEVER destroyed: it is kept under its own key first, so "restore" costs
+          // the user nothing and a deliberate work-in-progress is recoverable rather than erased.
+          // Everything here is best-effort and flag-gated; on ANY failure the original save still happens
+          // exactly as before. Kill switch: AGENTV3_GREEN_GUARD=off.
+          let saved = false;
+          if (greenGuardEnabled()) {
+            try {
+              const greenKey = greenWorkspaceKey(workspaceId);
+              const snapshot = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
+              const hasSnapshot = Object.keys(snapshot).length > 0;
+              const decision = decideGreenGuard({
+                before: { green: hasSnapshot },
+                after: { green: previewGreen },
+                hasSnapshot,
+              });
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: `GREEN_GUARD_${decision.action.toUpperCase()}`,
+                message: decision.reason, autoResolved: true,
+              });
+              if (decision.action === 'save') {
+                await saveWorkspaceFiles(workspaceId, toSave);
+                saved = true;
+                // The new last known good. Written AFTER the project save so a failure here can never
+                // cost the user their actual files.
+                await saveWorkspaceFiles(greenKey, toSave).catch(() => {});
+              } else if (decision.action === 'restore') {
+                const plan = restorePlan(snapshot, toSave);
+                // Keep the broken attempt before undoing it — nothing the user paid for is thrown away.
+                await saveWorkspaceFiles(`${workspaceId}::attempt`, toSave).catch(() => {});
+                for (const [path, content] of Object.entries(plan.write)) {
+                  try { await actuator.writeFile(workspaceId, path, content); } catch { /* per-file best-effort */ }
+                }
+                const rm = buildRemoveCommand(plan.remove);
+                if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
+                await saveWorkspaceFiles(workspaceId, snapshot);
+                saved = true;
+                if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
+                events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan), ts: Date.now() });
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORED',
+                  message: `Restored the last verified-working version: ${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`,
+                  autoResolved: true,
+                });
+              }
+            } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
+          }
+          if (!saved) saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
           // P-BRE.2 — incremental signal: compare this build's file hashes to the previous build's
           // (Firestore-cached per workspace), report how many files were UNCHANGED, and store the new
           // hashes for next time. Best-effort — never affects the build or the save above.

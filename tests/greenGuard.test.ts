@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   decideGreenGuard, restorePlan, greenGuardMessage,
-  greenWorkspaceKey, isGreenSnapshotKey, greenGuardEnabled,
+  greenWorkspaceKey, isGreenSnapshotKey, greenGuardEnabled, buildRemoveCommand,
 } from '../src/server/AgentV3/GreenGuard';
 
 /**
@@ -121,5 +121,60 @@ describe('the kill switch (project convention: off without a deploy)', () => {
     expect(greenGuardEnabled({ AGENTV3_GREEN_GUARD: 'off' } as any)).toBe(false);
     expect(greenGuardEnabled({ AGENTV3_GREEN_GUARD: ' OFF ' } as any)).toBe(false);
     expect(greenGuardEnabled({ AGENTV3_GREEN_GUARD: 'on' } as any)).toBe(true);
+  });
+});
+
+describe('removing what the failed attempt added — in the SANDBOX too', () => {
+  it('builds a bounded rm for safe workspace paths', () => {
+    expect(buildRemoveCommand(['src/New.tsx', 'lib/a-b_c.ts'])).toBe("rm -f -- 'src/New.tsx' 'lib/a-b_c.ts'");
+    expect(buildRemoveCommand([])).toBe('');
+  });
+
+  it('DROPS anything that could escape the workspace or the quotes (no injection surface)', () => {
+    const bad = ['../../etc/passwd', '/etc/passwd', "a';rm -rf /;'", 'a$(whoami)', 'a`id`', 'a b|c', 'a\nb', '-rf'];
+    for (const p of bad) expect(buildRemoveCommand([p]), p).toBe('');
+    // A safe path alongside bad ones survives; the bad ones are dropped, never escaped.
+    expect(buildRemoveCommand(['ok.ts', '../evil'])).toBe("rm -f -- 'ok.ts'");
+  });
+
+  it('is capped, so a pathological restore cannot build an unbounded command line', () => {
+    const many = Array.from({ length: 500 }, (_, i) => `f${i}.ts`);
+    expect(buildRemoveCommand(many, 3)).toBe("rm -f -- 'f0.ts' 'f1.ts' 'f2.ts'");
+  });
+});
+
+describe('LAYER 2 WIRING — the guard is on the real save path and can never cost a user their files', () => {
+  const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+  const at = route.indexOf('── GREEN GUARD, LAYER 2');
+  const seg = route.slice(at, at + 5200);
+
+  it('sits at the durable file save — the exact line that used to overwrite a working app', () => {
+    expect(at).toBeGreaterThan(-1);
+    expect(seg).toContain('decideGreenGuard(');
+    expect(seg).toContain('greenWorkspaceKey(workspaceId)');
+  });
+
+  it('green is EARNED — only a real-browser render sets it', () => {
+    // Both setters sit beside a recordPreviewVerified() call; nothing else may set it.
+    const setters = route.match(/previewGreen = true;/g) || [];
+    expect(setters.length).toBe(2);
+    for (const m of route.matchAll(/previewGreen = true;/g)) {
+      expect(route.slice(m.index!, m.index! + 260)).toContain('recordPreviewVerified()');
+    }
+  });
+
+  it('the failed attempt is KEPT before anything is undone', () => {
+    expect(seg.indexOf('::attempt')).toBeGreaterThan(-1);
+    expect(seg.indexOf('::attempt')).toBeLessThan(seg.indexOf('saveWorkspaceFiles(workspaceId, snapshot)'));
+  });
+
+  it('the plain save still runs when the guard did not save — a user never loses their files', () => {
+    expect(seg).toContain('if (!saved) saveWorkspaceFiles(workspaceId, toSave)');
+    expect(seg).toContain('/* the guard must never cost a user their save');
+  });
+
+  it('is flag-gated and records its decision for the admin either way', () => {
+    expect(seg).toContain('greenGuardEnabled()');
+    expect(seg).toContain('GREEN_GUARD_');
   });
 });

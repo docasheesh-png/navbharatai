@@ -28504,3 +28504,45 @@ are only two states, fully working or not built yet — this is infrastructure t
 Tests: 14 in `tests/greenGuard.test.ts` — both layers' rules, the hybrid trap, restore idempotence,
 a deleted file coming back, the white-label check on the user message, and a source assertion that the
 app list excludes snapshots. Gate: tsc clean both projects, full run 12,821/12,821.
+
+### GREEN GUARD, layer 2 — now WIRED (the half the user actually feels)
+
+Layer 1 shipped the decision core and honestly recorded that it did nothing yet. This wires it into
+the exact line that caused the problem: the settle-time `saveWorkspaceFiles(workspaceId, toSave)`,
+which persisted whatever the turn produced, good or broken.
+
+- **The green signal is EARNED, not inferred.** `previewGreen` is set in exactly TWO places, both
+  beside a `recordPreviewVerified()` call — the render-rescue and the preview-verify paths, each of
+  which opened the app in a REAL browser and saw it render (the verify path also requires zero console
+  errors). A build that merely "finished" never sets it. Protecting a state we never verified would be
+  the same lie in a new place, and a test asserts there are exactly two setters.
+- **Green ⇒ the file set is ALSO written to `<workspaceId>::green`,** after the project save, so a
+  failure writing the snapshot can never cost the user their actual files.
+- **Was-green-and-now-broken ⇒ restored:** the good files are written back to the sandbox AND the
+  durable store, and the files the failed attempt ADDED are removed from both — without that second
+  half the result is a hybrid third state that was never tested (see layer 1's note).
+- **The failed attempt is never destroyed.** It is saved under `<workspaceId>::attempt` BEFORE
+  anything is undone, so a restore costs the user nothing and a deliberate work-in-progress is
+  recoverable rather than erased. Test asserts the ordering.
+- **Sandbox deletion goes through a PURE, tested `buildRemoveCommand`.** The actuator has no delete
+  primitive, so removal is a shell command — which is exactly why the path filter is strict
+  (workspace-relative, no traversal, no metacharacters), the list is capped, and unsafe paths are
+  DROPPED rather than escaped. A restore is not worth inventing a command-injection surface for.
+- **It can never cost a user their save.** The whole block is inside try/catch with `if (!saved)`
+  falling through to the original save, and it is flag-gated (`AGENTV3_GREEN_GUARD=off`). Its decision
+  is recorded in the build report either way (`GREEN_GUARD_SAVE|RESTORE|NONE`, `GREEN_GUARD_RESTORED`).
+
+**HONEST LIMITS, stated rather than discovered later:**
+1. It protects a turn that ends NOT-GREEN. It does NOT catch a turn that ends green while having
+   broken something the preview does not exercise (a route the check never visits). Narrowing that
+   needs a per-route fingerprint of the working app — the natural next slice.
+2. `before.green` is inferred from "a verified-good snapshot exists", not from a fresh check at turn
+   start. That is deliberately conservative and correct for the reported case, but it means a
+   deliberate, long-running rewrite that legitimately does not render yet WILL be rolled back — which
+   is why the attempt is preserved and the user is told, rather than silently overwritten.
+3. Unverified in production: this sandbox cannot reach the live site, so the proof is the next real
+   build report.
+
+Tests: 22 in `tests/greenGuard.test.ts` (8 new for layer 2) — the injection surface, the cap, exactly
+two green setters each beside a real-browser verification, attempt-kept-before-undo ordering, the
+fall-through save, and the flag gate. Gate: tsc clean both projects, full run 12,876/12,876.

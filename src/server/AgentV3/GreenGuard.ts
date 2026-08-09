@@ -123,6 +123,26 @@ export function greenGuardMessage(plan: RestorePlan): string {
   return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. Your working app is back exactly as it was — nothing of it was lost. Tell me what you wanted and I'll try a different way.`;
 }
 
+/** A path we are willing to delete: workspace-relative, no traversal, no shell metacharacters. */
+const SAFE_REL_PATH = /^(?!.*\.\.)[A-Za-z0-9._][A-Za-z0-9._\-/]{0,200}$/;
+
+/**
+ * The shell command that removes the files a failed attempt added, or '' when there is nothing safe
+ * to remove.
+ *
+ * Deleting must happen in the SANDBOX as well as the durable store: leaving the stray file on disk
+ * means the running app still imports it, so the preview stays broken and the "restore" was a lie.
+ * The actuator has no delete primitive, so this is a command — which is exactly why the path filter
+ * is strict and the whole thing is PURE and unit-tested rather than assembled inline. Anything with
+ * traversal, an absolute path, a quote or a shell metacharacter is dropped rather than escaped: a
+ * restore is not worth inventing a command-injection surface for.
+ */
+export function buildRemoveCommand(paths: readonly string[], max = 200): string {
+  const safe = (paths || []).filter((p) => typeof p === 'string' && SAFE_REL_PATH.test(p)).slice(0, max);
+  if (safe.length === 0) return '';
+  return `rm -f -- ${safe.map((p) => `'${p}'`).join(' ')}`;
+}
+
 /**
  * Where a workspace's last-known-good files live: the SAME durable store as the project itself, under
  * a suffixed key.

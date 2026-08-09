@@ -788,9 +788,39 @@ export class BuildDiagnostics {
    */
   private resolveRecoveredOnSuccess(): void {
     if (this.ok !== true) return;
+    const recovered = recoveredCommands(this.commands);
     for (const issue of this.issues) {
-      if (isRecoverableOnSuccess(issue.code)) issue.autoResolved = true;
+      if (!isRecoverableOnSuccess(issue.code)) continue;
+      // A FAILED COMMAND NEEDS EVIDENCE, NOT AN ALIBI (autopsy d6deaaf0, Mitrify, 2026-08-09).
+      // "The build succeeded, so everything transient was recovered" is true of a retried tool call.
+      // It is NOT true of a command whose failure had a lasting consequence: `npm run db:push` exited
+      // 127, the tables were never created, the next two diagnostics say exactly that — and this
+      // back-fill still stamped it `autoResolved: true`, where it became the build's ONE reported
+      // "self-heal". A tally that counts a permanent failure as a heal is a green number wearing a
+      // lie, and it feeds the admin's first-pass-quality headline. A failed command is now forgiven
+      // unless the run itself still carries an unresolved problem ABOUT that command — see
+      // failureHasSurvivingConsequence for why both this case and PaisaTrack's must keep working.
+      if (issue.code === 'SANDBOX_CMD_FAILED'
+        && !recovered.has(commandKey(issue.message))
+        && failureHasSurvivingConsequence(issue.message, this.issues)) continue;
+      issue.autoResolved = true;
     }
+  }
+
+  /**
+   * Update the framework label after the run learns what the app REALLY is.
+   *
+   * ROOT CAUSE (autopsy d6deaaf0, Mitrify, 2026-08-09): `meta.framework` was captured ONCE, when the
+   * diagnostics object was constructed at build start, from the request's default (`vite-react`).
+   * The import detected `node-express` twelve seconds later and the manifest recorded it correctly —
+   * so ONE build carried TWO different answers to the same question, and the report's answer was the
+   * wrong one. This is the exact sibling of the stale `model` label `honestModelLabel` was written to
+   * fix on 2026-07-27: same object, same moment of capture, same "the truth arrives later" shape. A
+   * blank value is ignored, so a caller can never erase a known framework with an unknown one.
+   */
+  setFramework(framework: string | undefined | null): void {
+    const f = (framework ?? '').trim();
+    if (f) this.meta.framework = f;
   }
 
   /**
@@ -931,7 +961,7 @@ export class BuildDiagnostics {
       },
       issues: [...this.issues],
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
-      rootCause: deriveRootCause({ issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok }),
+      rootCause: deriveRootCause({ issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands }),
       commands: this.commands.length ? [...this.commands] : undefined,
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,
       errors: this.errors.length ? [...this.errors] : undefined,
@@ -1084,6 +1114,59 @@ export function isRecoverableOnSuccess(code: string): boolean {
 }
 
 /**
+ * The identity of a command for "did this same thing later succeed?" — the first line, trimmed and
+ * capped exactly as the SANDBOX_CMD_FAILED message renders it, so an issue message and a recorded
+ * command compare equal without re-parsing either. PURE.
+ */
+export function commandKey(commandOrMessage: string): string {
+  const raw = (commandOrMessage || '').trim();
+  // Issue messages render as `$ <command> → exit N (Ms)`; recorded commands are the bare command.
+  const m = /^\$\s+([\s\S]*?)\s+→\s+/.exec(raw);
+  return (m ? m[1] : raw).split('\n')[0].trim().slice(0, 120);
+}
+
+/**
+ * Commands that ran CLEAN at least once — the strongest evidence that a failure of the same command
+ * was genuinely recovered rather than merely outlived by a build that succeeded anyway. PURE.
+ */
+export function recoveredCommands(
+  commands: ReadonlyArray<{ command: string; exitCode: number | null }>,
+): Set<string> {
+  const ok = new Set<string>();
+  for (const c of commands) if (c?.exitCode === 0) ok.add(commandKey(c.command));
+  return ok;
+}
+
+/**
+ * Did a failed command leave a CONSEQUENCE that outlived it? PURE.
+ *
+ * This is the discriminator between the two real cases, and both must keep working:
+ *  • PaisaTrack (2026-07-21): `npx tsc --noEmit` failed twice, the agent then FIXED the code and the
+ *    build succeeded without ever re-running tsc. Nothing in the run says the problem survived, so
+ *    the build's success genuinely supersedes it — forgiving it is what stops a passing build from
+ *    reporting phantom "unresolved" failures.
+ *  • Mitrify (2026-08-09): `npm run db:push` failed, and the run ALSO carries two still-unresolved
+ *    problems that name that very command — the tables were never created. Forgiving it stamped a
+ *    permanent failure as the build's one "self-heal".
+ * So: a failure is only forgiven when NOTHING unresolved in the same run is about it. Evidence, not
+ * an alibi. Deliberately conservative — with no surviving problem mentioning the command, behaviour
+ * is exactly as before.
+ */
+export function failureHasSurvivingConsequence(
+  commandText: string,
+  issues: ReadonlyArray<{ code: string; message: string; autoResolved: boolean; observation?: boolean }>,
+): boolean {
+  const key = commandKey(commandText);
+  if (!key) return false;
+  return issues.some((i) =>
+    !i.autoResolved
+    && i.observation !== true
+    && !isRecoverableOnSuccess(i.code)   // another transient is not a consequence
+    && typeof i.message === 'string'
+    && i.message.includes(key));
+}
+
+/**
  * The model label the report should LEAD with: what actually delivered, not what was planned.
  *
  * ROOT CAUSE (autopsy 2026-07-27, buildId d1623410): the report's `model` came from the router's
@@ -1148,6 +1231,8 @@ export function deriveRootCause(input: {
   errors?: readonly CapturedError[];
   review?: string;
   ok?: boolean;
+  /** The run's recorded commands — evidence for whether a failed one later succeeded. Optional. */
+  commands?: ReadonlyArray<{ command: string; exitCode: number | null }>;
 }): string | undefined {
   const { issues, errors, review, ok } = input;
   const outcome = [...issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
@@ -1163,7 +1248,15 @@ export function deriveRootCause(input: {
   // On a SUCCESSFUL build a recovered-transient (TOOL_ERROR / retry / non-zero sandbox probe) is NOT the
   // root cause — the build recovered from it (PaisaTrack "fix all error" autopsy 2026-07-21: an ok:true
   // build reported "Unterminated string in JSON" as its rootCause). Exclude those on ok:true.
-  const excluded = (i: BuildIssue): boolean => isInfra(i) || (ok === true && isRecoverableOnSuccess(i.code));
+  // …with the SAME evidence rule the back-fill uses (autopsy d6deaaf0): a failed command counts as
+  // recovered only when that command later ran clean. Without `commands` the caller has no evidence
+  // either way, so behaviour is exactly as before — this can only ever make the verdict more honest.
+  const recovered = recoveredCommands(input.commands ?? []);
+  const forgiven = (i: BuildIssue): boolean => i.code !== 'SANDBOX_CMD_FAILED'
+    || recovered.has(commandKey(i.message))
+    || !failureHasSurvivingConsequence(i.message, issues);
+  const excluded = (i: BuildIssue): boolean => isInfra(i)
+    || (ok === true && isRecoverableOnSuccess(i.code) && forgiven(i));
   // Pick the TERMINAL cause, not merely the FIRST noisy one. An unresolved ERROR outranks an unresolved
   // WARNING even when the warning appears earlier in the timeline (EstateNest autopsy 2026-07-20: two
   // benign architect `read_file`-not-found WARNINGS — reading a file before it was written, build

@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { envVarNames, conjurableSecrets, externalSecretVars, buildDevEnvContent } from '../src/server/AgentV3/ImportPreview';
 import { analyzePreviewHtml, jsonErrorBody } from '../src/server/AgentV3/PreviewVerify';
+import { BuildDiagnostics, commandKey, recoveredCommands, failureHasSurvivingConsequence } from '../src/server/AgentV3/BuildDiagnostics';
 
 /**
  * FORENSIC AUTOPSY — build report d6deaaf0 (Mitrify import, 2026-08-09).
@@ -160,5 +161,97 @@ describe('ROOT CAUSE 3 — a JSON error body is NOT a working preview', () => {
   it('a long error message is truncated rather than pasted whole into the verdict', () => {
     const msg = `database error: ${'y'.repeat(500)}`;
     expect(jsonErrorBody(`{"message":"${msg}"}`)).toMatch(/…$/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECOND PASS over the same report (admin: "autopsy me kuch bacha hai?"). Two more findings, both
+// of which the FIRST pass missed — and the first one is the more serious, because it made the
+// report lie about the engine's own quality.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ROOT CAUSE 4 — a permanent failure was counted as the build\'s ONE self-heal', () => {
+  const fresh = () => new BuildDiagnostics({ buildId: 'b1', workspaceId: 'ws', framework: 'vite-react' });
+
+  it('THE REPORTED LIE: db:push exit 127 with the tables still missing is NOT auto-resolved', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run db:push', exitCode: 127, stdout: '', stderr: 'sh: 1: drizzle-kit: not found', durationMs: 325 });
+    // The consequence the run itself recorded, exactly as the real report did.
+    d.record({
+      phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_FAILED',
+      message: "The app's database migration step (npm run db:push) exited 127 after 0s — its tables may be missing.",
+      autoResolved: false,
+    });
+    d.finish(true, 'Survey delivered.');
+    const r = d.report();
+    const failed = r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED');
+    expect(failed?.autoResolved).toBe(false);
+    // The heal tally must not count it. In the real report this was `healCount: 1` — a green number
+    // measuring a failure, feeding the admin's first-pass-quality headline.
+    expect(r.counts.autoResolved).toBe(0);
+    expect(r.counts.unresolved).toBeGreaterThan(0);
+  });
+
+  it('PaisaTrack still holds: an intermediate failure with NO surviving consequence is forgiven', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.finish(true, 'Build complete.');
+    const r = d.report();
+    expect(r.counts.unresolved).toBe(0);
+    expect(r.issues.filter((i) => i.code === 'SANDBOX_CMD_FAILED').every((i) => i.autoResolved)).toBe(true);
+  });
+
+  it('a command that later ran CLEAN is forgiven even with a lingering mention', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'boom', durationMs: 10 });
+    d.record({ phase: 'build', severity: 'warning', code: 'SOME_NOTE', message: 'npm run build was flaky earlier', autoResolved: false });
+    d.recordCommand({ command: 'npm run build', exitCode: 0, stdout: 'ok', stderr: '', durationMs: 10 });
+    d.finish(true, 'Build complete.');
+    const failed = d.report().issues.find((i) => i.code === 'SANDBOX_CMD_FAILED');
+    expect(failed?.autoResolved).toBe(true);
+  });
+
+  it('a FAILED build is untouched — it already keeps its failures', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run db:push', exitCode: 127, stdout: '', stderr: 'not found', durationMs: 1 });
+    d.finish(false, 'Build failed.');
+    expect(d.report().issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')?.autoResolved).toBe(false);
+  });
+
+  it('the helpers are precise: an issue message and a recorded command compare equal', () => {
+    expect(commandKey('$ npm run db:push → exit 127 (0s)')).toBe('npm run db:push');
+    expect(commandKey('npm run db:push')).toBe('npm run db:push');
+    expect(recoveredCommands([{ command: 'a', exitCode: 0 }, { command: 'b', exitCode: 1 }])).toEqual(new Set(['a']));
+    // An observation about the user's own code is never a consequence of OUR command.
+    expect(failureHasSurvivingConsequence('$ npm run db:push → exit 127', [
+      { code: 'INTEGRITY_UNUSED_DEP', message: 'npm run db:push mentioned', autoResolved: false, observation: true },
+    ])).toBe(false);
+  });
+});
+
+describe('ROOT CAUSE 5 — one build carried TWO answers for its own framework', () => {
+  it('the report keeps the request default until the import tells it otherwise', () => {
+    const d = new BuildDiagnostics({ buildId: 'b1', framework: 'vite-react' });
+    expect(d.report().framework).toBe('vite-react');
+    d.setFramework('node-express');      // what the import actually detected, 12s into the build
+    expect(d.report().framework).toBe('node-express');
+  });
+
+  it('a blank update can never erase a known framework', () => {
+    const d = new BuildDiagnostics({ buildId: 'b1', framework: 'node-express' });
+    d.setFramework('');
+    d.setFramework(undefined);
+    expect(d.report().framework).toBe('node-express');
+  });
+
+  it('every place that reassigns the framework tells the report (the sibling sweep)', () => {
+    const route = read('src/server/routes/agentv3.ts');
+    // The import landing — the path that produced the reported mismatch.
+    const at = route.indexOf('framework = validation.framework;');
+    expect(route.slice(at, at + 400)).toContain('setFramework');
+    // The drift correction — the same class, found by hunting siblings rather than waiting for it.
+    const drift = route.indexOf('const detected = detectFrameworkFromWorkspace(union);');
+    expect(route.slice(drift, drift + 400)).toContain('setFramework');
   });
 });

@@ -28294,3 +28294,47 @@ Tests: 16 new in `tests/importAutopsyMitrify.test.ts` — the exact Mitrify file
 `.env.example`) now yielding SESSION_SECRET, regex state-safety across repeated scans, install-before-
 migrate ordering and its skip path, the exact error body the admin saw, and the false-positive guards
 that keep a healthy API greeting passing. Gate: tsc clean both projects, full run 12,795/12,795.
+
+### Second pass over the SAME report (admin: "autopsy me kuch bacha hai fix karne layak?")
+
+Two more root causes, both missed by the first pass — and the first of them is the more serious,
+because it made the report lie about the ENGINE'S OWN quality rather than about the user's app.
+
+**ROOT CAUSE 4 — a permanent failure was counted as the build's ONE self-heal.** The report showed
+`healCount: 1`, and that heal was `$ npm run db:push → exit 127` carrying `autoResolved: true`. It was
+never healed: the tables were never created, and the run's own next two entries
+(`IMPORT_DB_MIGRATIONS_FAILED`, `DB_SCHEMA_MISSING`) say so and stayed unresolved. The cause was
+`RECOVERABLE_ON_SUCCESS`, which forgives every `SANDBOX_CMD_FAILED` on a build that ultimately
+succeeded — "a successful build recovered from them by definition". That inference is sound for a
+retried tool call and FALSE for a failure whose consequence outlived it. Worse, `healCount` feeds
+`firstPassQuality` — the admin's headline engine number — so the engine was crediting itself for its
+own unrepaired failure.
+The first fix attempted was "forgive only if the same command later ran clean". An EXISTING test
+(PaisaTrack, 2026-07-21) proved that too blunt: `npx tsc --noEmit` failed twice, the agent fixed the
+code, the build succeeded and tsc was never re-run — genuinely recovered, no re-run evidence. Both
+cases are real, so the discriminator had to be the EVIDENCE, not the command: a failure is forgiven
+unless the run still carries an unresolved, non-observation problem that NAMES that command
+(`failureHasSurvivingConsequence`). Mitrify's db:push is named by two surviving problems → stays a
+failure; PaisaTrack's tsc is named by none → still forgiven. `deriveRootCause` takes the same
+evidence so the two can never disagree.
+
+**ROOT CAUSE 5 — one build carried TWO answers for its own framework** (`node-express` in the
+manifest, `vite-react` in the report). `meta.framework` is captured ONCE when the diagnostics object
+is constructed at build start, from the request default; the import detected the real framework 12
+seconds later and only the manifest heard about it. This is the exact sibling of the stale `model`
+label that `honestModelLabel` was written to fix on 2026-07-27 — same object, same moment of capture,
+same "the truth arrives later" shape — which is why hunting siblings (rule 3) found it. New
+`setFramework()` is now called at BOTH places the label is reassigned: the import landing and the
+drift correction. A blank value can never erase a known one.
+
+**STILL OPEN (rule 6) — an unexplained 153-second hole.** Between `IMPORT_PREVIEW_SERVING`
+(ts 1786282510925) and the next recorded step (ts 1786282664021) the run recorded nothing but
+heartbeats. Total wall clock was 8m46s for a read-only survey whose actual model work was 30s across
+two calls. The earlier "hole in the recording" fix covered the boot; this gap sits AFTER it, so it is
+a different one and the report does not yet say what filled it. Not guessed at here — the next
+report with instrumentation over that window should name it.
+
+Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (24 total) — the exact db:push case staying
+unresolved with `counts.autoResolved: 0`, PaisaTrack still forgiven, a later-clean command forgiven,
+a failed build untouched, observations never counting as a consequence, and a source sweep proving
+every framework reassignment tells the report. Gate: tsc clean both projects, full run 12,803/12,803.

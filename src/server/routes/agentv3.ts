@@ -5728,6 +5728,8 @@ export function registerAgentV3Routes(app: Express): void {
         diag?: {
           record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }) => void;
           recordCommand?: (rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }) => void;
+          /** Push the framework label the import DETECTED, so the report stops carrying the request default. */
+          setFramework?: (framework: string) => void;
         } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
@@ -5783,6 +5785,10 @@ export function registerAgentV3Routes(app: Express): void {
       // empty": without it the import lives only in the ephemeral sandbox.
       try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
       framework = validation.framework;
+      // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
+      // start, before the import existed, so it kept the request default while the manifest recorded
+      // the detected one — one build, two answers. The label is now pushed wherever it changes.
+      try { opts.diag?.setFramework?.(framework); } catch { /* a label update never blocks an import */ }
       isEditMode = true;
       isImportTurn = true; // this turn's job was to import + survey, not to build (see the flag decl)
       emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
@@ -7210,7 +7216,13 @@ export function registerAgentV3Routes(app: Express): void {
               // Land them properly — durable store (Files/IDE/reopen), files_restored event,
               // framework lock, edit mode, memory index, background preview boot.
               if (Object.keys(after.files).length > 0) {
-                await landImportedProject(after.files, { source: cleanImportUrl, writeToSandbox: false });
+                // Only the label is threaded here (not the whole diagnostics object): this path never
+                // recorded issues, and widening its forensic surface is a separate change. The label
+                // alone is what the autopsy proved wrong, so the label alone is what moves.
+                await landImportedProject(after.files, {
+                  source: cleanImportUrl, writeToSandbox: false,
+                  diag: { record: () => {}, setFramework: (f) => buildDiag.setFramework(f) },
+                });
               } else {
                 events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
               }
@@ -7318,6 +7330,8 @@ export function registerAgentV3Routes(app: Express): void {
                 const detected = detectFrameworkFromWorkspace(union);
                 if (detected && detected !== framework) {
                   framework = detected;
+                  // Same sibling as the import path above — the report must not keep the stale label.
+                  try { buildDiagRef?.setFramework?.(detected); } catch { /* never block a build on a label */ }
                   events.emit({ type: 'narration', agent: 'architect', text: `🧭 Detected this is a ${detected} app (not the default) — switching to the ${detected} toolchain so the preview and checks match your code.`, ts: Date.now() });
                 }
               }

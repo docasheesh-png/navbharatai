@@ -77,15 +77,36 @@ now been audited against live code; there is no ⬜ left in this section.
 
 ---
 
-## 1 · 🟢 THE SIX THAT MATTER MOST
+## 1 · 🟢 WHAT ACTUALLY MATTERS MOST
+
+> **⚠️ This section was called "THE SIX" and the six do not exist (verified 2026-08-08).** Two are DONE
+> (production-DB migration shipped in #2177; zero-setup auth was already built). One is INFRA-BLOCKED and
+> was mislabelled "large" (React Native). One is half-shipped (Render done, Railway's API unverifiable
+> from here). One turned out to be half-built already (regional languages — the prompt side ships). Only
+> the template gallery checked out as straightforwardly open, and even its headline feature — real
+> screenshots — needs a capture pipeline that does not exist.
+>
+> Left as-is, this list would have sent a session to rebuild working features and to ship a framework
+> button the sandbox cannot run. Verify every line against code before starting.
 
 Ordered by what a user would actually feel.
 
-1. **React Native / Expo — real native mobile apps.** The single biggest capability gap against Bolt.
-   Today's Capacitor wrapper ships a webview, which is not the same product. 🔵 Large.
-2. **Sandbox → production database migration.** The dev sandbox's Postgres dies when the app is
-   published, so a user's LIVE app still needs them to create a durable database by hand. Everything
-   before this step (provisioning, connecting, Studio) is built — this is the last gap in the chain.
+1. **React Native / Expo — real native mobile apps.** 🔒 **RECLASSIFIED INFRA-BLOCKED (2026-08-08) —
+   it was sitting here as "just large", and that mislabel is dangerous.** Verified: `react-native`/`expo`
+   appear in NO framework registry (`frameworkOptions.ts` lists vite-react, nextjs, spring-boot …); the
+   three files that mention react-native contain detection patterns, not capability; and the fullstack
+   E2B image ships Node/Go/Mongo/JDK with **no Expo tooling and no Android SDK**.
+   So registering the framework would create a build option the sandbox **cannot run** — the exact
+   rule-2 failure already recorded for item 7 ("a 'Rust' build that 403s = a fake feature"). Left in §1,
+   a session could spend a week on it and ship a button that 403s.
+   **Real blocker:** rebuild + republish the E2B template with Expo (multi-GB) — admin infra, not a code
+   session. Today's Capacitor wrapper ships a webview, which is a different product, honestly labelled.
+2. ~~**Sandbox → production database migration.**~~ — ✅ **DONE (#2177, 2026-08-07).** After a successful
+   publish the app's OWN migrations now run against the connected database (Prisma / Drizzle / Knex /
+   TypeORM / Sequelize / Flyway / Alembic), gated by an allowlist of forward-only apply verbs that fails
+   CLOSED — `prisma migrate deploy` is allowed, `migrate reset` can never be. Honest at every branch:
+   non-Postgres says so, no migration tool is silent, a failure leaves the app published with a plain
+   line saying it cannot save data yet.
 3. ~~**Zero-setup auth.**~~ — ✅ **ALREADY BUILT (verified 2026-08-08 by reading the generated code, not
    the description).** `generate_auth` with `type: 'supabase'` IS this item — its own header says
    "ROADMAP #1 Phase 1.3: the ZERO-SETUP path … login works on the first build with no keys to paste".

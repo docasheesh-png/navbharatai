@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   DEFAULT_STORE_PACKS, storePacks, packForProduct, storeBillingEnabled,
-  storePlatformConfigured, storeTransactionDocId,
+  storePlatformConfigured, storeTransactionDocId, storeFeePct, netAfterStoreFee, storePriceForCredit,
 } from '../src/server/lib/storeBilling';
 import {
   decodeJwsPayload, verifyApplePurchase, verifyGooglePurchase, verifyStorePurchase,
@@ -28,14 +28,55 @@ const appleKeys = () => {
 
 afterEach(() => {
   _setStoreFetchForTests(null);
-  for (const k of ['STORE_PACKS', 'STORE_BILLING', 'APPLE_IAP_KEY_ID', 'APPLE_IAP_ISSUER_ID', 'APPLE_BUNDLE_ID', 'APPLE_IAP_PRIVATE_KEY', 'GOOGLE_PLAY_SA_JSON', 'GOOGLE_PLAY_PACKAGE_NAME']) delete process.env[k];
+  for (const k of ['STORE_PACKS', 'STORE_BILLING', 'STORE_FEE_PCT', 'APPLE_IAP_KEY_ID', 'APPLE_IAP_ISSUER_ID', 'APPLE_BUNDLE_ID', 'APPLE_IAP_PRIVATE_KEY', 'GOOGLE_PLAY_SA_JSON', 'GOOGLE_PLAY_PACKAGE_NAME']) delete process.env[k];
+});
+
+describe('our ₹ never shrinks because of the store cut (admin 2026-08-09)', () => {
+  it('EVERY default pack nets at least its credit value after the store commission', () => {
+    // The whole point of the markup. If this ever fails, we are funding the store out of margin.
+    for (const p of DEFAULT_STORE_PACKS) {
+      expect(netAfterStoreFee(p.priceInr, 15), p.productId).toBeGreaterThanOrEqual(p.creditInr);
+    }
+  });
+
+  it('storePriceForCredit is the arithmetic behind those prices — no guessing', () => {
+    expect(storePriceForCredit(99, 15)).toBeLessThanOrEqual(119);
+    expect(storePriceForCredit(999, 15)).toBeLessThanOrEqual(1199);
+    // At Apple's non-enrolled 30% the required price is visibly higher — which is exactly the
+    // signal the admin needs if the Small Business Program enrolment is ever missed.
+    expect(storePriceForCredit(99, 30)).toBeGreaterThan(storePriceForCredit(99, 15));
+  });
+
+  it('the fee rate is env-tunable and junk never becomes a rate', () => {
+    expect(storeFeePct()).toBe(15);
+    process.env.STORE_FEE_PCT = '30';
+    expect(storeFeePct()).toBe(30);
+    process.env.STORE_FEE_PCT = 'banana';
+    expect(storeFeePct()).toBe(15);
+    process.env.STORE_FEE_PCT = '150';
+    expect(storeFeePct()).toBe(15); // a rate ≥100% would compute a negative net
+  });
+
+  it('netAfterStoreFee refuses to invent a number for junk input', () => {
+    expect(netAfterStoreFee(0)).toBe(0);
+    expect(netAfterStoreFee(-5)).toBe(0);
+    expect(netAfterStoreFee(NaN)).toBe(0);
+  });
 });
 
 describe('the pack catalogue is the ONLY source of money', () => {
   it('ships sane defaults and accepts an env override', () => {
     expect(storePacks()).toEqual([...DEFAULT_STORE_PACKS]);
-    process.env.STORE_PACKS = JSON.stringify([{ productId: 'x.1', priceInr: 49, label: 'Mini' }]);
-    expect(storePacks()).toEqual([{ productId: 'x.1', priceInr: 49, label: 'Mini' }]);
+    process.env.STORE_PACKS = JSON.stringify([{ productId: 'x.1', priceInr: 59, creditInr: 49, label: 'Mini' }]);
+    expect(storePacks()).toEqual([{ productId: 'x.1', priceInr: 59, creditInr: 49, label: 'Mini' }]);
+  });
+
+  it('a config naming only one number credits exactly what was charged — never more', () => {
+    process.env.STORE_PACKS = JSON.stringify([{ productId: 'x.1', priceInr: 199 }]);
+    expect(storePacks()[0]).toMatchObject({ priceInr: 199, creditInr: 199 });
+    // And a config that tries to credit MORE than the store charged is clamped — no free money.
+    process.env.STORE_PACKS = JSON.stringify([{ productId: 'x.2', priceInr: 99, creditInr: 9999 }]);
+    expect(storePacks()[0].creditInr).toBe(99);
   });
 
   it('junk config NEVER leaves the app with nothing to sell, and never invents a price', () => {
@@ -46,7 +87,7 @@ describe('the pack catalogue is the ONLY source of money', () => {
   });
 
   it('an UNKNOWN product credits nothing — a retired store product cannot mint money', () => {
-    expect(packForProduct('nbai.tokens.99')?.priceInr).toBe(99);
+    expect(packForProduct('nbai.tokens.99')?.creditInr).toBe(99);
     expect(packForProduct('nbai.tokens.retired')).toBeNull();
     expect(packForProduct('')).toBeNull();
     expect(packForProduct(undefined)).toBeNull();
@@ -188,7 +229,8 @@ describe('the credit route cannot be talked into inventing money', () => {
     const packAt = route.indexOf('packForProduct(verified.productId)');
     expect(verifyAt).toBeGreaterThan(-1);
     expect(packAt).toBeGreaterThan(verifyAt);          // price is decided AFTER the store answers
-    expect(route).toContain('amountPaid: pack.priceInr');
+    expect(route).toContain('amountPaid: pack.creditInr');
+    expect(route).toContain('storePriceInr: pack.priceInr'); // both amounts recorded, none confused
     expect(route).not.toContain('req.body?.amount');   // an amount from the client is never money
   });
 

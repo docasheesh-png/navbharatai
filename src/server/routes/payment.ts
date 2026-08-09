@@ -13,6 +13,7 @@ import { verifyPaymentInternal, computeCreditedWallet } from '../lib/payments';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   storeBillingEnabled, storePlatformConfigured, storePacks, packForProduct, storeTransactionDocId,
+  storeFeePct, netAfterStoreFee,
 } from '../lib/storeBilling';
 import { verifyStorePurchase } from '../lib/storeVerify';
 import {
@@ -562,15 +563,23 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       if (existing.exists() && existing.data()?.paymentStatus === 'SUCCESS') {
         // Idempotent: the store re-delivers purchases on relaunch, and the app retries on flaky
         // networks. Both must be safe.
-        return res.json({ alreadyProcessed: true, balanceAdded: existing.data()?.balanceAdded ?? pack.priceInr });
+        return res.json({ alreadyProcessed: true, balanceAdded: existing.data()?.balanceAdded ?? pack.creditInr });
       }
 
       const nowIso = new Date().toISOString();
+      // TWO AMOUNTS, both recorded honestly (admin 2026-08-09: "hamare ₹ kam nahi hone chahiye").
+      // The store charged `priceInr` (marked up to absorb its commission); the wallet is credited
+      // `creditInr` — the SAME value this pack gives on the web, so a user is never short-changed
+      // for buying on a phone. `storePriceInr`/`storeFeePct` ride along on the transaction so the
+      // admin's own reporting can reconcile a payout without re-deriving the markup.
       const txData = {
         transactionId: docId,
         userId,
-        amountPaid: pack.priceInr,
-        balanceAdded: pack.priceInr,
+        amountPaid: pack.creditInr,
+        balanceAdded: pack.creditInr,
+        storePriceInr: pack.priceInr,
+        storeFeePct: storeFeePct(),
+        storeNetInr: netAfterStoreFee(pack.priceInr),
         isVishwakarmaOrder: true,   // the wallet-credit shape every top-up uses
         buyPass: false,
         paymentProvider: platform === 'apple' ? 'APPLE_IAP' : 'GOOGLE_PLAY',
@@ -592,7 +601,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
       return res.json({
         ok: true,
-        balanceAdded: pack.priceInr,
+        balanceAdded: pack.creditInr,
         tokenBalance: wallet.tokenBalance,
         currentBalance: wallet.remaining_balance,
       });

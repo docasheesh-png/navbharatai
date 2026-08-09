@@ -28148,3 +28148,23 @@ buy UI + platform routing (web → Cashfree, native → store). Products must ex
 and Play Console before that code can be exercised at all, and Apple's "Agreements, Tax, and
 Banking" + Google's payments profile take days to approve — so the admin checklist was handed over
 first, in parallel with this slice.
+
+## 2026-08-09 — Store markup: the store's cut comes out of the STORE PRICE, never our margin
+
+Admin: *"Google aur Apple apna % lete hai — hamare ₹ kam nahi hone chahiye!!"* Correct, and the fix
+is arithmetic, not hope. A pack now carries TWO amounts, deliberately separate:
+- `priceInr` — what the STORE charges, marked up to absorb the commission (₹119 / ₹299 / ₹599 / ₹1199)
+- `creditInr` — what the WALLET gets, identical to the web rail (₹99 / ₹249 / ₹499 / ₹999)
+At 15% every default pack nets ≥ its credit (₹119→₹101.15, ₹1199→₹1019.15) — **test-pinned**, so a
+future price edit that would quietly fund the store out of our margin fails CI.
+Why markup and not a smaller credit: charging ₹99 and crediting ₹84 reads as cheating the user;
+charging ₹119 for ₹99 of credit, with the reason on screen, is the same arithmetic told honestly —
+and is what every large app does on mobile. `storePriceForCredit()` is the calculation in code, so a
+price change is derived rather than guessed, and `netAfterStoreFee()` states the real net.
+⚠️ Recorded honestly: 15% is right for BOTH stores on the first $1M/year — Google applies it
+automatically, **Apple requires a one-time enrolment in the App Store Small Business Program**;
+without it the rate is 30% and these prices under-recover. India's GST also sits in the middle (the
+stores collect and remit). `STORE_FEE_PCT` exists so the admin retunes from the FIRST REAL PAYOUT
+report, which is the only honest source for the final rate. The transaction record now stores
+`storePriceInr` / `storeFeePct` / `storeNetInr` alongside the credit, so a payout can be reconciled
+without re-deriving anything.

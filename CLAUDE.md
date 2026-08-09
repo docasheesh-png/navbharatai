@@ -393,9 +393,18 @@ the code (it is actually read somewhere) on 2026-07-11.
   = more user trust); Storage can be added when Phase 1.4 needs it. ⚠️ Supabase FREE plan allows only
   **2 projects per org** — a user already at the cap must get an honest "no room in your Supabase account"
   message, never a silent failure.)
-- **One-wallet AI spending (shipped 2026-08-04, default OFF):** `AI_WALLET_SPEND` (`on` makes every
+- **One-wallet AI spending (shipped 2026-08-04):** `AI_WALLET_SPEND` (`on` makes every
   assistant/tool spend the SAME wallet as a build — see THE ONE-WALLET LAW). Related tunables:
   `AI_TOOL_FREE_DAILY_LIMIT`, `AI_IMAGE_FREE_DAILY_LIMIT`, `AI_IMAGE_PASS_DAILY_LIMIT`.
+  ✅ **SET `on` in Cloud Run by the admin 2026-08-08 — the wallet now really moves for Professionals,
+  Doctor AI and the Other-AI tools.** Turned on only AFTER the pre-launch audit found and fixed a real
+  OVERCHARGE (#2175): the tiered markup was applied PER CALL and then summed, so a multi-call request
+  paid the cheap-rate first dollar N times — three $0.50 calls billed $6.00 instead of $5.50, worst on
+  the App Debugger, which fans out over file batches. Verified live on `main` before the flag went on.
+  Everything else the audit checked was already clean: no double-charge path (zone-billed routes and
+  explicitly-billed routes are disjoint), a FAILED action is never charged, an unmeasured provider
+  charges ZERO rather than an invented number, an empty wallet is refused BEFORE any provider call, an
+  unreadable balance fails OPEN, and the daily rollup is dated on the server clock.
 - **E2B sandbox cost control (shipped 2026-08-04):** `AGENTV3_SANDBOX_IDLE_MINUTES` (default 15, was a
   hardcoded 45 — a 5-minute build was followed by 45 idle billed minutes), `AGENTV3_SANDBOX_TOUCH_MINUTES`
   (default 5 — how often a LIVE build refreshes its durable stamp so the cross-instance orphan reaper can
@@ -408,6 +417,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   NOT set, so every webhook is rejected (the signature cannot be verified) — a user who paid by UPI and
   closed the app satisfied neither delivery route and was never credited. Setting the webhook secret is
   still worth doing (credit in seconds instead of on the next visit), but the money no longer depends on it.
+- **Flipped ON by the admin 2026-08-08 (all four audited against live code first — see `ROADMAP.md` §0):**
+  `AGENTV3_PARALLEL_BUILD` (frontend + backend build concurrently; ONE `parallelBuild` value drives the
+  per-path write lock, the dispatch decision AND the architect prompt, so "parallel on, lock off" cannot
+  exist, and sub-agents share the same locked actuator) · `AGENTV3_WEAK_CHECKPOINT` (every 20 steps on a
+  weak build, the DETERMINISTIC readiness scan steers only on the two completeness-independent blockers;
+  no LLM call, so no cost; max 2 nudges from step 15) · `AGENTV3_VACCINE` (after a successful build the
+  platform RUNS the app's own test suite and reports honest pass/fail, so a green build whose tests fail
+  can never be called verified; a shell command, NOT a model call — its repair budget only opens if
+  `AGENTV3_FEATURE_HEAL` is also on, which it is not) · `AGENTV3_DEPHEALTH_GATE` (CVE + copyleft advisory
+  appended to an already-successful build; cannot block or fail one).
+  ⚠️ **What to watch on the first real builds:** parallel build is the only one that changes HOW a build
+  runs — its speedup is unmeasured and needs a real large multi-file build to judge. The other three are
+  advisory or deterministic and cannot fail a build. Any of them reverts instantly by unsetting it.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

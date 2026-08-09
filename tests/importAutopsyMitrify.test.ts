@@ -255,3 +255,44 @@ describe('ROOT CAUSE 5 — one build carried TWO answers for its own framework',
     expect(route.slice(drift, drift + 400)).toContain('setFramework');
   });
 });
+
+describe('ROOT CAUSE 6 — the app keeps its OWN port; the preview follows it', () => {
+  const route = read('src/server/routes/agentv3.ts');
+
+  /**
+   * ADMIN 2026-08-09: "report me likha hai app port 3000 par, lekin mitrify to port 5000 par hai."
+   * The report was not lying — the app really was on 3000, because a pin wrote `PORT=3000` into its
+   * dev .env and moved every PORT-honoring app off its own port. That pin treated the SYMPTOM of the
+   * 2026-08-07 bug (make the app match our URL) instead of the cause (make our URL follow the app),
+   * and on an import turn told to change nothing it changed the app's port.
+   */
+  it('nothing assigns the app a port any more', () => {
+    expect(route).not.toContain("provided.PORT = '3000'");
+    expect(route).not.toMatch(/provided\.PORT\s*=\s*['"`]\d+/);
+  });
+
+  it('an EMPTY PORT is never written either — that binds a random port, not a default', () => {
+    // `Number(process.env.PORT ?? 5000)` turns '' into 0. Absent is the only safe placeholder.
+    expect(buildDevEnvContent(['PORT', 'API_KEY'], {})).not.toMatch(/^PORT=/m);
+    expect(buildDevEnvContent(['PORT'], {})).toMatch(/NODE_ENV=development/);
+    // A REAL provided port (the user's own value) is still honoured.
+    expect(buildDevEnvContent(['PORT'], { PORT: '8080' })).toMatch(/^PORT=8080$/m);
+    // Every other var keeps its empty placeholder — only PORT is parsed rather than tested.
+    expect(buildDevEnvContent(['API_KEY'], {})).toMatch(/^API_KEY=$/m);
+  });
+
+  it('the import boot now uses the evidence-first flip, not a single guess', () => {
+    const at = route.indexOf('const { up, port } = parseDevServerHealthCheck(combined);');
+    const seg = route.slice(at, at + 3000);
+    expect(seg).toContain('rankPortCandidates(');
+    expect(seg).toContain('LISTENING_PORTS_COMMAND');
+    // The flip must stay COST-FREE on the happy path: it only engages when the first port did not render.
+    expect(seg).toContain('if (winner.url && !winner.served.rendered)');
+  });
+
+  it('the flip is fed real evidence — the app\'s own log first, the OS scan last', () => {
+    const at = route.indexOf('const { up, port } = parseDevServerHealthCheck(combined);');
+    const seg = route.slice(at, at + 3000);
+    expect(seg).toMatch(/rankPortCandidates\(\{\s*parsed:\s*port,\s*scriptPort,/);
+  });
+});

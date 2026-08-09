@@ -201,6 +201,12 @@ export function buildDevEnvContent(varNames: string[], provided: Record<string, 
   const env: Record<string, string> = { NODE_ENV: 'development' };
   for (const n of varNames) if (!(n in env)) env[n] = '';
   Object.assign(env, provided); // provisioned/real values always override the placeholder
+  // AN EMPTY PORT IS WORSE THAN NO PORT (2026-08-09). Every other var is safe as '' because apps
+  // test it for truthiness, but a port is PARSED: `process.env.PORT || 5000` falls back correctly,
+  // while `Number(process.env.PORT ?? 5000)` turns '' into 0 and the server binds a RANDOM port —
+  // which no preview could then find. Left absent, every idiom falls back to the app's own default,
+  // which is exactly what we want now that we no longer assign the port at all.
+  if (env.PORT === '') delete env.PORT;
   return Object.entries(env).map(([k, v]) => `${k}=${String(v)}`).join('\n') + '\n';
 }
 

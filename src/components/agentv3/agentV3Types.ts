@@ -71,6 +71,9 @@ export type AgentV3WireEvent =
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
   | { type: 'agent_done'; agent: AgentRole; ok: boolean; summary: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
+  // The build needs credentials from the user. Carries NAMES ONLY — the value is written straight to
+  // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
+  | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
@@ -167,6 +170,8 @@ export interface AgentV3ClientState {
   pendingClarify?: { domain: string; questions: string[] };
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
+  /** The build is waiting on credentials the user must type. Names only — values go straight to the vault. */
+  pendingSecrets?: { callId: string; prompt: string; secrets: Array<{ name: string; why: string }> };
   /** The sandbox workspace id for this build (enables History → restore). */
   workspaceId?: string;
   /** P0 — the ACTIVE build's unique id + prompt hash (from `build_meta`/`result`). Echoed on the report

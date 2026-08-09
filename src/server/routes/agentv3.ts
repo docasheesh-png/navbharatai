@@ -271,6 +271,7 @@ import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
+import { secretRequestPrompt } from '../AgentV3/secretRequest';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
@@ -7667,6 +7668,45 @@ export function registerAgentV3Routes(app: Express): void {
       //
       // It ASKS rather than acting because a new project consumes one of the two a free Supabase plan
       // allows. Deny (or the approval timeout) simply means we continue and report honestly.
+      // ASK THE USER FOR A KEY, MID-BUILD (admin 2026-08-08). Wired only when there is a VERIFIED user,
+      // because without one there is no vault to save into — and a popup whose input goes nowhere is
+      // worse than the build carrying on and reporting the missing key at the end.
+      //
+      // The value never passes through here. The client writes it straight to the encrypted vault over
+      // the authenticated secrets API; this callback only re-READS the vault afterwards and hands the
+      // dispatcher the pairs to merge into the app's `.env`. That re-read is the whole point: the vault
+      // is loaded once at build start, so a key saved mid-build would otherwise not exist for the
+      // running app until the next build.
+      if (userId) {
+        dispatcher.setSavedSecretNames(Object.keys(vaultSecrets));
+        dispatcher.setSecretRequestHandler(async (asks) => {
+          const requestId = randomUUID();
+          emit({
+            type: 'secret_request',
+            agent: 'architect',
+            callId: requestId,
+            prompt: secretRequestPrompt({ ask: asks, alreadyHave: [], rejected: [] }),
+            secrets: asks,
+            ts: Date.now(),
+          });
+          // `false` here means the user pressed Skip, closed the build, or the ask timed out — all of
+          // which are "carry on without it", never a retry loop.
+          if (!await awaitApproval(requestId)) return null;
+
+          // Re-read the vault: the client saved directly to it, so this is the first moment the server
+          // can see the values. Only the keys we ASKED for are returned — a build must never quietly
+          // pull in unrelated keys the user happens to have saved.
+          const fresh = await loadUserVaultSecrets(userId).catch(() => null);
+          if (!fresh) return null;
+          const picked: Record<string, string> = {};
+          for (const a of asks) {
+            const v = fresh[a.name];
+            if (typeof v === 'string' && v.trim()) picked[a.name] = v;
+          }
+          return Object.keys(picked).length > 0 ? picked : null;
+        });
+      }
+
       if (userId && vaultSecrets[DB_PROVIDER_MARKER] !== 'supabase') {
         const connected = await getConnection(userId).catch(() => null);
         if (connected?.orgId) {

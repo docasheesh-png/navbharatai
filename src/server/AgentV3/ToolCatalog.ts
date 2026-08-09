@@ -1991,6 +1991,38 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'request_secrets',
+      description:
+        'ASK THE USER for API keys / credentials this app needs, right now, while you are building. A '
+        + 'popup opens with a field per key; the user fills the values, they are saved to their own '
+        + 'encrypted vault (Settings → Secrets & API Keys) AND written into the app\'s .env immediately, '
+        + 'so you can use them in this same build via process.env / import.meta.env. '
+        + 'USE THIS instead of writing a placeholder key and continuing — a feature built on a fake key '
+        + 'cannot work. Name the EXACT env var your code will read, and say plainly what it is for and '
+        + 'where the user gets it. Keys the user already saved are filtered out automatically, so just '
+        + 'ask for what the app needs. NEVER ask for NavBharatAI\'s own provider keys (they are refused). '
+        + 'If the user skips, keep building and leave that feature as a visibly disabled "needs setup" '
+        + 'state — never fake it.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          secrets: {
+            type: 'array',
+            description: 'The keys to ask for.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'The EXACT env var name your code reads, e.g. STRIPE_SECRET_KEY.' },
+                why: { type: 'string', description: 'Plain language: what it is for and where to get it, e.g. "To take card payments — from your Stripe dashboard → Developers → API keys".' },
+              },
+              required: ['name', 'why'],
+            },
+          },
+        },
+        required: ['secrets'],
+      },
+    },
+    {
       name: 'generate_animation',
       description:
         'Add a dependency-free MOTION pack so the app feels alive instead of assembled: a motion.css of '
@@ -2994,6 +3026,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_backup',
   'analyze_requirements',
   'generate_i18n',
+  'request_secrets',
   'generate_animation',
   'generate_ui_states',
   'generate_state',

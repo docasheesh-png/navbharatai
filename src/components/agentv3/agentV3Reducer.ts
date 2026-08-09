@@ -210,6 +210,12 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       // Non-blocking: just record the questions for the panel to surface. The build keeps streaming.
       return { ...state, pendingClarify: { domain: event.domain, questions: event.questions } };
 
+    case 'secret_request':
+      // Same shape as a permission request — one pending interactive gate — but with fields to fill.
+      // Kept SEPARATE so a secrets popup can never be answered by the yes/no buttons, and so the
+      // reducer's existing "done clears pendingPermission" rule cannot silently drop a half-typed key.
+      return { ...state, pendingSecrets: { callId: event.callId, prompt: event.prompt, secrets: event.secrets } };
+
     case 'permission_request':
       return {
         ...state,
@@ -218,7 +224,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       };
 
     case 'done':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined, pendingSecrets: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'result':
       // T1-health-card: the successful build terminates with `result` (not `done`), so surface the

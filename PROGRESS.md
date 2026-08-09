@@ -27945,3 +27945,16 @@ the same effect from the server side:
 escaping, shared-cache invariant, cold-vs-warm page). Honest note: the FIRST-ever render of a new
 dependency set still pays the old waterfall (crawl runs in background); every render after — every
 reload, every reopen, every other user on the instance — gets the burst.
+
+## 2026-08-09 — DNS record cards now answer the registrar's own form (the "Type me kya choose karu?" freeze)
+
+Admin, with a live Hostinger screenshot beside our connect page: the registrar's add-record form
+leads with a "Type" dropdown (A/MX/AAAA/CNAME/SRV/TXT/CAA) — and our card answered it with only a
+tiny corner badge, so the user froze at "Choose type". Second freeze on the same form: registrar
+Name boxes want RELATIVE names ("@" for the apex, the bare prefix for a subdomain) while our cards
+show fully-qualified ones — pasted as-is they get rejected or silently doubled
+(mitrify.in.mitrify.in). The card now maps 1:1 onto the form: TYPE is a first-class copyable Field
+(same row style as Name/Value), and a per-record hint says exactly what to do — 'in the "Type"
+dropdown choose A … leave TTL as-is', plus the relative-Name fallback ('type @ instead — it means
+the same thing there') via new pure `relativeRecordName` (exported, trailing-dot/case tolerant,
+foreign names untouched). tests/dnsRecordTypeHint.test.ts.

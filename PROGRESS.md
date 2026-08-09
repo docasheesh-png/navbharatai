@@ -28664,3 +28664,63 @@ Tests: 7 more in `tests/greenGuard.test.ts` (29 total) — the exact phrases and
 near-misses that must NOT match, the message advertising the hatch, the honest "this did not run
 correctly" hand-back, and wiring assertions that it runs before the guardian and says something honest
 when there is nothing to give back. Gate: tsc clean both projects, full run 12,908/12,908.
+
+---
+
+## 2026-08-09 — AUTOPSY: build 02be22e3 (CRM `continue`) — THE FIRST LIVE PROOF OF GREEN GUARD
+
+**The production evidence I had been asking for.** This report carries
+`GREEN_GUARD_SAVE — "The turn ended with a verified working app — recorded as the last known good
+state."` So Green Guard (#2204) IS live, DID run, and DID capture a baseline on a real user build.
+Everything shipped today between #2196 and #2207 is no longer only unit-tested.
+
+### Ledger
+- ❌ **Still broken (3):** `READINESS_BLOCKER — 5 fake/incomplete code issue(s) (placeholder /
+  not-implemented / fake data)` unresolved (the app SHIPPED with placeholder code — a rule-2 violation
+  inside the generated app); `TEST_SUITE playwright: FAIL (exit=1)` unresolved; the `@types/react` v19
+  vs `react` v18 mismatch was described by the reviewer and never fixed.
+- 🔀 **Worked around (2):** `RENDER_RESCUE` — the build finished NOT-ok and was upgraded to success
+  because the preview rendered (honest for billing, but the 50/50 question stands: why did it finish
+  not-ok?); and the dev server was **KILLED (out of memory)** and silently restarted by the health
+  check.
+- ⏭️ **Skipped (2):** the 5 placeholder features were found and never fixed; the Playwright failure was
+  recorded and never investigated.
+- 🥵 **Struggle (3):** **8m18s** of wall clock for `continue` on a **24-file** app, with only 7 model
+  calls; `typecheck` alone took 34s and the dev-server start 33s; and the ETA **never converged** —
+  "~3 min" at the start, "about 3 min more" at minute 4, still "about 3 min more" at minute 8, then it
+  finished 19 seconds later.
+- ✅ **Self-heal (3, and this is the alarming bucket):** added 2 missing imports, removed a duplicate
+  import in `src/App.tsx`, removed one in `src/main.tsx` — **and then the identical three heals ran
+  AGAIN** twenty seconds later.
+
+### FIXED HERE — the guard's first live lesson was about its own honesty
+The recorded reason said **"a verified working app"** on a build whose own health said **"NOT READY ·
+66/100 — 5 incomplete features (placeholder code)"**. Two lines of ONE report contradicting each other
+— exactly the class this project keeps killing. What the guard actually verified is narrow: the app was
+opened in a real browser and it rendered. That is worth protecting, and it is NOT the same claim as
+"working". The reason now says what was measured, and carries the build's own readiness verdict
+(`hasUnresolvedReadinessBlocker`) so an unfinished baseline is recorded as *"the best known state, not
+a finished one"* instead of hiding behind a green word. The DECISION is unchanged: a snapshot that
+loads is still worth protecting, because the alternative is protecting nothing.
+
+### OPEN ROOT CAUSE (rule 6 — recorded, not guessed at)
+**A self-heal did not survive to the next reader.** `evaluate` ran twice (the post-answer integrity
+pass, then the reviewer). `readEvalSnapshot` re-reads every file FRESH from the sandbox each time, and
+the duplicate-import heal is guarded by `if (deduped !== content)` — so the second run finding the SAME
+duplicates proves the first heal's writes were **not present in the sandbox when the second read
+happened**. Either a lost write or something restoring older content over it. Between the two runs the
+post-answer pass logged "loading the durable project (24 files)", which is a suspect but NOT proof, and
+guessing the mechanism is precisely what rule 4 forbids. Needs a targeted trace. Cost today: duplicate
+work and a heal tally that counts the same repair twice.
+
+### PROACTIVE (step 6) — the ceiling this report shows, stated plainly
+This was a **weak-tier** build (`powerLevel: weak`, `noClaude: true`, 18 KIMI turns, ₹27.04). The
+placeholder code and the duplicate imports are what that tier produces, and no amount of downstream
+healing turns them into a finished app — the heals are the engine cleaning up its own output. The 50/50
+law's real question here is not "why did the heal miss one?" but "why is the builder generating
+duplicate imports and placeholder functions at all?" That is an upstream prompt/contract problem, and
+it is where the next real quality jump lives — not in another repair pass.
+
+Tests: 5 more in `tests/greenGuard.test.ts` (33 total) — the reason saying only what was measured, the
+unfinished-build caveat, no caveat when clean, and a wiring assertion that the readiness verdict really
+reaches the record. Gate: tsc clean both projects, full run 12,912/12,912.

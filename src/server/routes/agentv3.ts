@@ -11118,6 +11118,8 @@ export function registerAgentV3Routes(app: Express): void {
                 before: { green: hasSnapshot },
                 after: { green: previewGreen },
                 hasSnapshot,
+                // Carried so the recorded reason cannot claim more than the build itself reported.
+                ready: !buildDiag.hasUnresolvedReadinessBlocker(),
               });
               buildDiag.record({
                 phase: 'build', severity: 'info', code: `GREEN_GUARD_${decision.action.toUpperCase()}`,

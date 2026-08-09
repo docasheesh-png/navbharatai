@@ -73,7 +73,13 @@ const config: CapacitorConfig = {
     // it just is no longer the ONLY thing standing between the user and their app. A visible splash for
     // a moment too long is a blemish; a splash that never leaves is a dead app.
     SplashScreen: {
-      launchShowDuration: 2000,
+      // 1000ms, was 2000 (admin 2026-08-09: "app jhatt se open ho"). The splash cannot be REMOVED —
+      // the WebView genuinely takes time to boot, and no splash means a blank/white sheet, which is
+      // worse — but it no longer overstays: the native timer releases at 1s, and the explicit hide()
+      // in nativeShell still fires the moment React paints when that is sooner. The splash image
+      // itself is now the NavBharatAI logo on the app's own dark surface (generated into
+      // android/.../drawable*/splash.png), replacing the stock Capacitor artwork users were seeing.
+      launchShowDuration: 1000,
       launchAutoHide: true,
       backgroundColor: '#0d1117',
       launchFadeOutDuration: 200,

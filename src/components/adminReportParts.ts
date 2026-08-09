@@ -96,7 +96,13 @@ export function partJson(rec: ReportLike | null | undefined, key: string): strin
 export function partsSummary(rec: ReportLike | null | undefined): string {
   const total = partCount(rec);
   const omitted = rec?.session?.omittedBuilds ?? 0;
-  if (total <= 1) return 'Single build';
+  // A session too large to store keeps ONE part (the focused build) but is not a single-build session —
+  // saying "Single build" there would hide the fact that earlier builds existed and were dropped.
+  if (total <= 1) {
+    return omitted > 0
+      ? `Only the reported build could be stored · ${omitted} earlier build(s) omitted — session too large`
+      : 'Single build';
+  }
   const base = `${total} parts (every build/edit of this session)`;
   return omitted > 0 ? `${base} · ${omitted} older build(s) omitted — too large to store` : base;
 }

@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ordinal, partCount, reportParts, partJson, partsSummary } from '../src/components/adminReportParts';
 import { copyTextToClipboard } from '../src/lib/copyText';
-import { buildAdminReportRecord } from '../src/server/AgentV3/AdminBuildReportStore';
+import { buildAdminReportRecord, fitSessionToDocument, FIRESTORE_DOC_LIMIT_BYTES } from '../src/server/AgentV3/AdminBuildReportStore';
 import type { BuildDiagnosticsReport } from '../src/server/AgentV3/BuildDiagnostics';
 
 /**
@@ -81,6 +81,45 @@ describe('the record CARRIES the whole session (promise 1)', () => {
     expect(rec.session!.omittedBuilds).toBe(40 - rec.session!.builds.length);
     // Newest kept: the cap drops the OLDEST, never the build the user was looking at.
     expect(rec.session!.builds[rec.session!.builds.length - 1].startedAt).toBe(1_039);
+  });
+
+  /**
+   * THE REGRESSION THAT NEARLY SHIPPED. The session was first fitted with `capSessionReports`, whose
+   * budget (6 MB) was chosen for an HTTP download. This record goes into a FIRESTORE DOCUMENT, whose
+   * hard limit is 1 MiB — so a normal multi-build session would have produced an oversized document,
+   * Firestore would have REJECTED the write, and the admin would have received NOTHING, including the
+   * focused build that arrived fine before the change. The budget must come from the real sink.
+   */
+  it('the stored record ALWAYS fits a Firestore document, however long the session', () => {
+    const fat = (t: number) => rep(t, { summary: 'x'.repeat(200_000) });
+    const builds = Array.from({ length: 20 }, (_, i) => fat(1_000 + i));
+    const rec = buildAdminReportRecord(builds[builds.length - 1], ctx, builds);
+    expect(JSON.stringify(rec).length).toBeLessThan(FIRESTORE_DOC_LIMIT_BYTES);
+    expect(rec.session!.count).toBe(20);
+    expect(rec.session!.omittedBuilds).toBeGreaterThan(0);
+  });
+
+  it('when even ONE build will not fit, the session is empty but the omission is still declared', () => {
+    // Each build alone is bigger than the whole document — nothing can be kept.
+    const huge = (t: number) => rep(t, { summary: 'x'.repeat(3_000_000) });
+    const builds = [huge(1_000), huge(2_000), huge(3_000)];
+    const rec = buildAdminReportRecord(builds[2], ctx, builds);
+    expect(rec.session!.builds).toHaveLength(0);
+    expect(rec.session!.omittedBuilds).toBe(3);
+    expect(rec.meta.sessionParts).toBe(1);
+    // The focused report still arrives — the session is best-effort, the report never is.
+    expect(rec.report.startedAt).toBe(3_000);
+    // And the admin is TOLD, rather than seeing a record that looks like a plain single build.
+    expect(partsSummary(rec as any)).toMatch(/3 earlier build\(s\) omitted/);
+  });
+
+  it('fitSessionToDocument drops OLDEST first and never exceeds its budget', () => {
+    const items = [{ a: 'x'.repeat(100) }, { a: 'y'.repeat(100) }, { a: 'z'.repeat(100) }];
+    const one = JSON.stringify(items[0]).length;
+    const fit = fitSessionToDocument(items, one * 2 + 1);
+    expect(fit.kept).toEqual([items[1], items[2]]);
+    expect(fit.omitted).toBe(1);
+    expect(fitSessionToDocument(items, 0)).toEqual({ kept: [], omitted: 3 });
   });
 });
 

@@ -28217,3 +28217,20 @@ every part boundary (including "a part is not the session"), every part parsing 
 clipboard's honest false. `tests/adminAllBuilds.test.ts`'s download contract updated to assert both
 halves of the split (auth header on the fetch, blob + filename on the save) rather than weakened.
 Gate: tsc clean both projects, real build green, bundle 637.4/650 KB, full run 12,775/12,775.
+
+**Same-day follow-up — the session budget was sized for the WRONG SINK (caught pre-merge).**
+The first cut fitted the session with `capSessionReports`, whose 6 MB budget was chosen for an HTTP
+download. This record goes into a **Firestore document**, whose hard limit is **1 MiB**. A normal
+multi-build session would therefore have produced an oversized document, Firestore would have
+REJECTED the write, and the admin would have received **nothing** — including the focused build that
+arrived fine before the change. A feature meant to give the admin more would have given less.
+Root cause (rule 4): a shared helper was reused without re-deriving its budget for the new sink.
+Fix: the session's allowance is now DERIVED — `1 MiB − (the focused report + meta) − 96 KB headroom`
+for Firestore's own field-name/UTF-8 accounting — and fitted by a new `fitSessionToDocument`, which
+is deliberately NOT `capSessionReports`: that one keeps the newest build "even if huge" (right for a
+download, fatal against a hard limit), this one drops oldest-first and will store ZERO builds rather
+than lose the write. The `session` block is kept even when empty, because `omittedBuilds` is the only
+place the admin learns earlier builds existed; `partsSummary` says so instead of "Single build".
+Siblings swept: the two other `capSessionReports` call sites are both HTTP bodies — 6 MB is correct
+there, no change. Regression tests encode both failures (the whole record must fit a document; a
+session where not even one build fits still declares its omission).

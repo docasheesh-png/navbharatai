@@ -28454,3 +28454,53 @@ this module warns about. It falls through to English until a Marathi catalogue e
 
 Gate after the correction: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1123 files
 / 12,848 tests, exit 0**.
+## 2026-08-09 — GREEN GUARD, layer 1 of 2: the decision core (admin: "app banne ke baad kharab nahi honi chahiye")
+
+**The admin's question, which is the sharpest one asked of this project:** "pehli build me 4-5 min me
+app 100% ban jati hai, working app — to baad me 20 min tak usko edit kar ke kharab kyu kiya jata hai?
+Iska koi permanent solution nahi hai? … ek double layer protection banao."
+
+**WHY IT HAPPENS — mechanism, not theory (verified in code):**
+1. The durable project is saved at the END of every turn, whatever the outcome (`saveWorkspaceFiles`
+   at settle). So the saved state is "the LAST turn", never "the last WORKING turn". A bad edit
+   overwrites the good app, and the good version survives only as a git commit inside a sandbox that
+   is eventually recycled — i.e. the working app is genuinely gone.
+2. When an edit breaks something, the engine's answer is MORE model passes (repair → heal → review →
+   autofix). Each pass is a fresh chance to break something else, and it is where the twenty minutes
+   go. Repair is expensive and probabilistic; going back is cheap and certain.
+
+**THE PRINCIPLE WAS ALREADY PROVEN HERE, AT THE WRONG SCALE.** `EndgameRepair`'s convergence guard
+snapshots files before a repair and rolls them back when the error count gets worse — "monotone by
+construction: it helps or does nothing, never harms." Exactly right, applied to ONE pass and ONE
+metric. Green Guard raises that same property to the level that matters — the whole TURN.
+
+**SHIPPED IN THIS PR — the PURE decision half** (`GreenGuard.ts`, no I/O, fully unit-tested):
+- `decideGreenGuard` — green now ⇒ SAVE as last known good; not green now but green before ⇒ RESTORE;
+  never green ⇒ NONE (nothing good exists to protect, and restoring rubbish over rubbish helps nobody).
+  An absent/unknown verdict is never treated as green — green must be EARNED (the visited-and-really-
+  rendered verdict, which only became trustworthy with #2196's honest preview checks).
+- `restorePlan` — writes back changed files AND removes files the bad turn ADDED. That second half is
+  what makes it a restore instead of an overlay: writing good files on top while leaving new ones
+  behind produces a THIRD state that was never tested — neither the working app nor the broken one.
+  That hybrid is the classic way a "rollback" quietly makes things worse; closed by construction.
+- `greenGuardMessage` — the user is always TOLD, never silently rewritten, in plain language with no
+  vendor name (white-label law).
+- `greenWorkspaceKey` — the snapshot lives in the SAME durable file store under a `::green` suffix.
+  Deliberately not a new storage system: that store already solves one-document-per-file (so a big
+  project never hits the 1 MB document limit), sharded writes and bounded deletes. A snapshot store of
+  my own would have to re-earn all of it — and, on this exact day, would have re-learned the 1 MB
+  lesson the hard way (see the report-parts entry above).
+- Kill switch `AGENTV3_GREEN_GUARD=off`.
+
+**SIBLING FIXED IN THE SAME CHANGE (rule 3):** `listUserWorkspaceApps` prefix-scans `agentv3-<uid>-`,
+and a snapshot key shares that prefix — so the user would have seen their app TWICE and could have
+opened the backup by mistake. Snapshots are now excluded there.
+
+**HONEST STATUS — this does NOTHING for a user yet.** It is the decision core only; nothing calls it.
+Layer 2 (capturing the snapshot at settle, and performing the restore) is the next PR, and until that
+lands the admin's problem is unchanged. Recorded plainly rather than reported as solved (rule 2: there
+are only two states, fully working or not built yet — this is infrastructure toward the first).
+
+Tests: 14 in `tests/greenGuard.test.ts` — both layers' rules, the hybrid trap, restore idempotence,
+a deleted file coming back, the white-label check on the user message, and a source assertion that the
+app list excludes snapshots. Gate: tsc clean both projects, full run 12,821/12,821.

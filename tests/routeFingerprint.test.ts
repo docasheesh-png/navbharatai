@@ -6,6 +6,7 @@ import {
   encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled,
   MAX_CHECK_ROUTES,
 } from '../src/server/AgentV3/RouteFingerprint';
+import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 
 /**
  * ADMIN 2026-08-09, after Green Guard shipped: "jo jo bacha hai usko bhi smart fix karo."
@@ -140,5 +141,77 @@ describe('WIRING — the check runs on a green turn and can veto that green', ()
   it('the fingerprint is written under its OWN key, never into the snapshot', () => {
     expect(seg).toContain('fingerprintWorkspaceKey(workspaceId)');
     expect(seg).not.toContain('greenWorkspaceKey(workspaceId), encodeFingerprint');
+  });
+});
+
+describe('WHERE DID THE TIME GO — a quiet minute is now described, not guessed at', () => {
+  /**
+   * AUTOPSY d6deaaf0: five consecutive heartbeats all pointed at the SAME narration line from minute 1,
+   * and a 153-second window plus an 8m46s read-only survey had nothing to explain them. A heartbeat
+   * could only name a TOOL — but the long stretches of a build (import, database provisioning,
+   * `npm install`, dev-server boot, preview verification) are not tool calls, so the report literally
+   * could not answer "where did the time go?". Nothing was recording it.
+   */
+  it('the heartbeat names the ACTIVE PHASE instead of a stale last-activity line', () => {
+    let now = 0;
+    const d = new BuildDiagnostics({ buildId: 'b1', now: () => now });
+    d.enterPhase('installing dependencies and starting your app');
+    now = 130_000;
+    d.heartbeat();
+    const hb = d.report().issues.filter((i) => i.code === 'HEARTBEAT').pop();
+    expect(hb?.message).toContain('installing dependencies and starting your app');
+    expect(hb?.message).toMatch(/130s so far/);
+    expect(hb?.message).not.toContain('last: starting');
+  });
+
+  it('closing a phase records how long it took, so the timeline shows the minutes', () => {
+    let now = 0;
+    const d = new BuildDiagnostics({ buildId: 'b1', now: () => now });
+    d.enterPhase('creating the database tables');
+    now = 95_000;
+    d.exitPhase();
+    const timing = d.report().issues.find((i) => i.code === 'PHASE_TIMING');
+    expect(timing?.message).toBe('⏳ creating the database tables took 1m 35s.');
+  });
+
+  it('a sub-3s step is not written to the timeline — that would be noise, not signal', () => {
+    let now = 0;
+    const d = new BuildDiagnostics({ buildId: 'b1', now: () => now });
+    d.enterPhase('quick step');
+    now = 1_000;
+    d.exitPhase();
+    expect(d.report().issues.some((i) => i.code === 'PHASE_TIMING')).toBe(false);
+  });
+
+  it('a forgotten exitPhase can never freeze the heartbeat on a stale label', () => {
+    let now = 0;
+    const d = new BuildDiagnostics({ buildId: 'b1', now: () => now });
+    d.enterPhase('first');
+    now = 10_000;
+    d.enterPhase('second');   // supersedes rather than nesting
+    now = 20_000;
+    d.heartbeat();
+    const hb = d.report().issues.filter((i) => i.code === 'HEARTBEAT').pop();
+    expect(hb?.message).toContain('second');
+    expect(hb?.message).not.toContain('first');
+    // …and the superseded phase still contributed its timing to the record.
+    expect(d.report().issues.some((i) => i.code === 'PHASE_TIMING' && i.message.includes('first'))).toBe(true);
+  });
+
+  it('an in-flight TOOL still wins — a named tool is more specific than a phase', () => {
+    let now = 0;
+    const d = new BuildDiagnostics({ buildId: 'b1', now: () => now });
+    d.enterPhase('some phase');
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', callId: 'c1', tool: 'write_file', ts: 1 } as any);
+    now = 30_000;
+    d.heartbeat();
+    expect(d.report().issues.filter((i) => i.code === 'HEARTBEAT').pop()?.message).toContain('in-flight: write_file');
+  });
+
+  it('the long stretches of an import are actually marked', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain("enterPhase?.('creating the database tables')");
+    expect(route).toContain("enterPhase?.('installing dependencies and starting your app')");
+    expect(route).toContain("enterPhase?.('checking the live preview')");
   });
 });

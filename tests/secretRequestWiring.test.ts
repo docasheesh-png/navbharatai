@@ -174,3 +174,37 @@ describe('THE SECURITY PROPERTY — a value never travels on the build stream', 
     expect(fn).toContain('await this.onSecretsNeeded(plan.ask)');
   });
 });
+
+/**
+ * LINK 0 — THE ONE THAT WOULD HAVE MADE ALL SIX POINTLESS.
+ *
+ * The tool was registered, the popup rendered, the vault wired and the .env merge proven — and the
+ * system prompt said, in its own words, "SECRETS / API KEYS the app needs: NEVER ask". The builder
+ * would have obeyed the prompt and never called the tool. A capability the model is forbidden to use is
+ * as dead as one with no caller; it just fails somewhere a grep does not look.
+ *
+ * The chat-safety half of that rule was RIGHT and is kept: a secret must never be pasted into chat,
+ * because chat is stored. What changed is where the instruction routes — to the popup, instead of to
+ * "tell them to add it in Settings afterwards", which is the after-the-build dead end this feature
+ * exists to remove.
+ */
+describe('link 0 — the builder is TOLD to use the tool', () => {
+  const prompt = read('src/server/AgentV3/systemPrompt.ts');
+
+  it('the prompt names request_secrets', () => {
+    expect(prompt).toContain('call the request_secrets TOOL');
+  });
+
+  it('the chat-safety rule survives — a secret still never goes in chat', () => {
+    expect(prompt).toContain('NEVER ask the user to paste a key into the CHAT');
+  });
+
+  it('it says ask EARLY, not at the end', () => {
+    // Telling the user afterwards leaves them with a broken app and homework.
+    expect(prompt).toContain('Ask AS SOON AS you know the app needs it, not at');
+  });
+
+  it('and a skip still forbids a fake feature', () => {
+    expect(prompt).toContain('never a fake success');
+  });
+});

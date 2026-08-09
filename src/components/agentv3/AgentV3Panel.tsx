@@ -12,7 +12,7 @@ import {
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { authedFetch } from '../../lib/authedFetch';
-import { importProjectArchive } from '../../lib/masterZipImport';
+import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
@@ -1237,14 +1237,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // uploaded in chunks (so archive size is not a limit — see zipProjectUpload.ts), extracted and
   // landed SERVER-SIDE into this workspace, and then shown in Files. It never becomes base64 in a
   // build request, which is exactly what capped it at 18 MB and made a 161 MB import impossible.
-  const handleZipProject = async (file: File) => {
+  // ONE import runner, two entry points. The zip and folder paths differ ONLY in where the bytes come
+  // from; every step after that — the precondition, the progress line, the honest summary, the Files
+  // hand-off, the error surface — is identical, and duplicating it per entry point is how two ways in
+  // start behaving differently for no reason anyone chose.
+  const runProjectImport = async (
+    announce: string,
+    run: (workspaceId: string, onProgress: (p: { label: string }) => void) => Promise<MasterImportResult | null>,
+  ) => {
     if (running || zipImporting) return;
-    // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used by the COMMIT call,
-    // which runs AFTER the entire archive has been transferred — so a missing one used to cost a 161 MB,
-    // multi-minute upload before the server could correctly refuse it. Resolve and validate the target
-    // here, in the first millisecond, exactly like the server's own size/disk preflight. This also fixes
-    // the id itself: this was the one call site passing `state.workspaceId` (empty until a build
-    // attaches) instead of the session's real id, so a FRESH tab could never import at all.
+    // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used once the bytes are
+    // already moving, so a missing one used to cost a 161 MB, multi-minute transfer before the server
+    // could correctly refuse it. Resolve and validate here, in the first millisecond — the same shape as
+    // the server's own size/disk preflight. This also fixes the id itself: the import was the one call
+    // site passing `state.workspaceId` (empty until a build attaches) instead of the session's real id,
+    // so a FRESH tab could never import at all.
     const targetWorkspaceId = resolveImportWorkspaceId({
       stateWorkspaceId: state.workspaceId,
       fallbackWorkspaceId: clientWorkspaceId(userId, sessionIdRef.current),
@@ -1254,22 +1261,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       return;
     }
     setZipImporting(true);
-    const started = Date.now();
-    setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
+    setUserMsgs((c) => [...c, { role: 'agent', text: announce, ts: Date.now() }]);
     try {
-      // MASTER HANDLER: reads the archive in the BROWSER and uploads only the surviving source, falling
-      // back to the chunked server upload (and saying so) when the browser genuinely cannot. A 161 MB or
-      // 1 GB project now crosses the network as a few MB of source, because node_modules/media/junk are
-      // dropped before they cost bandwidth — and the server was going to discard them on arrival anyway.
-      const result = await importProjectArchive(file, targetWorkspaceId, userId, email, (p) => {
-        setZipProgress(p.label);
-      });
+      const result = await run(targetWorkspaceId, (p) => setZipProgress(p.label));
+      if (!result) return; // the user cancelled the picker — a normal outcome, not a failure
       // The tree is already in hand on the browser path — paint Files immediately instead of making the
       // user wait on a round trip for data this tab just read itself.
       if (result.files) { try { onFilesSync?.(result.files); } catch { /* the read-back below still covers it */ } }
-      // The success line now STATES what did not come in. A green tick over a silently-gutted project
-      // is the product lying about its own result — the exact thing the second and third absolute rules
-      // forbid. `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
+      // The success line STATES what did not come in. A green tick over a silently-gutted project is the
+      // product lying about its own result — the exact thing the second and third absolute rules forbid.
+      // `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
       setUserMsgs((c) => [...c, {
         role: 'agent',
         text: result.dropSummary
@@ -1283,8 +1284,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const res = await fetch('/api/agentv3/workspace-files', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          // The SAME resolved id the import landed in — reading back `state.workspaceId` here would
-          // ask an empty workspace for the files on exactly the fresh session this fix is about.
           body: JSON.stringify({ workspaceId: targetWorkspaceId, userId, email }),
         });
         const data = await res.json().catch(() => null);
@@ -1302,6 +1301,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setZipProgress('');
     }
   };
+
+  // A .zip: read in the browser, uploading only the surviving source; the chunked server upload stays
+  // as an honest fallback when the browser genuinely cannot open it.
+  const handleZipProject = (file: File) => runProjectImport(
+    `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`,
+    (workspaceId, onProgress) => importProjectArchive(file, workspaceId, userId, email, onProgress),
+  );
+
+  // A FOLDER: no zip, no archive, nothing staged — the browser reads the project where it already is.
+  const handleOpenFolder = () => runProjectImport(
+    '📂 Opening your project folder…',
+    async (workspaceId, onProgress) => {
+      const dir = await pickProjectFolder();
+      if (!dir) return null; // cancelled
+      return importProjectFolder(dir, dir.name || 'your project', workspaceId, userId, email, onProgress);
+    },
+  );
 
   // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
   // LIVE during a build — a sent message is queued server-side (/steer) and the AgentRunner injects
@@ -3709,6 +3725,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
                 onZipProject={(f) => void handleZipProject(f)}
+                onOpenFolder={() => void handleOpenFolder()}
               />
               {/* Voice to App — INLINE dictation (admin 2026-07-22): tap to speak → text types into THIS
                   input box live; tap again to stop. No separate page. Turns red/pulsing while listening. */}

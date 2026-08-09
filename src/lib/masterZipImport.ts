@@ -22,6 +22,7 @@ import { uploadZipProject, type ZipProjectResult } from './zipProjectUpload';
 import { chunkFilesForSync, totalFilesBytes } from './chunkFilesForSync';
 import { importDropSummary, type DropCounts } from './importDropReport';
 import { authJsonHeaders } from './authHeaders';
+import { readFolderInBrowser, isFolderImportSupported, pickProjectFolder } from './folderImport';
 
 export interface MasterImportProgress {
   /** What the user should be told is happening right now. */
@@ -151,5 +152,46 @@ export async function importProjectArchive(
   }
 }
 
+/**
+ * Import a project FOLDER the user picked directly — no zip, no archive, no staging.
+ *
+ * Shares every downstream step with the archive path (same filter, same chunked send, same honest
+ * summary), so a folder import and a zip import of the same project land identical files. The only
+ * difference is where the bytes are read from, which is exactly as it should be.
+ */
+export async function importProjectFolder(
+  root: FileSystemDirectoryHandle,
+  folderName: string,
+  workspaceId: string,
+  userId: string | null | undefined,
+  email: string | null | undefined,
+  onProgress?: (p: MasterImportProgress) => void,
+): Promise<MasterImportResult> {
+  const read = await readFolderInBrowser(root, (p) => onProgress?.({
+    // A folder walk has no known total until it ends, so a percentage here would be invented. Show the
+    // real running counts instead — honest, and just as reassuring that something is happening.
+    label: `Reading your project… ${p.kept.toLocaleString()} file(s) so far`,
+    fraction: null,
+  }));
+
+  const keptCount = Object.keys(read.files).length + Object.keys(read.assets).length;
+  if (keptCount === 0) {
+    throw new Error('No source files were found in that folder. Pick the folder that holds your app’s source (the one with package.json), not a build or downloads folder.');
+  }
+
+  const payload: Record<string, string> = { ...read.files, ...read.assets };
+  const { imported, failedBatches } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
+  const summary = importDropSummary({ kept: imported, totalEntries: read.totalEntries, dropped: read.dropped });
+  const warn = partialSaveWarning(failedBatches, imported);
+  return {
+    via: 'browser',
+    files: read.files,
+    fileName: folderName,
+    fileCount: keptCount,
+    imported,
+    dropSummary: [summary, warn].filter(Boolean).join('\n\n'),
+  };
+}
+
 /** Re-exported so callers need only this module. */
-export { totalFilesBytes };
+export { totalFilesBytes, isFolderImportSupported, pickProjectFolder };

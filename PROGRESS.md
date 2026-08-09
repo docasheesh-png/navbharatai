@@ -27923,3 +27923,67 @@ still kept.
 ### Remaining in the handler
 Part 3 — File System Access "Open Folder" (two-way, no upload at all on desktop Chrome/Edge).
 Part 4 — the connect-time audit.
+
+---
+
+## 2026-08-05 — master import handler, part 3: "Open Folder" — no zip at all
+
+Parts 1-2 stopped shipping a gigabyte by reading the ZIP in the browser. This removes the zip too.
+
+### What it does
+`📎 Attach → Open project folder` (Chrome/Edge desktop). The user points at their project folder and
+the browser reads it where it already is — nothing compressed, nothing staged, and the only bytes that
+leave the machine are the source files.
+
+It removes a failure CLASS rather than mitigating one: no archive to be truncated, no temp file on a
+Cloud Run instance, no chunk that can land on the wrong instance, no 30-minute upload TTL, no memory
+ceiling from holding an archive — because there is no archive. A 50 GB folder opens as cheaply as a
+5 MB one.
+
+### The decision that makes it fast
+**Prune before descending.** `node_modules` in a real project is 50,000-200,000 files. Walking into it
+to reject each entry individually would take minutes for a verdict already known from the folder name,
+so `SKIP_DIR_RE` is tested against the DIRECTORY before recursing. The biggest folder in the project
+costs exactly one check. This is the assertion the test suite cares most about (`visited` must never
+contain `node_modules`, `react` or `.git`), because the pure helpers cannot catch a traversal that
+descends anyway.
+
+### Shared, not duplicated (rule 4, three times over)
+- Every keep/drop verdict comes from `keepVerdict` — the same function the zip path uses, over the same
+  `importRules`. A folder import and a zip import of the same project MUST land identical files, or the
+  two paths quietly disagree and only one of them is right.
+- `readFolderInBrowser` returns the identical `BrowserZipResult` shape, so the master handler and the
+  panel treat a folder and an archive the same way and neither learns a second vocabulary.
+- The panel's two entry points were collapsed into ONE `runProjectImport` runner. The zip and folder
+  paths differ only in where the bytes come from; the precondition, progress line, honest summary,
+  Files hand-off and error surface are identical, and duplicating them is how two ways in start
+  behaving differently for no reason anyone chose.
+
+### Honest by construction
+- The menu item is gated on `isFolderImportSupported()` — real capability, not a browser sniff. Offering
+  a button that throws on Firefox or a phone is worse than not offering it, and the `.zip` option (which
+  now does the same in-browser filtering) stays for everyone.
+- A cancelled picker returns null and is treated as a normal outcome, never surfaced as a failure.
+- A file the OS refuses to hand over (permissions, broken link) is counted and skipped — one bad file
+  never aborts a 4,000-file import.
+- No invented percentage: a folder walk has no known total until it ends, so the progress line shows the
+  real running count instead.
+
+### Verification
+10 tests in `folderImport.test.ts`, including a fake directory tree that exercises the real traversal.
+One test-harness bug found and fixed along the way: `Blob.size` is a read-only getter, so
+`Object.assign`-ing a size onto a Blob throws — the walk then (correctly) counted every file as
+unreadable, and the test would have been measuring its own harness instead of the traversal.
+`tsc` (frontend + server) clean; full suite green. `AppKnowledgeBase.ts` updated in the same change.
+
+### ⚠️ NOT pushed — this session lost GitHub write access
+`git push`, `merge_pull_request` and the MCP `push_files` all return 403 while READS still work; the
+session's git relay changed port (41729 → 41789) and the write credentials went with it. Parts 2 and 3
+are committed locally and were delivered to the admin as patches. Nothing here is unverified — the gate
+was run in full — but it is unmerged until a session with write access applies it.
+
+### Remaining
+Part 4 — the connect-time audit (the "30 seconds after connecting" idea the admin has not yet chosen).
+Also still open from earlier: two-way write-back to the opened folder, which is the genuinely novel half
+of "Open Folder" and deliberately NOT attempted in the same change as the read path — writing to a
+user's real disk is irreversible from our side and deserves its own design.

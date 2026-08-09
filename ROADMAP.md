@@ -86,12 +86,21 @@ Ordered by what a user would actually feel.
 2. **Sandbox → production database migration.** The dev sandbox's Postgres dies when the app is
    published, so a user's LIVE app still needs them to create a durable database by hand. Everything
    before this step (provisioning, connecting, Studio) is built — this is the last gap in the chain.
-3. **Zero-setup auth.** One click, no keys: signup / login / session / reset on top of the database we
-   already provision. Replit's headline feature.
+3. ~~**Zero-setup auth.**~~ — ✅ **ALREADY BUILT (verified 2026-08-08 by reading the generated code, not
+   the description).** `generate_auth` with `type: 'supabase'` IS this item — its own header says
+   "ROADMAP #1 Phase 1.3: the ZERO-SETUP path … login works on the first build with no keys to paste".
+   The whole chain connects: Supabase OAuth → one-tap creates a project in the USER's account and saves
+   `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` → the vault→app pipe injects them into `.env` →
+   the generated module reads those exact names via `import.meta.env`. It also fails LOUDLY when the
+   keys are absent rather than shipping a login screen that silently never works.
 4. **AWS / Azure / Railway deploy providers.** Render shipped (and its UI was wired 2026-08-07). Three
    more provider modules, same shape as `renderDeploy.ts`.
-5. **Visual template gallery.** Sixteen starters exist but as *text only*. Screenshots + categories +
-   "build this" kills cold-start and drops weak-tier cost toward zero.
+5. **Visual template gallery.** ✅ **VERIFIED GENUINELY OPEN (2026-08-08)** — the first §1 item this
+   week that checked out as actually missing. `TemplatesPanel.tsx` has 14 starters, each carrying only
+   `id`, `name`, a Lucide `icon` and a `prompt`; there is no screenshot, thumbnail or category field
+   anywhere, and no `/api/templates` endpoint. (`savedTemplates` does exist, so the save-as-template
+   half is partly there — check it before rebuilding that piece.) Screenshots + categories + "build
+   this" kills cold-start and drops weak-tier cost toward zero.
 6. **Regional languages** — ⚠️ **RE-SCOPED 2026-08-08; the old "prompt + UI, 3–4 PR" line was wrong in
    both directions.** The *prompt* half is **already shipped**: `LANGUAGE_RULE` in
    `AgentV3/systemPrompt.ts` names Tamil/Bengali/Marathi explicitly, sits at the top of every prompt

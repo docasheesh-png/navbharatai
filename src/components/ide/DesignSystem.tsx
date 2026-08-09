@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LayoutTemplate, Copy, Check, Download, Eye, Code, Loader2, Save, History, AlertTriangle } from 'lucide-react';
 import { injectStyleBlock, canCarryStylesheet } from '../../lib/cssInjection';
 import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
+import { mergePalette, paletteSummary } from '../../lib/paletteMerge';
+import { authedFetch } from '../../lib/authedFetch';
 
 interface ColorToken {
   name: string;
@@ -135,6 +137,46 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
   const [activeTab, setActiveTab] = useState<'colors' | 'typography' | 'spacing' | 'components' | 'export'>('colors');
   const [copied, setCopied] = useState<string | null>(null);
   const [editingColor, setEditingColor] = useState<number | null>(null);
+  // BRAND → PALETTE. `/api/design/palette` has been live for a while — real AI, real auth gate, real
+  // wallet billing — and nothing in the client ever called it: `DesignAdvisor.aiPalette` is imported by
+  // exactly one file, the route itself. Meanwhile the only way to choose colours on this tab was to open
+  // a picker and guess, one swatch at a time. Same shape as the Render deploy (#2174) — a real
+  // capability with no door — so the door goes on the screen that already exists.
+  const [brand, setBrand] = useState('');
+  const [paletteBusy, setPaletteBusy] = useState(false);
+  const [paletteMsg, setPaletteMsg] = useState<string>('');
+
+  const applyBrandPalette = async () => {
+    const description = brand.trim();
+    if (!description || paletteBusy) return;
+    setPaletteBusy(true);
+    setPaletteMsg('');
+    try {
+      const res = await authedFetch('/api/design/palette', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand: description }),
+      }, 60_000);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        // The server's own words — a daily-allowance or empty-wallet refusal names the exact next
+        // step, and replacing it with a generic line would strand the user.
+        setPaletteMsg(data?.error || 'Could not create a palette just now. Please try again in a moment.');
+        return;
+      }
+      if (!data?.palette) {
+        setPaletteMsg('No palette came back this time. Try describing your brand a little differently.');
+        return;
+      }
+      const merged = mergePalette(tokens.colors, data.palette.colors);
+      setTokens((prev) => ({ ...prev, colors: merged.tokens }));
+      setPaletteMsg(paletteSummary(merged));
+    } catch {
+      setPaletteMsg('Could not reach NavBharatAI to create the palette.');
+    } finally {
+      setPaletteBusy(false);
+    }
+  };
   const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview');
 
   // Saving into the user's REAL app (admin 2026-07-27). This used to call onCodeUpdate, which only
@@ -272,6 +314,36 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
         {/* Colors */}
         {activeTab === 'colors' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Describe the brand, get a whole palette — instead of guessing one swatch at a time. */}
+            <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>Describe your brand</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void applyBrandPalette(); }}
+                  placeholder="e.g. a calm, trustworthy clinic for families"
+                  maxLength={300}
+                  style={{ flex: 1, background: '#0b0e14', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '6px 8px', color: '#e2e8f0', fontSize: 12 }}
+                />
+                <button
+                  onClick={() => void applyBrandPalette()}
+                  disabled={paletteBusy || !brand.trim()}
+                  style={{
+                    background: paletteBusy || !brand.trim() ? 'rgba(99,102,241,0.15)' : '#6366f1',
+                    color: paletteBusy || !brand.trim() ? '#94a3b8' : '#fff',
+                    border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                    cursor: paletteBusy || !brand.trim() ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  {paletteBusy ? <><Loader2 size={12} className="animate-spin" /> Creating…</> : 'Create palette'}
+                </button>
+              </div>
+              {paletteMsg && (
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>{paletteMsg}</div>
+              )}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
               {tokens.colors.map((color, idx) => (
                 <div key={idx} style={{ ...cardStyle, cursor: 'pointer' }} onClick={() => setEditingColor(editingColor === idx ? null : idx)}>

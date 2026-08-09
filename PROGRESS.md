@@ -28546,3 +28546,83 @@ which persisted whatever the turn produced, good or broken.
 Tests: 22 in `tests/greenGuard.test.ts` (8 new for layer 2) — the injection surface, the cap, exactly
 two green setters each beside a real-browser verification, attempt-kept-before-undo ordering, the
 fall-through save, and the flag gate. Gate: tsc clean both projects, full run 12,876/12,876.
+
+---
+
+## 2026-08-09 — ROUTE FINGERPRINT: the largest remaining way a working app got broken
+
+**Admin, right after Green Guard shipped:** "jo jo bacha hai usko bhi smart fix karo."
+
+**THE HOLE.** Green Guard judged "green" by opening ONE url — the home page. So an edit that left the
+home page rendering while breaking `/admin`, `/checkout` or `/profile` ended the turn GREEN, the broken
+state became the new LAST KNOWN GOOD, and the guard cheerfully protected the damage. Worse than a
+missed catch: the guard actively preserved the regression. This is the failure a user finds days later.
+
+**THE SMART PART IS THE SAMPLE, NOT THE SWEEP.** A real app declares hundreds of routes (the Mitrify
+report counted 186); visiting them all would add minutes to every build — a worse product than the bug.
+Instead: only the app's own VISITABLE pages are considered (an `/api` endpoint is not a screen, a
+`:id` route has no real value to substitute, an asset is not a page); a small DETERMINISTIC sample is
+taken (home first, then shallowest-then-alphabetical, capped at 5) so the same app yields the same
+routes every turn and two records are always comparable; and the check runs ONLY on a turn that already
+looks green, so a failing build pays nothing extra.
+
+**THE COMPARISON IS DELIBERATELY ASYMMETRIC**, and that is what keeps it from false-failing honest
+builds: a route that rendered before and does not now is a REGRESSION; a route that NEVER rendered is
+not held against the turn (it may need a login, seed data, or may not exist yet); and a route that was
+not reachable this turn is simply NOT MEASURED, never "broken" — the same honesty rule the preview
+verdict follows (an unmeasured thing must not be reported as a failure).
+
+**A regression VETOES green** (`previewGreen = false`), which hands the turn straight to Green Guard's
+restore — so the damage is undone instead of enshrined — and records `ROUTE_REGRESSION` naming the
+exact pages, with the line the admin needs: "the home page still loaded, so it would have passed
+unnoticed."
+
+The fingerprint lives under its OWN key (`<workspaceId>::greenmeta`), never inside the snapshot, so a
+restore can never write our bookkeeping file into the user's app. A corrupt record degrades to "no
+fingerprint" rather than throwing. Independent kill switch `AGENTV3_ROUTE_FINGERPRINT=off` — the extra
+page visits can be stopped without disabling Green Guard.
+
+**STILL OPEN (unchanged, stated again rather than quietly dropped):**
+1. A deliberate long rewrite that legitimately does not render yet is still rolled back. The attempt is
+   preserved under `<workspaceId>::attempt` and the user is told, but there is no one-sentence way to
+   ask for it back — that escape hatch is the next slice.
+2. The 153-second silent window and the 8m46s read-only survey remain unexplained.
+3. Everything from today is unverified in production; the proof is the next real build report.
+
+Tests: 19 in `tests/routeFingerprint.test.ts` — the sample's determinism and bounds, every not-a-page
+and not-visitable rejection, the caught bug (home fine + /admin broken), the three asymmetry rules,
+corrupt-record tolerance, and wiring assertions that the check only runs on a green turn and that a
+regression vetoes green. Gate: tsc clean both projects, full run 12,895/12,895.
+
+### Same day — WHERE DID THE TIME GO: the heartbeat could only ever name a tool
+
+**The open item from the d6deaaf0 autopsy, now measurable instead of guessed at.** That report had five
+consecutive heartbeats all pointing at the SAME narration line from minute 1, a 153-second window with
+nothing but heartbeats, and 8m46s of wall clock for a read-only survey whose actual model work was 30
+seconds. I recorded it as an open root cause rather than inventing an explanation.
+
+**ROOT CAUSE: `heartbeat()` could only name a TOOL the agent had called.** But the long stretches of a
+build are not tool calls at all — importing a repository, provisioning a database, `npm install`,
+booting the dev server, verifying the preview. During every one of them the heartbeat fell back to
+`last: <the most recent narration>`, which is why five minutes of real work were all labelled with a
+line from minute one. The report could not answer "where did the time go?" because **nothing was ever
+recording it**. That is a hole in the RECORDING, exactly like the 2026-08-04 "238-second window with no
+events" finding — the same class, one level further out.
+
+**FIX:** `enterPhase(name)` / `exitPhase()` on the diagnostics. An ACTIVE PHASE now outranks a stale
+last-activity line in the heartbeat ("minute 3 — still working (installing dependencies and starting
+your app, 130s so far)"), and closing a phase writes a `PHASE_TIMING` line so the report carries a
+plain timeline of where the minutes went. An in-flight TOOL still wins — a named tool is more specific
+than a phase. A new phase SUPERSEDES an unclosed one rather than nesting, so a forgotten `exitPhase`
+can never freeze the heartbeat on a stale label (and the superseded phase still contributes its
+timing). Sub-3s steps are not written — that is noise, not signal.
+
+Marked so far: creating the database tables, installing dependencies and starting your app, checking
+the live preview — i.e. precisely the stretches that produced the silent window. This does not make a
+build faster by itself; it makes the next report SAY where the time went, which is the prerequisite for
+cutting it honestly rather than by guesswork.
+
+Tests: 6 more in `tests/routeFingerprint.test.ts` (25 total) — the heartbeat naming the phase and its
+elapsed seconds, the timing line, the sub-3s suppression, the supersede-not-nest rule, tools still
+outranking phases, and a source assertion that the import's long stretches are actually marked.
+Gate: tsc clean both projects, full run 12,901/12,901.

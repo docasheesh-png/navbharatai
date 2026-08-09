@@ -128,6 +128,7 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand } from '../AgentV3/GreenGuard';
+import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
@@ -5732,6 +5733,9 @@ export function registerAgentV3Routes(app: Express): void {
           recordCommand?: (rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }) => void;
           /** Push the framework label the import DETECTED, so the report stops carrying the request default. */
           setFramework?: (framework: string) => void;
+          /** Name the long NON-TOOL stretch running now, so a quiet minute is described, not guessed at. */
+          enterPhase?: (name: string) => void;
+          exitPhase?: () => void;
         } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
@@ -5966,8 +5970,11 @@ export function registerAgentV3Routes(app: Express): void {
             // migration CLIs (drizzle-kit) do not load .env themselves. Best-effort + bounded: a
             // migration failure is recorded honestly and the boot still proceeds.
             const migration = needsDb && provided.DATABASE_URL ? detectMigrationCommand(importedFiles) : null;
+            // PHASE MARKERS (autopsy d6deaaf0): these stretches are not tool calls, so before this the
+            // heartbeat had nothing to name and the report showed a blank gap where the minutes went.
             if (migration) {
               emitLive({ type: 'narration', agent: 'architect', text: `🗄️ Creating your app's database tables (${migration.label}) so pages that read data work in the preview…`, ts: Date.now() });
+              opts.diag?.enterPhase?.('creating the database tables');
               const mStartedAt = Date.now();
               // INSTALL BEFORE MIGRATE (build report d6deaaf0, Mitrify — `npm run db:push` → exit 127,
               // `sh: 1: drizzle-kit: not found`). A migration CLI is a project DEPENDENCY, so running the
@@ -6030,7 +6037,9 @@ export function registerAgentV3Routes(app: Express): void {
                 });
               }
             }
+            opts.diag?.exitPhase?.();
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
+            opts.diag?.enterPhase?.('installing dependencies and starting your app');
             // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
             // start → serve), never a hardcoded `npm run dev` — CoreUI's script is `start`, so the
             // blind command failed with `Missing script: "dev"` and the live preview never booted.
@@ -6067,6 +6076,8 @@ export function registerAgentV3Routes(app: Express): void {
               });
               emitLive({ type: 'narration', agent: 'architect', text: `⚠️ Heads up: the app's database is missing its "${missingTable}" table — pages that read data may fail until the app's migrations run.`, ts: Date.now() });
             }
+            opts.diag?.exitPhase?.();
+            opts.diag?.enterPhase?.('checking the live preview');
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
               const scriptPort = devScriptPort(importedFiles['package.json'] ?? null);
@@ -10960,6 +10971,47 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
         if (Object.keys(toSave).length > 0) {
+          // ── ROUTE FINGERPRINT (admin 2026-08-09: "jo jo bacha hai usko bhi smart fix karo") ──────
+          // Green Guard judged "green" from ONE url — the home page. So an edit that left the home page
+          // rendering while breaking /admin ended the turn GREEN, the broken state became the new last
+          // known good, and the guard protected the damage. That is the largest remaining way a working
+          // app gets quietly broken, and the one a user finds days later.
+          //
+          // Here the pages that worked LAST time are re-opened. Losing one VETOES green, which hands the
+          // turn straight to Green Guard's restore. Deliberately cheap and deliberately asymmetric:
+          // it runs only on a turn that already looks green (a failing build pays nothing), it opens at
+          // most MAX_CHECK_ROUTES pages, and a page that never rendered is NOT held against this turn —
+          // only losing something we ourselves watched working counts.
+          let routeChecks: Array<{ route: string; rendered: boolean }> = [];
+          if (previewGreen && routeFingerprintEnabled() && lastPreviewUrl && actuator.browseUrl && !abort.signal.aborted) {
+            try {
+              const fpKey = fingerprintWorkspaceKey(workspaceId);
+              const previous = decodeFingerprint(await loadWorkspaceFiles(fpKey).catch(() => ({})));
+              // Watch the SAME pages as last time first, so two records are always comparable; top up
+              // from the project's own declared routes when there is nothing recorded yet.
+              const declared = getWorkspaceMemory(workspaceId).snapshot()?.graph?.routes ?? [];
+              const toCheck = pickCheckRoutes(previous?.ok?.length ? previous.ok : declared);
+              for (const r of toCheck) {
+                if (abort.signal.aborted) break;
+                const url = r === '/' ? lastPreviewUrl : `${lastPreviewUrl.replace(/\/$/, '')}${r}`;
+                try {
+                  const html = (await withTimeout(actuator.browseUrl(workspaceId, url), 20_000, 'route-fingerprint')).html;
+                  routeChecks.push({ route: r, rendered: analyzePreviewHtml(html).rendered });
+                } catch { /* unreachable ≠ broken by this turn — simply not measured */ }
+              }
+              const broken = regressedRoutes(previous, routeChecks);
+              if (broken.length > 0) {
+                previewGreen = false; // veto: Green Guard now restores instead of protecting the damage
+                buildDiag.record({
+                  phase: 'preview', severity: 'warning', code: 'ROUTE_REGRESSION',
+                  message: regressionMessage(broken), autoResolved: false,
+                });
+              } else if (routeChecks.some((c) => c.rendered)) {
+                // Record what worked, under its OWN key so a restore never writes it into the app.
+                await saveWorkspaceFiles(fpKey, encodeFingerprint(buildFingerprint(routeChecks, Date.now()))).catch(() => {});
+              }
+            } catch { /* the fingerprint is an extra safety net — it must never break a build */ }
+          }
           // ── GREEN GUARD, LAYER 2 (admin 2026-08-09) ──────────────────────────────────────────────
           // "Pehli build me working app ban jati hai — baad me edit kar ke kharab kyu kiya jata hai?"
           // Because THIS line saves whatever the turn produced, good or broken: the durable project has

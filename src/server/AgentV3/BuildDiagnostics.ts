@@ -337,6 +337,8 @@ export class BuildDiagnostics {
   private readonly pending = new Map<string, { tool: string; ts: number }>();
   /** Last thing the agent was doing — surfaced in the minute-by-minute heartbeat. */
   private lastActivity = 'starting';
+  /** The long non-tool stretch currently running — see heartbeat()/enterPhase() for why this exists. */
+  private activePhase: { name: string; at: number } | null = null;
   private truncated = false;
   /** AI Diagnosis Bundle channels — raw sandbox logs (#3), LLM I/O (#4), full errors+stack (#1). */
   private readonly commands: SandboxCommandRecord[] = [];
@@ -423,8 +425,50 @@ export class BuildDiagnostics {
   heartbeat(): void {
     const mins = Math.max(1, Math.round((this.now() - this.startedAt) / 60_000));
     const inFlight = [...this.pending.values()].map((p) => p.tool);
-    const status = inFlight.length ? `in-flight: ${inFlight.join(', ')}` : `last: ${this.lastActivity}`;
+    // THE BLIND SPOT THIS CLOSES (autopsy d6deaaf0, 2026-08-09). A heartbeat could only ever name a
+    // TOOL the agent called. The long stretches of a build are NOT tool calls — importing a repo,
+    // provisioning a database, `npm install`, booting the dev server, verifying the preview — so on
+    // that report five consecutive heartbeats all pointed at the SAME narration line from minute 1,
+    // and a 153-second window plus an 8m46s read-only survey were left with nothing to explain them.
+    // The report could not answer "where did the time go?" because nothing was ever recording it.
+    // An ACTIVE PHASE now outranks a stale last-activity line, so silence is described, not guessed.
+    const status = inFlight.length
+      ? `in-flight: ${inFlight.join(', ')}`
+      : this.activePhase
+        ? `${this.activePhase.name}, ${Math.round((this.now() - this.activePhase.at) / 1000)}s so far`
+        : `last: ${this.lastActivity}`;
     this.record({ phase: 'build', severity: 'info', code: 'HEARTBEAT', message: `⏱ minute ${mins} — still working (${status})`, autoResolved: true });
+  }
+
+  /**
+   * Mark the start of a long non-tool stretch (import, dependency install, preview boot, verification).
+   * Idempotent-ish: a new phase supersedes an unclosed one rather than nesting, because these stretches
+   * are sequential and a forgotten `exitPhase` must never freeze the heartbeat on a stale label.
+   */
+  enterPhase(name: string): void {
+    const n = (name || '').trim();
+    if (!n) return;
+    if (this.activePhase) this.exitPhase();
+    this.activePhase = { name: n, at: this.now() };
+  }
+
+  /**
+   * Close the active phase and record how long it took — so the report carries a plain timeline of
+   * where a build's minutes actually went, instead of a gap the next autopsy has to guess at.
+   */
+  exitPhase(): void {
+    const p = this.activePhase;
+    if (!p) return;
+    this.activePhase = null;
+    const seconds = Math.round((this.now() - p.at) / 1000);
+    // Only worth a line when it actually consumed time; a sub-3s step is noise on the timeline.
+    if (seconds >= 3) {
+      this.record({
+        phase: 'build', severity: 'info', code: 'PHASE_TIMING',
+        message: `⏳ ${p.name} took ${seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`}.`,
+        autoResolved: true,
+      });
+    }
   }
 
   /**

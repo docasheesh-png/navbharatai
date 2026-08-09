@@ -24,6 +24,33 @@ function visibleText(html: string): string {
     .trim();
 }
 
+/** Words that separate a server ERROR payload from a friendly JSON greeting like {"status":"ok"}. */
+const JSON_ERROR_WORDS = /\b(error|failed|failure|required|missing|invalid|unauthori[sz]ed|forbidden|not\s+found|cannot|can't|unexpected|exception|denied|unavailable|timeout|timed\s+out|crash)\b/i;
+
+/**
+ * If the page body is a JSON ERROR envelope, return its message; otherwise ''. PURE.
+ *
+ * Deliberately narrow, because an API-first project may legitimately answer `/` with JSON: the body
+ * must PARSE as a JSON object, be small enough to be a status envelope rather than real data, and
+ * either carry an explicit error field (`error`, `stack`, a 4xx/5xx `statusCode`) or a message that
+ * READS as a failure. `{"message":"API is running"}` is therefore left alone, while
+ * `{"message":"secret option required for sessions"}` is caught.
+ */
+export function jsonErrorBody(html: string): string {
+  const body = (html || '').trim();
+  if (!body.startsWith('{') || body.length > 2000) return '';
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return ''; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '';
+  const obj = parsed as Record<string, unknown>;
+  const message = [obj.message, obj.error, obj.msg, obj.detail].find((v) => typeof v === 'string' && v.trim()) as string | undefined;
+  const status = typeof obj.statusCode === 'number' ? obj.statusCode : typeof obj.status === 'number' ? obj.status : 0;
+  const explicit = 'error' in obj || 'stack' in obj || 'errors' in obj || (status >= 400 && status <= 599);
+  if (!explicit && !(message && JSON_ERROR_WORDS.test(message))) return '';
+  const shown = (message ?? JSON.stringify(obj)).trim();
+  return shown.length > 200 ? `${shown.slice(0, 200)}…` : shown;
+}
+
 /**
  * Judge whether a preview's RENDERED HTML represents a working app. Conservative: only declares
  * `rendered` when there is genuine visible content AND no error/empty-mount signal.
@@ -37,6 +64,17 @@ export function analyzePreviewHtml(html: string): PreviewVerdict {
   // must not be misread as a generic blank page by the length check below).
   if (/cannot get \//i.test(h) || /\b404\b[^<]{0,40}not found/i.test(lower)) {
     problems.push('the server returned 404 / "Cannot GET" — the dev server is not serving the app at this path');
+  }
+
+  // A JSON ERROR BODY WHERE THE APP SHOULD BE (build report d6deaaf0, Mitrify, 2026-08-09). The
+  // preview showed literally `{"message":"secret option required for sessions"}` — express-session
+  // rejecting EVERY request because it had no secret — and this analyser passed it as "rendered",
+  // so the build reported "✅ Live preview is up" over an app that served nothing but an error. It
+  // slipped through every existing rule: 48 characters (over the blank-page threshold), no overlay
+  // markup, no "Cannot GET", no empty mount root. A machine-readable error is still an error.
+  const jsonError = jsonErrorBody(h);
+  if (jsonError) {
+    problems.push(`the server returned an error instead of the app: ${jsonError}`);
   }
 
   if (problems.length === 0 && h.length < 40) {

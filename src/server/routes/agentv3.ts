@@ -5953,7 +5953,39 @@ export function registerAgentV3Routes(app: Express): void {
             if (migration) {
               emitLive({ type: 'narration', agent: 'architect', text: `🗄️ Creating your app's database tables (${migration.label}) so pages that read data work in the preview…`, ts: Date.now() });
               const mStartedAt = Date.now();
+              // INSTALL BEFORE MIGRATE (build report d6deaaf0, Mitrify — `npm run db:push` → exit 127,
+              // `sh: 1: drizzle-kit: not found`). A migration CLI is a project DEPENDENCY, so running the
+              // app's own migration script before `npm install` is a guaranteed failure — and it failed
+              // silently enough that the app booted against an empty database and every data page broke.
+              // The install is not extra time: the dev-server boot runs the same one seconds later and
+              // now finds a warm tree. A FAILED install is recorded and the migration is skipped, because
+              // running a command whose binary certainly does not exist only buys a confusing exit 127.
+              let depsReady = true;
               try {
+                const deps = await withTimeout(
+                  Promise.resolve(actuator.ensureDependencies?.(workspaceId) ?? { ok: true, ran: false, log: '' }),
+                  300_000,
+                  'import-db-migrate-deps',
+                );
+                depsReady = deps.ok;
+                if (!deps.ok) {
+                  opts.diag?.record({
+                    phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_SKIPPED',
+                    message: `Could not install the project's dependencies, so the migration step (${migration.label}) was skipped rather than run without them — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                    autoResolved: false,
+                    detail: (deps.log || '').split('\n').slice(-25).join('\n').slice(0, 1000),
+                  });
+                }
+              } catch (e) {
+                depsReady = false;
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_SKIPPED',
+                  message: `Installing the project's dependencies did not finish in time, so the migration step (${migration.label}) was skipped — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
+              if (depsReady) try {
                 const mcmd = `${shellEnvAssignment('DATABASE_URL', provided.DATABASE_URL)} ${migration.command}`;
                 const mres = await withTimeout(actuator.runCommand(workspaceId, mcmd), 150_000, 'import-db-migrate');
                 try {

@@ -64,10 +64,23 @@ describe('admin dashboard surface', () => {
   });
 
   it('downloads carry the admin token on fetch (a plain link cannot) and land as a .json file', () => {
-    const at = dashboard.indexOf('const downloadWorkspaceReport');
-    const seg = dashboard.slice(at, at + 1200);
-    expect(seg).toContain('{ headers }');
-    expect(seg).toContain('.json');
-    expect(seg).toContain('URL.createObjectURL');
+    // The fetch and the save were SPLIT (2026-08-09) so Copy and Download share one loader and can
+    // never hand over different bytes. Both halves are still asserted — the auth header on the fetch,
+    // and the blob/filename on the save.
+    const fetchAt = dashboard.indexOf('const fetchWorkspaceReportJson');
+    expect(fetchAt).toBeGreaterThan(-1);
+    const fetchSeg = dashboard.slice(fetchAt, fetchAt + 900);
+    expect(fetchSeg).toContain('{ headers }');
+    expect(fetchSeg).toContain('/download');
+
+    const saveAt = dashboard.indexOf('const saveJsonFile');
+    const saveSeg = dashboard.slice(saveAt, saveAt + 900);
+    expect(saveSeg).toContain('URL.createObjectURL');
+    expect(saveSeg).toContain("a.download = filename");
+
+    const dlAt = dashboard.indexOf('const downloadWorkspaceReport');
+    const dlSeg = dashboard.slice(dlAt, dlAt + 600);
+    expect(dlSeg).toContain('fetchWorkspaceReportJson(');
+    expect(dlSeg).toContain('.json`');
   });
 });

@@ -12,8 +12,9 @@ import { fileURLToPath } from 'url';
 //
 // 2) SERVER DETERMINISM — a `process.env.PORT || <default>` server binds whatever the ambient
 //    sandbox env implies, so the SAME app landed on different ports in different sandboxes while its
-//    saved URL stayed pinned to history. The import boot now writes a real PORT into the dev .env so
-//    every boot of a PORT-honoring app binds the same port, in every sandbox.
+//    saved URL stayed pinned to history. Answered FIRST by pinning the app's port, and since
+//    2026-08-09 by discovering it instead — see the superseded-block note below for why the pin was
+//    the wrong half of the fix and what replaced it.
 
 const SURFACE = readFileSync(
   fileURLToPath(new URL('../src/components/agentv3/PreviewSurface.tsx', import.meta.url)), 'utf8');
@@ -35,19 +36,37 @@ describe('fresh verified URL beats the saved one (client)', () => {
   });
 });
 
-describe('the import boot pins a deterministic PORT (server)', () => {
-  it('writes a real PORT into the dev .env when none was provisioned', () => {
-    expect(ROUTE).toContain("if (!('PORT' in provided)) provided.PORT = '3000';");
+/**
+ * SUPERSEDED 2026-08-09 — this block used to require the OPPOSITE of what it now requires.
+ *
+ * Root cause 2 above was answered twice: the client fix (root cause 1, still asserted above) made a
+ * freshly VERIFIED url outrank the saved one, and a server-side pin additionally wrote a fixed PORT
+ * into the app's dev .env so the app could not move. The client fix addressed the cause; the pin
+ * addressed the symptom, by changing the user's app.
+ *
+ * The admin caught the cost of that on 2026-08-09: "report me likha hai app port 3000 par, lekin
+ * mitrify to port 5000 par hai." The report was accurate — the app was on 3000 because we put it
+ * there. Forcing the port contradicts everything else in the user's project that names the real one
+ * (README, OAuth redirect URIs, a hardcoded proxy or CORS origin), and on an import turn instructed
+ * to change nothing, moving the app's port is exactly the change we promised not to make.
+ *
+ * So the pin is gone and the import boot now DISCOVERS the port instead — the app's own boot log
+ * first, then the ports the sandbox OS reports as listening, visiting candidates until one genuinely
+ * serves. The determinism the pin bought is replaced by evidence, which is stronger: it is right even
+ * for an app that ignores PORT entirely. `tests/importAutopsyMitrify.test.ts` carries the detail.
+ */
+describe('the import boot DISCOVERS the port — it never assigns one (server)', () => {
+  it('no fixed PORT is written into the user\'s app', () => {
+    expect(ROUTE).not.toMatch(/provided\.PORT\s*=\s*['"`]\d+/);
   });
 
-  it('the pin lands BEFORE the .env is written, so it reaches the app', () => {
-    const pinAt = ROUTE.indexOf("provided.PORT = '3000'");
-    const envWriteAt = ROUTE.indexOf('buildDevEnvContent(declaredEnvVars, provided)');
-    expect(pinAt).toBeGreaterThan(-1);
-    expect(envWriteAt).toBeGreaterThan(pinAt);
-  });
-
-  it('a real value, never an empty placeholder — PORT= (empty string) is itself a hazard: dotenv defines it, `|| default` falls through but parseInt(\'\') is NaN', () => {
+  it('an empty PORT is not written either — dotenv would define it and `Number(\'\')` binds port 0', () => {
     expect(ROUTE).not.toMatch(/provided\.PORT\s*=\s*''/);
+  });
+
+  it('the boot ranks real candidates instead of trusting one guess', () => {
+    const at = ROUTE.indexOf('const { up, port } = parseDevServerHealthCheck(combined);');
+    expect(at).toBeGreaterThan(-1);
+    expect(ROUTE.slice(at, at + 3000)).toContain('rankPortCandidates(');
   });
 });

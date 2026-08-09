@@ -732,6 +732,31 @@ export class E2BActuator implements IEngineerActuator {
     }
   }
 
+  /**
+   * Install the project's dependencies if they are missing or stale — see IEngineerActuator for the
+   * failure this closes (a migration that ran before `npm install` and died with "drizzle-kit: not
+   * found"). Uses the SAME staleness check and installer as the dev-server boot, so there is one
+   * install implementation and the two can never drift; a warm tree returns instantly with
+   * `ran: false`. Never throws — the caller decides what to do with an honest failure.
+   */
+  async ensureDependencies(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }> {
+    try {
+      const sandbox = await this.getSandbox(workspaceId);
+      const hasPkg = await sandbox.files.exists(`${WORKSPACE_ROOT}/package.json`).catch(() => false);
+      if (!hasPkg) return { ok: true, ran: false, log: '(no package.json — nothing to install)' };
+      const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
+      const stale = hasModules && await sandbox.commands
+        .run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => r.stdout.includes('STALE'))
+        .catch(() => false);
+      if (hasModules && !stale) return { ok: true, ran: false, log: '(dependencies already installed)' };
+      const res = await this._npmInstall(sandbox);
+      return { ok: res.success, ran: true, log: res.log };
+    } catch (err: any) {
+      return { ok: false, ran: false, log: err?.message ? String(err.message) : String(err) };
+    }
+  }
+
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const sandbox = await this.getSandbox(workspaceId);
     usageTracker.record(workspaceId, 'command');

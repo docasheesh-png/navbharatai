@@ -6,6 +6,8 @@ import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../lib/firstPassQuality';
+import { copyTextToClipboard } from '../lib/copyText';
+import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -53,6 +55,8 @@ interface AdminBuildReportRow {
    *  first-pass rate rather than counted as clean (see firstPassStatsFromMeta). */
   healCount?: number;
   unresolvedCount?: number;
+  /** How many builds/edits of the session the record carries (1 when only the focused build exists). */
+  sessionParts?: number;
 }
 
 type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
@@ -146,8 +150,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // Build Reports inbox (admin 2026-07-29) — the reports users submit via the single "Report" button.
   const [buildReports, setBuildReports] = useState<AdminBuildReportRow[]>([]);
   const [buildReportsLoading, setBuildReportsLoading] = useState(false);
-  const [selectedReport, setSelectedReport] = useState<{ meta: AdminBuildReportRow; report: any } | null>(null);
+  const [selectedReport, setSelectedReport] = useState<{
+    meta: AdminBuildReportRow;
+    report: any;
+    /** Every build/edit of that session (admin 2026-08-09) — absent for a single-build report. */
+    session?: { builds?: any[]; count?: number; omittedBuilds?: number } | null;
+  } | null>(null);
   const [selectedReportLoading, setSelectedReportLoading] = useState(false);
+  /** Which part of the open report the admin is looking at / will copy or download ('all' | index). */
+  const [reportPart, setReportPart] = useState('all');
   // ALL BUILDS browser (admin 2026-08-06) — every user's every build, no user submit needed.
   interface AllBuildRow {
     workspaceId: string; savedAt: number; ownerUid: string | null;
@@ -237,6 +248,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const openBuildReport = useCallback(async (id: string) => {
     setSelectedReportLoading(true);
+    setReportPart('all'); // a new report always opens on the whole thing, never the previous part index
     try {
       const r = await fetch(`/api/admin/build-reports/${encodeURIComponent(id)}`, { headers });
       if (!r.ok) throw new Error('not found');
@@ -273,18 +285,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, expandedWorkspace]);
 
-  // Auth header rides on fetch (a plain <a href> cannot carry it), then the blob becomes the file.
-  const downloadWorkspaceReport = async (workspaceId: string, buildId?: string) => {
+  /** Save a JSON string as a file. One implementation — every Download button funnels through it. */
+  const saveJsonFile = (json: string, filename: string) => {
     try {
-      const qs = buildId ? `?build=${encodeURIComponent(buildId)}` : '';
-      const r = await fetch(`/api/admin/all-builds/${encodeURIComponent(workspaceId)}/download${qs}`, { headers });
-      if (!r.ok) { toast('No report recorded for that build.'); return; }
-      const data = await r.json();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = buildId ? `build-${workspaceId}-${buildId}.json` : `build-session-${workspaceId}.json`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -292,20 +300,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); toast('Download failed.'); }
   };
 
-  const downloadSelectedReport = () => {
-    if (!selectedReport) return;
-    try {
-      const blob = new Blob([JSON.stringify(selectedReport, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `build-report-${selectedReport.meta.id}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) { console.error(e); toast('Download failed.'); }
+  /** Copy a JSON string, and say honestly whether it worked (a browser can refuse the clipboard). */
+  const copyJson = async (json: string, what: string) => {
+    if (!json) { toast('Nothing to copy — that part is empty.'); return; }
+    const ok = await copyTextToClipboard(json);
+    toast(ok ? `${what} copied as JSON.` : 'Copy blocked by the browser — use Download instead.');
   };
+
+  // Auth header rides on fetch (a plain <a href> cannot carry it). Returns the pretty JSON so the
+  // Download and Copy buttons share ONE fetch path and can never diverge in what they hand over.
+  const fetchWorkspaceReportJson = async (workspaceId: string, buildId?: string): Promise<string> => {
+    try {
+      const qs = buildId ? `?build=${encodeURIComponent(buildId)}` : '';
+      const r = await fetch(`/api/admin/all-builds/${encodeURIComponent(workspaceId)}/download${qs}`, { headers });
+      if (!r.ok) { toast('No report recorded for that build.'); return ''; }
+      return JSON.stringify(await r.json(), null, 2);
+    } catch (e) { console.error(e); toast('Could not load that report.'); return ''; }
+  };
+
+  const downloadWorkspaceReport = async (workspaceId: string, buildId?: string) => {
+    const json = await fetchWorkspaceReportJson(workspaceId, buildId);
+    if (!json) return;
+    saveJsonFile(json, buildId ? `build-${workspaceId}-${buildId}.json` : `build-session-${workspaceId}.json`);
+  };
+
+  const copyWorkspaceReport = async (workspaceId: string, buildId?: string) => {
+    const json = await fetchWorkspaceReportJson(workspaceId, buildId);
+    if (!json) return;
+    await copyJson(json, buildId ? 'Build' : 'Full session');
+  };
+
+  // PARTS (admin 2026-08-09): a submitted report now carries the WHOLE session, so Download/Copy act
+  // on the CHOSEN part — "All", or the 1st / 2nd / 3rd … build — never silently on just one of them.
+  const selectedParts = useMemo(() => reportParts(selectedReport), [selectedReport]);
+  const selectedPartJson = useMemo(() => partJson(selectedReport, reportPart), [selectedReport, reportPart]);
+  const selectedPartMeta = selectedParts.find((p) => p.key === reportPart) ?? selectedParts[0];
+
+  const downloadSelectedReport = () => {
+    if (!selectedPartJson) { toast('Nothing to download.'); return; }
+    saveJsonFile(selectedPartJson, `${selectedPartMeta?.filename || `build-report-${selectedReport?.meta.id}`}.json`);
+  };
+
+  const copySelectedReport = () => void copyJson(selectedPartJson, selectedPartMeta?.label || 'Report');
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
@@ -1338,6 +1374,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <span
                           role="button"
                           tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); } }}
+                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                        >
+                          ⧉ Copy session
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); }}
                           onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); } }}
                           className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10"
@@ -1351,12 +1396,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           {!expandedLoading && expandedHistory.length === 0 && (
                             <p className="text-[11px] text-[#8b949e]">Only the latest report exists for this workspace — use “Full session” above.</p>
                           )}
-                          {!expandedLoading && expandedHistory.map((h) => (
+                          {/* NUMBERED 1st, 2nd, 3rd … in BUILD order (admin 2026-08-09). The list itself
+                              arrives newest-first, so the position is counted from the far end — that way
+                              "1st part" here means the same build as "1st part" in the session download,
+                              which is ordered oldest → newest. */}
+                          {!expandedLoading && expandedHistory.map((h, i) => (
                             <div key={h.id} className="flex items-center gap-3 py-1">
                               <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${h.ok === true ? 'bg-emerald-400' : h.ok === false ? 'bg-rose-400' : 'bg-zinc-500'}`} />
+                              <span className="shrink-0 text-[10px] font-black text-[#8b949e] tabular-nums w-9">{ordinal(expandedHistory.length - i)}</span>
                               <span className="flex-1 min-w-0 text-[11px] text-[#c9d1d9] truncate">
                                 {h.startedAt ? new Date(h.startedAt).toLocaleString() : h.id} — {h.prompt || h.summary || 'build'}
                               </span>
+                              <button
+                                onClick={() => void copyWorkspaceReport(b.workspaceId, h.id)}
+                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-300/80 hover:text-white hover:bg-emerald-500/10"
+                              >
+                                ⧉ Copy
+                              </button>
                               <button
                                 onClick={() => void downloadWorkspaceReport(b.workspaceId, h.id)}
                                 className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
@@ -1583,6 +1639,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                     <span className="flex items-center gap-2">
                                       <span className={`w-2 h-2 rounded-full shrink-0 ${r.ok === true ? 'bg-emerald-500' : r.ok === false ? 'bg-red-500' : r.inFlight ? 'bg-amber-500' : 'bg-zinc-600'}`} />
                                       <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
+                                      {/* A report carrying the whole session says so in the list, so the
+                                          admin knows there are parts to choose from before opening it. */}
+                                      {(r.sessionParts ?? 1) > 1 && (
+                                        <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-indigo-300">{r.sessionParts} parts</span>
+                                      )}
                                     </span>
                                     {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
                                   </td>
@@ -1622,12 +1683,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
                       <div className="min-w-0">
                         <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
-                        {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()}</p>}
+                        {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()} · {partsSummary(selectedReport)}</p>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        {/* PART PICKER (admin 2026-08-09) — the record holds the whole 0→100% session,
+                            so the admin chooses how much to take: All, or the 1st / 2nd / 3rd … build.
+                            Only shown when there is genuinely more than one part to choose between. */}
+                        {selectedParts.length > 1 && (
+                          <select
+                            value={reportPart}
+                            onChange={(e) => setReportPart(e.target.value)}
+                            aria-label="Which part of the report"
+                            className="bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] font-bold text-white focus:outline-none focus:border-indigo-500"
+                          >
+                            {selectedParts.map((p) => (
+                              <option key={p.key} value={p.key}>{p.label}</option>
+                            ))}
+                          </select>
+                        )}
+                        <button
+                          onClick={copySelectedReport}
+                          disabled={!selectedPartJson}
+                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/20 disabled:opacity-40"
+                        >
+                          <FileText className="w-3.5 h-3.5" /> Copy JSON
+                        </button>
                         <button
                           onClick={downloadSelectedReport}
-                          disabled={!selectedReport}
+                          disabled={!selectedPartJson}
                           className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
                         >
                           <Download className="w-3.5 h-3.5" /> Download JSON
@@ -1639,7 +1722,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {selectedReportLoading ? (
                         <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>
                       ) : (
-                        <pre className="text-[11px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words font-mono">{JSON.stringify(selectedReport?.report ?? {}, null, 2)}</pre>
+                        // WHAT YOU SEE IS WHAT YOU COPY: the viewer renders the SAME bytes the two
+                        // buttons hand over, so the chosen part can never differ from the read one.
+                        <pre className="text-[11px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words font-mono">{selectedPartJson || JSON.stringify(selectedReport?.report ?? {}, null, 2)}</pre>
                       )}
                     </div>
                   </div>

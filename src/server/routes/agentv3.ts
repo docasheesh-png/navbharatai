@@ -2809,6 +2809,29 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const email = verifiedUid ? await resolveVerifiedEmail(verifiedUid).catch(() => null) : null;
     const name = verifiedUid ? await resolveVerifiedName(verifiedUid).catch(() => null) : null;
+    // THE WHOLE SESSION, not one turn (admin 2026-08-09: "puri report, sabhi edit sath 0 to 100 admin
+    // ko send ho"). A user builds and then edits many times; the failure they report is usually
+    // explained by an EARLIER turn — which a single-build record threw away, leaving the admin to
+    // debug with a fraction of the evidence. Gather every build of this workspace exactly the way the
+    // admin download route does (durable history + the latest, de-duplicated by start time, ordered
+    // oldest → newest). Best-effort: if history cannot be read, the record is exactly what it was
+    // before — one honest build, never a fake or partial "session".
+    const wsForSession = workspaceId || report.workspaceId || '';
+    let sessionBuilds: BuildDiagnosticsReport[] = [];
+    if (wsForSession) {
+      try {
+        const metaList = await listDiagnosticsHistory(wsForSession, 20).catch(() => []);
+        const full = (await Promise.all(
+          metaList.map((h) => getDiagnosticsHistoryItem(wsForSession, h.id).catch(() => null)),
+        )).filter(Boolean) as BuildDiagnosticsReport[];
+        const byStart = new Map<number, BuildDiagnosticsReport>();
+        for (const r of full) byStart.set(r.startedAt, r);
+        // The report in hand is the freshest truth for its own slot — and covers the case where the
+        // latest build is not in durable history yet.
+        byStart.set(report.startedAt, report);
+        sessionBuilds = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+      } catch { sessionBuilds = []; }
+    }
     const record = buildAdminReportRecord(report, {
       userId: verifiedUid ?? null,
       email,
@@ -2816,7 +2839,7 @@ export function registerAgentV3Routes(app: Express): void {
       workspaceId: workspaceId || report.workspaceId || null,
       buildId: buildId || report.buildId || null,
       reportedAt: Date.now(),
-    });
+    }, sessionBuilds);
     const saved = await saveAdminBuildReport(record);
     if (!saved) {
       res.status(502).json({ error: 'Could not send the report right now — please try again in a moment.' });
@@ -5706,6 +5729,8 @@ export function registerAgentV3Routes(app: Express): void {
         diag?: {
           record: (issue: { phase: 'build' | 'preview'; severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean; detail?: string }) => void;
           recordCommand?: (rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }) => void;
+          /** Push the framework label the import DETECTED, so the report stops carrying the request default. */
+          setFramework?: (framework: string) => void;
         } },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
@@ -5761,6 +5786,10 @@ export function registerAgentV3Routes(app: Express): void {
       // empty": without it the import lives only in the ephemeral sandbox.
       try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
       framework = validation.framework;
+      // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
+      // start, before the import existed, so it kept the request default while the manifest recorded
+      // the detected one — one build, two answers. The label is now pushed wherever it changes.
+      try { opts.diag?.setFramework?.(framework); } catch { /* a label update never blocks an import */ }
       isEditMode = true;
       isImportTurn = true; // this turn's job was to import + survey, not to build (see the flag decl)
       emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
@@ -5905,14 +5934,22 @@ export function registerAgentV3Routes(app: Express): void {
             // (express-session throws "secret option required" on '' — the exact reason the Mitrify
             // preview died). Third-party keys are NEVER faked; they stay empty + honestly listed.
             Object.assign(provided, conjurableSecrets(declaredEnvVars));
-            // PIN THE PORT (admin screenshot 2026-08-07 — Mitrify preview URL said 3000, the app was
-            // on 5000): a server that reads `process.env.PORT || <default>` binds a DIFFERENT port
-            // depending on ambient sandbox env, so the same app landed on 3000 in one sandbox and
-            // 5000 in the next while its saved preview URL stayed pinned to history — E2B's "Closed
-            // Port Error" page rendered as the app. Writing PORT into the dev .env makes every boot
-            // of a PORT-honoring app bind the SAME port, in every sandbox, forever. Apps that ignore
-            // PORT (vite serves its own) are untouched, and the log-parsed port still wins downstream.
-            if (!('PORT' in provided)) provided.PORT = '3000';
+            // THE PORT IS THE APP'S OWN — WE DO NOT ASSIGN IT (admin 2026-08-09: "report me likha hai
+            // app port 3000 par, lekin mitrify to port 5000 par hai").
+            //
+            // The report was not lying: the app really was on 3000, because WE PUT IT THERE. A pin
+            // used to write a fixed PORT into the app's dev .env, so every PORT-honoring app was
+            // moved off its own port. That was a workaround for the 2026-08-07
+            // bug where a saved preview URL kept pointing at a port the app no longer bound — and it
+            // treated the SYMPTOM (make the app match our URL) instead of the cause (make our URL
+            // follow the app). Forcing the port also silently contradicts everything else in the
+            // user's project that names the real one: their README, their OAuth redirect URIs, a
+            // hardcoded proxy or CORS origin — and on an import turn whose instruction was "do not
+            // change any files", moving the app's port is precisely the kind of change we promised
+            // not to make.
+            // The cause is now fixed properly: the boot below discovers the port the app ACTUALLY
+            // bound (its own log first, then the ports the sandbox OS reports as listening) and the
+            // preview URL follows it. So the app keeps its own port — 5000 stays 5000.
             // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
             // provisioned DATABASE_URL + generated local secrets, plus empty placeholders for the rest.
             if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {
@@ -5931,7 +5968,39 @@ export function registerAgentV3Routes(app: Express): void {
             if (migration) {
               emitLive({ type: 'narration', agent: 'architect', text: `🗄️ Creating your app's database tables (${migration.label}) so pages that read data work in the preview…`, ts: Date.now() });
               const mStartedAt = Date.now();
+              // INSTALL BEFORE MIGRATE (build report d6deaaf0, Mitrify — `npm run db:push` → exit 127,
+              // `sh: 1: drizzle-kit: not found`). A migration CLI is a project DEPENDENCY, so running the
+              // app's own migration script before `npm install` is a guaranteed failure — and it failed
+              // silently enough that the app booted against an empty database and every data page broke.
+              // The install is not extra time: the dev-server boot runs the same one seconds later and
+              // now finds a warm tree. A FAILED install is recorded and the migration is skipped, because
+              // running a command whose binary certainly does not exist only buys a confusing exit 127.
+              let depsReady = true;
               try {
+                const deps = await withTimeout(
+                  Promise.resolve(actuator.ensureDependencies?.(workspaceId) ?? { ok: true, ran: false, log: '' }),
+                  300_000,
+                  'import-db-migrate-deps',
+                );
+                depsReady = deps.ok;
+                if (!deps.ok) {
+                  opts.diag?.record({
+                    phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_SKIPPED',
+                    message: `Could not install the project's dependencies, so the migration step (${migration.label}) was skipped rather than run without them — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                    autoResolved: false,
+                    detail: (deps.log || '').split('\n').slice(-25).join('\n').slice(0, 1000),
+                  });
+                }
+              } catch (e) {
+                depsReady = false;
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_SKIPPED',
+                  message: `Installing the project's dependencies did not finish in time, so the migration step (${migration.label}) was skipped — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
+              if (depsReady) try {
                 const mcmd = `${shellEnvAssignment('DATABASE_URL', provided.DATABASE_URL)} ${migration.command}`;
                 const mres = await withTimeout(actuator.runCommand(workspaceId, mcmd), 150_000, 'import-db-migrate');
                 try {
@@ -5999,21 +6068,43 @@ export function registerAgentV3Routes(app: Express): void {
             }
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
-              const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
-              const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
+              const scriptPort = devScriptPort(importedFiles['package.json'] ?? null);
+              let bootPort = port ?? scriptPort ?? oneShotDevPort(framework);
               // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
               // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
               // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
               // problem analyzePreviewHtml found, e.g. a full-stack app serving its API but 404-ing its
               // client routes). The URL is still exposed either way so the user can retry from the tab.
-              let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
-              if (bootUrl) {
+              const visit = async (candidate: number) => {
+                let url = '';
+                try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, candidate), 10_000, 'import-preview-url')); }
+                catch { /* URL resolution is best-effort — the boot itself already succeeded */ }
+                if (!url) return { url: '', served: { rendered: true, problems: [] as string[] } };
+                try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, url), 30_000, 'import-preview-verify')).html) }; }
+                catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
+              };
+              let winner = await visit(bootPort);
+              // FLIP SYSTEM, now on the IMPORT path too (admin 2026-08-09 — "report me port 3000, lekin
+              // mitrify to 5000 par hai"). The flip existed only on the Diagnose route, so this path had
+              // ONE guess and no way to correct it — which is why the port was being PINNED instead.
+              // With the pin gone the app keeps its own port, and if the first guess does not render we
+              // ask the sandbox OS which ports are REALLY listening and visit each candidate until one
+              // genuinely serves the app. Every flip target is evidence, every verdict is earned, and
+              // the happy path costs nothing extra.
+              if (winner.url && !winner.served.rendered) {
+                let listening: number[] = [];
                 try {
-                  const probe = await withTimeout(actuator.browseUrl(workspaceId, bootUrl), 30_000, 'import-preview-verify');
-                  served = analyzePreviewHtml(probe.html);
-                } catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
-                emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
+                  listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'import-preview-port-scan')).stdout);
+                } catch { /* best-effort — without the scan the flip simply has no extra candidates */ }
+                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening })) {
+                  if (cand === bootPort) continue;
+                  const attempt = await visit(cand);
+                  if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }
+                }
               }
+              const bootUrl = winner.url;
+              const served = winner.served;
+              if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               // BOOT LOG DIAGNOSER (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc): the boot log
               // is IN HAND here, and on that build it named the exact cause (`ECONNREFUSED …:5432` at
               // ensureSchema) while the verdict still guessed "it isn't serving the app's pages (only
@@ -7156,7 +7247,13 @@ export function registerAgentV3Routes(app: Express): void {
               // Land them properly — durable store (Files/IDE/reopen), files_restored event,
               // framework lock, edit mode, memory index, background preview boot.
               if (Object.keys(after.files).length > 0) {
-                await landImportedProject(after.files, { source: cleanImportUrl, writeToSandbox: false });
+                // Only the label is threaded here (not the whole diagnostics object): this path never
+                // recorded issues, and widening its forensic surface is a separate change. The label
+                // alone is what the autopsy proved wrong, so the label alone is what moves.
+                await landImportedProject(after.files, {
+                  source: cleanImportUrl, writeToSandbox: false,
+                  diag: { record: () => {}, setFramework: (f) => buildDiag.setFramework(f) },
+                });
               } else {
                 events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
               }
@@ -7264,6 +7361,8 @@ export function registerAgentV3Routes(app: Express): void {
                 const detected = detectFrameworkFromWorkspace(union);
                 if (detected && detected !== framework) {
                   framework = detected;
+                  // Same sibling as the import path above — the report must not keep the stale label.
+                  try { buildDiagRef?.setFramework?.(detected); } catch { /* never block a build on a label */ }
                   events.emit({ type: 'narration', agent: 'architect', text: `🧭 Detected this is a ${detected} app (not the default) — switching to the ${detected} toolchain so the preview and checks match your code.`, ts: Date.now() });
                 }
               }

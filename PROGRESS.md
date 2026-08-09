@@ -28168,6 +28168,213 @@ stores collect and remit). `STORE_FEE_PCT` exists so the admin retunes from the 
 report, which is the only honest source for the final rate. The transaction record now stores
 `storePriceInr` / `storeFeePct` / `storeNetInr` alongside the credit, so a payout can be reconciled
 without re-deriving anything.
+---
+
+## 2026-08-09 — Reported build = the WHOLE session (0 → 100), with per-part Download AND Copy
+
+**Admin ask (verbatim):** "jab koi user app bana kar report kare, to puri report, sabhi edit sath
+0 to 100 admin ko send ho! Admin ke pas option ho kitne part download/copy karne hai — 1st, 2nd,
+3rd … all. Aur sirf download ka option aa raha hai, copy bhi add karo! Aur han, build report JSON
+me hi copy hi, text me nhi."
+
+**Root cause of what was wrong (not a UI gap — a DATA gap).** Pressing "Report" submitted exactly
+ONE report: whichever build the user happened to be looking at. Every earlier build and every edit
+of that session — the part that actually explains how the app got into its final state — was never
+sent. So the admin inbox held the last frame of a film, and no autopsy (rule 5) could see the
+sequence that produced it. Adding buttons to that record would have divided nothing into parts.
+
+**Fix, in order:**
+1. `report-to-admin` now gathers the workspace's whole durable history (up to 20 builds) plus the
+   report in hand, dedupes by `startedAt`, orders oldest → newest, and stores it. Best-effort: if
+   the history read fails the record is byte-identical to what it was before — a submit can never
+   fail because of this.
+2. `AdminBuildReportRecord` gained `session { builds, count, omittedBuilds }` and `meta.sessionParts`.
+   Every build is trimmed for storage and the set is byte-capped by the SAME `capSessionReports` the
+   user-side stitch uses — the newest is always kept, dropped ones are COUNTED, never silently lost.
+   A single-build session stores no `session` block at all (an "All" and a "1st part" that are the
+   same bytes is a choice with nothing behind it).
+3. New PURE `src/components/adminReportParts.ts` owns the numbering, the labels and — the part that
+   matters — the payload BOUNDARY: `'all'` = the entire record; an index = that ONE build wrapped
+   with the identifying meta and `part {index, of, label}`, so a pasted part is never an anonymous
+   blob and never the whole session wearing a part label. Nonsense/out-of-range keys return `''` so
+   the button disables instead of copying "undefined".
+4. **Copy everywhere Download exists**, and the payload is JSON — the report modal (part picker +
+   Copy JSON + Download JSON), the all-builds session row, and every single build inside it. New
+   shared `src/lib/copyText.ts`: `navigator.clipboard` does not exist in a non-secure context and
+   `writeText` REJECTS when the document is unfocused — both look identical to a user who pastes and
+   gets their old clipboard back, so it falls back to `execCommand` and returns an honest boolean.
+   The UI reports "copied" only when a copy genuinely happened (rule 3).
+5. Copy and Download now share ONE loader (`fetchWorkspaceReportJson`) and one saver
+   (`saveJsonFile`), so the two buttons cannot drift into handing over different bytes. The modal's
+   `<pre>` renders the SAME string the buttons hand over — what you see is what you copy.
+6. Numbering is by BUILD order: the expanded list arrives newest-first, so its ordinal counts from
+   the far end — "1st part" there is the same build as "1st part" in the oldest → newest session
+   download. A report carrying more than one build shows a "N parts" badge in the inbox list.
+
+Tests: 25 new in `tests/adminReportParts.test.ts` — ordinal edge cases (11th/21st/23rd), the session
+genuinely reaching the record, the focused build surviving the byte cap with the omission COUNTED,
+every part boundary (including "a part is not the session"), every part parsing as JSON, and the
+clipboard's honest false. `tests/adminAllBuilds.test.ts`'s download contract updated to assert both
+halves of the split (auth header on the fetch, blob + filename on the save) rather than weakened.
+Gate: tsc clean both projects, real build green, bundle 637.4/650 KB, full run 12,775/12,775.
+
+**Same-day follow-up — the session budget was sized for the WRONG SINK (caught pre-merge).**
+The first cut fitted the session with `capSessionReports`, whose 6 MB budget was chosen for an HTTP
+download. This record goes into a **Firestore document**, whose hard limit is **1 MiB**. A normal
+multi-build session would therefore have produced an oversized document, Firestore would have
+REJECTED the write, and the admin would have received **nothing** — including the focused build that
+arrived fine before the change. A feature meant to give the admin more would have given less.
+Root cause (rule 4): a shared helper was reused without re-deriving its budget for the new sink.
+Fix: the session's allowance is now DERIVED — `1 MiB − (the focused report + meta) − 96 KB headroom`
+for Firestore's own field-name/UTF-8 accounting — and fitted by a new `fitSessionToDocument`, which
+is deliberately NOT `capSessionReports`: that one keeps the newest build "even if huge" (right for a
+download, fatal against a hard limit), this one drops oldest-first and will store ZERO builds rather
+than lose the write. The `session` block is kept even when empty, because `omittedBuilds` is the only
+place the admin learns earlier builds existed; `partsSummary` says so instead of "Single build".
+Siblings swept: the two other `capSessionReports` call sites are both HTTP bodies — 6 MB is correct
+there, no change. Regression tests encode both failures (the whole record must fit a document; a
+session where not even one build fits still declares its omission).
+
+---
+
+## 2026-08-09 — AUTOPSY: build report d6deaaf0 (Mitrify import) — a "clean" build that served nothing
+
+**What the report claimed:** `ok: true`, `✅ Live preview is up on port 3000`, 1 self-heal, 3 unresolved.
+**What the admin's screen showed:** `{"message":"secret option required for sessions"}` — the app
+answered EVERY request with an error. The build was reported as a success over a dead app.
+
+### Ledger
+- ❌ **Still broken (3):** (1) `npm run db:push` → exit 127, `sh: 1: drizzle-kit: not found`, so the
+  database stayed empty; (2) `relation "profiles" does not exist` — every data page dead; (3) the app
+  served an error body at `/` while the preview verdict said "up".
+- 🔀 **Worked around (2):** in-browser preview could not load the packages → silently switched to the
+  live server; the manifest says `framework: node-express` while the report says `vite-react` — ONE
+  build carrying two different answers for the same question.
+- ⏭️ **Skipped (2, both correct and disclosed):** 8 credential-printing `console.log`s were found and
+  deliberately NOT changed ("do not change any files"), and the E2E scaffold was skipped.
+- 🥵 **Struggle (1):** 8m 46s wall clock for a read-only survey, of which the actual AI work was 30s
+  (two calls). The remaining ~8 minutes were import (80s) + install + preview boot.
+- ✅ **Self-heal (1):** the APP's own `ensureSchema` tried to repair the schema and failed — ours
+  healed nothing here, so the green checkmark was measuring someone else's failed attempt.
+
+### THE MISSING SUBSYSTEM (step 2)
+A **pre-flight "can this app actually run here?" contract**: dependencies present before any project
+script runs, the app's own required secrets provisioned, and the preview verdict EARNED by reading
+what the app actually returns. All three were absent, and each absence produced one symptom above.
+
+### Root causes killed (step 3 — the class, not the instance)
+1. **Env discovery read a file the project may not have.** `envVarNames` parsed only
+   `.env.example`/`.env.sample`/`.env.template`. Mitrify commits none, so the list was EMPTY — which
+   is why no `SESSION_SECRET` was conjured (express-session then rejected every request) AND why the
+   honest "these external services still need real values" note never appeared. One gap, three
+   symptoms. It now ALSO scans the source for `process.env.X` / `import.meta.env.X`: an example file
+   is a courtesy, a `process.env` read is the truth every project has. Bounded (source extensions
+   only, 4 MB cap) and order-stable (the documented template still leads).
+2. **The install guarantee was attached to the dev-server COMMAND, not the WORKSPACE.** Anything else
+   needing a project binary ran outside it — migrations today, lint/test/codegen tomorrow. New
+   `ensureDependencies()` on the actuator (reusing the SAME staleness check and installer as the
+   boot, so the two cannot drift) is now called BEFORE the migration. Zero added time: it is the same
+   install the boot runs seconds later. A failed install SKIPS the migration with an honest record
+   instead of buying a confusing exit 127.
+3. **THE HONESTY FAILURE — a JSON error body counted as a rendered app.** `analyzePreviewHtml` had
+   rules for "Cannot GET", overlays, empty mounts and blank pages; a 48-character machine-readable
+   error passed all of them. New `jsonErrorBody()` catches an error envelope — deliberately narrow,
+   so `{"message":"API is running"}` is left alone while `{"message":"secret option required…"}` is
+   caught, and the verdict quotes what the app actually returned.
+
+### OPEN root cause (rule 6 — recorded, not patched)
+**The framework detector gives two different answers in one build** (`node-express` in the manifest,
+`vite-react` in the report). That disagreement is very likely what makes an in-browser preview be
+attempted for a server app and then abandoned — the 🔀 workaround above. Not fixed in this pass: the
+evidence identifies the contradiction but not yet which of the two writers is wrong, and guessing at
+a value that steers the whole preview strategy is exactly the surface patch rule 4 forbids. Next
+autopsy or a targeted trace should settle it.
+
+Tests: 16 new in `tests/importAutopsyMitrify.test.ts` — the exact Mitrify file shape (no
+`.env.example`) now yielding SESSION_SECRET, regex state-safety across repeated scans, install-before-
+migrate ordering and its skip path, the exact error body the admin saw, and the false-positive guards
+that keep a healthy API greeting passing. Gate: tsc clean both projects, full run 12,795/12,795.
+
+### Second pass over the SAME report (admin: "autopsy me kuch bacha hai fix karne layak?")
+
+Two more root causes, both missed by the first pass — and the first of them is the more serious,
+because it made the report lie about the ENGINE'S OWN quality rather than about the user's app.
+
+**ROOT CAUSE 4 — a permanent failure was counted as the build's ONE self-heal.** The report showed
+`healCount: 1`, and that heal was `$ npm run db:push → exit 127` carrying `autoResolved: true`. It was
+never healed: the tables were never created, and the run's own next two entries
+(`IMPORT_DB_MIGRATIONS_FAILED`, `DB_SCHEMA_MISSING`) say so and stayed unresolved. The cause was
+`RECOVERABLE_ON_SUCCESS`, which forgives every `SANDBOX_CMD_FAILED` on a build that ultimately
+succeeded — "a successful build recovered from them by definition". That inference is sound for a
+retried tool call and FALSE for a failure whose consequence outlived it. Worse, `healCount` feeds
+`firstPassQuality` — the admin's headline engine number — so the engine was crediting itself for its
+own unrepaired failure.
+The first fix attempted was "forgive only if the same command later ran clean". An EXISTING test
+(PaisaTrack, 2026-07-21) proved that too blunt: `npx tsc --noEmit` failed twice, the agent fixed the
+code, the build succeeded and tsc was never re-run — genuinely recovered, no re-run evidence. Both
+cases are real, so the discriminator had to be the EVIDENCE, not the command: a failure is forgiven
+unless the run still carries an unresolved, non-observation problem that NAMES that command
+(`failureHasSurvivingConsequence`). Mitrify's db:push is named by two surviving problems → stays a
+failure; PaisaTrack's tsc is named by none → still forgiven. `deriveRootCause` takes the same
+evidence so the two can never disagree.
+
+**ROOT CAUSE 5 — one build carried TWO answers for its own framework** (`node-express` in the
+manifest, `vite-react` in the report). `meta.framework` is captured ONCE when the diagnostics object
+is constructed at build start, from the request default; the import detected the real framework 12
+seconds later and only the manifest heard about it. This is the exact sibling of the stale `model`
+label that `honestModelLabel` was written to fix on 2026-07-27 — same object, same moment of capture,
+same "the truth arrives later" shape — which is why hunting siblings (rule 3) found it. New
+`setFramework()` is now called at BOTH places the label is reassigned: the import landing and the
+drift correction. A blank value can never erase a known one.
+
+**STILL OPEN (rule 6) — an unexplained 153-second hole.** Between `IMPORT_PREVIEW_SERVING`
+(ts 1786282510925) and the next recorded step (ts 1786282664021) the run recorded nothing but
+heartbeats. Total wall clock was 8m46s for a read-only survey whose actual model work was 30s across
+two calls. The earlier "hole in the recording" fix covered the boot; this gap sits AFTER it, so it is
+a different one and the report does not yet say what filled it. Not guessed at here — the next
+report with instrumentation over that window should name it.
+
+Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (24 total) — the exact db:push case staying
+unresolved with `counts.autoResolved: 0`, PaisaTrack still forgiven, a later-clean command forgiven,
+a failed build untouched, observations never counting as a consequence, and a source sweep proving
+every framework reassignment tells the report. Gate: tsc clean both projects, full run 12,803/12,803.
+
+### 2026-08-09 — The app keeps its OWN port (admin: "report me port 3000, lekin mitrify to 5000 par hai")
+
+**The report was not lying — and that is the point.** The app really was on port 3000, because
+NavBharatAI put it there: the import boot wrote a fixed `PORT` into the app's dev `.env`, moving every
+PORT-honoring app off its own port.
+
+**Why that pin existed, and why it was the wrong half of the fix.** It answered the 2026-08-07 bug
+(the Preview tab showing E2B's "Closed Port Error" for 3000 while the app served 5000). That bug had
+TWO answers shipped together: a CLIENT fix making a freshly VERIFIED url outrank the saved historical
+one — the real cause — and this server pin, which made the app unable to move. The client fix cured
+the cause; the pin cured the symptom by changing the user's app.
+
+**The cost the admin found.** Forcing the port silently contradicts everything else in the user's own
+project that names the real one — their README, their OAuth redirect URIs, a hardcoded dev proxy or
+CORS origin — and on an import turn whose instruction was literally "do not change any files", moving
+the app's port is precisely the change we promised not to make. It also made the report's honest
+statement ("port 3000") read as a bug to the one person who knows the app.
+
+**Fixed at the cause.** Nothing assigns a port any more; the import boot DISCOVERS it — the app's own
+boot log first, then `devScriptPort`, then the ports the sandbox OS reports as genuinely LISTENING —
+and visits candidates until one actually serves the app. This is the evidence-first flip system built
+on 2026-08-07 (admin: "ek par na chale to dusra, dusre par na chale to teesra?"), which until now was
+wired ONLY into the Diagnose route; the import path had one guess and no way to correct it, which is
+exactly why a pin felt necessary there. The determinism the pin bought is replaced by evidence, which
+is strictly stronger: it is right even for an app that ignores `PORT` altogether. The flip stays
+cost-free on the happy path — it engages only when the first port fails to render.
+
+**A hazard closed on the way:** an EMPTY `PORT=` is now never written either. Every other var is safe
+as `''` because apps test it for truthiness, but a port is PARSED — `Number(process.env.PORT ?? 5000)`
+turns `''` into 0 and the server binds a RANDOM port that no preview could find. Absent is the only
+safe placeholder; a real user-provided value is still honoured.
+
+`tests/previewFreshUrl.test.ts` asserted the OPPOSITE invariant. It was REPLACED, not deleted, with
+the superseding decision and the reasoning recorded in place — the client half of that fix (the real
+cause) is untouched and still asserted. 4 new tests in `tests/importAutopsyMitrify.test.ts` (28 total).
+Gate: tsc clean both projects, full run 12,807/12,807.
 
 ---
 

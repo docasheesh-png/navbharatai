@@ -28234,3 +28234,63 @@ place the admin learns earlier builds existed; `partsSummary` says so instead of
 Siblings swept: the two other `capSessionReports` call sites are both HTTP bodies — 6 MB is correct
 there, no change. Regression tests encode both failures (the whole record must fit a document; a
 session where not even one build fits still declares its omission).
+
+---
+
+## 2026-08-09 — AUTOPSY: build report d6deaaf0 (Mitrify import) — a "clean" build that served nothing
+
+**What the report claimed:** `ok: true`, `✅ Live preview is up on port 3000`, 1 self-heal, 3 unresolved.
+**What the admin's screen showed:** `{"message":"secret option required for sessions"}` — the app
+answered EVERY request with an error. The build was reported as a success over a dead app.
+
+### Ledger
+- ❌ **Still broken (3):** (1) `npm run db:push` → exit 127, `sh: 1: drizzle-kit: not found`, so the
+  database stayed empty; (2) `relation "profiles" does not exist` — every data page dead; (3) the app
+  served an error body at `/` while the preview verdict said "up".
+- 🔀 **Worked around (2):** in-browser preview could not load the packages → silently switched to the
+  live server; the manifest says `framework: node-express` while the report says `vite-react` — ONE
+  build carrying two different answers for the same question.
+- ⏭️ **Skipped (2, both correct and disclosed):** 8 credential-printing `console.log`s were found and
+  deliberately NOT changed ("do not change any files"), and the E2E scaffold was skipped.
+- 🥵 **Struggle (1):** 8m 46s wall clock for a read-only survey, of which the actual AI work was 30s
+  (two calls). The remaining ~8 minutes were import (80s) + install + preview boot.
+- ✅ **Self-heal (1):** the APP's own `ensureSchema` tried to repair the schema and failed — ours
+  healed nothing here, so the green checkmark was measuring someone else's failed attempt.
+
+### THE MISSING SUBSYSTEM (step 2)
+A **pre-flight "can this app actually run here?" contract**: dependencies present before any project
+script runs, the app's own required secrets provisioned, and the preview verdict EARNED by reading
+what the app actually returns. All three were absent, and each absence produced one symptom above.
+
+### Root causes killed (step 3 — the class, not the instance)
+1. **Env discovery read a file the project may not have.** `envVarNames` parsed only
+   `.env.example`/`.env.sample`/`.env.template`. Mitrify commits none, so the list was EMPTY — which
+   is why no `SESSION_SECRET` was conjured (express-session then rejected every request) AND why the
+   honest "these external services still need real values" note never appeared. One gap, three
+   symptoms. It now ALSO scans the source for `process.env.X` / `import.meta.env.X`: an example file
+   is a courtesy, a `process.env` read is the truth every project has. Bounded (source extensions
+   only, 4 MB cap) and order-stable (the documented template still leads).
+2. **The install guarantee was attached to the dev-server COMMAND, not the WORKSPACE.** Anything else
+   needing a project binary ran outside it — migrations today, lint/test/codegen tomorrow. New
+   `ensureDependencies()` on the actuator (reusing the SAME staleness check and installer as the
+   boot, so the two cannot drift) is now called BEFORE the migration. Zero added time: it is the same
+   install the boot runs seconds later. A failed install SKIPS the migration with an honest record
+   instead of buying a confusing exit 127.
+3. **THE HONESTY FAILURE — a JSON error body counted as a rendered app.** `analyzePreviewHtml` had
+   rules for "Cannot GET", overlays, empty mounts and blank pages; a 48-character machine-readable
+   error passed all of them. New `jsonErrorBody()` catches an error envelope — deliberately narrow,
+   so `{"message":"API is running"}` is left alone while `{"message":"secret option required…"}` is
+   caught, and the verdict quotes what the app actually returned.
+
+### OPEN root cause (rule 6 — recorded, not patched)
+**The framework detector gives two different answers in one build** (`node-express` in the manifest,
+`vite-react` in the report). That disagreement is very likely what makes an in-browser preview be
+attempted for a server app and then abandoned — the 🔀 workaround above. Not fixed in this pass: the
+evidence identifies the contradiction but not yet which of the two writers is wrong, and guessing at
+a value that steers the whole preview strategy is exactly the surface patch rule 4 forbids. Next
+autopsy or a targeted trace should settle it.
+
+Tests: 16 new in `tests/importAutopsyMitrify.test.ts` — the exact Mitrify file shape (no
+`.env.example`) now yielding SESSION_SECRET, regex state-safety across repeated scans, install-before-
+migrate ordering and its skip path, the exact error body the admin saw, and the false-positive guards
+that keep a healthy API greeting passing. Gate: tsc clean both projects, full run 12,795/12,795.

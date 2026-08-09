@@ -28168,3 +28168,45 @@ stores collect and remit). `STORE_FEE_PCT` exists so the admin retunes from the 
 report, which is the only honest source for the final rate. The transaction record now stores
 `storePriceInr` / `storeFeePct` / `storeNetInr` alongside the credit, so a payout can be reconciled
 without re-deriving anything.
+
+---
+
+## 2026-08-09 — The platform speaks the user's language too (ROADMAP item 6, half 1)
+
+**Root cause, stated exactly.** `LANGUAGE_RULE` makes the MODEL mirror the user's language, and it works.
+What it cannot reach is the ~157 narration lines OUR SERVER emits during a build ("🗄️ Provisioning a
+local PostgreSQL…", "🔧 Added 2 missing import(s)…") — they never pass through a model, so no prompt rule
+can translate them. A Hindi user reads Hindi from the AI and English from the platform, in one feed. The
+roadmap's own line said to do this half first because it is the jarring half.
+
+**Fixed as a CLASS, not as strings** (fourth rule, step 2). Every such line is now an ID with typed
+parameters in `AgentV3/narrationCatalogue.ts`; call sites hold an id, never a sentence. 🔒 Completeness is
+enforced by the COMPILER — `Catalogue` is a mapped type over every id, so a language table missing one
+line fails `tsc`. A half-translated language cannot ship, and a new id cannot be added without translating
+it everywhere. That is what keeps "fully working / not built yet" true per-language.
+
+**Language decided from the user's own words, by SCRIPT** (`lib/narrationLanguage.ts`) — deterministic,
+free, and incapable of disagreeing with itself between two lines of one build. A 20% share threshold, and
+code/paths/urls stripped first, so `Build a dashboard app and label it डैशबोर्ड` stays English while
+`मुझे Firebase के साथ ऐप बनाओ` is Hindi. **Romanised Hinglish resolves to ENGLISH on purpose**: the model
+answers such a prompt in English too, and Devanagari output there would make the platform disagree with
+the AI in the very same feed — the exact bug this closes. Other Indian scripts are RECOGNISED but resolve
+to English rather than being served Hindi they did not ask for; adding Tamil later is one complete
+catalogue plus one line, nothing else moves.
+
+**Siblings hunted** (rule 3): sub-agents emit into the SAME feed, so `SubAgent.ts` threads the build's
+language into every child dispatcher — a child left on the default would have put English lines back into
+a Hindi build.
+
+23 tests (`tests/narrationLanguage.test.ts`), including completeness across every supported language, a
+"Hindi is not a copy-paste of English" check, identifiers/paths/package names never translated, and the
+white-label assertion that no vendor or model name can reach a narration line. Three existing source-lock
+tests (`dbProvisionVerify`, `userDatabaseWins`, `secretPreflightWiring`) now lock the branch AND the
+catalogue's words — strictly stronger than the string match they replaced, not weakened to pass.
+
+Scope, honestly: this slice covers the 23 lines in `ToolDispatcher.ts`. The ~131 in `routes/agentv3.ts`
+are the next slice; until they land, a Hindi build shows Hindi for the dispatcher's lines and English for
+the route's. `AppKnowledgeBase.ts` states that limit plainly rather than promising the whole feed.
+
+Verification gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1120 files /
+12,774 tests, exit 0**.

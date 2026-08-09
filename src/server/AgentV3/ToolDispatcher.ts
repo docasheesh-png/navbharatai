@@ -1,4 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
+import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 
@@ -457,6 +459,27 @@ export class ToolDispatcher {
   }
 
   /**
+   * The language THIS BUILD's platform narration speaks (ROADMAP item 6). Defaults to English, and
+   * the composition root sets it from the user's own prompt exactly as `LANGUAGE_RULE` tells the
+   * model to — so the AI and the platform can never disagree inside one feed.
+   */
+  private narrationLang: NarrationLanguage = 'en';
+
+  /** Set by the composition root from `resolveNarrationLanguage(userPrompt)` before the build runs. */
+  setNarrationLanguage(lang: NarrationLanguage): void {
+    this.narrationLang = lang;
+  }
+
+  /**
+   * Emit one platform narration line. THE choke point: call sites name a message id, never a
+   * sentence, so a new line is translatable by construction and no call site can forget the
+   * language. Best-effort like every other narration — it must never be able to break a build.
+   */
+  private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
+    this.events?.emit({ type: 'narration', agent, text: narrationText(this.narrationLang, id, params), ts: Date.now() });
+  }
+
+  /**
    * Bake the "made by NavBharatAI" badge into the app's HTML entry so it ships with the live
    * preview AND any later deploy (both serve the workspace files). Idempotent (never a second
    * badge) and best-effort — a failure here must NEVER break a build or block the preview (first
@@ -576,7 +599,7 @@ export class ToolDispatcher {
       let verdicts: SecretVerdict[] = [];
       try { verdicts = await verifyInjectedSecrets(this.userSecretsEnv); } catch { verdicts = []; }
       if (verdicts.length === 0) {
-        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & API Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
+        this.narrate('secrets.loaded', { count: names.length });
       } else {
         const { loaded, problems } = preflightNarration(verdicts);
         this.events?.emit({ type: 'narration', agent: 'architect', text: loaded, ts: Date.now() });
@@ -620,13 +643,13 @@ export class ToolDispatcher {
     const connectedUrl = dotEnvValue(envNow, 'DATABASE_URL') ?? this.userSecretsEnv?.DATABASE_URL ?? '';
     if (isUserOwnedDatabaseUrl(connectedUrl)) {
       this.postgresProvisioned = true; // decided — never reconsider mid-build
-      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Using the database you connected in Settings — your app will read and write your own data, so no temporary sandbox database is needed.', ts: Date.now() });
+      this.narrate('db.usingConnected', {});
       return;
     }
     this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
     this.postgresProvisionedAt = Date.now();
     try {
-      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
+      this.narrate('db.provisioning', {});
       // NOTE: the E2B provisionBackend arms the in-sandbox keepalive watchdog itself (single choke
       // point) — every provisioning path (first provision, mid-build revival, preview-boot revival)
       // gets the keepalive without each caller re-wiring it.
@@ -672,10 +695,10 @@ export class ToolDispatcher {
           // user's own account), so ASK for it rather than continuing toward a certain failure.
           const rescued = await this.rescueDatabase();
           if (!rescued) {
-            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ The sandbox database did not pass its connection test — I wrote DATABASE_URL and will keep going; the next database step will retry it.', ts: Date.now() });
+            this.narrate('db.connectionTestFailed', {});
           }
         } else {
-          this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
+          this.narrate('db.ready', {});
         }
       }
     } catch {
@@ -802,7 +825,7 @@ export class ToolDispatcher {
       const { content: fixed, reverted } = revertSqliteToPostgres(content);
       if (reverted) {
         getWorkspaceMemory(this.workspaceId).recordAudit('postgres-lock: reverted a schema downgrade to sqlite back to postgresql');
-        this.events?.emit({ type: 'narration', agent: 'architect', text: '🔒 Kept your database on PostgreSQL — it\'s provisioned and ready. A failing migration means the schema needs fixing (a relation or field), not a switch to SQLite. Fixing the schema instead.', ts: Date.now() });
+        this.narrate('db.postgresLocked', {});
         return fixed;
       }
     }
@@ -1809,11 +1832,7 @@ export class ToolDispatcher {
     try {
       const { content: next, removed } = dedupeDuplicateImports(content);
       if (removed.length > 0) {
-        this.events?.emit({
-          type: 'narration', agent,
-          text: `🔧 Removed ${removed.length} duplicate import(s) in \`${path}\` that would have broken the preview ("Duplicate declaration").`,
-          ts: Date.now(),
-        });
+        this.narrate('fix.duplicateImports', { count: removed.length, file: path }, agent);
         try { getWorkspaceMemory(this.workspaceId).recordAudit(`[DUP-IMPORT] removed ${removed.length} duplicate import(s) in ${path}: ${removed.join('; ')}`); } catch { /* audit best-effort */ }
       }
       return next;
@@ -1849,11 +1868,7 @@ export class ToolDispatcher {
         try {
           getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
         } catch { /* audit best-effort */ }
-        this.events?.emit({
-          type: 'narration', agent: 'architect',
-          text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
-          ts: Date.now(),
-        });
+        this.narrate('fix.pinnedDeps', { changed: pinned.changed.join('; ') });
       }
       // FRAMEWORK CORE-DEPS GUARD (CargoPilot autopsy 2026-07-19): a written package.json must never
       // DROP the framework's own runtime deps (next/react/vite/…). If it does, a later `npm install`
@@ -1865,11 +1880,7 @@ export class ToolDispatcher {
         try {
           getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-CORE] restored framework core deps in ${path}: ${core.added.join('; ')}`);
         } catch { /* audit best-effort */ }
-        this.events?.emit({
-          type: 'narration', agent: 'architect',
-          text: `🔧 Kept the framework's core dependencies in package.json (${core.added.join('; ')}) so the dev server can't lose its own runtime.`,
-          ts: Date.now(),
-        });
+        this.narrate('fix.coreDeps', { added: core.added.join('; ') });
       }
       return out;
     } catch {
@@ -1934,11 +1945,7 @@ export class ToolDispatcher {
         if (process.env.AGENTV3_NEXT_MW_FIX !== 'off' && (this.framework === 'nextjs' || this.framework === 'next')) {
           const corrected = nextMiddlewareCorrectPath(path);
           if (corrected && corrected !== path) {
-            this.events?.emit({
-              type: 'narration', agent,
-              text: `🔧 Moved \`${path}\` to \`${corrected}\` — Next.js only runs middleware from the project root, so the route guards were silently disabled where it was written.`,
-              ts: Date.now(),
-            });
+            this.narrate('fix.nextMiddlewareMoved', { from: path, to: corrected }, agent);
             try { getWorkspaceMemory(this.workspaceId).recordAudit(`[NEXT-MW] relocated misplaced middleware ${path} → ${corrected}`); } catch { /* audit best-effort */ }
             path = corrected;
           }
@@ -2355,7 +2362,7 @@ export class ToolDispatcher {
             const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
             if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
               this.postgresReprovisionAttempts += 1;
-              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database had gone to sleep — restarting PostgreSQL before your database step…', ts: Date.now() });
+              this.narrate('db.asleepRestarting', {});
               await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
               this.postgresProvisionedAt = Date.now();
             }
@@ -2382,7 +2389,7 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The Prisma schema had an incomplete relation — completed it with `prisma format` and re-ran the command successfully.', ts: Date.now() });
+                this.narrate('fix.prismaRelation', {});
                 // The formatter rewrote schema.prisma in the sandbox — sync the durable copy so
                 // restores/edits see the completed relation, not the broken original.
                 const schemaPath = `${dirMatch ? `${dirMatch[1].replace(/\/+$/, '')}/` : ''}prisma/schema.prisma`;
@@ -2420,7 +2427,7 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database toolkit wasn\'t installed yet — installed it and re-ran the step successfully.', ts: Date.now() });
+                this.narrate('fix.toolkitInstalled', {});
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
@@ -2448,7 +2455,7 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database client had not been generated yet — generated it and re-ran the step successfully.', ts: Date.now() });
+                this.narrate('fix.clientGenerated', {});
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
@@ -2481,7 +2488,7 @@ export class ToolDispatcher {
                 const retry = await this.actuator.runCommand(this.workspaceId, command);
                 if (retry.exitCode === 0) {
                   ({ exitCode, stdout, stderr } = retry);
-                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 A database enum wasn't available on SQLite — rewired the code that used it (${missingEnums.join(', ')}) to plain string values and re-ran the step successfully.`, ts: Date.now() });
+                  this.narrate('fix.enumOnSqlite', { enums: missingEnums.join(', ') });
                 }
               }
             } catch { /* self-heal is best-effort — the original failure is still reported */ }
@@ -2501,7 +2508,7 @@ export class ToolDispatcher {
           if (canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
             this.postgresReprovisionAttempts += 1;
             try {
-              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database went away — restarting PostgreSQL in the sandbox…', ts: Date.now() });
+              this.narrate('db.wentAwayRestarting', {});
               const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
               const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
               if (Object.keys(lines).length > 0) {
@@ -2513,7 +2520,7 @@ export class ToolDispatcher {
               if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.postgresProvisionedAt = Date.now(); // revival verified — reset the preflight gate
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Database is back — re-ran the step against PostgreSQL.', ts: Date.now() });
+                this.narrate('db.backOnline', {});
               } else {
                 // The revival itself could not bring the DB back — another attempt would repeat the same
                 // failure, so this is genuinely dead (not merely reaped). Confirm + release the lock now.
@@ -2530,7 +2537,7 @@ export class ToolDispatcher {
           }
           if (this.postgresConfirmedDead) {
             getWorkspaceMemory(this.workspaceId).recordAudit('postgres confirmed dead in sandbox — releasing the provider lock so the app can use SQLite for the preview');
-            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ NavBharatAI couldn\'t keep PostgreSQL running in the preview sandbox, so the live preview will use SQLite. Your PostgreSQL setup still applies when you deploy to your own database.', ts: Date.now() });
+            this.narrate('db.fellBackToSqlite', {});
           }
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
@@ -2878,7 +2885,7 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Auto-fixed ${rec.fixes.length} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`, ts: Date.now() });
+              this.narrate('fix.importKind', { count: rec.fixes.length });
             }
           } catch { /* reconcile is best-effort — a failure just leaves the honest blocker below */ }
           // MISSING-IMPORT SELF-HEAL (root cause — admin jungle-game report 104f5b09): a generated file
@@ -2898,7 +2905,7 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${addRes.added.length} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`, ts: Date.now() });
+              this.narrate('fix.missingImports', { count: addRes.added.length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // WRONG-SOURCE SELF-HEAL (Kanban build 2026-07-13): a NAMED import points at a module that does
@@ -2916,7 +2923,7 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
+              this.narrate('fix.repointedImports', { count: wrongRes.fixes.length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
@@ -2937,7 +2944,7 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
-                this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+                this.narrate('fix.duplicateImport', { file });
               }
             }
           } catch { /* best-effort — a failure just leaves the honest blocker below */ }
@@ -2957,7 +2964,7 @@ export class ToolDispatcher {
                   const newPkg = depRes.files['package.json'];
                   try { await this.actuator.writeFile(this.workspaceId, 'package.json', newPkg); } catch { /* best-effort */ }
                   try { this.onFileWrite?.('package.json', newPkg); } catch { /* best-effort */ }
-                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${depRes.added.length} missing dependency(ies) to package.json (${depRes.added.map((d) => d.package).join(', ')}) so the app installs and runs.`, ts: Date.now() });
+                  this.narrate('fix.missingDeps', { count: depRes.added.length, packages: depRes.added.map((d) => d.package).join(', ') });
                 }
               }
             } catch { /* best-effort — a failure just leaves the honest 'missing dependency' finding below */ }

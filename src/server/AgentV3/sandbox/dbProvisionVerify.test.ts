@@ -1,3 +1,4 @@
+import { narrationText } from '../narrationCatalogue';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -116,7 +117,10 @@ describe('every surface that claimed success now consumes the verification', () 
   it('the ToolDispatcher "✅ ready" line is earned, with an honest alternative', () => {
     const src = read('server/AgentV3/ToolDispatcher.ts');
     expect(src).toContain("if (prov?.dbVerified === false) {");
-    expect(src).toContain('did not pass its connection test');
+    // The sentence now lives in the narration catalogue (ROADMAP item 6) so it can be spoken in the
+    // user's own language — so the lock is two-part: the branch narrates, and the words still say it.
+    expect(src).toContain("this.narrate('db.connectionTestFailed'");
+    expect(narrationText('en', 'db.connectionTestFailed', {})).toContain('did not pass its connection test');
   });
 
   it('the watchdog arms only for a database that actually answered', () => {

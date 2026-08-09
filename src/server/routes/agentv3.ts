@@ -126,7 +126,7 @@ import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, m
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -5959,7 +5959,17 @@ export function registerAgentV3Routes(app: Express): void {
             // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
             // provisioned DATABASE_URL + generated local secrets, plus empty placeholders for the rest.
             if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {
-              try { await actuator.writeFile(workspaceId, '.env', buildDevEnvContent(declaredEnvVars, provided)); } catch { /* env write best-effort */ }
+              // MERGED, never overwritten (fixed 2026-08-09). This used to write the generated content
+              // straight over `.env`, and that content lists every declared var with an EMPTY
+              // placeholder — so a real value already in the file became `KEY=`. On this very route a
+              // build can have just saved the user's own key (the mid-build secrets popup), or
+              // rescueDatabase can have just written a real DATABASE_URL, and this wiped it. The user
+              // supplied the key, it saved, and the app still did not work.
+              try {
+                let existingEnv = '';
+                try { existingEnv = await actuator.readFile(workspaceId, '.env'); } catch { existingEnv = ''; }
+                await actuator.writeFile(workspaceId, '.env', mergeDevEnvContent(existingEnv, declaredEnvVars, provided));
+              } catch { /* env write best-effort */ }
               const extNote = externalServiceNote(declaredEnvVars);
               if (extNote) emitLive({ type: 'narration', agent: 'architect', text: extNote, ts: Date.now() });
             }

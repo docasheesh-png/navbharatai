@@ -20,6 +20,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { classifyDevServerFailure, missingCredentialFromLog, unavailableDbEngine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
+import { mergeDotEnv } from '../secrets/appSecretsEnv';
 
 /** SQL/ORM drivers whose presence means the app needs a database to boot. */
 const DB_DEPS = [
@@ -197,6 +198,55 @@ export function envVarNames(files: Record<string, string>): string[] {
  * — enough for the app to start; the features that need REAL keys just won't work (honest partial).
  * PURE.
  */
+/**
+ * The dev `.env` MERGED over whatever the app already has — never a wholesale overwrite.
+ *
+ * THE BUG THIS FIXES (found 2026-08-09 while verifying the mid-build secrets popup). The caller wrote
+ * `buildDevEnvContent(...)` straight over `.env`, and that content lists every declared variable with
+ * an EMPTY placeholder. Any real value already in the file was replaced by `KEY=`. On the same chat
+ * route where a build runs, that meant:
+ *
+ *   1. the build asks for STRIPE_SECRET_KEY, the user types their real key
+ *   2. it is saved to the vault and merged into `.env` — correct so far
+ *   3. the preview boot in the same turn rewrites `.env` from scratch
+ *   4. the user's key is now `STRIPE_SECRET_KEY=`
+ *
+ * The user supplied the key, it saved, and the app still does not work — the worst shape of bug,
+ * because every visible signal says it succeeded. The same overwrite could erase keys the vault
+ * injected at build start, or the DATABASE_URL that `rescueDatabase` had just written.
+ *
+ * THE RULE: an EMPTY placeholder never overwrites a value that already exists. Real `provided` values
+ * still win (they are provisioned on purpose — a freshly created database URL should replace a stale
+ * one), and placeholders are only added for variables the file does not mention yet. PURE.
+ */
+export function mergeDevEnvContent(
+  existingEnv: string,
+  varNames: string[],
+  provided: Record<string, string>,
+): string {
+  const generated = buildDevEnvContent(varNames, provided);
+  const existing = String(existingEnv ?? '');
+  if (!existing.trim()) return generated;
+
+  // Which keys the file already carries a NON-EMPTY value for — those are the ones to protect.
+  const held = new Set<string>();
+  for (const line of existing.split('\n')) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    if (m && m[2].trim() !== '') held.add(m[1]);
+  }
+
+  // Everything the generated content wants to set, minus the blanks that would clobber a real value.
+  const wanted: Record<string, string> = {};
+  for (const line of generated.split('\n')) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    if (!m) continue;
+    const [, key, value] = m;
+    if (value.trim() === '' && held.has(key)) continue; // the placeholder loses to a real value
+    wanted[key] = value;
+  }
+  return mergeDotEnv(existing, wanted);
+}
+
 export function buildDevEnvContent(varNames: string[], provided: Record<string, string>): string {
   const env: Record<string, string> = { NODE_ENV: 'development' };
   for (const n of varNames) if (!(n in env)) env[n] = '';

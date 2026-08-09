@@ -108,10 +108,46 @@ export function restorePlan(
   return { write, remove, unchanged };
 }
 
+/** Where the rolled-back attempt is kept, so "undo the undo" is possible at all. */
+export function attemptWorkspaceKey(workspaceId: string): string {
+  return `${workspaceId}::attempt`;
+}
+
+/** The exact words that bring the rolled-back attempt back. Shown to the user in the message below. */
+export const KEEP_CHANGES_PHRASE = 'keep my changes';
+
+/**
+ * Did the user ask for the rolled-back attempt back?
+ *
+ * DELIBERATELY EXACT-PHRASE, NOT INTENT DETECTION. Green Guard has one honest false positive: a user
+ * who asked for something large on purpose (a framework migration, a rewrite) gets rolled back because
+ * their app legitimately does not render yet. The escape hatch for that must be something the user can
+ * TRUST, and a classifier that is right most of the time is the wrong tool — guessing wrong here either
+ * strands them or restores a broken tree over a working one. So the restore message states the exact
+ * words, and only those words (plus the obvious Hinglish equivalents this app's users actually type)
+ * are honoured. A message that merely CONTAINS the phrase inside a longer instruction still counts —
+ * people write "keep my changes and add a login" — but nothing is inferred beyond the phrase itself.
+ * PURE.
+ */
+export function wantsAttemptBack(prompt: string | null | undefined): boolean {
+  const p = (prompt ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!p) return false;
+  return [
+    KEEP_CHANGES_PHRASE,
+    'keep my change',
+    'restore my changes',
+    'mere changes rakho',
+    'mere changes wapas',
+    'wo wapas do',
+    'purana wala wapas',
+  ].some((phrase) => p.includes(phrase));
+}
+
 /**
  * What the USER is told when their app is put back. Honest and specific — never silent, because a
  * user whose files changed under them without explanation has lost trust in the tool, and never
- * blaming their request. Carries no vendor or model name (the white-label law). PURE.
+ * blaming their request. It also states the EXACT words that undo this, because a safety net the user
+ * cannot escape is a cage. Carries no vendor or model name (the white-label law). PURE.
  */
 export function greenGuardMessage(plan: RestorePlan): string {
   const changed = Object.keys(plan.write).length;
@@ -120,7 +156,12 @@ export function greenGuardMessage(plan: RestorePlan): string {
   if (changed > 0) bits.push(`${changed} file${changed === 1 ? '' : 's'} put back`);
   if (removed > 0) bits.push(`${removed} file${removed === 1 ? '' : 's'} added by that attempt removed`);
   const detail = bits.length > 0 ? ` (${bits.join(', ')})` : '';
-  return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. Your working app is back exactly as it was — nothing of it was lost. Tell me what you wanted and I'll try a different way.`;
+  return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. Your working app is back exactly as it was — nothing of it was lost, and the attempt is saved too. Tell me what you wanted and I'll try a different way — or reply "${KEEP_CHANGES_PHRASE}" if you meant to keep that version and carry on from there.`;
+}
+
+/** Told to the user when the attempt is handed back — plainly, including what it does not promise. */
+export function attemptRestoredMessage(fileCount: number): string {
+  return `↩️ Brought your changes back (${fileCount} file${fileCount === 1 ? '' : 's'}). Note that this version did not run correctly when it was made, so the app may not load until we fix it — tell me what you want next and we'll work from here.`;
 }
 
 /** A path we are willing to delete: workspace-relative, no traversal, no shell metacharacters. */

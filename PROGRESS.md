@@ -28626,3 +28626,41 @@ Tests: 6 more in `tests/routeFingerprint.test.ts` (25 total) — the heartbeat n
 elapsed seconds, the timing line, the sub-3s suppression, the supersede-not-nest rule, tools still
 outranking phases, and a source assertion that the import's long stretches are actually marked.
 Gate: tsc clean both projects, full run 12,901/12,901.
+
+### Same day — "KEEP MY CHANGES": Green Guard's one honest false positive now has an exit
+
+**The last open item of the double-layer protection.** Green Guard restores whenever a verified-working
+app stops working. That is right almost always, and WRONG in exactly one case: a user who asked for
+something large ON PURPOSE — a framework migration, a rewrite — whose app legitimately does not render
+yet. Their work was already preserved under `<workspaceId>::attempt`, but there was **no way to ask for
+it back**. A safety net the user cannot leave is a cage.
+
+**The fix is an EXACT PHRASE, deliberately not a classifier.** The restore message now states the exact
+words ("reply **keep my changes**"), and only those words — plus the Hinglish equivalents a real user of
+this app types (`mere changes rakho`, `wo wapas do`, `purana wala wapas`) — are honoured. An intent
+classifier would be the wrong tool here even at a high win rate: guessing wrong either strands the user
+or restores a broken tree over a working app, and neither is worth a probabilistic bet. A phrase
+appearing INSIDE a longer instruction still counts ("keep my changes and add a login"), because people
+write instructions rather than commands — but nothing beyond the stated phrase is inferred. Explicitly
+NOT matched: "undo that", "revert", "keep the design the same", "do not change my code".
+
+**Where it runs, and why there:** BEFORE the file guardian. The guardian's existing job is to carry the
+durable project into the sandbox, so writing the attempt into the durable store first means the
+guardian delivers it by its own proven path — no second restore mechanism to keep in step with the
+first. The turn then proceeds normally, so "keep my changes and add a login" does BOTH in one go
+instead of costing the user a turn.
+
+**Honest in both directions:** handing the attempt back does not pretend it works
+(`attemptRestoredMessage` says plainly that this version did not run correctly when it was made), and
+when there is nothing preserved the user is told so rather than the request silently doing nothing.
+`attemptWorkspaceKey()` is now the single source of the key for both the writer and the reader.
+
+With this, the double-layer protection the admin asked for is complete: prevent (last known good),
+undo (auto-restore), catch what the home page hides (route fingerprint), explain the time (phase
+timing), and escape (keep my changes). **Still unverified in production — the proof is the next real
+build report.**
+
+Tests: 7 more in `tests/greenGuard.test.ts` (29 total) — the exact phrases and the Hinglish set, the
+near-misses that must NOT match, the message advertising the hatch, the honest "this did not run
+correctly" hand-back, and wiring assertions that it runs before the guardian and says something honest
+when there is nothing to give back. Gate: tsc clean both projects, full run 12,908/12,908.

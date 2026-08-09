@@ -4,6 +4,7 @@ import { join } from 'path';
 import {
   decideGreenGuard, restorePlan, greenGuardMessage,
   greenWorkspaceKey, isGreenSnapshotKey, greenGuardEnabled, buildRemoveCommand,
+  wantsAttemptBack, attemptWorkspaceKey, attemptRestoredMessage, KEEP_CHANGES_PHRASE,
 } from '../src/server/AgentV3/GreenGuard';
 
 /**
@@ -164,8 +165,11 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
   });
 
   it('the failed attempt is KEPT before anything is undone', () => {
-    expect(seg.indexOf('::attempt')).toBeGreaterThan(-1);
-    expect(seg.indexOf('::attempt')).toBeLessThan(seg.indexOf('saveWorkspaceFiles(workspaceId, snapshot)'));
+    // The key moved behind attemptWorkspaceKey() when the "keep my changes" hatch began reading it —
+    // one helper for the writer and the reader, so the two can never disagree about where it lives.
+    const keep = seg.indexOf('attemptWorkspaceKey(workspaceId)');
+    expect(keep).toBeGreaterThan(-1);
+    expect(keep).toBeLessThan(seg.indexOf('saveWorkspaceFiles(workspaceId, snapshot)'));
   });
 
   it('the plain save still runs when the guard did not save — a user never loses their files', () => {
@@ -176,5 +180,67 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
   it('is flag-gated and records its decision for the admin either way', () => {
     expect(seg).toContain('greenGuardEnabled()');
     expect(seg).toContain('GREEN_GUARD_');
+  });
+});
+
+describe('"KEEP MY CHANGES" — the escape hatch, because a net you cannot leave is a cage', () => {
+  /**
+   * Green Guard has exactly one honest false positive: a user who asked for something LARGE on purpose
+   * (a framework migration, a rewrite) is rolled back because their app legitimately does not render
+   * yet. The attempt was already preserved; this makes it reachable in one sentence.
+   */
+  it('honours the exact words the restore message tells the user', () => {
+    expect(wantsAttemptBack('keep my changes')).toBe(true);
+    expect(wantsAttemptBack('  KEEP MY CHANGES  ')).toBe(true);
+    // People write instructions, not commands — the phrase inside a longer sentence still counts.
+    expect(wantsAttemptBack('keep my changes and add a login page')).toBe(true);
+  });
+
+  it('honours the Hinglish a real user of this app actually types', () => {
+    expect(wantsAttemptBack('mere changes rakho')).toBe(true);
+    expect(wantsAttemptBack('wo wapas do')).toBe(true);
+    expect(wantsAttemptBack('purana wala wapas chahiye')).toBe(true);
+  });
+
+  it('is NOT a classifier — a merely similar request must not restore a broken tree', () => {
+    // Getting this wrong either strands the user or overwrites a working app with a broken one, so
+    // nothing is inferred beyond the stated phrase.
+    expect(wantsAttemptBack('keep the design the same')).toBe(false);
+    expect(wantsAttemptBack('do not change my code')).toBe(false);
+    expect(wantsAttemptBack('undo that')).toBe(false);
+    expect(wantsAttemptBack('revert')).toBe(false);
+    expect(wantsAttemptBack('')).toBe(false);
+    expect(wantsAttemptBack(null)).toBe(false);
+  });
+
+  it('the restore message TELLS the user those exact words (or the hatch is undiscoverable)', () => {
+    const msg = greenGuardMessage(restorePlan({ 'a.tsx': 'G' }, { 'a.tsx': 'B' }));
+    expect(msg).toContain(KEEP_CHANGES_PHRASE);
+    expect(msg).toMatch(/the attempt is saved too/);
+  });
+
+  it('handing the attempt back does not pretend it works', () => {
+    const msg = attemptRestoredMessage(3);
+    expect(msg).toMatch(/3 files/);
+    expect(msg).toMatch(/did not run correctly/); // honest: this version was rolled back for a reason
+  });
+
+  it('the attempt key is the same one the rollback wrote to', () => {
+    expect(attemptWorkspaceKey('ws1')).toBe('ws1::attempt');
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave)');
+  });
+
+  it('WIRING: it runs BEFORE the file guardian, so one restore path carries it into the sandbox', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+    const hatch = route.indexOf('── "KEEP MY CHANGES"');
+    const guardian = route.indexOf('const plan = planFileGuardian(');
+    expect(hatch).toBeGreaterThan(-1);
+    expect(hatch).toBeLessThan(guardian);
+    const seg = route.slice(hatch, hatch + 3200);
+    expect(seg).toContain('wantsAttemptBack(prompt)');
+    expect(seg).toContain('GREEN_GUARD_ATTEMPT_RESTORED');
+    // Honest when there is nothing to give back, rather than silently doing nothing.
+    expect(seg).toContain('There is no earlier version of yours saved to bring back');
   });
 });

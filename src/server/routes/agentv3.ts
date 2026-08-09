@@ -127,7 +127,7 @@ import { importFailureNarration, importFailureModelReason } from '../AgentV3/imp
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
-import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
@@ -7296,6 +7296,38 @@ export function registerAgentV3Routes(app: Express): void {
         // AUTO-RECOVER anything that went missing — a one-off deleted file is re-added, and a fully
         // recycled sandbox is restored whole (overwriting bare scaffold placeholders). It runs BEFORE
         // the agent edits anything, so it can only recover loss, never clobber legitimate new work.
+        // ── "KEEP MY CHANGES" (admin 2026-08-09) ────────────────────────────────────────────────────
+        // Green Guard has exactly one honest false positive: a user who asked for something large ON
+        // PURPOSE — a framework migration, a rewrite — gets rolled back because their app legitimately
+        // does not render yet. A safety net the user cannot escape is a cage, so the restore message
+        // states the exact words that bring their version back, and this honours them.
+        //
+        // It runs BEFORE the file guardian on purpose: the guardian's job is to restore the durable
+        // project into the sandbox, so putting the attempt into the durable store first means the
+        // guardian then carries it into the sandbox by its own existing path — no second restore
+        // mechanism to keep in step with the first. The turn then proceeds normally, so "keep my
+        // changes and add a login" does both things in one go instead of costing the user a turn.
+        //
+        // Matching is EXACT-PHRASE, never a classifier: guessing wrong here either strands the user or
+        // restores a broken tree over a working one, and neither is worth a probabilistic win rate.
+        if (greenGuardEnabled() && wantsAttemptBack(prompt)) {
+          try {
+            const attempt = await loadWorkspaceFiles(attemptWorkspaceKey(workspaceId)).catch(() => ({} as Record<string, string>));
+            const count = Object.keys(attempt).length;
+            if (count > 0) {
+              await saveWorkspaceFiles(workspaceId, attempt);
+              events.emit({ type: 'narration', agent: 'architect', text: attemptRestoredMessage(count), ts: Date.now() });
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'GREEN_GUARD_ATTEMPT_RESTORED',
+                message: `The user asked for the rolled-back attempt back; ${count} file(s) restored from the preserved attempt before this turn's work began.`,
+                autoResolved: true,
+              });
+            } else {
+              // Honest rather than silent: the phrase was understood, there was simply nothing kept.
+              events.emit({ type: 'narration', agent: 'architect', text: 'There is no earlier version of yours saved to bring back — nothing was rolled back recently. Tell me what you would like to change and we will go from what is here now.', ts: Date.now() });
+            }
+          } catch { /* best-effort — a failed recall must never block the turn */ }
+        }
         try {
           const saved = await loadWorkspaceFiles(workspaceId);
           const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
@@ -11050,7 +11082,7 @@ export function registerAgentV3Routes(app: Express): void {
               } else if (decision.action === 'restore') {
                 const plan = restorePlan(snapshot, toSave);
                 // Keep the broken attempt before undoing it — nothing the user paid for is thrown away.
-                await saveWorkspaceFiles(`${workspaceId}::attempt`, toSave).catch(() => {});
+                await saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave).catch(() => {});
                 for (const [path, content] of Object.entries(plan.write)) {
                   try { await actuator.writeFile(workspaceId, path, content); } catch { /* per-file best-effort */ }
                 }

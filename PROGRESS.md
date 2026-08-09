@@ -28081,3 +28081,41 @@ indigo "Check now" button; the raw states remain as dim mono detail (support sti
 are never the headline; a second Check sits at the bottom for the user who scrolled to copy records
 (same handler — one implementation, test-pinned). Honesty preserved: nothing says "Live" except the
 API's own `active` flag, even when all three sub-states read ACTIVE (test-pinned).
+
+## 2026-08-09 — Three native-feel fixes (admin): desktop Apple login, Capacitor splash, tap vibration → tone
+
+**1. Desktop Apple login (root-caused in code, config caveat recorded honestly).** Google's provider
+is statically imported; Apple's handler did `await import('firebase/auth')` INSIDE the click. On a
+cold cache that network wait consumes the browser's transient user activation, so `signInWithPopup`
+is popup-BLOCKED → falls back to `signInWithRedirect` → which silently dies on desktop Chrome's
+storage-partitioned return ("missing initial state"). That asymmetry is exactly why Google worked
+and Apple did not. Fix: the module promise starts at MODULE LOAD (`firebaseAuthModuleForApple`);
+the click-time await resolves from memory in the same tick and the popup keeps its activation.
+⚠️ HONEST CAVEAT (rule 6): the live site is unreachable from this sandbox (proxy policy), so the fix
+could not be verified against production. If Apple STILL fails after deploy, the remaining suspect is
+CONSOLE config, which only the admin can check: Firebase Console → Authentication → Apple must have
+the **Services ID + Apple Team ID + private key** filled for WEB (native iOS working proves nothing
+about web), and the Apple Developer portal's Services ID must list the Firebase authDomain return URL
+(`https://<authDomain>/__/auth/handler`) as a registered Return URL.
+
+**2. Splash: Capacitor logo out, NavBharatAI logo in, 1s not 2s.** The 11 `drawable*/splash.png`
+files were the STOCK Capacitor artwork — that is the logo the admin saw at every app open. All 11
+regenerated from `public/logo.png` on the app's own dark surface (#0d1117 — the same color as
+`SplashScreen.backgroundColor`, so splash → app is one continuous surface), each density/orientation
+at its correct dimensions, stamped with a PNG tEXt marker so a test can prove stock artwork never
+returns. `launchShowDuration` 2000→1000 ("jhatt se open"); the splash itself cannot be REMOVED (the
+WebView genuinely boots; no splash = a blank sheet, which is worse) and `launchAutoHide: true` is
+untouched per the 2026-07-26 anti-brick rule. Takes effect in the NEXT .aab build.
+
+**3. Tap vibration → touch tone ("tak").** The app-wide tap feedback drove the Haptics vibration
+motor — on many Androids a strong whole-hand buzz at chat-typing frequency. New `tapTone.ts`: a
+synthesised WebAudio tick (1.8kHz, ~35ms exponential decay, gain 0.08 — Android's own keyboard
+behaviour), zero asset bytes, starts the same millisecond the finger lands, and respects silent mode
+the way vibration never did. `installTapHaptics` now takes an injectable `tick` (default the tone),
+needs no Haptics plugin, keeps the 60ms anti-storm throttle; the one stray `navigator.vibrate(30)`
+in AIChat's send button now uses the same tone, and a sweep asserts `navigator.vibrate` is gone.
+
+Tests: nativeShell tap block rewritten (proves the motor is NEVER touched), 9 new in
+tests/nativePolish.test.ts (activation prefetch contract, per-bucket splash marker + IHDR orientation
+check, tone envelope/resume/never-throws, vibrate-free sweep).
+Gate: tsc clean both projects, real build green, full run 12,725/12,725.

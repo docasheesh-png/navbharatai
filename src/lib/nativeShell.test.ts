@@ -450,59 +450,70 @@ describe('keyboard behaviour — the loudest WebView giveaway', () => {
   });
 });
 
-describe('tap haptics — one delegated listener, never 200 call sites', () => {
+describe('tap feedback — one delegated listener, SOUND not vibration (admin 2026-08-09)', () => {
   function hapticCtx() {
-    const impacts: string[] = [];
+    const ticks: number[] = [];
+    const impact = vi.fn(() => Promise.resolve());
     let handler: ((e: Event) => void) | null = null;
     const root = {
       addEventListener: (_t: string, cb: (e: Event) => void) => { handler = cb; },
       removeEventListener: () => { handler = null; },
     };
     return {
-      impacts,
+      ticks,
+      impact,
+      tick: () => { ticks.push(1); },
       root,
       fire: (matches: boolean) => handler?.({ target: { closest: () => (matches ? {} : null) } } as unknown as Event),
       attached: () => handler !== null,
-      ctx: { Capacitor: { isNativePlatform: () => true }, Haptics: { impact: (o: { style: string }) => { impacts.push(o.style); return Promise.resolve(); } } } as never,
+      // Haptics present in the context on purpose: the assertion below proves taps IGNORE it now.
+      ctx: { Capacitor: { isNativePlatform: () => true }, Haptics: { impact } } as never,
     };
   }
 
-  it('ticks on a real control, and stays silent on plain content', () => {
+  it('ticks on a real control, stays silent on plain content — and NEVER touches the vibration motor', () => {
     const h = hapticCtx();
-    installTapHaptics(h.ctx, h.root, () => 1000);
+    installTapHaptics(h.ctx, h.root, () => 1000, h.tick);
     h.fire(true);
-    expect(h.impacts).toEqual(['light']);
+    expect(h.ticks).toHaveLength(1);
     h.fire(false);
-    expect(h.impacts).toEqual(['light']); // untouched — body text must not buzz
+    expect(h.ticks).toHaveLength(1); // untouched — body text must not tick
+    expect(h.impact).not.toHaveBeenCalled(); // the buzz is gone: sound replaced vibration
   });
 
-  it('throttles a fast tapper into one tick instead of a buzz storm', () => {
+  it('throttles a fast tapper into one tick instead of a tick storm', () => {
     const h = hapticCtx();
     let t = 1000;
-    installTapHaptics(h.ctx, h.root, () => t);
+    installTapHaptics(h.ctx, h.root, () => t, h.tick);
     h.fire(true);
     t += HAPTIC_MIN_GAP_MS - 1;
     h.fire(true);
-    expect(h.impacts).toHaveLength(1);
+    expect(h.ticks).toHaveLength(1);
     t += HAPTIC_MIN_GAP_MS;
     h.fire(true);
-    expect(h.impacts).toHaveLength(2);
+    expect(h.ticks).toHaveLength(2);
+  });
+
+  it('works WITHOUT the Haptics plugin — sound needs no native module', () => {
+    const h = hapticCtx();
+    installTapHaptics({ Capacitor: { isNativePlatform: () => true } } as never, h.root, () => 1000, h.tick);
+    h.fire(true);
+    expect(h.ticks).toHaveLength(1);
   });
 
   it('teardown detaches the listener', () => {
     const h = hapticCtx();
-    const off = installTapHaptics(h.ctx, h.root, () => 1);
+    const off = installTapHaptics(h.ctx, h.root, () => 1, h.tick);
     expect(h.attached()).toBe(true);
     off();
     expect(h.attached()).toBe(false);
   });
 
-  it('is a no-op on web — a browser has no haptics to give', () => {
+  it('is a no-op on web — the browser keeps ordinary silent clicks', () => {
     const h = hapticCtx();
-    const impact = vi.fn(() => Promise.resolve());
-    installTapHaptics({ Capacitor: { isNativePlatform: () => false }, Haptics: { impact } } as never, h.root, () => 1);
+    installTapHaptics({ Capacitor: { isNativePlatform: () => false } } as never, h.root, () => 1, h.tick);
     expect(h.attached()).toBe(false);
-    expect(impact).not.toHaveBeenCalled();
+    expect(h.ticks).toHaveLength(0);
   });
 });
 

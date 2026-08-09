@@ -28119,3 +28119,52 @@ Tests: nativeShell tap block rewritten (proves the motor is NEVER touched), 9 ne
 tests/nativePolish.test.ts (activation prefetch contract, per-bucket splash marker + IHDR orientation
 check, tone envelope/resume/never-throws, vibrate-free sweep).
 Gate: tsc clean both projects, real build green, full run 12,725/12,725.
+
+## 2026-08-09 — Store billing slice 1: Apple + Google purchase verification and wallet credit (admin: "apple/google payment setup karwao")
+
+Both stores REQUIRE their own billing for digital goods bought inside the app, and our wallet top-up
+is exactly that — this is the NATIVE funding rail for the SAME one wallet Cashfree funds on web (one
+money model, two rails; the credit itself flows through the existing `computeCreditedWallet`).
+
+Shipped (server, dormant behind `STORE_BILLING`):
+- **`storeBilling.ts`** — the pack catalogue as DATA (stores need fixed price points, unlike the
+  web's free-form amount): ₹99/₹249/₹499/₹999 defaults, `STORE_PACKS` JSON override, and junk config
+  falls back to the defaults rather than leaving the app with nothing to sell. `packForProduct` is
+  the single place a product becomes money — an UNKNOWN id (a retired store product) credits nothing.
+- **`storeVerify.ts`** — real verification against Apple's App Store Server API (ES256 JWT from the
+  admin's .p8; production tried first with automatic SANDBOX fallback on 404, because a TestFlight
+  purchase is not fraud; refunded/revoked refuses) and Google's Play Developer API (service-account
+  JWT → access token → purchases.products.get; ONLY `purchaseState 0` credits — a PENDING UPI
+  purchase is not money). Injectable fetch, so money code is provable in CI where neither store exists.
+- **`/api/payment/store/verify`** — verified uid required; the product comes from the STORE's answer
+  and is priced from OUR catalogue (a client cannot buy ₹99 and claim ₹999); the store transaction
+  id IS the `payment_transactions` doc id, so a re-delivered or retried purchase credits exactly
+  once; credit happens in a Firestore transaction. `/api/payment/store/packs` reports honestly
+  whether each platform is actually configured. 21 tests, written around the ways it could WRONGLY
+  credit (forged token, client-chosen product, refund, pending, replay).
+
+**Still to come (slice 2), and honestly blocked on the admin's console work:** the native plugin +
+buy UI + platform routing (web → Cashfree, native → store). Products must exist in App Store Connect
+and Play Console before that code can be exercised at all, and Apple's "Agreements, Tax, and
+Banking" + Google's payments profile take days to approve — so the admin checklist was handed over
+first, in parallel with this slice.
+
+## 2026-08-09 — Store markup: the store's cut comes out of the STORE PRICE, never our margin
+
+Admin: *"Google aur Apple apna % lete hai — hamare ₹ kam nahi hone chahiye!!"* Correct, and the fix
+is arithmetic, not hope. A pack now carries TWO amounts, deliberately separate:
+- `priceInr` — what the STORE charges, marked up to absorb the commission (₹119 / ₹299 / ₹599 / ₹1199)
+- `creditInr` — what the WALLET gets, identical to the web rail (₹99 / ₹249 / ₹499 / ₹999)
+At 15% every default pack nets ≥ its credit (₹119→₹101.15, ₹1199→₹1019.15) — **test-pinned**, so a
+future price edit that would quietly fund the store out of our margin fails CI.
+Why markup and not a smaller credit: charging ₹99 and crediting ₹84 reads as cheating the user;
+charging ₹119 for ₹99 of credit, with the reason on screen, is the same arithmetic told honestly —
+and is what every large app does on mobile. `storePriceForCredit()` is the calculation in code, so a
+price change is derived rather than guessed, and `netAfterStoreFee()` states the real net.
+⚠️ Recorded honestly: 15% is right for BOTH stores on the first $1M/year — Google applies it
+automatically, **Apple requires a one-time enrolment in the App Store Small Business Program**;
+without it the rate is 30% and these prices under-recover. India's GST also sits in the middle (the
+stores collect and remit). `STORE_FEE_PCT` exists so the admin retunes from the FIRST REAL PAYOUT
+report, which is the only honest source for the final rate. The transaction record now stores
+`storePriceInr` / `storeFeePct` / `storeNetInr` alongside the credit, so a payout can be reconciled
+without re-deriving anything.

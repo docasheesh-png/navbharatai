@@ -1,5 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
+import { recordHeal, type HealEvent } from './healRepeat';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 
 /**
@@ -408,6 +409,30 @@ const MAX_SUMMARY = 200;
  * fake success), so the model can see and recover from it.
  */
 export class ToolDispatcher {
+  /**
+   * Repairs already performed in THIS build, by fingerprint — see healRepeat.ts.
+   *
+   * A repair that fires twice for the same file did not hold the first time, so the second firing is
+   * reported as a DEFECT rather than as another cheerful green fix. Instance-scoped, so one build's
+   * ledger can never leak into another's.
+   */
+  private readonly healLedger = new Map<string, number>();
+
+  /**
+   * Announce a repair honestly: a fix the first time, a bug when the same repair runs again.
+   *
+   * The build report showed the identical three repair lines at t=126s, t=216s and t=313s of one build.
+   * Printing "🔧 fixed it" a third time is how that stayed invisible for so long.
+   */
+  private announceHeal(event: HealEvent, fixText: string): void {
+    const verdict = recordHeal(this.healLedger, event);
+    if (!verdict.repeat) {
+      this.events?.emit({ type: 'narration', agent: 'architect', text: fixText, ts: Date.now() });
+      return;
+    }
+    this.events?.emit({ type: 'narration', agent: 'architect', text: `⚠️ ${verdict.message}`, ts: Date.now() });
+  }
+
   constructor(
     private readonly actuator: ActuatorPort,
     private readonly workspaceId: string,
@@ -2878,7 +2903,10 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Auto-fixed ${rec.fixes.length} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`, ts: Date.now() });
+              this.announceHeal(
+                { kind: 'import-kind-mismatch', file: [...new Set(rec.fixes.map((f: { file: string }) => f.file))].sort().join(', ') },
+                `🔧 Auto-fixed ${rec.fixes.length} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`,
+              );
             }
           } catch { /* reconcile is best-effort — a failure just leaves the honest blocker below */ }
           // MISSING-IMPORT SELF-HEAL (root cause — admin jungle-game report 104f5b09): a generated file
@@ -2898,7 +2926,12 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${addRes.added.length} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`, ts: Date.now() });
+              for (const file of changedFiles) {
+                this.announceHeal(
+                  { kind: 'missing-import', file },
+                  `🔧 Added ${addRes.added.length} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`,
+                );
+              }
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // WRONG-SOURCE SELF-HEAL (Kanban build 2026-07-13): a NAMED import points at a module that does
@@ -2916,7 +2949,12 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
+              for (const file of changedFiles) {
+                this.announceHeal(
+                  { kind: 'wrong-source-import', file },
+                  `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`,
+                );
+              }
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
@@ -2937,7 +2975,10 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
-                this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+                this.announceHeal(
+                  { kind: 'duplicate-import', file },
+                  `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`,
+                );
               }
             }
           } catch { /* best-effort — a failure just leaves the honest blocker below */ }
@@ -7015,21 +7056,31 @@ export class ToolDispatcher {
       }
 
       case 'deploy': {
+        // A DEPLOY THAT DID NOT DEPLOY MUST NOT REPORT SUCCESS (autopsy build aed2906d, 2026-08-09).
+        //
+        // Every branch below used to RETURN a sentence. A returned string is a SUCCESSFUL tool result, so
+        // the build timeline recorded `✓ deploy (0s)` twice, no URL was ever emitted, and the agent was
+        // left guessing — it went off running `ls -la dist/` and `pwd && ls -la` trying to work out what
+        // had happened. The user had asked for one thing, a live link, and got neither the link nor an
+        // error. THROWING is how every other tool reports a failure here (it becomes a TOOL_ERROR the
+        // agent can read and act on), so deploy now uses the same convention as the rest of the catalog.
+        // The message text is unchanged — it was already the right explanation, it was just being
+        // delivered as if it were good news.
         if (!this.deploy) {
-          return 'Deployment is not configured in this context.';
+          throw new Error('Deployment is not configured in this context.');
         }
         if (!this.actuator.downloadDistFiles) {
-          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+          throw new Error('Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.');
         }
         let files: Map<string, Buffer>;
         try {
           files = await this.actuator.downloadDistFiles(this.workspaceId);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+          throw new Error(`Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`);
         }
         if (files.size === 0) {
-          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+          throw new Error('No built files found. Run "npm run build" to produce dist/ before deploying.');
         }
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });

@@ -23,16 +23,22 @@ describe('relativeRecordName', () => {
   });
 });
 
-describe('the record card answers the registrar form', () => {
+describe('the record card shows EXACTLY what gets pasted (admin 2026-08-09)', () => {
   const src = readFileSync(join(__dirname, '..', 'src/components/agentv3/NbaiDomainConnect.tsx'), 'utf8');
 
   it('Type is a first-class copyable Field — not only a corner badge', () => {
     expect(src).toContain('<Field label="Type" value={rec.type}');
   });
 
-  it('the hint names the exact dropdown choice and the relative-Name fallback', () => {
+  it('NAME displays and copies the RELATIVE form directly — the user never translates', () => {
+    // The registrar's Name box wants "@" / the bare prefix, so that is what the Field carries.
+    expect(src).toContain('<Field label="Name" value={relativeRecordName(rec.name, cleanDomain)}');
+    // The old half-measure — full name plus a "type @ instead" footnote — must never come back.
+    expect(src).not.toContain('If the Name box rejects the full name');
+  });
+
+  it('the hint names the exact dropdown choice, and explains "@" in one plain line', () => {
     expect(src).toContain('in the "Type" dropdown choose');
-    expect(src).toContain('If the Name box rejects the full name');
-    expect(src).toContain('relativeRecordName(rec.name, cleanDomain)');
+    expect(src).toContain('simply means your domain');
   });
 });

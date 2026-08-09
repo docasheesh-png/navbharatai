@@ -28050,3 +28050,15 @@ show fully-qualified ones — pasted as-is they get rejected or silently doubled
 dropdown choose A … leave TTL as-is', plus the relative-Name fallback ('type @ instead — it means
 the same thing there') via new pure `relativeRecordName` (exported, trailing-dot/case tolerant,
 foreign names untouched). tests/dnsRecordTypeHint.test.ts.
+
+## 2026-08-09 — Name box shows EXACTLY what gets pasted (admin: "jo copy paste hoga, wahi dikhna chahiye — fix karo!!")
+
+The previous entry's fix was rightly called out as a half-measure: the card still displayed the
+fully-qualified name (mitrify.in) with a footnote saying "if rejected, type @ instead". A
+non-technical user should NEVER be asked to translate — and since every registrar form (Hostinger,
+GoDaddy, Namecheap, …) takes relative names, the FQDN display was simply the wrong default. Now the
+NAME Field displays and COPIES the relative form directly ("@" for the apex, "_acme-challenge" for
+the challenge), the copy button carries exactly those bytes, and the one remaining plain line
+explains '"@" simply means your domain'. The old fallback sentence is test-pinned to never return.
+Lesson (external-adaptation applied to my own output): when the user's screen and the target form
+disagree, change the SCREEN to match the form — never hand the user a translation rule.

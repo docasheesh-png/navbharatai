@@ -318,21 +318,20 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">{rec.type}</span>
                 {rec.note && <span className="text-[10px] text-zinc-500">{rec.note}</span>}
               </div>
-              {/* TYPE as a first-class copyable field (admin 2026-08-08, Hostinger screenshot): the
-                  registrar's add-record form leads with a "Type" dropdown, and a small corner badge
-                  did not read as the answer to it — users froze at "Choose type". Same Field row as
-                  Name/Value, so the form maps 1:1: Type → Type, Name → Name, Value → Value. */}
+              {/* THE CARD SHOWS EXACTLY WHAT GETS PASTED (admin 2026-08-09: "jo jo copy paste hoga,
+                  wahi wahi dikhna chahiye — mere users non-technical hain"). Registrar forms lead
+                  with a "Type" dropdown and take names RELATIVE to the domain ("@" for the apex) —
+                  Hostinger, GoDaddy, Namecheap, all of them. So Type is a first-class copyable
+                  Field, and NAME displays and copies the RELATIVE form directly. The earlier
+                  version showed the full name with a "if rejected, type @ instead" footnote — a
+                  half-measure: the user should never be asked to translate. */}
               <Field label="Type" value={rec.type} k={`t${i}`} copied={copied} onCopy={copy} />
-              <Field label="Name" value={rec.name} k={`n${i}`} copied={copied} onCopy={copy} />
+              <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`n${i}`} copied={copied} onCopy={copy} />
               <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
               <p className="text-[10px] text-zinc-500">
-                At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, put the Name and Value above in their boxes, and leave TTL as-is.
-                {/* Registrar forms want RELATIVE names (Hostinger, GoDaddy, …): the apex is "@", a
-                    subdomain is just its prefix. Saying it here kills the second freeze of the same
-                    form — a full name pasted into a relative box gets rejected or silently doubled
-                    (mitrify.in.mitrify.in). */}
-                {relativeRecordName(rec.name, cleanDomain) !== rec.name && (
-                  <> If the Name box rejects the full name, type <span className="font-bold text-zinc-300">{relativeRecordName(rec.name, cleanDomain)}</span> instead — it means the same thing there.</>
+                At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
+                {relativeRecordName(rec.name, cleanDomain) === '@' && (
+                  <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
                 )}
               </p>
             </div>

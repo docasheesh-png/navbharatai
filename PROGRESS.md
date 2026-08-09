@@ -28454,3 +28454,95 @@ this module warns about. It falls through to English until a Marathi catalogue e
 
 Gate after the correction: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1123 files
 / 12,848 tests, exit 0**.
+## 2026-08-09 — GREEN GUARD, layer 1 of 2: the decision core (admin: "app banne ke baad kharab nahi honi chahiye")
+
+**The admin's question, which is the sharpest one asked of this project:** "pehli build me 4-5 min me
+app 100% ban jati hai, working app — to baad me 20 min tak usko edit kar ke kharab kyu kiya jata hai?
+Iska koi permanent solution nahi hai? … ek double layer protection banao."
+
+**WHY IT HAPPENS — mechanism, not theory (verified in code):**
+1. The durable project is saved at the END of every turn, whatever the outcome (`saveWorkspaceFiles`
+   at settle). So the saved state is "the LAST turn", never "the last WORKING turn". A bad edit
+   overwrites the good app, and the good version survives only as a git commit inside a sandbox that
+   is eventually recycled — i.e. the working app is genuinely gone.
+2. When an edit breaks something, the engine's answer is MORE model passes (repair → heal → review →
+   autofix). Each pass is a fresh chance to break something else, and it is where the twenty minutes
+   go. Repair is expensive and probabilistic; going back is cheap and certain.
+
+**THE PRINCIPLE WAS ALREADY PROVEN HERE, AT THE WRONG SCALE.** `EndgameRepair`'s convergence guard
+snapshots files before a repair and rolls them back when the error count gets worse — "monotone by
+construction: it helps or does nothing, never harms." Exactly right, applied to ONE pass and ONE
+metric. Green Guard raises that same property to the level that matters — the whole TURN.
+
+**SHIPPED IN THIS PR — the PURE decision half** (`GreenGuard.ts`, no I/O, fully unit-tested):
+- `decideGreenGuard` — green now ⇒ SAVE as last known good; not green now but green before ⇒ RESTORE;
+  never green ⇒ NONE (nothing good exists to protect, and restoring rubbish over rubbish helps nobody).
+  An absent/unknown verdict is never treated as green — green must be EARNED (the visited-and-really-
+  rendered verdict, which only became trustworthy with #2196's honest preview checks).
+- `restorePlan` — writes back changed files AND removes files the bad turn ADDED. That second half is
+  what makes it a restore instead of an overlay: writing good files on top while leaving new ones
+  behind produces a THIRD state that was never tested — neither the working app nor the broken one.
+  That hybrid is the classic way a "rollback" quietly makes things worse; closed by construction.
+- `greenGuardMessage` — the user is always TOLD, never silently rewritten, in plain language with no
+  vendor name (white-label law).
+- `greenWorkspaceKey` — the snapshot lives in the SAME durable file store under a `::green` suffix.
+  Deliberately not a new storage system: that store already solves one-document-per-file (so a big
+  project never hits the 1 MB document limit), sharded writes and bounded deletes. A snapshot store of
+  my own would have to re-earn all of it — and, on this exact day, would have re-learned the 1 MB
+  lesson the hard way (see the report-parts entry above).
+- Kill switch `AGENTV3_GREEN_GUARD=off`.
+
+**SIBLING FIXED IN THE SAME CHANGE (rule 3):** `listUserWorkspaceApps` prefix-scans `agentv3-<uid>-`,
+and a snapshot key shares that prefix — so the user would have seen their app TWICE and could have
+opened the backup by mistake. Snapshots are now excluded there.
+
+**HONEST STATUS — this does NOTHING for a user yet.** It is the decision core only; nothing calls it.
+Layer 2 (capturing the snapshot at settle, and performing the restore) is the next PR, and until that
+lands the admin's problem is unchanged. Recorded plainly rather than reported as solved (rule 2: there
+are only two states, fully working or not built yet — this is infrastructure toward the first).
+
+Tests: 14 in `tests/greenGuard.test.ts` — both layers' rules, the hybrid trap, restore idempotence,
+a deleted file coming back, the white-label check on the user message, and a source assertion that the
+app list excludes snapshots. Gate: tsc clean both projects, full run 12,821/12,821.
+
+### GREEN GUARD, layer 2 — now WIRED (the half the user actually feels)
+
+Layer 1 shipped the decision core and honestly recorded that it did nothing yet. This wires it into
+the exact line that caused the problem: the settle-time `saveWorkspaceFiles(workspaceId, toSave)`,
+which persisted whatever the turn produced, good or broken.
+
+- **The green signal is EARNED, not inferred.** `previewGreen` is set in exactly TWO places, both
+  beside a `recordPreviewVerified()` call — the render-rescue and the preview-verify paths, each of
+  which opened the app in a REAL browser and saw it render (the verify path also requires zero console
+  errors). A build that merely "finished" never sets it. Protecting a state we never verified would be
+  the same lie in a new place, and a test asserts there are exactly two setters.
+- **Green ⇒ the file set is ALSO written to `<workspaceId>::green`,** after the project save, so a
+  failure writing the snapshot can never cost the user their actual files.
+- **Was-green-and-now-broken ⇒ restored:** the good files are written back to the sandbox AND the
+  durable store, and the files the failed attempt ADDED are removed from both — without that second
+  half the result is a hybrid third state that was never tested (see layer 1's note).
+- **The failed attempt is never destroyed.** It is saved under `<workspaceId>::attempt` BEFORE
+  anything is undone, so a restore costs the user nothing and a deliberate work-in-progress is
+  recoverable rather than erased. Test asserts the ordering.
+- **Sandbox deletion goes through a PURE, tested `buildRemoveCommand`.** The actuator has no delete
+  primitive, so removal is a shell command — which is exactly why the path filter is strict
+  (workspace-relative, no traversal, no metacharacters), the list is capped, and unsafe paths are
+  DROPPED rather than escaped. A restore is not worth inventing a command-injection surface for.
+- **It can never cost a user their save.** The whole block is inside try/catch with `if (!saved)`
+  falling through to the original save, and it is flag-gated (`AGENTV3_GREEN_GUARD=off`). Its decision
+  is recorded in the build report either way (`GREEN_GUARD_SAVE|RESTORE|NONE`, `GREEN_GUARD_RESTORED`).
+
+**HONEST LIMITS, stated rather than discovered later:**
+1. It protects a turn that ends NOT-GREEN. It does NOT catch a turn that ends green while having
+   broken something the preview does not exercise (a route the check never visits). Narrowing that
+   needs a per-route fingerprint of the working app — the natural next slice.
+2. `before.green` is inferred from "a verified-good snapshot exists", not from a fresh check at turn
+   start. That is deliberately conservative and correct for the reported case, but it means a
+   deliberate, long-running rewrite that legitimately does not render yet WILL be rolled back — which
+   is why the attempt is preserved and the user is told, rather than silently overwritten.
+3. Unverified in production: this sandbox cannot reach the live site, so the proof is the next real
+   build report.
+
+Tests: 22 in `tests/greenGuard.test.ts` (8 new for layer 2) — the injection surface, the cap, exactly
+two green setters each beside a real-browser verification, attempt-kept-before-undo ordering, the
+fall-through save, and the flag gate. Gate: tsc clean both projects, full run 12,876/12,876.

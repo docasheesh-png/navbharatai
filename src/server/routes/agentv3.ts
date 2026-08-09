@@ -5933,14 +5933,22 @@ export function registerAgentV3Routes(app: Express): void {
             // (express-session throws "secret option required" on '' — the exact reason the Mitrify
             // preview died). Third-party keys are NEVER faked; they stay empty + honestly listed.
             Object.assign(provided, conjurableSecrets(declaredEnvVars));
-            // PIN THE PORT (admin screenshot 2026-08-07 — Mitrify preview URL said 3000, the app was
-            // on 5000): a server that reads `process.env.PORT || <default>` binds a DIFFERENT port
-            // depending on ambient sandbox env, so the same app landed on 3000 in one sandbox and
-            // 5000 in the next while its saved preview URL stayed pinned to history — E2B's "Closed
-            // Port Error" page rendered as the app. Writing PORT into the dev .env makes every boot
-            // of a PORT-honoring app bind the SAME port, in every sandbox, forever. Apps that ignore
-            // PORT (vite serves its own) are untouched, and the log-parsed port still wins downstream.
-            if (!('PORT' in provided)) provided.PORT = '3000';
+            // THE PORT IS THE APP'S OWN — WE DO NOT ASSIGN IT (admin 2026-08-09: "report me likha hai
+            // app port 3000 par, lekin mitrify to port 5000 par hai").
+            //
+            // The report was not lying: the app really was on 3000, because WE PUT IT THERE. A pin
+            // used to write a fixed PORT into the app's dev .env, so every PORT-honoring app was
+            // moved off its own port. That was a workaround for the 2026-08-07
+            // bug where a saved preview URL kept pointing at a port the app no longer bound — and it
+            // treated the SYMPTOM (make the app match our URL) instead of the cause (make our URL
+            // follow the app). Forcing the port also silently contradicts everything else in the
+            // user's project that names the real one: their README, their OAuth redirect URIs, a
+            // hardcoded proxy or CORS origin — and on an import turn whose instruction was "do not
+            // change any files", moving the app's port is precisely the kind of change we promised
+            // not to make.
+            // The cause is now fixed properly: the boot below discovers the port the app ACTUALLY
+            // bound (its own log first, then the ports the sandbox OS reports as listening) and the
+            // preview URL follows it. So the app keeps its own port — 5000 stays 5000.
             // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
             // provisioned DATABASE_URL + generated local secrets, plus empty placeholders for the rest.
             if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {
@@ -6059,21 +6067,43 @@ export function registerAgentV3Routes(app: Express): void {
             }
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
-              const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
-              const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
+              const scriptPort = devScriptPort(importedFiles['package.json'] ?? null);
+              let bootPort = port ?? scriptPort ?? oneShotDevPort(framework);
               // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
               // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
               // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
               // problem analyzePreviewHtml found, e.g. a full-stack app serving its API but 404-ing its
               // client routes). The URL is still exposed either way so the user can retry from the tab.
-              let served: { rendered: boolean; problems: string[] } = { rendered: true, problems: [] };
-              if (bootUrl) {
+              const visit = async (candidate: number) => {
+                let url = '';
+                try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, candidate), 10_000, 'import-preview-url')); }
+                catch { /* URL resolution is best-effort — the boot itself already succeeded */ }
+                if (!url) return { url: '', served: { rendered: true, problems: [] as string[] } };
+                try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, url), 30_000, 'import-preview-verify')).html) }; }
+                catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
+              };
+              let winner = await visit(bootPort);
+              // FLIP SYSTEM, now on the IMPORT path too (admin 2026-08-09 — "report me port 3000, lekin
+              // mitrify to 5000 par hai"). The flip existed only on the Diagnose route, so this path had
+              // ONE guess and no way to correct it — which is why the port was being PINNED instead.
+              // With the pin gone the app keeps its own port, and if the first guess does not render we
+              // ask the sandbox OS which ports are REALLY listening and visit each candidate until one
+              // genuinely serves the app. Every flip target is evidence, every verdict is earned, and
+              // the happy path costs nothing extra.
+              if (winner.url && !winner.served.rendered) {
+                let listening: number[] = [];
                 try {
-                  const probe = await withTimeout(actuator.browseUrl(workspaceId, bootUrl), 30_000, 'import-preview-verify');
-                  served = analyzePreviewHtml(probe.html);
-                } catch { served = { rendered: false, problems: ['the preview could not be reached to verify it'] }; }
-                emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
+                  listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'import-preview-port-scan')).stdout);
+                } catch { /* best-effort — without the scan the flip simply has no extra candidates */ }
+                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening })) {
+                  if (cand === bootPort) continue;
+                  const attempt = await visit(cand);
+                  if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }
+                }
               }
+              const bootUrl = winner.url;
+              const served = winner.served;
+              if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               // BOOT LOG DIAGNOSER (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc): the boot log
               // is IN HAND here, and on that build it named the exact cause (`ECONNREFUSED …:5432` at
               // ensureSchema) while the verdict still guessed "it isn't serving the app's pages (only

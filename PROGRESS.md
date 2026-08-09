@@ -28338,3 +28338,40 @@ Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (24 total) — the exact d
 unresolved with `counts.autoResolved: 0`, PaisaTrack still forgiven, a later-clean command forgiven,
 a failed build untouched, observations never counting as a consequence, and a source sweep proving
 every framework reassignment tells the report. Gate: tsc clean both projects, full run 12,803/12,803.
+
+### 2026-08-09 — The app keeps its OWN port (admin: "report me port 3000, lekin mitrify to 5000 par hai")
+
+**The report was not lying — and that is the point.** The app really was on port 3000, because
+NavBharatAI put it there: the import boot wrote a fixed `PORT` into the app's dev `.env`, moving every
+PORT-honoring app off its own port.
+
+**Why that pin existed, and why it was the wrong half of the fix.** It answered the 2026-08-07 bug
+(the Preview tab showing E2B's "Closed Port Error" for 3000 while the app served 5000). That bug had
+TWO answers shipped together: a CLIENT fix making a freshly VERIFIED url outrank the saved historical
+one — the real cause — and this server pin, which made the app unable to move. The client fix cured
+the cause; the pin cured the symptom by changing the user's app.
+
+**The cost the admin found.** Forcing the port silently contradicts everything else in the user's own
+project that names the real one — their README, their OAuth redirect URIs, a hardcoded dev proxy or
+CORS origin — and on an import turn whose instruction was literally "do not change any files", moving
+the app's port is precisely the change we promised not to make. It also made the report's honest
+statement ("port 3000") read as a bug to the one person who knows the app.
+
+**Fixed at the cause.** Nothing assigns a port any more; the import boot DISCOVERS it — the app's own
+boot log first, then `devScriptPort`, then the ports the sandbox OS reports as genuinely LISTENING —
+and visits candidates until one actually serves the app. This is the evidence-first flip system built
+on 2026-08-07 (admin: "ek par na chale to dusra, dusre par na chale to teesra?"), which until now was
+wired ONLY into the Diagnose route; the import path had one guess and no way to correct it, which is
+exactly why a pin felt necessary there. The determinism the pin bought is replaced by evidence, which
+is strictly stronger: it is right even for an app that ignores `PORT` altogether. The flip stays
+cost-free on the happy path — it engages only when the first port fails to render.
+
+**A hazard closed on the way:** an EMPTY `PORT=` is now never written either. Every other var is safe
+as `''` because apps test it for truthiness, but a port is PARSED — `Number(process.env.PORT ?? 5000)`
+turns `''` into 0 and the server binds a RANDOM port that no preview could find. Absent is the only
+safe placeholder; a real user-provided value is still honoured.
+
+`tests/previewFreshUrl.test.ts` asserted the OPPOSITE invariant. It was REPLACED, not deleted, with
+the superseding decision and the reasoning recorded in place — the client half of that fix (the real
+cause) is untouched and still asserted. 4 new tests in `tests/importAutopsyMitrify.test.ts` (28 total).
+Gate: tsc clean both projects, full run 12,807/12,807.

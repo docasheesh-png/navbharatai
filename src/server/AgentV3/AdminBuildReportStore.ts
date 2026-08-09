@@ -13,7 +13,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { trimReportForStorage } from './DiagnosticsStore';
-import type { BuildDiagnosticsReport } from './BuildDiagnostics';
+import { capSessionReports, type BuildDiagnosticsReport } from './BuildDiagnostics';
 
 const COLLECTION = 'admin_build_reports';
 /** Keep the inbox bounded on read; the collection itself is admin-managed. */
@@ -78,6 +78,11 @@ export interface AdminBuildReportMeta {
   sessionLine: string | null;
   /** Workspace wipes repaired across the session — zero unless the guardian had to restore. */
   sessionDataLoss: number | null;
+  /**
+   * How many builds (parts) this report carries — 1 when only the focused build was available.
+   * In meta so the inbox list can say "5 parts" without loading the full document.
+   */
+  sessionParts?: number;
   /** A short, human label for the app — the first line of the build prompt. */
   appLabel: string;
   /** The raw billing tier string from the build (admin-only detail). */
@@ -124,7 +129,27 @@ export function classifyReportTier(userTier: string | null | undefined): ReportT
 /** The full stored record: metadata + the trimmed report snapshot. */
 export interface AdminBuildReportRecord {
   meta: AdminBuildReportMeta;
+  /**
+   * The build the user was LOOKING AT when they pressed Report — the one they are complaining about.
+   * Kept as the top-level `report` so every existing reader (admin UI, download) is unchanged.
+   */
   report: BuildDiagnosticsReport;
+  /**
+   * THE WHOLE SESSION — every build/edit of this workspace, oldest → newest (admin 2026-08-09:
+   * "jab koi user app bana kar report kare, to puri report, sabhi edit sath 0 to 100 admin ko send ho").
+   *
+   * WHY: one turn is never the story. A user builds, then edits five times; the failure they report is
+   * usually explained by an EARLIER turn, which the single-report record threw away. The admin then
+   * debugged with a quarter of the evidence. Absent (undefined) when only one build exists or the
+   * session could not be gathered — never a fake empty session.
+   */
+  session?: {
+    builds: BuildDiagnosticsReport[];
+    /** How many builds the session really has — `builds.length` may be smaller (size cap). */
+    count: number;
+    /** Oldest builds dropped to stay inside the document size limit. Honest, never hidden. */
+    omittedBuilds: number;
+  };
 }
 
 function cap(s: string | undefined | null, n: number): string | null {
@@ -146,7 +171,17 @@ export function appLabelFromPrompt(prompt: string | undefined | null): string {
  * be asserted directly. The report is run through `trimReportForStorage` so the snapshot is already
  * secret-redacted and byte-bounded, exactly like every other durable copy.
  */
-export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: AdminBuildReportContext): AdminBuildReportRecord {
+export function buildAdminReportRecord(
+  report: BuildDiagnosticsReport,
+  ctx: AdminBuildReportContext,
+  /**
+   * Every build of the session, oldest → newest (admin 2026-08-09). Pass it and the record carries the
+   * WHOLE story; omit it and the record is exactly what it was before. Each build is trimmed the same
+   * way the focused one is — secret-redacted and byte-bounded — and the set is capped so one enormous
+   * session can never exceed the document limit, with the omitted count reported honestly.
+   */
+  sessionBuilds?: readonly BuildDiagnosticsReport[],
+): AdminBuildReportRecord {
   const trimmed = trimReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
   const userTier = cap(trimmed.billing?.userTier, 80);
@@ -162,6 +197,12 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
   const runningFor = inFlight && typeof trimmed.startedAt === 'number'
     ? Math.max(0, Math.round((ctx.reportedAt - trimmed.startedAt) / 1000))
     : 0;
+  // THE WHOLE SESSION (admin 2026-08-09): trim every build exactly like the focused one, then cap the
+  // set so a long session cannot exceed the storage limit. A single-build session adds nothing new, so
+  // it is left absent rather than duplicating the focused report.
+  const trimmedSession = (sessionBuilds ?? []).map((b) => trimReportForStorage(b));
+  const cappedSession = trimmedSession.length > 1 ? capSessionReports(trimmedSession) : null;
+
   return {
     meta: {
       id,
@@ -192,8 +233,13 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       // which is what keeps the self-heal tally from inflating itself — see BuildDiagnostics.
       healCount: typeof trimmed.counts?.autoResolved === 'number' ? trimmed.counts.autoResolved : undefined,
       unresolvedCount: typeof trimmed.counts?.unresolved === 'number' ? trimmed.counts.unresolved : undefined,
+      // 1 part = just the focused build; more when the whole session came with it.
+      sessionParts: cappedSession ? cappedSession.kept.length : 1,
     },
     report: trimmed,
+    ...(cappedSession
+      ? { session: { builds: cappedSession.kept, count: trimmedSession.length, omittedBuilds: cappedSession.omitted } }
+      : {}),
   };
 }
 

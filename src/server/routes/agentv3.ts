@@ -2808,6 +2808,29 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const email = verifiedUid ? await resolveVerifiedEmail(verifiedUid).catch(() => null) : null;
     const name = verifiedUid ? await resolveVerifiedName(verifiedUid).catch(() => null) : null;
+    // THE WHOLE SESSION, not one turn (admin 2026-08-09: "puri report, sabhi edit sath 0 to 100 admin
+    // ko send ho"). A user builds and then edits many times; the failure they report is usually
+    // explained by an EARLIER turn — which a single-build record threw away, leaving the admin to
+    // debug with a fraction of the evidence. Gather every build of this workspace exactly the way the
+    // admin download route does (durable history + the latest, de-duplicated by start time, ordered
+    // oldest → newest). Best-effort: if history cannot be read, the record is exactly what it was
+    // before — one honest build, never a fake or partial "session".
+    const wsForSession = workspaceId || report.workspaceId || '';
+    let sessionBuilds: BuildDiagnosticsReport[] = [];
+    if (wsForSession) {
+      try {
+        const metaList = await listDiagnosticsHistory(wsForSession, 20).catch(() => []);
+        const full = (await Promise.all(
+          metaList.map((h) => getDiagnosticsHistoryItem(wsForSession, h.id).catch(() => null)),
+        )).filter(Boolean) as BuildDiagnosticsReport[];
+        const byStart = new Map<number, BuildDiagnosticsReport>();
+        for (const r of full) byStart.set(r.startedAt, r);
+        // The report in hand is the freshest truth for its own slot — and covers the case where the
+        // latest build is not in durable history yet.
+        byStart.set(report.startedAt, report);
+        sessionBuilds = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+      } catch { sessionBuilds = []; }
+    }
     const record = buildAdminReportRecord(report, {
       userId: verifiedUid ?? null,
       email,
@@ -2815,7 +2838,7 @@ export function registerAgentV3Routes(app: Express): void {
       workspaceId: workspaceId || report.workspaceId || null,
       buildId: buildId || report.buildId || null,
       reportedAt: Date.now(),
-    });
+    }, sessionBuilds);
     const saved = await saveAdminBuildReport(record);
     if (!saved) {
       res.status(502).json({ error: 'Could not send the report right now — please try again in a moment.' });

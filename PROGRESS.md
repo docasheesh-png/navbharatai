@@ -28062,3 +28062,22 @@ the challenge), the copy button carries exactly those bytes, and the one remaini
 explains '"@" simply means your domain'. The old fallback sentence is test-pinned to never return.
 Lesson (external-adaptation applied to my own output): when the user's screen and the target form
 disagree, change the SCREEN to match the form — never hand the user a translation rule.
+
+## 2026-08-09 — "Ab kya karna hai? Connect ka button hi nahi hai" — the next action was three screens down
+
+Admin, after the auto-DNS reported "Nameservers live — 3 records applied automatically": *"DNS record
+daal diye. Par ab kya karna hai! Connect karne ka button hi nahi hai?"* Two defects, one symptom:
+1. **Layout.** The status bar AND its "Check" button were rendered LAST — below the records list,
+   the automatic-setup block and the registrar picker. On a phone that is three screens down, so
+   the single action the user needed was invisible and the page read as having no next step.
+2. **Vocabulary.** The line itself was `Pending — add the records, then check. (ownership:
+   OWNERSHIP_PENDING, host: HOST_PENDING, SSL: CERT_PENDING)` — engineering states that cannot tell
+   a non-technical user whose move it is, or whether anything is progressing.
+Fixed: new pure `connectStage()` maps the three real API states to ONE plain sentence + the ONE next
+action ("Waiting for your DNS records to spread across the internet… nothing is lost if it is not
+ready yet" → "Ownership confirmed — now pointing your domain at your app" → "Almost there — issuing
+your free HTTPS certificate" → "Live!"). The block moved to the TOP of the result area with a real
+indigo "Check now" button; the raw states remain as dim mono detail (support still needs them) but
+are never the headline; a second Check sits at the bottom for the user who scrolled to copy records
+(same handler — one implementation, test-pinned). Honesty preserved: nothing says "Live" except the
+API's own `active` flag, even when all three sub-states read ACTIVE (test-pinned).

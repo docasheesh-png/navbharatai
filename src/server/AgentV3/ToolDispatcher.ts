@@ -237,6 +237,7 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5255,6 +5256,28 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_systems': {
+        // PHASE 6. Combat, AI, projectiles and waves — written as PURE arithmetic so the rules that a
+        // hand-written version gets wrong (i-frames, segment collision, separation, de-aggro
+        // hysteresis, single death) are provable rather than approximated.
+        const gsyRec = (input as Record<string, unknown>) || {};
+        const gsyInclude = Array.isArray(gsyRec.include)
+          ? gsyRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gsy = generateGameSystems(gsyInclude);
+        const gsyWritten: string[] = [];
+        for (const [path, content] of Object.entries(gsy.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('gameplay systems');
+        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}`;
       }
 
       case 'generate_game_shell': {

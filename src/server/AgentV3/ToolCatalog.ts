@@ -2023,6 +2023,30 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_controller',
+      description:
+        'Add the character controller for a game. Call generate_game_runtime (and generate_game_3d for '
+        + '3D) first. Emits src/game/play: a PURE motor holding all the "feel" arithmetic, plus a thin '
+        + 'three.js controller that does the raycasts. '
+        + 'IT INCLUDES THE THINGS THAT MAKE MOVEMENT FEEL GOOD, and they look like bugs on paper so do NOT '
+        + 'strip them: coyote time (jump still works ~100ms after walking off a ledge — without it a '
+        + 'player who presses a frame late gets nothing and the game feels unresponsive), jump buffering '
+        + '(a jump pressed just before landing fires on touchdown), variable jump height (releasing early '
+        + 'cuts the arc), separate air control, step offset so the character does not snag on every kerb, '
+        + 'a slope limit with sliding, and ground snap so it does not launch off bumps. It EMITS '
+        + 'PLAYER_JUMPED / PLAYER_LANDED — hook VFX and audio to those events, never inside the controller.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: motor, character. Default = both.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_3d',
       description:
         'Add the 3D layer for a game (three.js). Call generate_game_runtime FIRST — this builds on its '
@@ -3076,6 +3100,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_controller',
   'generate_game_3d',
   'generate_game_runtime',
   'generate_animation',

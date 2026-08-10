@@ -146,7 +146,16 @@ export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, 
   // Overran. Each successive overrun is EVIDENCE THE ESTIMATE WAS WRONG BY A LARGER FACTOR, so the
   // extension doubles instead of repeating the same small step — a fixed step is what produced the
   // 2-minute sawtooth of broken promises.
-  const step = Math.min(ETA_MAX_STEP_MS, Math.max(ETA_MIN_STEP_MS, Math.round((base / 2) * Math.pow(2, done))));
+  // THE FLOOR MUST NOT SWALLOW THE DOUBLING (real build report 02be22e3, 2026-08-09). Written as
+  // `max(MIN, (base/2) * 2^done)` the clamp ate the first doubling whenever base/2 fell under the
+  // floor — which is the common case. With base = 3 min: done=0 → max(3, 1.5) = 3 min, and done=1 →
+  // max(3, 3) = 3 min AGAIN. That build therefore said "about 3 min more to go" at minute 4 and the
+  // SAME "about 3 min more to go" at minute 8, then finished 19 seconds later. A promise repeated
+  // verbatim after it has already been broken reads as a frozen lie, which is precisely what the
+  // doubling was added to prevent. Applying the floor to the BASE STEP and doubling that keeps every
+  // successive promise strictly larger than the last: 3 min → 6 min → (then the honest no-number line).
+  const baseStep = Math.max(ETA_MIN_STEP_MS, Math.round(base / 2));
+  const step = Math.min(ETA_MAX_STEP_MS, baseStep * Math.pow(2, done));
   const next = done + 1;
   // After a couple of broken promises, naming another number is not information — it is the same lie
   // with a bigger integer. Say plainly that it is taking longer and that we will report when it lands.

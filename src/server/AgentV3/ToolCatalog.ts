@@ -1277,6 +1277,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_helpdesk',
+      description:
+        'Add a real Helpdesk / ticketing backend to the app (server/helpdesk/) — a packaged domain vertical for ' +
+        'customer support and IT desks. THREE real guarantees: (1) TICKET STATE-MACHINE — open → in_progress → ' +
+        'resolved → closed along allowed transitions only (+ reopen from resolved/closed), an invalid jump ' +
+        'rejected (409); (2) PRIORITY-DRIVEN SLA + BREACH — each priority has an SLA target (urgent 4h/high ' +
+        '12h/medium 24h/low 72h) and a still-unresolved ticket past its due time is SLA-breached, derived from ' +
+        'the dates (reopen restarts the clock); (3) APPEND-ONLY thread — every status change + comment is an ' +
+        'immutable ordered entry. Emits a dependency-free HelpdeskService (createTicket, setStatus, assign, ' +
+        'addComment, slaDueAt, isSlaBreached, thread, list) + an Express router (GET/POST /tickets, GET ' +
+        '/tickets/:id with slaBreached, PATCH /tickets/:id/status, /assign, POST /tickets/:id/comments, GET ' +
+        '/tickets/:id/thread) + a README. In-memory by default — swap the Maps for your DB. Pairs with the ' +
+        'auth/notification/email recipes. Use for helpdesk / support / ticketing / IT-desk prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -3102,6 +3118,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_pharmacy',
   'generate_recruitment',
   'generate_invoicing',
+  'generate_helpdesk',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

@@ -22,6 +22,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Deep link for the GitHub OAuth return. The server callback redirects the token to
+                 com.navbharat.ai://github-callback#gh_token=..., which the OS routes back to this
+                 (singleTask) activity and Capacitor's App plugin surfaces as `appUrlOpen`. This is what
+                 brings the user back INTO the app after signing in, instead of stranding them in a
+                 browser on the website. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.navbharat.ai" />
+            </intent-filter>
+
         </activity>
 
         <provider

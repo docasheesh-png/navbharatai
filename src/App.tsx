@@ -2338,6 +2338,33 @@ export default function App() {
     };
     window.addEventListener('storage', handleStorageChange);
 
+    // NATIVE (Capacitor) GitHub OAuth return. The in-app browser redirects to
+    // com.navbharat.ai://github-callback#gh_token=…, which fires the App plugin's `appUrlOpen`. Extract
+    // the token, connect, and close the in-app browser so the user lands back in the app. NO-OP on web
+    // (isNativePlatform() is false), so every browser/desktop flow above is untouched.
+    let removeGithubUrlOpen: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        if (Capacitor.isNativePlatform?.() !== true) return;
+        const { App: CapApp } = await import('@capacitor/app');
+        const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
+          const url = data?.url || '';
+          if (!/gh_token=/.test(url)) return; // not our GitHub deep link — ignore
+          const frag = url.split('#')[1] || url.split('?')[1] || '';
+          const token = new URLSearchParams(frag).get('gh_token');
+          if (!token) return;
+          setGithubToken(token);
+          localStorage.setItem('gh_token', token);
+          rememberGithubOwner(auth.currentUser?.uid);
+          addLog('GitHub connected successfully.', 'success');
+          fetchGitHubUser(token);
+          void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+        });
+        removeGithubUrlOpen = () => { try { handle.remove(); } catch { /* already removed */ } };
+      } catch { /* not native / plugin absent — the web flows above handle the token */ }
+    })();
+
     // Check for fragment token (supporting full redirect flow)
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const fragmentToken = hashParams.get('gh_token');
@@ -2371,6 +2398,7 @@ export default function App() {
     return () => {
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);
+      removeGithubUrlOpen?.();
     };
   }, []);
 

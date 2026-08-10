@@ -29274,3 +29274,37 @@ Tests: 20 in `tests/chatComposerCore.test.ts` — delete taking its replies and 
 messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the exact charge with no
 minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
 written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
+
+## 2026-08-10 — Mobile GitHub login now returns to the APP (in-app popup + deep-link), not the browser
+
+Admin report: in the installed app, GitHub login redirected the whole WebView to the browser and never came
+back — NavBharatAI ended up running on the website in the browser. Admin chose the **custom-scheme in-app
+popup** approach (like Google/Apple).
+
+ROOT CAUSE: `connectGitHub` did a full-page `window.location.href = <github oauth>` and the server callback
+redirected to the https website. In a Capacitor app that navigates away from the native bundle, so the user
+lands on the website in an external browser with no way back into the app.
+
+FIX (native-only; web/desktop OAuth is byte-for-byte unchanged, proven by tests):
+- `useGitHubConnect.ts` — on `Capacitor.isNativePlatform()`, open GitHub in an **in-app browser**
+  (`@capacitor/browser`, Custom Tab / SFSafariViewController) instead of navigating the WebView, and send
+  `state='nbai-native'` so the server knows to return via the app scheme.
+- `githubAuth.ts` — new pure, exported `nativeOauthReturn(state, token)`: for the native sentinel ONLY, it
+  redirects to `com.navbharat.ai://github-callback#gh_token=…`. 🔒 The scheme target is a FIXED server
+  constant, NEVER derived from the caller's `state`, so a crafted state can't open-redirect the token
+  (test-locked). Any other state → null → the normal allow-list-guarded web flow, unchanged.
+- `App.tsx` — a native `appUrlOpen` listener catches the deep link, stores the token, connects, and closes
+  the in-app browser. NO-OP on web.
+- `AndroidManifest.xml` — intent-filter for the `com.navbharat.ai` scheme so the OS routes the deep link
+  back to the (singleTask) MainActivity → `appUrlOpen`.
+- `.github/workflows/ios-ipa.yml` — adds the same `com.navbharat.ai` URL scheme to `Info.plist` via
+  PlistBuddy (next iOS build picks it up automatically — no manual Xcode step).
+- Added `@capacitor/browser` dependency.
+
+**Honest boundary (rule 6):** the native deep-link flow cannot be exercised from the dev sandbox (no device).
+Web is fully unchanged and test-covered; the on-device confirm (install a fresh APK/TestFlight build, tap
+GitHub connect → in-app GitHub page → returns into the app) is the admin's final verification. The Android
+AndroidManifest ships in-repo; the iOS scheme lands on the next `.ipa` build via the workflow above.
+
+**Verification:** frontend `npm run build` ✅ · `tsc`/`tsc -p tsconfig.server.json` clean for touched files ·
+`npx vitest run` ✅ **13352/13352**; new tests lock the native-return + the open-redirect-safety invariant.

@@ -29172,3 +29172,38 @@ security), the admin gate (#2217, security — the password in a URL), the clien
 this. Five classes were scanned and REMOVED from the report as clean rather than padded into it:
 `Number(env)` NaN, engine empty-catches, unbounded caches, RegExp from user text, and the 52 "not all
 code paths return a value" hits that are all Express handlers.
+
+---
+
+## 2026-08-10 — Two vendor names were reaching users mid-build (White-Label Law)
+
+Found while starting ROADMAP item 6's second slice (translating the route's narration): two
+user-facing build narration lines named the AI vendor outright.
+
+    'Escalating to Sonnet to fix the issues found in review…'
+    '🔧 Review found issues — GLM/KIMI fixing them once…'
+
+Both `events.emit({ type: 'narration' … })` — the stream every builder watches — and both on the
+ESCALATION path, i.e. exactly when the engine is working hardest and the user is reading most closely.
+This is a direct breach of the standing rule: *to the user it is always NavBharatAI doing the work.*
+
+**Why it survived.** CLAUDE.md says "a regression test asserts that user-facing streams contain none of
+the forbidden vendor tokens", and such tests DO exist — for billing payloads (`userCostBreakdown`),
+report bodies (`userFacingReport`) and history summaries (`redactProviderError`). Build NARRATION, the
+single most-read user-facing stream in the product, had no such test. The law was enforced everywhere
+it had been remembered, and nowhere it had not.
+
+**Fixed without making the product worse.** Anonymising must not become withholding: an escalation the
+user cannot see would be a worse product than one that names a vendor. The lines now say what is
+happening and why, in NavBharatAI's own voice — "Bringing in NavBharatAI's stronger engine to fix what
+the review found…" — and a test asserts BOTH halves (no vendor name, and the escalation is still
+announced).
+
+The new guard walks every `type: 'narration'` emission in the server and fails on a vendor name in the
+LITERAL text. It deliberately inspects only string literals: a narration whose text comes from a
+variable can legitimately carry admin-only content that is redacted downstream, and flagging those
+would train the next author to silence the test rather than fix a leak. It also asserts the scan found
+>50 emissions, so a regex that quietly matches nothing cannot make the whole guard vacuous.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1138 files / 13,164 tests,
+exit 0**.

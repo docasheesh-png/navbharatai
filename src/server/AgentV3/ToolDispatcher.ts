@@ -7252,21 +7252,31 @@ export class ToolDispatcher {
       }
 
       case 'deploy': {
+        // A DEPLOY THAT DID NOT DEPLOY MUST NOT REPORT SUCCESS (autopsy build aed2906d, 2026-08-09).
+        //
+        // Every branch below used to RETURN a sentence. A returned string is a SUCCESSFUL tool result, so
+        // the build timeline recorded `✓ deploy (0s)` twice, no URL was ever emitted, and the agent was
+        // left guessing — it went off running `ls -la dist/` and `pwd && ls -la` trying to work out what
+        // had happened. The user had asked for one thing, a live link, and got neither the link nor an
+        // error. THROWING is how every other tool reports a failure here (it becomes a TOOL_ERROR the
+        // agent can read and act on), so deploy now uses the same convention as the rest of the catalog.
+        // The message text is unchanged — it was already the right explanation, it was just being
+        // delivered as if it were good news.
         if (!this.deploy) {
-          return 'Deployment is not configured in this context.';
+          throw new Error('Deployment is not configured in this context.');
         }
         if (!this.actuator.downloadDistFiles) {
-          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+          throw new Error('Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.');
         }
         let files: Map<string, Buffer>;
         try {
           files = await this.actuator.downloadDistFiles(this.workspaceId);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+          throw new Error(`Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`);
         }
         if (files.size === 0) {
-          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+          throw new Error('No built files found. Run "npm run build" to produce dist/ before deploying.');
         }
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });

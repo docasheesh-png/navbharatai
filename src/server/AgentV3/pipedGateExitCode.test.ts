@@ -72,3 +72,48 @@ describe('pipedGateExitCodeWarning — the pipe ate the exit code', () => {
     expect(pipedGateExitCodeWarning('cat log.txt | head', 0, 'src/App.tsx(1,1): error TS1005: x')).toBeNull();
   });
 });
+
+/**
+ * THE MISSING BINARY — the pipe's most common lie (autopsy build 6414138d, 2026-08-09).
+ *
+ * A real free-tier build ran `npm run build 2>&1 | tail -10`, the shell reported exit 0 because `tail`
+ * succeeded, and the output said `sh: 1: tsc: not found`. The app had not been compiled at all — yet the
+ * closing message to the user was "The app compiles cleanly and is ready to use." A fake success, shown
+ * to a real user, on a build they were charged ₹37 for.
+ *
+ * The guard already existed and already recognised that command as a piped gate. It stayed silent because
+ * every signature it knew was a COMPILER message, while a missing binary is a SHELL message. The very next
+ * turn of that same session ran the identical command WITHOUT a pipe and got the truth — exit 127,
+ * `sh: 1: vite: not found` — so the pipe was the only difference between a lie and a fact.
+ */
+describe('a gate tool that never ran at all', () => {
+  it('catches the exact lie from the report: tsc missing, pipe reports success', () => {
+    const out = '\n> project@0.1.0 build\n> tsc && vite build\n\nsh: 1: tsc: not found\n';
+    expect(pipedGateExitCodeWarning('npm run build 2>&1 | tail -10', 0, out)).not.toBeNull();
+  });
+
+  it('catches the sibling the next turn hit — vite missing', () => {
+    const out = '\n> project@0.1.0 build\n> tsc && vite build\n\nsh: 1: vite: not found\n';
+    expect(pipedGateExitCodeWarning('npm run build 2>&1 | tail -5', 0, out)).not.toBeNull();
+  });
+
+  it('understands bash phrasing as well as the POSIX sh the sandbox actually uses', () => {
+    expect(pipedGateExitCodeWarning('npm test | head -20', 0, 'bash: vitest: command not found')).not.toBeNull();
+    expect(pipedGateExitCodeWarning('npm test | head -20', 0, '/bin/sh: 1: vitest: not found')).not.toBeNull();
+  });
+
+  it('catches npm failing to find the binary itself', () => {
+    expect(pipedGateExitCodeWarning('npm run build | tail -3', 0, 'npm ERR! code ENOENT\nnpm ERR! syscall spawn')).not.toBeNull();
+  });
+
+  it('still says nothing about a genuinely clean piped build', () => {
+    // It must stay quiet on success, or every honest build starts second-guessing itself.
+    const ok = '\n> project@0.1.0 build\n> tsc && vite build\n\nvite v5.4.21 building for production...\n✓ 48 modules transformed.\n✓ built in 1.08s\n';
+    expect(pipedGateExitCodeWarning('npm run build 2>&1 | tail -10', 0, ok)).toBeNull();
+  });
+
+  it('does not trip on those words appearing in ordinary passing output', () => {
+    // A test named "renders a not found page" must never be read as a missing binary.
+    expect(pipedGateExitCodeWarning('npm test | tail -5', 0, '✓ renders a not found page (12ms)\nTests: 4 passed')).toBeNull();
+  });
+});

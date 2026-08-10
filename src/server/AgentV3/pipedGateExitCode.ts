@@ -42,6 +42,16 @@ const REAL_ERROR: RegExp[] = [
   /^\s*\d+\s+problems?\s*\(\d+\s+errors?/m,    // eslint summary with errors
   /^\s*error\s+[A-Z]\w+:/m,                    // mypy/ruff style
   /\bSyntaxError\b|\bTypeError\b(?=.*\n\s+at\s)/, // a thrown error with a stack
+  // THE MISSING BINARY (autopsy build 6414138d, 2026-08-09). The most common way a piped build lies is
+  // not a compiler error at all — it is the compiler never running. `npm run build 2>&1 | tail -10`
+  // printed `sh: 1: tsc: not found` and the pipe reported exit 0, so the agent told the user "the app
+  // compiles cleanly and is ready to use" about an app that had not been compiled at all. None of the
+  // signatures above match that text, because a missing binary produces a SHELL message, not a tool
+  // message. The same build in the very next turn ran the command WITHOUT a pipe and got the truth:
+  // exit 127, `sh: 1: vite: not found`. So the pipe was the only difference between a lie and a fact.
+  /^(?:[\w./-]*sh|bash|zsh):\s*(?:\d+:\s*)?\S+:\s*(?:command\s+)?not found/mi, // sh: 1: tsc: not found
+  /\bcommand not found\b/i,                    // bash phrasing
+  /^\s*(?:npm\s+)?ERR!\s+.*\bENOENT\b/mi,     // npm could not find the script/binary
 ];
 
 /** Does the command send a gate tool's output through a pipe (so the shell reports the LAST stage)? */

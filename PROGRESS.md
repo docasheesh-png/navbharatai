@@ -28800,3 +28800,34 @@ Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (34 total) — the exact c
 the verdict, the pair-of-signals guard against false positives, a genuine app still passing, the retry
 firing only when pending, and the first failure surviving in the report.
 Gate: tsc clean both projects, full run 12,971/12,971.
+
+### 2026-08-10 — HEAL LEDGER: the "a heal did not survive" suspicion becomes a MEASUREMENT
+
+**The open root cause from report 02be22e3, taken as far as evidence allows.** Three deterministic
+self-heals ran, and the IDENTICAL three ran again twenty seconds later. Each repair pass re-reads every
+file FRESH from the sandbox (`readEvalSnapshot`) and the dedupe heal only fires when the content
+genuinely still differs — so the second run PROVES the first heal's write was absent on the next read.
+I refused to guess the mechanism (rule 4), but a suspicion recorded in prose cannot be acted on later,
+so the fact is now captured with names and counts.
+
+**Why a shared, workspace-keyed ledger and not a field on the dispatcher:** the two passes run on
+DIFFERENT `ToolDispatcher` instances — the reviewer gets a CHILD dispatcher from `SubAgent` — so any
+per-instance memory would be blind to exactly the case worth catching. Keyed by workspace, it is the
+smallest thing both can see. The dispatcher only WRITES to it (a plain import — no new constructor
+parameter threaded through the sub-agent spawn); the ROUTE reads it at settle, because that is where
+the diagnostics object lives.
+
+All three file-writing self-heals now report (import/export reconcile, wrong-source repoint,
+duplicate-import dedupe). The build starts with a clean sheet so "twice" means twice in THIS build, and
+a repeat lands as `HEAL_NOT_DURABLE`, severity warning, **autoResolved: false** — it is a real defect,
+not a note. ADMIN-ONLY: a user never needs to know our repair passes ran twice.
+
+The next report that shows this will name the exact files, which is what makes the mechanism findable
+instead of re-suspected. Memory is bounded (500 paths per workspace, 200 workspaces) so a pathological
+build cannot grow it.
+
+Tests: 11 in `tests/healLedger.test.ts` — a single heal is normal and silent, the reported two-file
+case captured with counts, the message stating what a repeat PROVES rather than suspects, workspace
+isolation, the per-build reset, junk tolerance, the memory bound, and wiring assertions that all three
+heals report and that the finding is recorded unresolved.
+Gate: tsc clean both projects, full run 12,982/12,982.

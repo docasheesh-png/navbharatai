@@ -129,6 +129,7 @@ import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
+import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
@@ -6741,6 +6742,8 @@ export function registerAgentV3Routes(app: Express): void {
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      // A clean sheet, so "healed twice" means twice in THIS build — see HealLedger.
+      resetHealLedger(workspaceId);
 
       // SELF-SOURCE GUARD (contamination autopsy 2026-07-31): a real workspace's durable store held
       // NavBharatAI's OWN 2576-file platform source, so "make this app" spent 31 minutes trying to boot our
@@ -11099,6 +11102,20 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
         if (Object.keys(toSave).length > 0) {
+          // A SELF-HEAL THAT DID NOT LAST (open root cause from report 02be22e3, now measured). Each
+          // repair pass re-reads the file fresh from the sandbox and only acts when the defect is
+          // genuinely still there — so healing the SAME file twice in one build is proof the earlier
+          // write was absent on the next read. Recorded with names and counts so the next report can
+          // be acted on instead of re-suspected. ADMIN-ONLY: the user never sees our repair passes.
+          try {
+            const repeats = healRepeats(workspaceId);
+            if (repeats.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'warning', code: 'HEAL_NOT_DURABLE',
+                message: healRepeatMessage(repeats), autoResolved: false,
+              });
+            }
+          } catch { /* evidence gathering must never break a build */ }
           // ── ROUTE FINGERPRINT (admin 2026-08-09: "jo jo bacha hai usko bhi smart fix karo") ──────
           // Green Guard judged "green" from ONE url — the home page. So an edit that left the home page
           // rendering while breaking /admin ended the turn GREEN, the broken state became the new last

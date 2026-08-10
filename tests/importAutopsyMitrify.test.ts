@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { envVarNames, conjurableSecrets, externalSecretVars, buildDevEnvContent } from '../src/server/AgentV3/ImportPreview';
-import { analyzePreviewHtml, jsonErrorBody } from '../src/server/AgentV3/PreviewVerify';
+import { analyzePreviewHtml, jsonErrorBody, hostErrorPage } from '../src/server/AgentV3/PreviewVerify';
 import { BuildDiagnostics, commandKey, recoveredCommands, failureHasSurvivingConsequence } from '../src/server/AgentV3/BuildDiagnostics';
 
 /**
@@ -294,5 +294,82 @@ describe('ROOT CAUSE 6 — the app keeps its OWN port; the preview follows it', 
     const at = route.indexOf('const { up, port } = parseDevServerHealthCheck(combined);');
     const seg = route.slice(at, at + 3000);
     expect(seg).toMatch(/rankPortCandidates\(\{\s*parsed:\s*port,\s*scriptPort,/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECOND MITRIFY IMPORT, real build report e61b13b1 (2026-08-10). Three fixes from the first autopsy
+// are visibly working in this report: PHASE_TIMING lines, heartbeats naming the live phase, and the
+// framework label finally agreeing with the manifest (node-express in BOTH). Two new root causes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ROOT CAUSE 7 — the preview host\'s OWN error page counted as the app', () => {
+  /**
+   * The admin's screen showed E2B's "Closed Port Error" — "the sandbox is running but there's no
+   * service running on port 3000 · Connection refused" — while the report said
+   * "✅ Live preview is up on port 3000".
+   *
+   * The damage went past a wrong verdict: this page rendering as "the app" is what stopped the port
+   * FLIP from ever engaging. The flip only runs when the first port fails to render, so a host error
+   * page that reads as success PINS the preview to a port nothing is listening on — the exact bug the
+   * flip exists to fix.
+   */
+  const CLOSED_PORT = `<html><body><h1>Closed Port Error</h1>
+    <p>The sandbox i5ryokk6mmc1xd3yxe6is is running but there's no service running on port 3000.</p>
+    <pre>3000-i5ryokk6mmc1xd3yxe6is.e2b.app
+Connection refused on port 3000</pre>
+    <p>Please ensure that your service is properly configured and running on the specified port.</p>
+    <a>Check the sandbox logs for more information</a></body></html>`;
+
+  it('the exact page the admin saw is NOT a rendered app', () => {
+    expect(hostErrorPage(CLOSED_PORT)).toMatch(/nothing is listening on port 3000/);
+    const verdict = analyzePreviewHtml(CLOSED_PORT);
+    expect(verdict.rendered).toBe(false);
+    expect(verdict.problems.join(' ')).toMatch(/not your app/);
+  });
+
+  it('needs a PAIR of signals, so a real app that merely mentions ports is safe', () => {
+    // A devops dashboard is allowed to contain these words without being called broken.
+    expect(hostErrorPage('<html><body><h1>My Server Monitor</h1><p>Connection refused on port 5432 — retrying…</p></body></html>')).toBe('');
+    expect(hostErrorPage('<html><body>the sandbox environment for developers</body></html>')).toBe('');
+    expect(hostErrorPage('')).toBe('');
+  });
+
+  it('a genuine app page is untouched', () => {
+    expect(analyzePreviewHtml('<html><body><div id="root"><h1>Mitrify</h1><p>Find providers</p></div></body></html>').rendered).toBe(true);
+  });
+});
+
+describe('ROOT CAUSE 8 — the migration is retried once the boot has proved the install works', () => {
+  const route = read('src/server/routes/agentv3.ts');
+
+  /**
+   * This report: the pre-boot install failed with `exit status 217`, so the migration was SKIPPED —
+   * and the same installer then succeeded nineteen seconds later inside the boot
+   * ("[health-check] installing dependencies… done"). So the app still booted against an empty
+   * database; only the reason in the report had changed. The boot PROVES the dependencies are there,
+   * which is the honest moment to try again.
+   */
+  it('a skipped/failed migration is retried after the dev-server boot', () => {
+    const at = route.indexOf('RETRY THE MIGRATION AFTER THE BOOT');
+    expect(at).toBeGreaterThan(-1);
+    const seg = route.slice(at, at + 2600);
+    expect(seg).toContain('import-db-migrate-retry');
+    expect(seg).toContain('IMPORT_DB_MIGRATIONS_APPLIED');
+  });
+
+  it('it does NOT re-run a migration that already succeeded', () => {
+    expect(route).toContain('const migrationPending = !!migration && !migrationApplied;');
+    expect(route).toContain('if (mok) migrationApplied = true;');
+    const at = route.indexOf('RETRY THE MIGRATION AFTER THE BOOT');
+    expect(route.slice(at, at + 2600)).toContain('if (migrationPending && migration && provided.DATABASE_URL)');
+  });
+
+  it('the retry is a SECOND CHANCE, not a cover-up — the first failure stays in the report', () => {
+    // The skip/fail record is written before the boot and is never removed by the retry.
+    const skipAt = route.indexOf('IMPORT_DB_MIGRATIONS_SKIPPED');
+    const retryAt = route.indexOf('RETRY THE MIGRATION AFTER THE BOOT');
+    expect(skipAt).toBeGreaterThan(-1);
+    expect(skipAt).toBeLessThan(retryAt);
   });
 });

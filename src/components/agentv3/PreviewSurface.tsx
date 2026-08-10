@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
@@ -17,15 +16,8 @@ import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/pre
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
 import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
-async function authJsonHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server soft-falls-back */ }
-  return headers;
-}
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="text-zinc-500 text-sm text-center leading-relaxed">{children}</div>;

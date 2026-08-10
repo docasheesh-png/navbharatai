@@ -29082,3 +29082,50 @@ throttled live probe returns an honest message instead of running.
 may compare `ADMIN_PASSWORD` directly.** That assertion is what caught the third copy.
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1133 files / 13,049 tests, exit 0**.
+
+---
+
+## 2026-08-09 — Audit fix #3b: ONE client token path (and the mistake I made getting there)
+
+The duplication list flagged eight components each carrying "attach the signed-in user's Firebase ID
+token", under FOUR names (`authHeader`, `authHeaders`, `authJsonHeaders`, `teamAuthHeader`) and two
+ways of reaching Firebase (a static `import { auth }` vs a dynamic `import('firebase/auth') +
+getApp()`).
+
+**All eight were behaviourally equivalent when read — no bug shipped from this**, and that is stated
+plainly rather than dramatised. It is worth fixing because finding #3 is what a drifted auth helper
+becomes given time: a copy that could not import the real thing was re-typed weaker, and the weaker
+one put the admin password in a URL.
+
+### The part worth recording: I nearly made it worse, twice
+
+1. **I wrote a NINTH module.** Halfway through, `authedFetch.ts` turned up — a shared helper whose own
+   header already says "so the Authorization header is built in exactly ONE place" and cites the
+   four-copies lesson. I was adding another one beside it.
+2. **Worse: `src/lib/authHeaders.ts` ALREADY EXISTED**, and my `Write` overwrote it (six files import
+   it, and its `authJsonHeaders(forceRefresh)` carries a capability none of the copies had). Restored
+   from git; the tests then failed on exactly the files whose import I had broken, which is how it
+   surfaced within the same session.
+
+So the real picture was not "one shared helper + eight copies". It was **TWO shared helpers + eight
+copies** — the strongest possible evidence that writing the rule down (this repo did, twice) does not
+prevent the next copy.
+
+### Why the copies existed — and the actual fix
+
+Not ignorance: the SHAPE each caller needed was missing. `authHeaders.ts` only offered the JSON variant,
+so every GET caller that did not want `Content-Type` wrote the whole helper again. `authedFetch.ts`
+only offered the bare variant. **One shape per real need** is what stops the next copy, so
+`authHeaders.ts` now exports both `authJsonHeaders(forceRefresh)` and `authHeader(forceRefresh)`, and
+`authedFetch.authHeaders()` keeps its exported name (eight files import it) while delegating instead of
+minting a token itself.
+
+Nine call sites swept, plus `src/lib/pushApi.ts` — a tenth copy the test found, not the scan.
+
+⚠️ **Deliberately untouched: the GitHub token.** `localStorage.gh_token` is a DIFFERENT credential that
+`/api/github/*` forwards to GitHub as `token <x>`. It is spelled `Authorization: Bearer …` too. Routing
+those callers through the Firebase helper would send the wrong credential and 401 every repository
+list. Test-locked so a later "tidy-up" cannot merge them.
+
+10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1134 files /
+13,059 tests, exit 0** · `npm run build` ✓.

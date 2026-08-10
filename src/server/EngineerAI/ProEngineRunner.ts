@@ -42,6 +42,7 @@ import type { IEngineerActuator } from './actuators/IEngineerActuator';
 import type { EngineerTask, DbProviderConfig } from './EngineerAITypes';
 import { thinkingBudgetFor, isComplexTask } from '../pro/ProComplexity';
 import { proMemoryStore } from '../pro/ProMemory';
+import { envFlag } from '../lib/envFlag';
 
 export type ExecutionTier = 'vfs' | 'cloudrun' | 'e2b';
 
@@ -69,7 +70,7 @@ export function selectTier(vfs: VirtualFileSystem, clampToVfs = true): Execution
 
 /** True when a local Docker daemon is available for the container tier. */
 export function dockerAvailable(): boolean {
-  return process.env.DOCKER_ENABLED === 'true';
+  return envFlag('DOCKER_ENABLED');
 }
 
 interface ResolvedBackend {

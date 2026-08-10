@@ -19,6 +19,7 @@
  */
 
 import { promises as dns } from 'dns';
+import { envFlag } from './envFlag';
 
 export interface DomainConnectSettings {
   providerName?: string;
@@ -33,7 +34,7 @@ export interface DomainConnectCheck {
 }
 
 export function domainConnectEnabled(): boolean {
-  return /^(on|true|1)$/i.test((process.env.AGENTV3_DOMAIN_CONNECT || '').trim());
+  return envFlag('AGENTV3_DOMAIN_CONNECT');
 }
 
 /** Our template identity — meaningful only once registered with the registrar's template registry. */

@@ -13,6 +13,7 @@
 // Everything is injectable (fetch + clock + config) so it is fully unit-testable without GitHub.
 
 import * as crypto from 'crypto';
+import { envFlag } from '../lib/envFlag';
 
 const GITHUB_API = 'https://api.github.com';
 const API_HEADERS = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'NavBharatAI-Builder' };
@@ -59,7 +60,7 @@ export function githubStorageEnabled(): boolean {
  * by merely having the secrets set).
  */
 export function githubStorageActive(): boolean {
-  return process.env.GITHUB_STORAGE_ENABLED === 'true' && githubStorageEnabled();
+  return envFlag('GITHUB_STORAGE_ENABLED') && githubStorageEnabled();
 }
 
 /** Slugify any string into a GitHub-safe segment (alnum, -, _ only; collapsed; lowercased). */

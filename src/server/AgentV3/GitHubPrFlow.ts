@@ -10,6 +10,7 @@
 // Pure orchestration over a small client port, so it is fully unit-testable without GitHub.
 
 import type { CiVerdict, PullRequestInfo } from './GitHubAppClient';
+import { envFlag } from '../lib/envFlag';
 
 /** The slice of GitHubAppClient this flow needs (so tests can pass a fake). */
 export interface PrCapableClient {
@@ -43,7 +44,7 @@ export interface PrFlowOptions {
  * review-gated PR flow turns on only when the admin asks for it.
  */
 export function githubPrMode(): boolean {
-  return process.env.GITHUB_PR_MODE === 'true';
+  return envFlag('GITHUB_PR_MODE');
 }
 
 const SKIPPED: PrFlowResult = { opened: false, prNumber: 0, prUrl: '', ci: 'none', merged: false, note: '' };

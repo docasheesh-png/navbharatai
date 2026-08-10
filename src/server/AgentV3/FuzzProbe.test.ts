@@ -141,12 +141,19 @@ describe('redTeamEnabled — opt-in flag', () => {
     delete process.env.AGENTV3_REDTEAM;
     expect(redTeamEnabled()).toBe(false);
   });
-  it("is ON only for the exact value 'on'", () => {
-    process.env.AGENTV3_REDTEAM = 'on';
-    expect(redTeamEnabled()).toBe(true);
-    for (const v of ['true', '1', 'off', '']) {
+  it('is ON for any explicit yes, OFF otherwise', () => {
+    // CONTRACT CHANGED DELIBERATELY (audit finding #1, 2026-08-09): the old strictness was the
+    // DEFECT, not a safeguard — rejecting `true`/`1` bought no safety (an admin typing them plainly
+    // means ON) while `on` vs `true` silently disagreed across the codebase. One shared parser now
+    // accepts every spelling of yes/no; an opt-in still requires an EXPLICIT yes, which is the part
+    // that actually mattered.
+    for (const v of ['on', 'true', '1']) {
       process.env.AGENTV3_REDTEAM = v;
-      expect(redTeamEnabled()).toBe(false);
+      expect(redTeamEnabled(), v).toBe(true);
+    }
+    for (const v of ['off', 'false', '0', '']) {
+      process.env.AGENTV3_REDTEAM = v;
+      expect(redTeamEnabled(), v).toBe(false);
     }
   });
 });

@@ -22,6 +22,8 @@
  *    we did not create are left alone.
  */
 
+import { envKillSwitch } from './envFlag';
+
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
 export interface ManagedZone {
@@ -38,7 +40,7 @@ export interface DesiredRecord {
 }
 
 export function managedDnsConfigured(): boolean {
-  if (process.env.AGENTV3_MANAGED_DNS === 'off') return false;
+  if (envKillSwitch('AGENTV3_MANAGED_DNS')) return false;
   return !!(process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
 }
 

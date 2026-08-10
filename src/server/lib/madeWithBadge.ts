@@ -26,11 +26,13 @@
  * the tier only has to flip one boolean.
  */
 
+import { envFlag } from './envFlag';
+
 /** Marker attribute — the idempotency contract. Present ⇒ this HTML is already stamped. */
 export const BADGE_MARKER = 'data-nbai-badge';
 
 export function badgeEnabled(): boolean {
-  return !/^(off|false|0)$/i.test((process.env.AGENTV3_MADE_WITH_BADGE || '').trim());
+  return envFlag('AGENTV3_MADE_WITH_BADGE', true);
 }
 
 /**

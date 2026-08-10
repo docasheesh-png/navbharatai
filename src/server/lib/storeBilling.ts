@@ -22,6 +22,8 @@
  * product — never a code change here.
  */
 
+import { envFlag } from './envFlag';
+
 /**
  * One purchasable token pack. TWO amounts, deliberately separate (admin 2026-08-09: "Google aur
  * Apple apna % lete hai — hamare ₹ kam nahi hone chahiye"):
@@ -130,7 +132,7 @@ export function packForProduct(productId: string | null | undefined): StorePack 
 export type StorePlatform = 'apple' | 'google';
 
 export function storeBillingEnabled(): boolean {
-  return /^(on|true|1)$/i.test((process.env.STORE_BILLING || '').trim());
+  return envFlag('STORE_BILLING');
 }
 
 /** Is this platform's verification actually configured? Honest per-platform answer, never a guess. */

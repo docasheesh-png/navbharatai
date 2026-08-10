@@ -28901,3 +28901,78 @@ Tests: 9 in `tests/sandboxCommandError.test.ts` — the reported case keeping np
 a fallback rather than a replacement, no duplicated status line, a transport failure still reporting
 -1, junk tolerance, the tail keeping the end, and the repo-wide sweep.
 Gate: tsc clean both projects, full run 12,996/12,996.
+
+---
+
+## 2026-08-09 — Full v5 audit, fix #1: one way to read a boolean env flag
+
+**Admin instruction:** scan the whole of NavBharatAI Pro v5 and find every flaw, big and small.
+
+### What the audit actually found — including the four classes that came back CLEAN
+
+Honesty first, because a padded list is worse than a short one. Four classic bug classes were scanned
+across the ~100k-line v5 surface and are genuinely NOT present: `Number(env)` NaN propagation (every
+site is `Number.isFinite`-guarded), error-swallowing empty catches in the engine, unbounded module-level
+caches, and RegExp built from unescaped user text (the one candidate, `orphanPageWiring`, is gated by
+`/^[A-Z][A-Za-z0-9]*$/`, so a metacharacter cannot reach it). A 52-hit "not all code paths return a
+value" class was ALSO discarded: every hit is an Express handler, where the return value is ignored.
+Those five classes were removed from the report rather than counted.
+
+What is real: **~290 items in 4 classes** — and they are not equal. Roughly 284 are duplication and
+dead code; about 6 genuinely bite. Reported to the admin with that split stated plainly.
+
+### Fix #1 (this change) — the flag dialects
+
+A boolean env flag was read **seven** different ways in one codebase:
+
+    process.env.X === 'true'            v === 'on' || v === 'true' || v === '1'
+    process.env.X === 'on'              v === 'on' || v === 'true'          // '1' fails
+    process.env.X === '1'               v === '1' || v === 'true'           // 'on' fails
+    /^(on|true|1)$/i.test(raw.trim())   process.env.X === 'off'             // 'OFF'/'false' do NOT disable
+
+**Why this is a money bug, not tidiness.** The admin turns features on by writing **`on`** — CLAUDE.md
+records seven flags set exactly that way. Under a `=== 'true'` reader, `AGENTV3_PAID_PUBLIC=on` leaves
+**billing switched off** and every user builds free, with nothing in any log to say so. The kill-switch
+side fails the other way and is worse: `AGENTV3_CIRCUIT_BREAKER=OFF` disables **nothing** while the
+operator believes a dangerous path is stopped. Neither failure is visible — the value is accepted, it
+just does not mean what it says. None of them trims, so a stray space in a Cloud Run value silently
+flips the meaning too.
+
+One parser now (`lib/envFlag.ts`): `parseEnvFlag` → `true | false | null`, where `null` is
+deliberately distinct from `false` (a typo takes the documented DEFAULT instead of silently disabling a
+default-ON guard). `envFlag(name, default)` and `envKillSwitch(name)` cover both directions. **44 call
+sites swept.**
+
+**What was deliberately NOT swept** — the sweep's correctness includes what it left alone.
+`AGENTV3_CHEAP_FLOOR` (`off|glm|kimi|on|both`), the power tiers (where `off` is a TIER NAME),
+`ENGINEER_QUOTA` (`off|0|unlimited|<n>`) and the numeric `'off' → 0` parsers carry more than two states;
+collapsing them to a boolean would destroy real meaning. Test-locked so a later sweep cannot "finish
+the job" and break them.
+
+### Two real defects the tests caught in the fix itself
+
+1. **The lock test found a SEVENTH dialect I had missed.** The first sweep covered six; the
+   source-level assertion then failed on 21 more sites using `=== 'on'` exactly (`AGENTV3_LINT_GATE`,
+   `AGENTV3_AUTOFIX`, `AGENTV3_INTEGRITY_GATE`, `AGENTV3_ESCALATION`, …). They work TODAY only because
+   CLAUDE.md happens to document them as `on`; `true` would have silently failed. Swept too.
+2. **I broke a generated app, and the audit of my own diff caught it.** `MaintenanceModeGenerator`
+   holds the middleware it writes INTO THE USER'S PROJECT inside a template literal. The sweep rewrote
+   a line in there to call our server helper — producing an app that cannot resolve the import.
+   Reverted, every other edit audited for the same mistake (clean), and the class is now test-locked:
+   an `envFlag(` inside a template literal fails CI.
+
+### Tests changed on purpose — and why that is not "changing a test to match broken behaviour"
+
+Nine existing tests asserted the strictness itself ("is OFF unless the env is exactly `true`", "stays
+OFF for `true`, `1`, `yes`"). Those tests encoded the DEFECT as the contract. Rejecting `1`/`on` bought
+no safety — an admin typing them plainly means ON — while the disagreement between readers was the
+whole bug. Each was rewritten to the corrected contract with the reason in-place; an opt-in still
+requires an EXPLICIT yes, which is the part that ever mattered.
+
+One more incidental find, recorded rather than fixed: several `*Generator.test.ts` files emit a scratch
+`._<name>_emitted_<pid>.ts` into the REAL `src/server/lib/` directory and delete it again, so any test
+that walks the source tree races them. The new test is written to be immune; the generators writing
+into the live source dir instead of a temp dir remains an OPEN item.
+
+16 new tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1131 files /
+13,011 tests, exit 0**.

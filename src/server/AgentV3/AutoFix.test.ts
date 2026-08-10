@@ -158,11 +158,22 @@ describe('AutoFix flags (R4 §2.3)', () => {
     expect(autoFixEnabled()).toBe(false);
   });
 
-  it('enables only on AGENTV3_AUTOFIX=on', () => {
-    process.env.AGENTV3_AUTOFIX = 'on';
-    expect(autoFixEnabled()).toBe(true);
-    process.env.AGENTV3_AUTOFIX = '1';
-    expect(autoFixEnabled()).toBe(false); // strict 'on'
+  it('enables on any explicit yes, and stays off when unset', () => {
+    // CONTRACT CHANGED DELIBERATELY (audit finding #1, 2026-08-09): the old strictness was the
+    // DEFECT, not a safeguard — rejecting `true`/`1` bought no safety (an admin typing them plainly
+    // means ON) while `on` vs `true` silently disagreed across the codebase. One shared parser now
+    // accepts every spelling of yes/no; an opt-in still requires an EXPLICIT yes, which is the part
+    // that actually mattered.
+    for (const v of ['on', 'true', '1', 'ON']) {
+      process.env.AGENTV3_AUTOFIX = v;
+      expect(autoFixEnabled(), v).toBe(true);
+    }
+    for (const v of ['off', 'false', '0', '']) {
+      process.env.AGENTV3_AUTOFIX = v;
+      expect(autoFixEnabled(), v).toBe(false);
+    }
+    delete process.env.AGENTV3_AUTOFIX;
+    expect(autoFixEnabled()).toBe(false);
   });
 
   it('reviewer [CRITICAL] auto-fix is ON by default (v5.0 must never knowingly ship its own diagnosed defect)', () => {

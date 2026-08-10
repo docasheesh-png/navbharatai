@@ -24,6 +24,7 @@
 
 import { GoogleAuth } from 'google-auth-library';
 import * as crypto from 'crypto';
+import { envFlag } from './envFlag';
 
 const FIREBASE_PROJECT = process.env.FIREBASE_DEPLOY_PROJECT ?? 'gen-lang-client-0866594388';
 const HOSTING_API = 'https://firebasehosting.googleapis.com/v1beta1';
@@ -377,5 +378,5 @@ export function firebaseHostingConfigured(): boolean {
  * publishes to a dedicated site (byte-identical to today).
  */
 export function firebaseCustomDomainsEnabled(): boolean {
-  return /^(on|true|1)$/i.test((process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS || '').trim());
+  return envFlag('AGENTV3_FIREBASE_CUSTOM_DOMAINS');
 }

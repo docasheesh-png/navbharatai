@@ -2023,6 +2023,34 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_systems',
+      description:
+        'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
+        + 'damage, death), enemy AI, projectiles and enemy waves. Call generate_game_runtime first. '
+        + 'Emits src/game/systems as PURE arithmetic, so the rules hold rather than being approximated. '
+        + 'IT ENCODES THE RULES A HAND-WRITTEN VERSION GETS WRONG — do not reimplement them: damage '
+        + 'needs BOTH an attack cooldown and invulnerability frames (i-frames), because without them an '
+        + 'adjacent enemy deals its damage 60 times a second and the player dies in half a second, and '
+        + 'lowering the damage number is not a fix; projectiles test the SEGMENT they travelled rather '
+        + 'than their new position, because a fast bullet would otherwise tunnel straight through a '
+        + 'small enemy; enemies use separation steering, or a group converges to one point and reads as '
+        + 'a single enemy; the de-aggro radius is larger than the detect radius so they cannot flicker '
+        + 'at the boundary; death fires exactly once; and a wave clears when every enemy is dead OR has '
+        + 'fallen out of the world, so one enemy through the floor cannot hang the level forever. '
+        + 'The AI only REQUESTS an attack — a Cooldown decides. Everything emits events, so pair it with '
+        + 'generate_game_vfx for impact.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: combat, ai, projectile, spawner. Default = all.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_shell',
       description:
         'COMPOSE a runnable game from the other game layers. Call generate_game_runtime, '
@@ -3152,6 +3180,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_systems',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_game_controller',

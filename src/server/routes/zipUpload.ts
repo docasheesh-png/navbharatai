@@ -31,6 +31,7 @@ import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 
 import { importDropSummary } from '../../lib/importDropReport';
+import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 
 /** One chunk stays far under Cloud Run's ~32 MB request cap even with protocol overhead. */
 export const ZIP_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -196,7 +197,7 @@ export function registerZipUploadRoutes(app: Express): void {
     if (!uploadOwnedBy(u, uid)) { res.status(403).json({ error: 'Unknown or expired upload.' }); return; }
     // Same strict ownership rule the other file-writing routes use: the VERIFIED uid must own this
     // workspace. An import writes files, so it is never reachable by merely knowing a workspace id.
-    if (!workspaceId || !workspaceId.startsWith(`agentv3-${uid}-`)) {
+    if (!ownedByVerifiedUid(uid, workspaceId)) {
       discard(uploadId);
       res.status(403).json({ error: 'This workspace does not belong to you.' });
       return;

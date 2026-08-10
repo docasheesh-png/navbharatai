@@ -14,6 +14,7 @@ import {
 import {
   buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse,
 } from '../lib/debugAnalysis';
+import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 
 /**
  * Full-App Debugger — the REAL whole-codebase scan route (admin request 2026-07-24).
@@ -40,10 +41,10 @@ const OVERALL_BUDGET_MS = 4 * 60_000;
 const MAX_GITHUB_FILES = 500;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
-function ownsWorkspace(uid: string | null, workspaceId: string): boolean {
-  if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
-  return !!uid && /^[A-Za-z0-9_-]{1,64}$/.test(uid) && workspaceId.startsWith(`agentv3-${uid}-`);
-}
+// Ownership is decided by the shared policy module, never re-typed here (audit finding #2). This
+// route needs the STRICTEST rule: debugging an app requires a real, verified owner, and an anon
+// workspace has none.
+const ownsWorkspace = (uid: string | null, workspaceId: string): boolean => ownedByVerifiedUid(uid, workspaceId);
 
 /** A short, human-friendly label for a Pro v5 app (no provider names; date + size only). */
 function appLabel(savedAt: number, fileCount: number): string {

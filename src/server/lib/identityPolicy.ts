@@ -35,8 +35,13 @@ export interface VerifiedIdentity {
  *  v3SessionContinuity's id shape; routes/agentv3.ts uses this same rule. */
 export const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
-/** Anon (identity-degraded) workspaces live under this prefix — capability-scoped, never listed. */
-export const ANON_WORKSPACE_PREFIX = 'agentv3-anon-';
+/**
+ * Anon (identity-degraded) workspaces live under this prefix — capability-scoped, never listed.
+ * Re-exported from `workspaceIdentity`, which owns the workspace-id scheme (audit finding #2); kept
+ * exported here so every existing importer of this module is unchanged.
+ */
+export { ANON_WORKSPACE_PREFIX } from './workspaceIdentity';
+import { ANON_WORKSPACE_PREFIX } from './workspaceIdentity';
 
 /**
  * Resolve the caller's REAL identity: the Firebase-token-verified uid/email, or null.

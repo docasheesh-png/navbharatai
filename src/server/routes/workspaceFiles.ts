@@ -14,6 +14,7 @@ import type { Express, Request, Response } from 'express';
 import { loadWorkspaceFiles, listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { sessionWorkspaceId, applyFilesToApp } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 /** Total bytes accepted in one write request. Bounds a single call; the store caps per file too. */
 export const MAX_WRITE_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -60,7 +61,8 @@ export function registerWorkspaceFileRoutes(app: Express): void {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Please sign in to see your apps.' });
     try {
-      const prefix = `agentv3-${uid}-`;
+      const prefix = workspacePrefixFor(uid);
+      if (!prefix) { res.json({ ok: true, apps: [] }); return; }
       const apps = (await listUserWorkspaceApps(uid)).map((a) => {
         const sessionId = a.workspaceId.startsWith(prefix) ? a.workspaceId.slice(prefix.length) : a.workspaceId;
         const when = a.savedAt > 0 ? new Date(a.savedAt).toISOString().slice(0, 10) : '';

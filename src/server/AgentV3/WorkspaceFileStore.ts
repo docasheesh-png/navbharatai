@@ -19,6 +19,7 @@ import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { isGreenSnapshotKey } from './GreenGuard';
+import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 const COLLECTION = 'workspace_files_v3';
 /** Firestore's hard per-document limit is 1 MB; skip a single file larger than this. */
@@ -352,7 +353,8 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
   const db = getDb();
   if (!db || !uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return [];
   try {
-    const prefix = `agentv3-${uid}-`;
+    const prefix = workspacePrefixFor(uid);
+    if (!prefix) return [];
     // U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range.
     const prefixEnd = `${prefix}${String.fromCharCode(0xf8ff)}`;
     const byId = admin.firestore.FieldPath.documentId();

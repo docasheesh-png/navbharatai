@@ -57,6 +57,7 @@ import { userCostStore } from '../lib/UserCostStore';
 import { userBuildHistoryStore, type BuildStatus } from '../lib/UserBuildHistoryStore';
 import { usdToInr } from '../lib/UsdInrRate';
 import { envFlag } from '../lib/envFlag';
+import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -904,7 +905,8 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const uid = await verifyFirebaseToken(req);
       if (!uid) return res.json({ apps: [] });
-      const prefix = `agentv3-${uid}-`;
+      const prefix = workspacePrefixFor(uid);
+      if (!prefix) { res.json({ ok: true, apps: [] }); return; }
       const apps = (await listUserWorkspaceApps(uid)).map((a) => {
         const sessionId = a.workspaceId.startsWith(prefix) ? a.workspaceId.slice(prefix.length) : a.workspaceId;
         const when = a.savedAt > 0 ? new Date(a.savedAt).toISOString().slice(0, 10) : '';

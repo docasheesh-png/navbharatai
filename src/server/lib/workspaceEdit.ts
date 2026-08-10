@@ -27,6 +27,7 @@
 
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { workspaceIdFor } from './workspaceIdentity';
 
 /** The store silently drops anything larger, so we check first and say so instead. */
 export const MAX_WRITE_FILE_BYTES = 900 * 1024;
@@ -42,9 +43,10 @@ const RESTORE_POINT_SEARCH_DEPTH = 5;
  * Returns null when either part is not a plausible id.
  */
 export function sessionWorkspaceId(uid: string, sessionId: string): string | null {
-  if (!uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return null;
+  // The uid rule and the id shape come from the shared module (audit finding #2); this route's own
+  // SESSION rule (1–128) is deliberately kept here — the callers genuinely disagree on it.
   if (!sessionId || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return null;
-  return `agentv3-${uid}-${sessionId}`;
+  return workspaceIdFor(uid, sessionId);
 }
 
 export interface HistoryDeps {

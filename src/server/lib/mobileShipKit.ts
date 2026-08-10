@@ -206,6 +206,14 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             npx cap add android
             npx cap sync android
           fi
+          # Capacitor's launch theme (styles.xml) references @drawable/splash; a fresh cap add (Capacitor 8)
+          # can omit the splash asset when @capacitor/splash-screen ships no image → resource linking fails
+          # with "resource drawable/splash not found". Guarantee a resolvable @drawable/splash exists.
+          if ! ls android/app/src/main/res/drawable*/splash.* >/dev/null 2>&1; then
+            echo "::warning::splash drawable missing — writing a placeholder so resource linking succeeds"
+            mkdir -p android/app/src/main/res/drawable
+            printf '<?xml version="1.0" encoding="utf-8"?>\\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\\n  <item android:drawable="@android:color/white" />\\n</layer-list>\\n' > android/app/src/main/res/drawable/splash.xml
+          fi
           if [ ! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
             echo "NBAI_FAILED_STAGE=capacitor"
             echo "::error::The Android project or its Gradle wrapper is incomplete, so there is nothing to compile."

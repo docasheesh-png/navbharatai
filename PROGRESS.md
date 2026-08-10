@@ -29207,3 +29207,70 @@ would train the next author to silence the test rather than fix a leak. It also 
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1138 files / 13,164 tests,
 exit 0**.
+
+---
+
+## 2026-08-10 — ONE INPUT BOX FOR EVERY AI (admin ask) — slice 1: the decisions
+
+**Admin:** "NavBharatAI app me jitne bhi AI hai, sabka input box ek jaisa hai. Sabhi AI's ke input ka
+acche-acche cheezein utha kar BEST input box banao, aur wahi sabhi jagah laga do." Three named wants:
+(1) delete a sent message everywhere, PLUS edit, WhatsApp-style; (2) the ON-SEND / SEARCH / CLEAR row
+that only NavBharatAI FREE has; (3) voice chat, today only in the professionals, everywhere — as a
+PAID feature with the price shown in the user's own language.
+**Export is CUT** — the admin confirmed ("han kato!"), so the shared row is ON SEND / SEARCH / CLEAR.
+
+**The four surfaces today:** `ide/AIChat.tsx` (FREE — has the toolbar), `agentv3/AgentV3Panel.tsx`
+(Pro v5 — has delete), `sda/SDAChat.tsx` (Doctor — has voice), `professionals/ProfessionalChat.tsx`.
+Each has its own composer; nobody has all three good things.
+
+**RATE CONFIRMED BY THE ADMIN:** the ask contained two different numbers — "0.2 paisa/sec" for the
+charge and "2 paisa / sec" for the popup, a 10× gap on real user money. Asked rather than assumed;
+answer: **2 paise per second (₹1.20/min)**. One constant drives BOTH the charge and the popup, so they
+can never disagree.
+
+### Shipped in this slice — the decisions, isolated from any screen
+
+**`chatMessageActions.ts` — what delete and edit MEAN in a chat with an AI.** The hard part is not the
+buttons. Unlike WhatsApp, every assistant reply is an ANSWER TO a particular message, so:
+- **DELETE** removes the message *and the replies that belong to it*, up to the user's next message.
+  Leaving an orphan behind reads as the AI answering a question nobody asked — worse than the message
+  the user wanted gone. An assistant message can never be deleted: it is not the user's text, and
+  removing it would silently rewrite what they were told.
+- **EDIT** rewinds to that point and hands the new text back to be re-sent, because a user edits when
+  they want a DIFFERENT ANSWER, not a different transcript. Keeping the later turns would leave
+  answers derived from the old wording sitting under the new one — coherent-looking and quietly wrong.
+  A no-change edit is a no-op (opening the editor must not cost the conversation); an emptied edit is
+  a delete; every edit is MARKED so history never pretends the original wasn't sent.
+- A 15-minute window: unlimited editing would let a user rewind instructions the builder has already
+  acted on, showing a transcript that no longer matches the app on disk.
+
+**`voiceChatBilling.ts` — the money and the consent.** Per-second billing is honest under THE
+ONE-WALLET LAW's own terms: that law forbids INVENTING a cost, and voice's cost genuinely IS time,
+measured by the clock — the same carve-out image generation already has. It never rounds up (whole
+seconds only, exact ₹ from there — the `inrToDebitTokens` remainder-carry lesson), a call that never
+started costs nothing, and the popup is WRITTEN in each language rather than translated word-for-word
+(the admin asked for exactly that). Every version states the rate per second AND per minute, that
+charging starts when the call connects and stops when it ends, and that it comes from the same one
+balance — plus a live meter showing time AND money together. No vendor name anywhere: a consent popup
+is the most user-facing surface there is.
+
+### ⚠️ A CONSTRAINT FOUND WHILE SURVEYING — voice charges NOTHING today
+`src/server/sonic/` contains no wallet, no spend, no charge of any kind; `ProfessionalVoiceButton`
+opens the voice surface directly. The code comment calls it "a paid, logged-in-only feature", but that
+is only a comment — no money has ever moved. **Therefore the consent popup CANNOT ship before the
+metering does**: a popup that says "2 paise per second" while nothing is charged is a lie told to
+every user, which breaks the second and third absolute rules. Voice is now a single indivisible slice:
+popup + per-second metering + wallet debit land together, or none of them do.
+
+**OPEN QUESTION FOR THE ADMIN (recorded, not assumed):** does a Professional Pass holder pay for
+voice? THE ONE-WALLET LAW says a Pass holder is never charged the wallet on top ("the Pass IS the
+payment"), but voice's cost is per-second and was not priced into the Pass. Either answer is
+defensible; it is the admin's money and the admin's promise, so it is not mine to pick.
+
+**HONEST STATUS — nothing is user-visible yet.** These are the shared decisions; the composer
+component and its wiring are slice 2, and voice is slice 3.
+
+Tests: 20 in `tests/chatComposerCore.test.ts` — delete taking its replies and refusing assistant
+messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the exact charge with no
+minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
+written in Devanagari rather than transliterated, and the no-vendor-name guarantee.

@@ -9,7 +9,6 @@
 // Pattern mirrors WorkspaceFileStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';

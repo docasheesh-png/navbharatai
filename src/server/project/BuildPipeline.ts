@@ -14,7 +14,7 @@
 import { VirtualFileSystem } from './ProjectModel';
 import { ProjectVersionStore } from './VersionStore';
 import { applyEdits, type FileEdit } from './EditEngine';
-import { verifyProject, type VerifyResult } from './ProjectVerifier';
+import { type VerifyResult } from './ProjectVerifier';
 import { autoRepair, type FixGenerator } from './RepairLoop';
 import { detectFramework, scaffold, type Framework } from './Scaffold';
 import { runValidation, type ValidationReport, MIN_FEATURE_COVERAGE } from './ValidationPipeline';

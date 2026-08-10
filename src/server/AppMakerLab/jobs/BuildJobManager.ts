@@ -1,5 +1,3 @@
-import admin from 'firebase-admin';
-import firebaseConfig from '../../../firebase-applet-config.json';
 
 const JOBS_COLLECTION = 'build_jobs';
 

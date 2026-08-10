@@ -20,7 +20,6 @@
 // later without changing this data model.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from './firestoreDb';
 import { getServerDb } from './serverDb';
 import type { UserRole } from './authMiddleware';
 

@@ -29129,3 +29129,46 @@ list. Test-locked so a later "tidy-up" cannot merge them.
 
 10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1134 files /
 13,059 tests, exit 0** · `npm run build` ✓.
+
+---
+
+## 2026-08-09 — Audit fix #4: 80 dead imports removed, 22 unused LOCALS deliberately left
+
+The audit's fourth and lowest-severity class: symbols the compiler proves nothing reads. Real, but
+cosmetic — no user ever saw a bug from it, and that is said plainly rather than counted alongside the
+security fixes.
+
+**80 dead IMPORTS removed across 26 files** — 48 of them in `server.ts` alone (nine unused names on one
+line; `openai`, `@anthropic-ai/sdk`, `@google/genai`, `axios`, `cheerio`, `AIRuntimeManager`,
+`UniversalAIRouter`, `BuildJobManager`, eleven unused `firebase/firestore` names…), 22 in
+`routes/pro.ts`, 8 in `routes/agentv3.ts`, and a `firestoreDatabaseId` import repeated across fourteen
+Firestore store modules.
+
+**Verified before deleting, because the first absolute rule outranks tidiness.** An unused NAME is
+always safe to drop; a whole import LINE is only safe if the module has no top-level side effects —
+removing it also removes the module load. Every local module in the whole-line set
+(`AIRuntimeManager`, `UniversalAIRouter`, `BuildJobManager`, `AppEngine`, `offlineResponse`,
+`aiRouter`, `aiCalls`, `secrets`) was checked for top-level executable statements; the only apparent
+hits were text inside prompt template literals. The third-party ones are pure SDKs.
+
+**22 unused LOCALS were deliberately NOT touched** (`msgs`, `modelFlash`, `MAX_HISTORY_STEPS`,
+destructured-but-unused params like `githubToken` / `proMemorySummary` / `proEditLog`, …). An unused
+import is provably inert; an unused local is a QUESTION — a destructuring that documents a payload's
+shape, a constant a nearby code path is meant to use, a parameter kept for positional compatibility.
+Deleting those needs a reading of each site, not a sweep, and a sweep is exactly how a "cleanup"
+becomes an outage. Recorded here rather than done blind.
+
+Boot smoke check (mandatory for a server change, and `server.ts` is the entry point): built bundle
+starts and `GET /api/health` answers **HTTP 200**. The Firestore "Unable to detect a Project Id" lines
+in that log are this sandbox having no GCP credentials, unrelated to the change.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1136 files / 13,131 tests,
+exit 0** · `npm run build` ✓ · boot + health probe ✓.
+
+### The audit, closed out
+
+Four classes reported, four addressed: flag dialects (#2215, money), the ownership choke point (#2216,
+security), the admin gate (#2217, security — the password in a URL), the client token path (#2220), and
+this. Five classes were scanned and REMOVED from the report as clean rather than padded into it:
+`Number(env)` NaN, engine empty-catches, unbounded caches, RegExp from user text, and the 52 "not all
+code paths return a value" hits that are all Express handlers.

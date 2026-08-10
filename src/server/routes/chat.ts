@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from 'express';
+import type { Express } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
 import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';

@@ -12,7 +12,6 @@
  * Fields:     content (string), updatedAt (number)
  */
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 
 class WorkspaceMemoryStore {

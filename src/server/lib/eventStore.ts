@@ -11,7 +11,6 @@
  * the publisher ever awaiting or being affected by a Firestore failure.
  */
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from './firestoreDb';
 import { getServerDb } from './serverDb';
 import { eventBus, type BusEvent } from './eventBus';
 

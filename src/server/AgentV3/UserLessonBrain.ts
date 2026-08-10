@@ -20,7 +20,6 @@
 // Collection: `user_brain_v3/{userId}`
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import {
   normalizeLessonText,

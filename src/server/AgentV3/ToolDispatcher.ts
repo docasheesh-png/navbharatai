@@ -320,6 +320,7 @@ import { redactSecrets, redactDeep } from './SecretRedactor';
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
+import { envKillSwitch } from '../lib/envFlag';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -1012,7 +1013,7 @@ export class ToolDispatcher {
    *  deterministic fix, additive-only + idempotent + a no-op on an ambiguous router (orphanPageWiring.ts),
    *  so it can never break a working router. Best-effort. Kill switch: AGENTV3_ORPHAN_PAGE_GUARD=off. */
   async healOrphanPages(): Promise<string> {
-    if (process.env.AGENTV3_ORPHAN_PAGE_GUARD === 'off') return '';
+    if (envKillSwitch('AGENTV3_ORPHAN_PAGE_GUARD')) return '';
     try {
       return await withTimeout((async () => {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
@@ -1042,7 +1043,7 @@ export class ToolDispatcher {
    *  statement-leading, paren-balanced calls only; anything ambiguous is left as an honest finding),
    *  idempotent, persisted through the same durable write path. Kill switch: AGENTV3_CRED_LOG_GUARD=off. */
   async healCredentialLogs(): Promise<string> {
-    if (process.env.AGENTV3_CRED_LOG_GUARD === 'off') return '';
+    if (envKillSwitch('AGENTV3_CRED_LOG_GUARD')) return '';
     try {
       return await withTimeout((async () => {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
@@ -1824,7 +1825,7 @@ export class ToolDispatcher {
    * a duplicate (safe), never wrongly refuses. Kill switch: AGENTV3_DUP_MODULE_GUARD=off.
    */
   private duplicateModuleRefusal(path: string): string | null {
-    if (process.env.AGENTV3_DUP_MODULE_GUARD === 'off') return null;
+    if (envKillSwitch('AGENTV3_DUP_MODULE_GUARD')) return null;
     let known: string[] = [];
     try { known = getWorkspaceMemory(this.workspaceId).graph().files; } catch { return null; }
     const dup = duplicateModuleTarget(path, known);
@@ -1854,7 +1855,7 @@ export class ToolDispatcher {
    * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
    */
   private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
-    if (process.env.AGENTV3_DUP_IMPORT_GUARD === 'off') return content;
+    if (envKillSwitch('AGENTV3_DUP_IMPORT_GUARD')) return content;
     if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;
     try {
       const { content: next, removed } = dedupeDuplicateImports(content);
@@ -1867,7 +1868,7 @@ export class ToolDispatcher {
   }
 
   private async hookWriteNote(files: Record<string, string>): Promise<string> {
-    if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
+    if (envKillSwitch('AGENTV3_HOOKS_WRITE_GUARD')) return '';
     if (!files || Object.keys(files).length === 0) return '';
     try {
       const report = await analyzeHooksRules(files);
@@ -1885,7 +1886,7 @@ export class ToolDispatcher {
    * AGENTV3_PKG_PIN_GUARD=off.
    */
   private pinPackageJsonContent(path: string, content: string): string {
-    if (process.env.AGENTV3_PKG_PIN_GUARD === 'off') return content;
+    if (envKillSwitch('AGENTV3_PKG_PIN_GUARD')) return content;
     if (!/(^|\/)package\.json$/.test(path)) return content;
     try {
       let out = content;
@@ -7216,7 +7217,7 @@ export class ToolDispatcher {
         const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let renameSkipped = 0;
-        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+        if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
           for (const f of codeFilesAll.slice(0, 50)) {
             try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
           }
@@ -7264,7 +7265,7 @@ export class ToolDispatcher {
         const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let addPropSkipped = 0;
-        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+        if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
           for (const f of codeFilesAll.slice(0, 50)) {
             try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
           }

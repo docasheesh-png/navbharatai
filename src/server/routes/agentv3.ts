@@ -355,6 +355,7 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 // session's second message a cold, empty sandbox.
 import { buildActuator } from './actuatorFactory';
 import { resolveNarrationLanguage } from '../lib/narrationLanguage';
+import { envFlag } from '../lib/envFlag';
 export { buildActuator };
 
 /**
@@ -935,7 +936,7 @@ export function readinessGateEnabled(): boolean {
  * can be measured on a few builds before it ever gates everyone (like the escalation rollout).
  */
 export function lintGateEnabled(): boolean {
-  return process.env.AGENTV3_LINT_GATE === 'on';
+  return envFlag('AGENTV3_LINT_GATE');
 }
 
 /**
@@ -998,7 +999,7 @@ export function postBuildCodeGateShouldRun(opts: {
  * "text reply > build app" rule). Flag off leaves the build prompt byte-identical to today.
  */
 export function requirementAwareBuildEnabled(): boolean {
-  return process.env.AGENTV3_REQUIREMENT_AWARE === 'on';
+  return envFlag('AGENTV3_REQUIREMENT_AWARE');
 }
 
 /**
@@ -1011,8 +1012,7 @@ export function requirementAwareBuildEnabled(): boolean {
  * flip is a measured decision.
  */
 export function perTierBillingEnabled(): boolean {
-  const v = process.env.AGENTV3_PER_TIER_BILLING;
-  return v === '1' || v === 'true';
+  return envFlag('AGENTV3_PER_TIER_BILLING');
 }
 
 /**
@@ -1024,8 +1024,7 @@ export function perTierBillingEnabled(): boolean {
  * Opus × 2). Set `AGENTV3_REALCOST_BILLING=off` (or `0`/`false`) to disable.
  */
 export function realCostBillingEnabled(): boolean {
-  const v = (process.env.AGENTV3_REALCOST_BILLING ?? '').toLowerCase();
-  return !(v === 'off' || v === '0' || v === 'false');
+  return envFlag('AGENTV3_REALCOST_BILLING', true);
 }
 
 /**
@@ -1242,8 +1241,7 @@ function envInt(name: string, fallback: number): number {
 // it; turn it ON by setting the env var on Cloud Run, and OFF again by unsetting it —
 // no code change, no leak. Remove this helper and its call sites once testing is done.
 function isProviderDebugOn(): boolean {
-  const v = process.env.AGENTV3_DEBUG_PROVIDER;
-  return v === '1' || v === 'true';
+  return envFlag('AGENTV3_DEBUG_PROVIDER');
 }
 export function providerDebugTag(label: string): string {
   return isProviderDebugOn() && label ? `\n\n_[debug · replied via ${label}]_` : '';
@@ -1893,7 +1891,7 @@ function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn:
  * Pure + exported for testing.
  */
 export function cheapFloorAllowedForTier(startTier?: string, rolloutKey?: string): boolean {
-  if (process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS === '1') return true;
+  if (envFlag('AGENTV3_CHEAP_FLOOR_ALL_TIERS')) return true;
   // SMART CHEAP-FIRST (admin 2026-07-03): when ESCALATION is on, EVERY app — simple OR complex —
   // tries the cheap floor (GLM/Kimi) FIRST, because a weak cheap build is caught by the mandatory
   // readiness gate (it downgrades ok:false) and RETRIED on Sonnet. So all apps get the cheap-first
@@ -2127,7 +2125,7 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // never breaks. Billing is unchanged (Opus-equivalent markup, D5/D6) regardless of which
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
   const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
-  const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
+  const withBackstop = envFlag('AGENTV3_DISABLE_HAIKU_BACKSTOP') ? [] : [haikuBackstop];
   // Builds run on CLAUDE FIRST (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex CAN
   // hallucinate in the tool-use loop — reply describing files ("creating index.html…") without ever
   // calling write_file — which is why they were EXCLUDED entirely from the build chain for a while
@@ -2316,7 +2314,7 @@ function grokPlanRunner(opts?: { noClaude?: boolean }): TurnRunner | null {
  * byte-identical to pre-P3 behaviour. Exported pure for unit testing.
  */
 export function escalationEnabled(): boolean {
-  return process.env.AGENTV3_ESCALATION === 'on';
+  return envFlag('AGENTV3_ESCALATION');
 }
 
 /**
@@ -2418,7 +2416,7 @@ export function sandboxDiag(): {
   previewDomainWarning: string | null;
 } {
   const e2bKeySet = !!(process.env.E2B_API_KEY && process.env.E2B_API_KEY.trim());
-  const dockerEnabled = process.env.DOCKER_ENABLED === 'true';
+  const dockerEnabled = envFlag('DOCKER_ENABLED');
   const actuator: 'e2b' | 'docker' | 'local' = e2bKeySet ? 'e2b' : dockerEnabled ? 'docker' : 'local';
   const domain = (process.env.E2B_PREVIEW_DOMAIN || '').trim() || 'e2b.app';
   const previewDomainIsCustom = domain !== 'e2b.app';
@@ -7970,7 +7968,7 @@ export function registerAgentV3Routes(app: Express): void {
         !isEditMode && intent === 'new_build' && buildDepth === 'deep'
         // Simple-lane-eligible builds (now incl. sonnet tier) plan their own manifest+contract inside
         // the lane — spending a blueprint model call here would be wasted on them.
-        && !classifyForSimpleLane(analysis?.startTier) && process.env.AGENTV3_BLUEPRINT === 'on'
+        && !classifyForSimpleLane(analysis?.startTier) && envFlag('AGENTV3_BLUEPRINT')
       ) {
         try {
           const bpGenerate = async (system: string, user: string): Promise<string> => {
@@ -8121,7 +8119,7 @@ export function registerAgentV3Routes(app: Express): void {
       // content, only relocated, so quality is unchanged, but the large static body becomes a stable cache
       // prefix (cache reads ≈ 0.1× input rate). Ships DORMANT: flag off = byte-for-byte today's behaviour.
       let cachePrefixPreamble = '';
-      if (process.env.AGENTV3_CACHE_PREFIX === 'on') {
+      if (envFlag('AGENTV3_CACHE_PREFIX')) {
         const split = splitCachedSystem(architectSystem, staticArchitectSystem);
         architectSystem = split.system;
         cachePrefixPreamble = split.preamble;
@@ -8259,7 +8257,7 @@ export function registerAgentV3Routes(app: Express): void {
       // "text reply > build app" rule), and the user can adjust any assumption via a normal follow-up. Only
       // fires for a new build of a detected domain with real askable gaps. Flag-gated OFF (AGENTV3_ASK_USER):
       // when unset the emit never happens, so the stream is byte-identical to today. Best-effort.
-      if (process.env.AGENTV3_ASK_USER === 'on' && intent === 'new_build' && !isEditMode) {
+      if (envFlag('AGENTV3_ASK_USER') && intent === 'new_build' && !isEditMode) {
         try {
           const g = analyzeRequirementGaps(prompt);
           if (shouldSurfaceRequirementGaps(g) && g.clarifyingQuestions.length > 0) {
@@ -9016,7 +9014,7 @@ export function registerAgentV3Routes(app: Express): void {
         // free in-browser preview can render them, then emit file_changed events so the client's
         // filesVersion bumps and the preview re-pulls immediately — the user sees the real app tens of
         // seconds sooner. Best-effort; never blocks or fails the build. Kill: unset AGENTV3_STREAMING_PREVIEW.
-        const onFilesReady = process.env.AGENTV3_STREAMING_PREVIEW === 'on'
+        const onFilesReady = envFlag('AGENTV3_STREAMING_PREVIEW')
           ? (files: { path: string; content: string }[]) => {
               const rec = Object.fromEntries(files.map((f) => [f.path, f.content]));
               mergeWorkspaceFiles(workspaceId, rec).catch(() => { /* durable save is best-effort */ });
@@ -9798,7 +9796,7 @@ export function registerAgentV3Routes(app: Express): void {
           // import/survey turn (mitrify autopsy 2026-07-24): the user said "do not change any files yet",
           // so the heal must not edit the imported project — the warnings above stay advisory (matches the
           // C9 reviewer-autofix `!isImportTurn` gate). `expectsArtifacts` is false on every import turn.
-          if (shouldRunIntegrityHeal({ gateEnabled: process.env.AGENTV3_INTEGRITY_GATE === 'on', resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
+          if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_INTEGRITY_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
             events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues (focus ownership / duplicate stylesheet)…', ts: Date.now() });
             try {
               const integrityRunner = new AgentRunner({
@@ -10733,7 +10731,7 @@ export function registerAgentV3Routes(app: Express): void {
         wroteFiles: writtenFiles.size > 0,
         isImportTurn,
         fastLaneGated,
-        reviewFastlaneForced: process.env.AGENTV3_REVIEW_FASTLANE === 'on',
+        reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE'),
         startTierSonnet: analysis?.startTier === 'sonnet',
       });
       if (result.ok && reviewHeadroomOk && reviewerAllowed) {

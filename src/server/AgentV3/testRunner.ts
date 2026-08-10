@@ -8,6 +8,7 @@
 
 import { detectPackageManager, pmRun, pmExec } from '../lib/packageManager';
 import { inFlagRollout } from './escalationRollout';
+import { envFlag } from '../lib/envFlag';
 
 export type TestFramework =
   | 'vitest'
@@ -156,7 +157,7 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
 export function vaccineEnabled(rolloutKey?: string): boolean {
   // Optional percentage canary: AGENTV3_VACCINE_PCT=N enables it for N% of builds (keyed by workspaceId).
   // Unset PCT = 100% (a plain global "on"). Same rollout infra as escalation/feature-heal.
-  return inFlagRollout(process.env.AGENTV3_VACCINE === 'on', process.env.AGENTV3_VACCINE_PCT, rolloutKey);
+  return inFlagRollout(envFlag('AGENTV3_VACCINE'), process.env.AGENTV3_VACCINE_PCT, rolloutKey);
 }
 
 /** An agent-facing repair instruction for a failing test suite (used only when a heal pass runs). */

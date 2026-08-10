@@ -1,4 +1,5 @@
 // AgentV3 — git storage-target resolution (own-repo working-branch vs safe private mirror).
+import { parseEnvFlag } from '../lib/envFlag';
 //
 // Admin-approved model (2026-07-05): when a user imports a repo they OWN, store build edits on a
 // dedicated WORKING BRANCH inside that real repo — NOT a separate per-session mirror (which caused
@@ -23,7 +24,7 @@ export const WORK_BRANCH = 'navbharatai/work';
  */
 export function ownRepoStorageEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const v = (env.AGENTV3_OWN_REPO_STORAGE || '').trim().toLowerCase();
-  return v === 'on' || v === 'true' || v === '1';
+  return parseEnvFlag(v) === true;
 }
 
 export interface OwnRepoTarget {

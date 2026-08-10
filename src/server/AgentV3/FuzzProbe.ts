@@ -1,3 +1,5 @@
+
+import { envFlag } from '../lib/envFlag';
 // AgentV3 — "App Health Culture", slice 3: RED-TEAM fuzz probe (Immune System Phase 3, GA-17).
 //
 // Culture (slice 1) asked "does the app DO what was asked?"; the Vaccine (slice 2) ran the app's own
@@ -245,5 +247,5 @@ export function fuzzRepairPrompt(findings: { input: FuzzInput; case: FuzzCase; v
 
 /** Opt-in flag — the red-team runs an extra browser-drive pass, so it stays off until explicitly enabled. */
 export function redTeamEnabled(): boolean {
-  return process.env.AGENTV3_REDTEAM === 'on';
+  return envFlag('AGENTV3_REDTEAM');
 }

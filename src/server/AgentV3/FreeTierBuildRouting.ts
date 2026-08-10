@@ -1,4 +1,5 @@
 // Free-tier build routing (admin plan 2026-07-10) — a NEW public user still on their welcome bonus
+import { envFlag } from '../lib/envFlag';
 // (has never purchased) gets their builds on the CHEAP floor (GLM / Kimi), NEVER on Claude. Rationale
 // the admin set: NavBharatAI must not spend its expensive Claude budget on a user who has not paid yet.
 // The moment the user recharges (becomes a paying customer) they graduate to the normal Claude-first
@@ -17,7 +18,7 @@
 
 /** DORMANT switch. Free-tier cheap routing is inert unless this is exactly 'true'. */
 export function freeTierCheapEnabled(): boolean {
-  return process.env.AGENTV3_FREE_TIER_CHEAP === 'true';
+  return envFlag('AGENTV3_FREE_TIER_CHEAP');
 }
 
 /** Minimal wallet shape this module reads — only whether the user has ever paid. */

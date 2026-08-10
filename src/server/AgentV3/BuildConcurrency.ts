@@ -1,4 +1,5 @@
 // AgentV3 — build concurrency model (admin plan 2026-07-05, FIX #3).
+import { parseEnvFlag } from '../lib/envFlag';
 //
 // TODAY (default): the build lock + registry are keyed by ACCOUNT (`userId ?? 'anon'`) → one build at a
 // time per account. That blocks two legitimate things the admin wants: (a) building two DIFFERENT apps
@@ -17,7 +18,7 @@ export const MAX_CONCURRENT_BUILDS_DEFAULT = 3;
 /** Master opt-in for per-workspace build locking. Default OFF → today's per-account behaviour. */
 export function perWorkspaceLockEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const v = (env.AGENTV3_PER_WORKSPACE_LOCK || '').trim().toLowerCase();
-  return v === 'on' || v === 'true' || v === '1';
+  return parseEnvFlag(v) === true;
 }
 
 /** The per-account concurrency cap (AGENTV3_MAX_CONCURRENT_BUILDS, default 3). Always ≥ 1. */

@@ -16,6 +16,7 @@ import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
 import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
+import { envFlag, envKillSwitch } from '../lib/envFlag';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -277,15 +278,15 @@ export class AgentRunner {
     // (AGENTV3_DEPHEALTH_GATE=on); read here directly (self-contained) rather than threaded via opts since it
     // is advisory-only and never influences build control flow. When on, it appends an advisory block to a
     // successful build's summary — it NEVER blocks or fails a build.
-    const depHealthGate = process.env.AGENTV3_DEPHEALTH_GATE === 'on';
+    const depHealthGate = envFlag('AGENTV3_DEPHEALTH_GATE');
     // Cap-4 injection — deterministically add a /health route to an Express entry that lacks one, at
     // build-end. Default-OFF admin flag (AGENTV3_OBSERVABILITY_INJECT=on); read here directly (self-contained,
     // advisory-adjacent). Purely additive + persisted via the durable write path; it NEVER blocks a build.
-    const observabilityInject = process.env.AGENTV3_OBSERVABILITY_INJECT === 'on';
+    const observabilityInject = envFlag('AGENTV3_OBSERVABILITY_INJECT');
     // P-PIPE — build-end PRETTIER advisory. Default-OFF admin flag (AGENTV3_PRETTIER_GATE=on); read here
     // directly (self-contained, advisory-only). When on, it appends a non-blocking "N file(s) need
     // formatting" note to a successful build's summary — it NEVER blocks or fails a build.
-    const prettierGate = process.env.AGENTV3_PRETTIER_GATE === 'on';
+    const prettierGate = envFlag('AGENTV3_PRETTIER_GATE');
     const maxBuildMs = this.opts.maxBuildMs;
     // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
@@ -488,7 +489,7 @@ export class AgentRunner {
           // payload — the fix for the 233KB prompt that timed out the cheap floor. No-op on a small
           // build. Disabled by setting transcriptKeepRecent to 0 turns is not offered; instead
           // AGENTV3_MODEL_COMPACT=off bypasses entirely for a clean A/B if ever needed.
-          const modelMessages = process.env.AGENTV3_MODEL_COMPACT === 'off'
+          const modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
             ? messages
             : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
           const turnCall = client.runTurn({

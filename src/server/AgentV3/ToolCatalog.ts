@@ -2023,6 +2023,31 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_runtime',
+      description:
+        'Add NavBharatAI\'s GAME RUNTIME to the project — the engine layer a game is built on. Call this '
+        + 'FIRST for any game, 2D or 3D, before writing gameplay. It emits src/game/core: a FIXED-TIMESTEP '
+        + 'loop with interpolated rendering and a delta clamp (so physics is identical on a 144Hz monitor '
+        + 'and a cheap phone, and an alt-tab cannot teleport the player), polled Input with keyboard + '
+        + 'mouse + touch-joystick + virtual buttons behind ONE action map, an EventBus, an object Pool, '
+        + 'game state with save/load, and GameFeel (trauma-squared screen shake, hit-stop, easing, '
+        + 'frame-rate-independent damp). NO dependency is added and nothing here is engine-specific, so it '
+        + 'serves a 2D canvas and a 3D scene equally. '
+        + 'DO NOT hand-roll a requestAnimationFrame loop, a keydown handler or a bullet array — every one '
+        + 'of those has a known failure (frame-rate-dependent physics, lost key presses, GC stutter) that '
+        + 'this runtime already solves. Put gameplay in update(fixedDelta), never in render.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: loop, input, events, pool, feel, state. Default = all; imports are pulled in automatically.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_animation',
       description:
         'Add a dependency-free MOTION pack so the app feels alive instead of assembled: a motion.css of '
@@ -3027,6 +3052,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_runtime',
   'generate_animation',
   'generate_ui_states',
   'generate_state',

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from './ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, mergeDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from './ImportPreview';
 
 describe('previewBootFailureAdvisory (honest DB state, admin 2026-07-24) — a failed boot names the real cause', () => {
   it('DB-needed + not provisioned → tells the user to connect their own database', () => {
@@ -380,5 +380,67 @@ describe('wiring — migrations run before the boot; the log scan cannot be sile
     const at = SRC.indexOf("code: 'DB_SCHEMA_MISSING'");
     expect(at).toBeGreaterThan(-1);
     expect(SRC.slice(at, at + 700)).toContain('autoResolved: false');
+  });
+});
+
+/**
+ * A PLACEHOLDER MUST NEVER ERASE A REAL KEY (found 2026-08-09).
+ *
+ * `buildDevEnvContent` lists every declared variable with an EMPTY placeholder, and the caller wrote it
+ * STRAIGHT OVER `.env`. On the same chat route where a build runs, that produced the worst shape of
+ * bug — one where every visible signal says it worked:
+ *
+ *   1. the build asks for STRIPE_SECRET_KEY; the user types their real key
+ *   2. it is saved to the vault and merged into `.env` — correct so far
+ *   3. the preview boot in the same turn rewrites `.env` from scratch
+ *   4. the key is now `STRIPE_SECRET_KEY=`, and the app silently cannot work
+ *
+ * The same overwrite could erase keys the vault injected at build start, or a DATABASE_URL that
+ * `rescueDatabase` had just written.
+ */
+describe('mergeDevEnvContent — placeholders lose to real values', () => {
+  it('THE BUG: a user key already in .env survives the dev-env write', () => {
+    const existing = 'NODE_ENV=development\nSTRIPE_SECRET_KEY=sk_live_realkey\n';
+    const merged = mergeDevEnvContent(existing, ['STRIPE_SECRET_KEY', 'OTHER_KEY'], {});
+    expect(merged).toContain('STRIPE_SECRET_KEY=sk_live_realkey');
+    expect(merged).not.toContain('STRIPE_SECRET_KEY=\n');
+  });
+
+  it('a DATABASE_URL just written by the database rescue is not clobbered either', () => {
+    const existing = 'DATABASE_URL=postgresql://u:p@real.host/db\n';
+    const merged = mergeDevEnvContent(existing, ['DATABASE_URL'], {});
+    expect(merged).toContain('postgresql://u:p@real.host/db');
+  });
+
+  it('but a REAL provided value still wins — provisioning is intentional', () => {
+    // A freshly created database URL should replace a stale one; only BLANKS are refused.
+    const existing = 'DATABASE_URL=postgresql://old\n';
+    const merged = mergeDevEnvContent(existing, ['DATABASE_URL'], { DATABASE_URL: 'postgresql://new' });
+    expect(merged).toContain('DATABASE_URL=postgresql://new');
+    expect(merged).not.toContain('postgresql://old');
+  });
+
+  it('placeholders are still added for variables the file does not mention', () => {
+    // The whole point of the dev env — `process.env.X` must be defined, not undefined.
+    const merged = mergeDevEnvContent('NODE_ENV=development\n', ['NEW_VAR'], {});
+    expect(merged).toContain('NEW_VAR=');
+  });
+
+  it('an empty or missing .env behaves exactly as before', () => {
+    const generated = buildDevEnvContent(['A_KEY'], { A_KEY: 'v' });
+    expect(mergeDevEnvContent('', ['A_KEY'], { A_KEY: 'v' })).toBe(generated);
+    expect(mergeDevEnvContent('   \n', ['A_KEY'], { A_KEY: 'v' })).toBe(generated);
+  });
+
+  it('an existing BLANK is allowed to be filled — nothing is lost by that', () => {
+    const merged = mergeDevEnvContent('API_KEY=\n', ['API_KEY'], { API_KEY: 'real' });
+    expect(merged).toContain('API_KEY=real');
+  });
+
+  it('comments and unrelated lines in the user\'s .env are preserved', () => {
+    const existing = '# my notes\nMY_OWN=kept\n';
+    const merged = mergeDevEnvContent(existing, ['NEW'], {});
+    expect(merged).toContain('# my notes');
+    expect(merged).toContain('MY_OWN=kept');
   });
 });

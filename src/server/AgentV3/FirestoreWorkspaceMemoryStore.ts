@@ -13,7 +13,6 @@
 
 import * as admin from 'firebase-admin';
 import type { MemorySnapshot, ProjectGraph, Episode } from './WorkspaceMemory';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 

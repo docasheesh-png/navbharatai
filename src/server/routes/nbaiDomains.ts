@@ -18,6 +18,7 @@ import {
 } from '../lib/cloudflareManagedDns';
 import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
 import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
+import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -34,14 +35,10 @@ import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns'
 const DOMAIN_RE = /^([a-z0-9-]+\.)+[a-z]{2,}$/;
 
 /** Strict owner gate: the verified uid must own this real workspace (no anon, no claimed fallback). */
-function ownsWorkspace(verifiedUid: string | null, workspaceId: unknown): workspaceId is string {
-  return (
-    !!verifiedUid &&
-    /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid) &&
-    typeof workspaceId === 'string' &&
-    workspaceId.startsWith(`agentv3-${verifiedUid}-`)
-  );
-}
+// Ownership is decided by the shared policy module, never re-typed here (audit finding #2). A custom
+// domain must attach to a real, verified owner — an anon workspace has nobody to own it.
+const ownsWorkspace = (verifiedUid: string | null, workspaceId: unknown): workspaceId is string =>
+  ownedByVerifiedUid(verifiedUid, workspaceId);
 
 export function registerNbaiDomainsRoutes(app: Express): void {
   app.post('/api/domains/nbai/connect', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {

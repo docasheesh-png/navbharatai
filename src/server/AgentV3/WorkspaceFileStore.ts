@@ -15,9 +15,10 @@
 // throws — a persistence failure must never break or block a build.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
+import { isGreenSnapshotKey } from './GreenGuard';
+import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 const COLLECTION = 'workspace_files_v3';
 /** Firestore's hard per-document limit is 1 MB; skip a single file larger than this. */
@@ -351,7 +352,8 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
   const db = getDb();
   if (!db || !uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return [];
   try {
-    const prefix = `agentv3-${uid}-`;
+    const prefix = workspacePrefixFor(uid);
+    if (!prefix) return [];
     // U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range.
     const prefixEnd = `${prefix}${String.fromCharCode(0xf8ff)}`;
     const byId = admin.firestore.FieldPath.documentId();
@@ -368,6 +370,12 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
         ? data.count
         : (Array.isArray(data.paths) ? data.paths.length : 0);
       if (fileCount <= 0) continue; // an empty workspace is not a debuggable app
+      // A last-known-good SNAPSHOT is stored under a suffixed key in this same collection (see
+      // GreenGuard.greenWorkspaceKey — reusing this store is what keeps a snapshot safe from the 1 MB
+      // document limit). It shares the user's `agentv3-<uid>-` prefix, so this prefix scan would list
+      // it as a SECOND app with the same name — the user would see their app twice and could open the
+      // backup by mistake. A snapshot is a safety copy, never an app.
+      if (isGreenSnapshotKey(d.id)) continue;
       apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
     }
     apps.sort((a, b) => b.savedAt - a.savedAt);

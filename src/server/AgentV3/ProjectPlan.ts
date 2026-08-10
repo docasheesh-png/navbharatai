@@ -19,6 +19,7 @@
 // fully unit-testable. Durable persistence lives in ProjectPlanStore.ts.
 
 import type { TodoItem, TodoStatus } from './types';
+import { parseEnvFlag } from '../lib/envFlag';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -101,8 +102,10 @@ export function projectModeEnabled(
   identity?: { userId?: string | null; email?: string | null },
 ): boolean {
   const flag = (env.AGENTV3_PROJECT_MODE || '').trim();
-  if (flag === 'on') return true;
-  if (!flag || flag === 'off') return false;
+  // A plain on/off answer wins; anything else is read as an allowlist of uids/emails below.
+  const plain = parseEnvFlag(flag);
+  if (plain !== null) return plain;
+  if (!flag) return false;
   const allow = new Set(flag.split(/[\s,]+/).filter(Boolean).map((s) => s.toLowerCase()));
   const uid = (identity?.userId || '').toLowerCase();
   const email = (identity?.email || '').toLowerCase();

@@ -1,4 +1,5 @@
 import { AIRouter } from '../AI/Router/AIRouter';
+import { commandFailureResult } from '../lib/sandboxCommandError';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { provisionOutcomeNote } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ReActAction, EngineerAgentEvent, EngineerTask, SharedLoopState } from './EngineerAITypes';
@@ -621,7 +622,7 @@ export class EngineerAgentLoop {
         try {
           result = await this.actuator.runCommand(workspaceId, command);
         } catch (err: any) {
-          result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+          result = commandFailureResult(err);
         }
         const output = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
         yield { type: 'command_result', command, exitCode: result.exitCode, output };
@@ -734,7 +735,7 @@ export class EngineerAgentLoop {
           try {
             result = await this.actuator.runCommand(workspaceId, cmd);
           } catch (err: any) {
-            result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+            result = commandFailureResult(err);
           }
           const output = redactToken((result.stdout + result.stderr).slice(-MAX_OBS_CHARS), githubToken);
           if (result.exitCode === 0) {
@@ -771,7 +772,7 @@ export class EngineerAgentLoop {
             try {
               result = await this.actuator.runCommand(workspaceId, cmd);
             } catch (err: any) {
-              result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+              result = commandFailureResult(err);
             }
             const output = redactToken((result.stdout + result.stderr).slice(-MAX_OBS_CHARS), githubToken);
             const httpsUrl = `https://github.com/${repoPath}`;

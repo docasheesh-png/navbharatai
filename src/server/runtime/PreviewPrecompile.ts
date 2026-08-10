@@ -25,6 +25,8 @@
  * `AGENTV3_PREVIEW_PRECOMPILE=off` forces the fallback without a deploy.
  */
 
+import { envKillSwitch } from '../lib/envFlag';
+
 // Lazily loaded: @babel/standalone is a ~3 MB parse, paid once per process, and only when the
 // in-browser preview is actually rendered.
 let _babel: { transform: (code: string, opts: object) => { code?: string | null } } | null | undefined;
@@ -88,7 +90,7 @@ function srcStampPlugin(filePath: string) {
  * it is a runtime concern (injectCss), not a compile-time one.
  */
 export function precompileModules(modules: Record<string, string>): Record<string, string> | null {
-  if (process.env.AGENTV3_PREVIEW_PRECOMPILE === 'off') return null;
+  if (envKillSwitch('AGENTV3_PREVIEW_PRECOMPILE')) return null;
   const Babel = loadBabel();
   if (!Babel) return null;
 

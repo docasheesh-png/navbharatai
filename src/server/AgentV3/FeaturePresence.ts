@@ -15,6 +15,7 @@
 
 import { isAffirmativelyRequested } from './featureRequest';
 import { inFlagRollout } from './escalationRollout';
+import { envFlag } from '../lib/envFlag';
 
 export interface FeatureProbeResult {
   /** The requested feature (stable slug, e.g. 'add', 'delete', 'filter'). */
@@ -217,7 +218,7 @@ export function featurePresenceSummary(r: FeaturePresenceResult): string {
 export function featureHealEnabled(rolloutKey?: string): boolean {
   // Optional percentage canary: AGENTV3_FEATURE_HEAL_PCT=N enables it for N% of builds (keyed by
   // workspaceId) so the admin can measure before a global ramp. Unset PCT = 100% (a plain global "on").
-  return inFlagRollout(process.env.AGENTV3_FEATURE_HEAL === 'on', process.env.AGENTV3_FEATURE_HEAL_PCT, rolloutKey);
+  return inFlagRollout(envFlag('AGENTV3_FEATURE_HEAL'), process.env.AGENTV3_FEATURE_HEAL_PCT, rolloutKey);
 }
 
 /** An agent-facing repair instruction for the missing features (used only when a heal pass runs). */

@@ -8,7 +8,6 @@
 // Pattern mirrors WorkspaceFileStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 
 const COLLECTION = 'workspace_embeddings_v3';

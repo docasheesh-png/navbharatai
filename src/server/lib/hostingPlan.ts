@@ -31,12 +31,13 @@ import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
 import { inrToDebitTokens } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { envFlag } from './envFlag';
 
 export const HOSTING_PLAN_ID = 'custom_domain';
 export const HOSTING_PLAN_DAYS = 30;
 
 export function hostingPlansEnabled(): boolean {
-  return !/^(off|false|0)$/i.test((process.env.AGENTV3_HOSTING_PLANS || '').trim());
+  return envFlag('AGENTV3_HOSTING_PLANS', true);
 }
 
 /** ₹ per 30 days. Env-tunable so a price change never needs a deploy. */

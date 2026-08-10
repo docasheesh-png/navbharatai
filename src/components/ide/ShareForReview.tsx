@@ -4,6 +4,7 @@
 // Self-contained (own styles + auth) so it needs only `generatedCode`.
 
 import React, { useState } from 'react';
+import { authHeader } from '../../lib/authHeaders';
 
 interface Feedback { rating: 'approve' | 'changes' | 'reject'; comment: string; name: string; timestamp: number }
 
@@ -12,17 +13,6 @@ interface ShareForReviewProps {
 }
 
 /** Firebase ID token for the RBAC-gated share endpoints. Best-effort → {} when signed out. */
-async function authHeader(): Promise<Record<string, string>> {
-  try {
-    const { getAuth } = await import('firebase/auth');
-    const { getApp } = await import('firebase/app');
-    const user = getAuth(getApp()).currentUser;
-    if (!user) return {};
-    return { Authorization: `Bearer ${await user.getIdToken()}` };
-  } catch {
-    return {};
-  }
-}
 
 const RATING_META: Record<Feedback['rating'], { label: string; color: string }> = {
   approve: { label: 'Approved', color: '#4ade80' },

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
+import { SecretRequestCard } from './SecretRequestCard';
+import { saveSecret } from '../../lib/secretsApi';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
@@ -11,6 +13,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
@@ -50,20 +53,13 @@ import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
-import { db, sanitizeFirestoreData, auth } from '../../App';
+import { db, sanitizeFirestoreData } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */
-async function authJsonHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server soft-falls-back */ }
-  return headers;
-}
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 /**
  * AgentV3Panel — NavBharatAI Pro v5.0 (Vargen 3.0), a Claude-Code-style chat
@@ -3298,6 +3294,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   </button>
                 )}
               </div>
+            )}
+            {state.pendingSecrets && (
+              <SecretRequestCard
+                prompt={state.pendingSecrets.prompt}
+                secrets={state.pendingSecrets.secrets}
+                onSave={async (vals) => {
+                  // Straight to the encrypted vault over the authenticated API — the value never goes
+                  // back up the build stream, which is stored in the transcript and the admin report.
+                  if (!userId) return false;
+                  for (const [name, value] of Object.entries(vals)) {
+                    await saveSecret(userId, name, value);
+                  }
+                  return true;
+                }}
+                onDone={(saved) => { respond(state.pendingSecrets!.callId, saved); }}
+              />
             )}
             {state.pendingPermission && (
               <div className="px-3 py-2.5 bg-amber-950/50 border border-amber-900 rounded">

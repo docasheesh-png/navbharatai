@@ -1,4 +1,5 @@
 import { Sandbox } from 'e2b';
+import { commandFailureResult } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
@@ -351,7 +352,7 @@ export class E2BActuator implements IEngineerActuator {
     if (hasLock) {
       const ci = await sandbox.commands.run('npm ci', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
-      }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+      }).catch((err: any) => commandFailureResult(err));
       if (ci.exitCode === 0) return { success: true, log: ci.stdout + ci.stderr };
       // npm ci failed (stale lock, missing lock entry) — fall through to npm install
     }
@@ -359,7 +360,7 @@ export class E2BActuator implements IEngineerActuator {
     // Step 2: npm install (resolves all deps, creates/updates lock file)
     const install = await sandbox.commands.run('npm install', {
       cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
-    }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+    }).catch((err: any) => commandFailureResult(err));
     const installLog = install.stdout + install.stderr;
     if (install.exitCode === 0) return { success: true, log: installLog };
 
@@ -367,7 +368,7 @@ export class E2BActuator implements IEngineerActuator {
     if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {
       const retry = await sandbox.commands.run('npm install --legacy-peer-deps', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
-      }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+      }).catch((err: any) => commandFailureResult(err));
       const retryLog = retry.stdout + retry.stderr;
       return {
         success: retry.exitCode === 0,
@@ -729,6 +730,31 @@ export class E2BActuator implements IEngineerActuator {
       };
     } catch (err: any) {
       return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
+    }
+  }
+
+  /**
+   * Install the project's dependencies if they are missing or stale — see IEngineerActuator for the
+   * failure this closes (a migration that ran before `npm install` and died with "drizzle-kit: not
+   * found"). Uses the SAME staleness check and installer as the dev-server boot, so there is one
+   * install implementation and the two can never drift; a warm tree returns instantly with
+   * `ran: false`. Never throws — the caller decides what to do with an honest failure.
+   */
+  async ensureDependencies(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }> {
+    try {
+      const sandbox = await this.getSandbox(workspaceId);
+      const hasPkg = await sandbox.files.exists(`${WORKSPACE_ROOT}/package.json`).catch(() => false);
+      if (!hasPkg) return { ok: true, ran: false, log: '(no package.json — nothing to install)' };
+      const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
+      const stale = hasModules && await sandbox.commands
+        .run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => r.stdout.includes('STALE'))
+        .catch(() => false);
+      if (hasModules && !stale) return { ok: true, ran: false, log: '(dependencies already installed)' };
+      const res = await this._npmInstall(sandbox);
+      return { ok: res.success, ran: true, log: res.log };
+    } catch (err: any) {
+      return { ok: false, ran: false, log: err?.message ? String(err.message) : String(err) };
     }
   }
 

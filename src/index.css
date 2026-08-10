@@ -4,6 +4,7 @@
    per `html[data-theme]`. Imported right after tailwind so it always wins. Inert until data-theme is
    set → an instant, total rollback (remove the attribute or this import). */
 @import "./styles/theme-compat.css";
+@import "./styles/font-scale-compat.css";
 
 /* Disable the browser's left/right swipe back/forward navigation — it was
    triggering accidental history navigation. Custom swipe (open/close the

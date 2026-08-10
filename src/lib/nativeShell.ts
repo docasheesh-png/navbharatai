@@ -14,6 +14,8 @@
 // Everything is dependency-injected (the Capacitor API is a parameter) so the logic is fully
 // unit-testable without a native runtime.
 
+import { playTapTone } from './tapTone';
+
 /** The minimal Capacitor surface this module touches (DI for tests). */
 export interface NativeShellContext {
   Capacitor?: { isNativePlatform?: () => boolean; isNative?: boolean };
@@ -293,19 +295,26 @@ const HAPTIC_TARGET = 'button, [role="button"], a[href], input[type="submit"]';
 export const HAPTIC_MIN_GAP_MS = 60;
 
 /**
- * App-wide haptic feedback on tap.
+ * App-wide tap feedback on touch.
  *
  * Deliberately ONE delegated listener rather than a prop threaded through ~200 components: a single
  * implementation cannot drift, and adding a button later gets the behaviour for free instead of
  * needing to remember. `pointerdown` (not click) so the tick lands on touch-down like a native
- * control, and 'light' because anything stronger becomes irritating at chat-typing frequency.
+ * control.
+ *
+ * SOUND, NOT VIBRATION (admin 2026-08-09: "vibration bahut hota hai — touch tone (tak tak) awaz aye
+ * to jyada accha"): the feedback used to be the Haptics motor, which on many Android phones is a
+ * strong whole-hand buzz at chat-typing frequency. It is now a soft synthesised tick (see tapTone.ts
+ * — Android's own keyboard behaviour), which also respects silent mode the way vibration never did.
+ * The `tick` is injectable for tests; the Haptics plugin is no longer involved in taps at all.
  */
 export function installTapHaptics(
   ctx: NativeShellContext,
   root: { addEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void; removeEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void },
   now: () => number = () => Date.now(),
+  tick: () => void = playTapTone,
 ): () => void {
-  if (!isNativeShell(ctx) || !ctx.Haptics) return () => {};
+  if (!isNativeShell(ctx)) return () => {};
   let last = 0;
   const onDown = (e: Event): void => {
     const target = e.target as { closest?: (s: string) => unknown } | null;
@@ -313,7 +322,7 @@ export function installTapHaptics(
     const t = now();
     if (t - last < HAPTIC_MIN_GAP_MS) return;
     last = t;
-    try { void ctx.Haptics?.impact({ style: 'light' }); } catch { /* best effort */ }
+    try { tick(); } catch { /* best effort — feedback must never break a tap */ }
   };
   root.addEventListener('pointerdown', onDown, { passive: true });
   return () => root.removeEventListener('pointerdown', onDown, { passive: true } as unknown);

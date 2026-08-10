@@ -20,6 +20,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { classifyDevServerFailure, missingCredentialFromLog, unavailableDbEngine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
+import { mergeDotEnv } from '../secrets/appSecretsEnv';
 
 /** SQL/ORM drivers whose presence means the app needs a database to boot. */
 const DB_DEPS = [
@@ -143,14 +144,49 @@ export function previewBootFailureAdvisory(opts: {
   return `⚠️ The live preview didn't boot. ${parts.join(' ')} Meanwhile the **In-browser preview** renders your frontend from the imported files.`;
 }
 
-/** The env-var NAMES the app documents in its committed .env template (never the values). PURE. */
+/** Source files worth scanning for env reads — code, not assets. */
+const ENV_SCAN_SOURCE = /\.(?:m?[jt]sx?|cjs|cts|mts)$/i;
+/** Bound the scan so a huge import cannot turn env discovery into a long CPU stall. */
+const ENV_SCAN_MAX_BYTES = 4_000_000;
+/** `process.env.NAME`, `process.env['NAME']`, `import.meta.env.NAME` — how code actually reads env. */
+const ENV_READ_PATTERN = /(?:process|import\s*\.\s*meta)\s*\.\s*env\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]\s*\])/g;
+
+/**
+ * The env-var NAMES this app needs — from its committed .env template AND from the code itself. PURE.
+ *
+ * ROOT CAUSE THIS CLOSES (build report d6deaaf0, Mitrify, 2026-08-09). Discovery used to read ONLY
+ * `.env.example` / `.env.sample` / `.env.template`. Mitrify commits none of those, so the list came
+ * back EMPTY — and that one gap produced three separate symptoms in a single build:
+ *   • no `SESSION_SECRET` was conjured, so express-session had no secret and EVERY request returned
+ *     `{"message":"secret option required for sessions"}` — the whole app was dead in preview;
+ *   • the honest "these external services still need real values" note never appeared, because the
+ *     external list is derived from the same discovery;
+ *   • nothing in the run explained any of it, so the build looked clean.
+ * A `.env.example` is a courtesy some projects keep; `process.env.X` in the source is the truth every
+ * project has. Reading the code is what makes this work for an app we have never seen before.
+ */
 export function envVarNames(files: Record<string, string>): string[] {
-  const raw = files['.env.example'] ?? files['.env.sample'] ?? files['.env.template'] ?? '';
-  if (typeof raw !== 'string') return [];
   const names: string[] = [];
-  for (const line of raw.split('\n')) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
-    if (m && !names.includes(m[1])) names.push(m[1]);
+  const add = (n: string) => { if (n && !names.includes(n)) names.push(n); };
+
+  // The declared template still goes FIRST — it is the app author's own documented order.
+  const raw = files['.env.example'] ?? files['.env.sample'] ?? files['.env.template'] ?? '';
+  if (typeof raw === 'string') {
+    for (const line of raw.split('\n')) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      if (m) add(m[1]);
+    }
+  }
+
+  // Then whatever the code genuinely reads, whether or not anyone documented it.
+  let scanned = 0;
+  for (const [path, content] of Object.entries(files)) {
+    if (typeof content !== 'string' || !ENV_SCAN_SOURCE.test(path)) continue;
+    if (scanned >= ENV_SCAN_MAX_BYTES) break;
+    scanned += content.length;
+    ENV_READ_PATTERN.lastIndex = 0; // a /g regex carries state between calls
+    let m: RegExpExecArray | null;
+    while ((m = ENV_READ_PATTERN.exec(content)) !== null) add(m[1] ?? m[2]);
   }
   return names;
 }
@@ -162,10 +198,65 @@ export function envVarNames(files: Record<string, string>): string[] {
  * — enough for the app to start; the features that need REAL keys just won't work (honest partial).
  * PURE.
  */
+/**
+ * The dev `.env` MERGED over whatever the app already has — never a wholesale overwrite.
+ *
+ * THE BUG THIS FIXES (found 2026-08-09 while verifying the mid-build secrets popup). The caller wrote
+ * `buildDevEnvContent(...)` straight over `.env`, and that content lists every declared variable with
+ * an EMPTY placeholder. Any real value already in the file was replaced by `KEY=`. On the same chat
+ * route where a build runs, that meant:
+ *
+ *   1. the build asks for STRIPE_SECRET_KEY, the user types their real key
+ *   2. it is saved to the vault and merged into `.env` — correct so far
+ *   3. the preview boot in the same turn rewrites `.env` from scratch
+ *   4. the user's key is now `STRIPE_SECRET_KEY=`
+ *
+ * The user supplied the key, it saved, and the app still does not work — the worst shape of bug,
+ * because every visible signal says it succeeded. The same overwrite could erase keys the vault
+ * injected at build start, or the DATABASE_URL that `rescueDatabase` had just written.
+ *
+ * THE RULE: an EMPTY placeholder never overwrites a value that already exists. Real `provided` values
+ * still win (they are provisioned on purpose — a freshly created database URL should replace a stale
+ * one), and placeholders are only added for variables the file does not mention yet. PURE.
+ */
+export function mergeDevEnvContent(
+  existingEnv: string,
+  varNames: string[],
+  provided: Record<string, string>,
+): string {
+  const generated = buildDevEnvContent(varNames, provided);
+  const existing = String(existingEnv ?? '');
+  if (!existing.trim()) return generated;
+
+  // Which keys the file already carries a NON-EMPTY value for — those are the ones to protect.
+  const held = new Set<string>();
+  for (const line of existing.split('\n')) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    if (m && m[2].trim() !== '') held.add(m[1]);
+  }
+
+  // Everything the generated content wants to set, minus the blanks that would clobber a real value.
+  const wanted: Record<string, string> = {};
+  for (const line of generated.split('\n')) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    if (!m) continue;
+    const [, key, value] = m;
+    if (value.trim() === '' && held.has(key)) continue; // the placeholder loses to a real value
+    wanted[key] = value;
+  }
+  return mergeDotEnv(existing, wanted);
+}
+
 export function buildDevEnvContent(varNames: string[], provided: Record<string, string>): string {
   const env: Record<string, string> = { NODE_ENV: 'development' };
   for (const n of varNames) if (!(n in env)) env[n] = '';
   Object.assign(env, provided); // provisioned/real values always override the placeholder
+  // AN EMPTY PORT IS WORSE THAN NO PORT (2026-08-09). Every other var is safe as '' because apps
+  // test it for truthiness, but a port is PARSED: `process.env.PORT || 5000` falls back correctly,
+  // while `Number(process.env.PORT ?? 5000)` turns '' into 0 and the server binds a RANDOM port —
+  // which no preview could then find. Left absent, every idiom falls back to the app's own default,
+  // which is exactly what we want now that we no longer assign the port at all.
+  if (env.PORT === '') delete env.PORT;
   return Object.entries(env).map(([k, v]) => `${k}=${String(v)}`).join('\n') + '\n';
 }
 

@@ -1,5 +1,4 @@
 
-import { GeminiProvider } from './Models/GeminiProvider';
 import { VertexProvider } from './Models/VertexProvider';
 
 export class AIRuntimeManager {

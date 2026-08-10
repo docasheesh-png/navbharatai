@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { playTapTone } from '../../lib/tapTone';
 import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -1764,7 +1765,8 @@ export const AIChat: React.FC<AIChatProps> = ({
                     ) : (
                       <button
                         onClick={() => {
-                          navigator.vibrate?.(30);
+                          // Tone, not vibration (admin 2026-08-09) — same feedback as every other tap.
+                          playTapTone();
                           onSend(attachments);
                           setAttachments([]);
                           setEditingMsgId(null);

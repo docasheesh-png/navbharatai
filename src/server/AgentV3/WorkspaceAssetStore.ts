@@ -16,7 +16,6 @@
 // throws — a persistence failure never blocks or breaks a build.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { pool } from './WorkspaceFiles';
 

@@ -40,8 +40,25 @@ export function parseListeningPorts(stdout: string | null | undefined): number[]
  */
 const INFRA_PORTS = new Set([22, 53, 5432, 3306, 27017, 6379, 9229]);
 
-/** Common dev-server ports, used only to ORDER candidates (never to invent one not listening). */
+/** Common dev-server ports, in rough order of likelihood across the frameworks we build. */
 const COMMON_DEV_PORTS = [3000, 5173, 5000, 8080, 4000, 8000, 4200, 5174];
+
+/** The port a given framework's dev server uses by default — moved to the front of the blind tail. */
+const FRAMEWORK_DEFAULT_PORT: Record<string, number> = {
+  'node-express': 5000,
+  express: 5000,
+  'vite-react': 5173,
+  vite: 5173,
+  react: 3000,
+  next: 3000,
+  nextjs: 3000,
+  nuxt: 3000,
+  svelte: 5173,
+  sveltekit: 5173,
+  vue: 5173,
+  angular: 4200,
+  astro: 4321,
+};
 
 export const MAX_PORT_CANDIDATES = 4;
 
@@ -51,7 +68,19 @@ export const MAX_PORT_CANDIDATES = 4;
  *   2. the dev script's declared --port,
  *   3. the expected/pinned port,
  *   4. every OTHER genuinely-listening port (common dev ports first, then ascending) — this is the
- *      flip: when the app landed somewhere nobody predicted, the OS still knows, and we follow it.
+ *      flip: when the app landed somewhere nobody predicted, the OS still knows, and we follow it,
+ *   5. LAST RESORT — the well-known dev ports even when nothing was observed listening.
+ *
+ * TIER 5 EXISTS BECAUSE EVIDENCE CAN BE ABSENT (admin 2026-08-10: "port 3000 par nahi chale to port
+ * 5000 par try kiya jayega"). Tier 4 is strictly better than guessing — but it produces NOTHING when
+ * the listening scan cannot run, comes back empty, or simply runs a moment before the server finishes
+ * binding. In that case the flip had no second candidate at all and the preview stayed pinned to a
+ * dead port, which is the very failure it exists to prevent. So after every piece of real evidence is
+ * exhausted, the familiar ports are tried anyway — a bounded guess is better than a certain dead end.
+ * The framework's own default leads that tail, so a node-express app reaches 5000 before it reaches
+ * a Vite port. Ordering guarantees this never OVERRIDES evidence: it only fills the space evidence
+ * left empty.
+ *
  * Deduped, infra ports removed, bounded. Never empty when any input port exists. PURE.
  */
 export function rankPortCandidates(opts: {
@@ -59,6 +88,8 @@ export function rankPortCandidates(opts: {
   scriptPort: number | null;
   expected: number | null;
   listening: number[];
+  /** Optional hint so the last-resort tail starts with this framework's own default port. */
+  framework?: string | null;
 }): number[] {
   const out: number[] = [];
   const push = (p: number | null | undefined): void => {
@@ -70,5 +101,15 @@ export function rankPortCandidates(opts: {
   const listening = (opts.listening ?? []).filter((p) => !INFRA_PORTS.has(p));
   for (const p of COMMON_DEV_PORTS) if (listening.includes(p)) push(p);
   for (const p of listening) push(p);
+  // Tier 5 — the bounded guess, only ever reaching ports evidence did not already supply.
+  //
+  // GATED ON HAVING ANY EVIDENCE AT ALL. With not one port from any source, nothing booted anywhere
+  // and there is nothing to flip TO — guessing there would spend four browser visits proving a dev
+  // server that never started is still not running. The tail is for "the app IS up, just not where we
+  // looked", which is the case the admin described.
+  if (out.length > 0) {
+    push(FRAMEWORK_DEFAULT_PORT[(opts.framework ?? '').trim().toLowerCase()]);
+    for (const p of COMMON_DEV_PORTS) push(p);
+  }
   return out.slice(0, MAX_PORT_CANDIDATES);
 }

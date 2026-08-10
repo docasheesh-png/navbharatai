@@ -21,6 +21,7 @@ import { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngi
 import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
+import { envFlag } from '../lib/envFlag';
 
 /**
  * Cached as a process-level singleton so the actuator's per-workspace sandbox map survives across
@@ -40,7 +41,7 @@ let sharedActuator: IEngineerActuator | null = null;
 export function buildActuator(): IEngineerActuator {
   if (sharedActuator) return sharedActuator;
   if (process.env.E2B_API_KEY) sharedActuator = new E2BActuator();
-  else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();
+  else if (envFlag('DOCKER_ENABLED')) sharedActuator = new DockerActuator();
   else sharedActuator = new LocalActuator();
   return sharedActuator;
 }

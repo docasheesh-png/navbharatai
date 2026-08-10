@@ -1075,11 +1075,20 @@ describe('cost-ladder escalation (P3) — dormant policy + gate', () => {
     expect(shouldEscalateBuild(simple, false)).toBe(false); // flag off → never escalate
   });
 
-  it('only activates when the flag is exactly "on"', () => {
-    process.env.AGENTV3_ESCALATION = 'true';
-    expect(escalationEnabled()).toBe(false); // only literal "on" enables it
-    process.env.AGENTV3_ESCALATION = 'on';
-    expect(escalationEnabled()).toBe(true);
+  it('activates on any explicit yes, and only on an explicit yes', () => {
+    // CONTRACT CHANGED DELIBERATELY (audit finding #1, 2026-08-09): "only literal on" was the DEFECT.
+    // The codebase read flags seven different ways, so `true` here and `on` there silently disagreed.
+    // One shared parser now accepts every spelling; an opt-in still requires an EXPLICIT yes.
+    for (const v of ['on', 'true', '1', 'ON']) {
+      process.env.AGENTV3_ESCALATION = v;
+      expect(escalationEnabled(), v).toBe(true);
+    }
+    for (const v of ['off', 'false', '0', '']) {
+      process.env.AGENTV3_ESCALATION = v;
+      expect(escalationEnabled(), v).toBe(false);
+    }
+    delete process.env.AGENTV3_ESCALATION;
+    expect(escalationEnabled()).toBe(false);
   });
 
   it('when ON, escalates a cheap-tier build with a higher tier available', () => {

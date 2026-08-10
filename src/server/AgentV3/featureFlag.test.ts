@@ -18,26 +18,31 @@ afterEach(() => {
 });
 
 describe('isAgentV3PaidPublicEnabled — money-path master switch (default OFF)', () => {
-  it('is OFF unless AGENTV3_PAID_PUBLIC is exactly "true"', () => {
+  it('is OFF until the admin explicitly says yes — in any spelling', () => {
+    // CONTRACT CHANGED DELIBERATELY (audit finding #1, 2026-08-09): rejecting `1`/`on` was the
+    // DEFECT, not a safeguard — the admin's habit is `on`, so a money gate written that way was
+    // silently OFF. An explicit YES is still required; only the spellings widened.
     delete process.env.AGENTV3_PAID_PUBLIC;
     expect(isAgentV3PaidPublicEnabled()).toBe(false);
     process.env.AGENTV3_PAID_PUBLIC = 'false';
     expect(isAgentV3PaidPublicEnabled()).toBe(false);
-    process.env.AGENTV3_PAID_PUBLIC = '1';
-    expect(isAgentV3PaidPublicEnabled()).toBe(false);
-    process.env.AGENTV3_PAID_PUBLIC = 'true';
-    expect(isAgentV3PaidPublicEnabled()).toBe(true);
+    for (const v of ['1', 'on', 'true', 'TRUE']) {
+      process.env.AGENTV3_PAID_PUBLIC = v;
+      expect(isAgentV3PaidPublicEnabled(), v).toBe(true);
+    }
   });
 });
 
 describe('isAgentV3CreditGateEnabled — decoupled ₹0-balance gate (default OFF)', () => {
-  it('is OFF unless AGENTV3_CREDIT_GATE is exactly "true"', () => {
+  it('is OFF until the admin explicitly says yes (see the note above)', () => {
     delete process.env.AGENTV3_CREDIT_GATE;
     expect(isAgentV3CreditGateEnabled()).toBe(false);
     process.env.AGENTV3_CREDIT_GATE = 'false';
     expect(isAgentV3CreditGateEnabled()).toBe(false);
     process.env.AGENTV3_CREDIT_GATE = '1';
-    expect(isAgentV3CreditGateEnabled()).toBe(false);
+    expect(isAgentV3CreditGateEnabled()).toBe(true);
+    process.env.AGENTV3_CREDIT_GATE = 'on';
+    expect(isAgentV3CreditGateEnabled()).toBe(true);
     process.env.AGENTV3_CREDIT_GATE = 'true';
     expect(isAgentV3CreditGateEnabled()).toBe(true);
   });

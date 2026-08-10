@@ -13,7 +13,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { trimReportForStorage } from './DiagnosticsStore';
-import type { BuildDiagnosticsReport } from './BuildDiagnostics';
+import { type BuildDiagnosticsReport } from './BuildDiagnostics';
 
 const COLLECTION = 'admin_build_reports';
 /** Keep the inbox bounded on read; the collection itself is admin-managed. */
@@ -78,6 +78,11 @@ export interface AdminBuildReportMeta {
   sessionLine: string | null;
   /** Workspace wipes repaired across the session — zero unless the guardian had to restore. */
   sessionDataLoss: number | null;
+  /**
+   * How many builds (parts) this report carries — 1 when only the focused build was available.
+   * In meta so the inbox list can say "5 parts" without loading the full document.
+   */
+  sessionParts?: number;
   /** A short, human label for the app — the first line of the build prompt. */
   appLabel: string;
   /** The raw billing tier string from the build (admin-only detail). */
@@ -124,7 +129,61 @@ export function classifyReportTier(userTier: string | null | undefined): ReportT
 /** The full stored record: metadata + the trimmed report snapshot. */
 export interface AdminBuildReportRecord {
   meta: AdminBuildReportMeta;
+  /**
+   * The build the user was LOOKING AT when they pressed Report — the one they are complaining about.
+   * Kept as the top-level `report` so every existing reader (admin UI, download) is unchanged.
+   */
   report: BuildDiagnosticsReport;
+  /**
+   * THE WHOLE SESSION — every build/edit of this workspace, oldest → newest (admin 2026-08-09:
+   * "jab koi user app bana kar report kare, to puri report, sabhi edit sath 0 to 100 admin ko send ho").
+   *
+   * WHY: one turn is never the story. A user builds, then edits five times; the failure they report is
+   * usually explained by an EARLIER turn, which the single-report record threw away. The admin then
+   * debugged with a quarter of the evidence. Absent (undefined) when only one build exists or the
+   * session could not be gathered — never a fake empty session.
+   */
+  session?: {
+    builds: BuildDiagnosticsReport[];
+    /** How many builds the session really has — `builds.length` may be smaller (size cap). */
+    count: number;
+    /** Oldest builds dropped to stay inside the document size limit. Honest, never hidden. */
+    omittedBuilds: number;
+  };
+}
+
+/**
+ * Firestore's HARD per-document limit. A document one byte over is REJECTED — the write fails and
+ * the whole report is lost, including the focused build that used to arrive fine.
+ */
+export const FIRESTORE_DOC_LIMIT_BYTES = 1_048_576;
+/**
+ * Headroom between our JSON byte count and Firestore's own accounting. Firestore charges for field
+ * NAMES, per-field overhead and UTF-8 expansion of non-ASCII text, none of which `JSON.stringify`
+ * length reflects — a report full of Devanagari can be materially larger on their side than ours.
+ */
+export const ADMIN_RECORD_SAFETY_BYTES = 96 * 1024;
+
+/**
+ * Fit the session into whatever the document has left, dropping OLDEST first.
+ *
+ * ⚠️ This is deliberately NOT `capSessionReports`. That one keeps the newest build "even if huge",
+ * which is right for an HTTP response (a big download still works) and WRONG here: this sink has a
+ * hard limit, so one oversized build must yield an empty-but-honest session rather than a rejected
+ * write. The report itself is never at risk — only the session is trimmed, and every drop is counted.
+ * PURE.
+ */
+export function fitSessionToDocument<T>(builds: readonly T[], budgetBytes: number): { kept: T[]; omitted: number } {
+  const kept: T[] = [];
+  let used = 0;
+  for (let i = builds.length - 1; i >= 0; i--) {
+    let size = 0;
+    try { size = JSON.stringify(builds[i])?.length ?? Number.MAX_SAFE_INTEGER; } catch { size = Number.MAX_SAFE_INTEGER; }
+    if (used + size > budgetBytes) break; // oldest-first drop: stop as soon as one no longer fits
+    kept.unshift(builds[i]);
+    used += size;
+  }
+  return { kept, omitted: builds.length - kept.length };
 }
 
 function cap(s: string | undefined | null, n: number): string | null {
@@ -146,7 +205,17 @@ export function appLabelFromPrompt(prompt: string | undefined | null): string {
  * be asserted directly. The report is run through `trimReportForStorage` so the snapshot is already
  * secret-redacted and byte-bounded, exactly like every other durable copy.
  */
-export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: AdminBuildReportContext): AdminBuildReportRecord {
+export function buildAdminReportRecord(
+  report: BuildDiagnosticsReport,
+  ctx: AdminBuildReportContext,
+  /**
+   * Every build of the session, oldest → newest (admin 2026-08-09). Pass it and the record carries the
+   * WHOLE story; omit it and the record is exactly what it was before. Each build is trimmed the same
+   * way the focused one is — secret-redacted and byte-bounded — and the set is capped so one enormous
+   * session can never exceed the document limit, with the omitted count reported honestly.
+   */
+  sessionBuilds?: readonly BuildDiagnosticsReport[],
+): AdminBuildReportRecord {
   const trimmed = trimReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
   const userTier = cap(trimmed.billing?.userTier, 80);
@@ -162,6 +231,26 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
   const runningFor = inFlight && typeof trimmed.startedAt === 'number'
     ? Math.max(0, Math.round((ctx.reportedAt - trimmed.startedAt) / 1000))
     : 0;
+  // THE WHOLE SESSION (admin 2026-08-09): trim every build exactly like the focused one, then fit the
+  // set into whatever the DOCUMENT has left. A single-build session adds nothing new, so it is left
+  // absent rather than duplicating the focused report.
+  //
+  // THE BUDGET IS DERIVED, NOT GUESSED. The session shares one Firestore document with `meta` and the
+  // focused `report`, so its allowance is the limit MINUS what those already spend, minus headroom for
+  // Firestore's own accounting. Reusing a fixed cap sized for a different sink is exactly how a change
+  // like this turns "the admin now gets more" into "the admin now gets NOTHING", because an oversized
+  // document is rejected outright and the report never lands.
+  const trimmedSession = (sessionBuilds ?? []).map((b) => trimReportForStorage(b));
+  let fittedSession: { kept: BuildDiagnosticsReport[]; omitted: number } | null = null;
+  if (trimmedSession.length > 1) {
+    let overhead = ADMIN_RECORD_SAFETY_BYTES;
+    try { overhead += JSON.stringify(trimmed)?.length ?? 0; } catch { overhead += FIRESTORE_DOC_LIMIT_BYTES; }
+    const budget = FIRESTORE_DOC_LIMIT_BYTES - overhead;
+    fittedSession = budget > 0
+      ? fitSessionToDocument(trimmedSession, budget)
+      : { kept: [], omitted: trimmedSession.length }; // focused report alone already fills the doc
+  }
+
   return {
     meta: {
       id,
@@ -192,8 +281,16 @@ export function buildAdminReportRecord(report: BuildDiagnosticsReport, ctx: Admi
       // which is what keeps the self-heal tally from inflating itself — see BuildDiagnostics.
       healCount: typeof trimmed.counts?.autoResolved === 'number' ? trimmed.counts.autoResolved : undefined,
       unresolvedCount: typeof trimmed.counts?.unresolved === 'number' ? trimmed.counts.unresolved : undefined,
+      // 1 part = just the focused build; more when the whole session came with it. A session that did
+      // not fit stores 0 builds — the focused report is still there, so the record still has 1 part.
+      sessionParts: fittedSession && fittedSession.kept.length > 0 ? fittedSession.kept.length : 1,
     },
     report: trimmed,
+    // Kept even when `builds` ends up EMPTY: the omitted count is the only place the admin learns that
+    // earlier builds existed and could not be stored. Dropping the block would hide that silently.
+    ...(fittedSession
+      ? { session: { builds: fittedSession.kept, count: trimmedSession.length, omittedBuilds: fittedSession.omitted } }
+      : {}),
   };
 }
 

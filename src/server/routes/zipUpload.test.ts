@@ -37,7 +37,12 @@ describe('zip-upload route contract', () => {
 
   it('commit requires the VERIFIED uid to own the target workspace', () => {
     // An import WRITES files, so knowing a workspace id must never be enough.
-    expect(SRC).toContain('workspaceId.startsWith(`agentv3-${uid}-`)');
+    // The invariant moved into lib/workspaceIdentity (audit finding #2) so it is no longer re-typed
+    // per route. Locking the shared POLICY is stronger than locking a template literal: this route
+    // must use the strictest one — an import WRITES files, so a verified owner is required and the
+    // anon capability does not apply.
+    expect(SRC).toContain('ownedByVerifiedUid(uid, workspaceId)');
+    expect(SRC).toContain("from '../lib/workspaceIdentity'");
   });
 
   it('commit lands server-side and never ships the file map back through a capped response', () => {

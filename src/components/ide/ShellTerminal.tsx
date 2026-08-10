@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Terminal } from 'xterm';
 import type { FitAddon } from 'xterm-addon-fit';
-import { auth } from '../../App';
+import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
 /**
  * REAL shell for Code Studio — a genuine TTY in the user's own sandbox (admin 2026-08-04: "kya ham,
@@ -53,14 +53,6 @@ export function wakePercent(w?: { phase?: string; seeded?: number; total?: numbe
 /** sessionKey → live shellId, so a remount reattaches instead of orphaning a running shell. */
 const attachedShells = new Map<string, string>();
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const token = await auth.currentUser?.getIdToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  } catch { /* unauthenticated calls are rejected server-side, honestly */ }
-  return headers;
-}
 
 /**
  * Explicitly kill the shell behind a terminal tab. Called when the user closes that terminal — the

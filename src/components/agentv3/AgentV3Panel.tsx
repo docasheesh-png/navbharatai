@@ -187,6 +187,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     setPowerLevel((cur) => (powerUnlocked ? cur : 'weak'));
   }, [powerUnlocked]);
+  // Persist the selected tier so OTHER surfaces (e.g. the APK builder's build-repair) can route the AI
+  // to the SAME models the user picked here — weak stays on the cheap coders, paid tiers get Sonnet/Opus.
+  useEffect(() => {
+    try { localStorage.setItem('nbai_power_level', powerLevel); } catch { /* storage unavailable — the reader falls back to the weak-safe default */ }
+  }, [powerLevel]);
   // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
   const onlyOpus = powerLevel === 'mini' || powerLevel === 'medium' || powerLevel === 'max';
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default

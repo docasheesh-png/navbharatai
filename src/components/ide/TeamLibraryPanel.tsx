@@ -5,23 +5,13 @@
 // token, so it can be dropped into the Team collaboration surface with just a teamId.
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Plus, Trash2, Copy, Check } from 'lucide-react';
+import { authHeader } from '../../lib/authHeaders';
 
 type LibraryKind = 'prompt' | 'template' | 'component';
 interface LibraryItem { id: string; kind: LibraryKind; title: string; content: string; createdAt: number; }
 
 const KINDS: LibraryKind[] = ['prompt', 'template', 'component'];
 
-async function authHeader(): Promise<Record<string, string>> {
-  try {
-    const { getAuth } = await import('firebase/auth');
-    const { getApp } = await import('firebase/app');
-    const user = getAuth(getApp()).currentUser;
-    const token = user ? await user.getIdToken() : null;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    return {};
-  }
-}
 
 export const TeamLibraryPanel: React.FC<{ teamId: string }> = ({ teamId }) => {
   const [items, setItems] = useState<LibraryItem[]>([]);

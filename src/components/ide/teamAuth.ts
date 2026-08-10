@@ -6,15 +6,9 @@
  * `{}` when unauthenticated or Firebase isn't ready, so the caller can surface an honest "sign in"
  * message rather than silently failing.
  */
-export async function teamAuthHeader(): Promise<Record<string, string>> {
-  try {
-    const { getAuth } = await import('firebase/auth');
-    const { getApp } = await import('firebase/app');
-    const user = getAuth(getApp()).currentUser;
-    if (!user) return {};
-    const token = await user.getIdToken();
-    return { Authorization: `Bearer ${token}` };
-  } catch {
-    return {};
-  }
-}
+/**
+ * Kept as a named re-export (TeamCollaboration and MentionInbox import it) but the implementation now
+ * lives in `lib/authHeaders` — audit finding #3b: eight copies of "attach the ID token" is how an auth
+ * path drifts.
+ */
+export { authHeader as teamAuthHeader } from '../../lib/authHeaders';

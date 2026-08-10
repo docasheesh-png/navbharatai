@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react';
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
+import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
 interface DnsRecord { type: string; name: string; value: string; note?: string; }
 interface DomainStatus {
@@ -87,15 +88,6 @@ export function relativeRecordName(name: string, domain: string): string {
   return name;
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const { auth } = await import('../../lib/firebase');
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* best-effort; the server will 401 if unauthenticated */ }
-  return headers;
-}
 
 export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProps) {
   const [domain, setDomain] = useState('');

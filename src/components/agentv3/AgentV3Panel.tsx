@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
@@ -52,20 +53,13 @@ import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
-import { db, sanitizeFirestoreData, auth } from '../../App';
+import { db, sanitizeFirestoreData } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */
-async function authJsonHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server soft-falls-back */ }
-  return headers;
-}
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 /**
  * AgentV3Panel — NavBharatAI Pro v5.0 (Vargen 3.0), a Claude-Code-style chat

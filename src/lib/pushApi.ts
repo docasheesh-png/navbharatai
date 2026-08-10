@@ -2,15 +2,8 @@
 // auth-header pattern, same bounded-timeout fetch, same honest-error surfacing).
 
 import { auth } from './firebase';
+import { authHeader as authHeaders } from './authHeaders';
 
-async function authHeaders(): Promise<Record<string, string>> {
-  try {
-    const token = await auth.currentUser?.getIdToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    return {};
-  }
-}
 
 const REQUEST_TIMEOUT_MS = 15_000;
 

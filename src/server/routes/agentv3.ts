@@ -9133,7 +9133,10 @@ export function registerAgentV3Routes(app: Express): void {
             // When the judge produced findings, hand them over as a REPAIR task (fix these; edit the
             // existing files), never a rebuild-from-scratch.
             const repairing = judgeFindings.length > 0;
-            events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Escalating to Sonnet to fix the issues found in review…' : 'Escalating to a stronger model to finish the build…', ts: Date.now() });
+            // WHITE-LABEL LAW: to the user it is always NavBharatAI doing the work. This line used to
+            // name "Sonnet" — a vendor model — on a surface every builder sees. What the user needs to
+            // know is that the engine is stepping up and WHY, which is said without the vendor.
+            events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Bringing in NavBharatAI\'s stronger engine to fix what the review found…' : 'Bringing in NavBharatAI\'s stronger engine to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name) => { try { buildDiag.recordProviderFailure(name); } catch { /* best-effort */ } } }),
@@ -9178,7 +9181,9 @@ export function registerAgentV3Routes(app: Express): void {
             let bounces = 0;
             while (nextReviewAction(verdict.pass, bounces, cap) === 'cheap_repair') {
               bounces++;
-              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Review found issues — GLM/KIMI fixing them once…', ts: Date.now() });
+              // WHITE-LABEL LAW: named GLM and KIMI to the user. Which engine repairs it is ours to
+              // know; the user is told what is happening to THEIR app.
+              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Review found issues — NavBharatAI is fixing them…', ts: Date.now() });
               try { await runner.run(judgeRepairPrompt(prompt, verdict.findings)); } catch { break; /* GLM/KIMI down → stop bouncing, escalate to Sonnet */ }
               events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} re-reviewing the fix…`, ts: Date.now() });
               verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);

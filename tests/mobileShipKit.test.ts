@@ -118,6 +118,27 @@ describe('generateShipKit — the store-rejection traps this repo learned the ha
   });
 });
 
+describe('generateShipKit — self-heals a broken Gradle wrapper (autopsy 2026-08-04)', () => {
+  // Real user build failed with "Unable to access jarfile …/gradle/wrapper/gradle-wrapper.jar", and no
+  // retry could fix it — the old guard checked only the gradlew SCRIPT, not the binary jar it runs. Both
+  // Android workflows must now GUARANTEE the wrapper jar (fetch it, else re-scaffold) and verify it.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: heals a missing gradle-wrapper.jar instead of failing forever`, () => {
+      // fetches the exact wrapper jar for the pinned Gradle version …
+      expect(wf).toContain('gradle/wrapper/gradle-wrapper.jar');
+      expect(wf).toContain('raw.githubusercontent.com/gradle/gradle/');
+      // … and re-scaffolds the project as a last resort …
+      expect(wf).toMatch(/rm -rf android[\s\S]*npx cap add android/);
+      // … and the final guard verifies BOTH the script AND the jar (not just gradlew).
+      expect(wf).toContain('! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar');
+    });
+  }
+});
+
 describe('generateShipKit — honesty about what only the user can do', () => {
   const kit = generateShipKit({ appName: 'My Shop' });
 

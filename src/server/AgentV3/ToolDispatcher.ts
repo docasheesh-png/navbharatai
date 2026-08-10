@@ -231,6 +231,7 @@ import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateMotion } from '../lib/MotionGenerator';
+import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5230,6 +5231,31 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_runtime': {
+        // THE ENGINE LAYER (admin 2026-08-09). AI-generated games play badly far more often because the
+        // model hand-rolls the runtime than because the art is simple: a raw-delta loop makes physics
+        // frame-rate dependent, event-driven input drops presses, and allocating bullets in the loop
+        // hands the GC work every frame. This ships a runtime that has already solved those, so every
+        // later generator (world, enemies, VFX) inherits a correct foundation. Pure generator in
+        // GameRuntimeGenerator.ts; no dependency, engine-agnostic.
+        const grRec = (input as Record<string, unknown>) || {};
+        const grInclude = Array.isArray(grRec.include)
+          ? grRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gr = generateGameRuntime(grInclude);
+        const grWritten: string[] = [];
+        for (const [path, content] of Object.entries(gr.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          grWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('game runtime');
+        return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}`;
       }
 
       case 'generate_animation': {

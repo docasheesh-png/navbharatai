@@ -407,6 +407,12 @@ function FileCard({ file }: { file: GeneratedFile }) {
 export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, onConnectGitHub, onMakeIcon }) => {
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
+  // The tier the user selected in the v5.0 panel (persisted there). It routes the AI build-repair to the
+  // same models the main build uses; absent ⇒ the server falls back to the weak-safe (cheap, no-Claude)
+  // path by construction, so this can never accidentally spend a flagship model.
+  const selectedPowerLevel = (() => {
+    try { return localStorage.getItem('nbai_power_level') || undefined; } catch { return undefined; }
+  })();
 
   // Step 1
   const [info, setInfo] = useState<AppInfo>({
@@ -1228,6 +1234,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
             githubToken={githubToken}
             onConnectGitHub={onConnectGitHub}
             onOpenGuide={() => void openGuide()}
+            powerLevel={selectedPowerLevel}
           />
         </div>
       </div>

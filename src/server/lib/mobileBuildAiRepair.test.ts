@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   AI_REPAIR_MAX_FILE_CHARS, AI_REPAIR_SYSTEM_PROMPT,
-  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain,
+  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, normalizeRepairTier,
   buildAiRepairPrompt, filesNamedInLog, parseAiRepairReply, runAiRepair, sanitizeAiText,
 } from './mobileBuildAiRepair';
 
@@ -118,6 +118,56 @@ describe('the model chain (heal-gate policy: flagship cheap coders, never Sonnet
   it('the kill switch works', () => {
     expect(aiRepairEnabled({ MOBILE_AUTOFIX_AI: 'off' } as NodeJS.ProcessEnv)).toBe(false);
     expect(aiRepairEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
+
+describe('the model chain follows the user tier (admin 2026-08-10) — with the free-tier no-Claude rule intact', () => {
+  const ALL = { GLM_API_KEY: 'g1', KIMI_API_KEY: 'k1', ANTHROPIC_API_KEY: 'a1' } as NodeJS.ProcessEnv;
+
+  it('normalizeRepairTier maps UI/engine power levels; unknown ⇒ weak (safe)', () => {
+    expect(normalizeRepairTier('weak')).toBe('weak');
+    expect(normalizeRepairTier('off')).toBe('normal');
+    expect(normalizeRepairTier('mini')).toBe('strong');
+    expect(normalizeRepairTier('medium')).toBe('powerful');
+    expect(normalizeRepairTier('max')).toBe('max');
+    expect(normalizeRepairTier(undefined)).toBe('weak');
+    expect(normalizeRepairTier('nonsense')).toBe('weak');
+  });
+
+  it('🔒 WEAK stays GLM→Kimi and NEVER carries a Claude rung — even when ANTHROPIC_API_KEY is set', () => {
+    const chain = aiRepairModelChain(ALL, 'weak');
+    expect(chain.map((c) => c.provider)).toEqual(['GLM', 'KIMI']);
+    expect(chain.some((c) => c.provider === 'CLAUDE')).toBe(false);
+  });
+
+  it('NORMAL is cheap-first with a Sonnet backstop', () => {
+    const chain = aiRepairModelChain(ALL, 'normal');
+    expect(chain.map((c) => c.provider)).toEqual(['GLM', 'KIMI', 'CLAUDE']);
+    const claude = chain.find((c) => c.provider === 'CLAUDE')!;
+    expect(claude.kind).toBe('anthropic');
+    expect(claude.model).toMatch(/sonnet/);
+  });
+
+  it('STRONG pins Sonnet first, cheap coders only as fallback', () => {
+    const chain = aiRepairModelChain(ALL, 'strong');
+    expect(chain[0].provider).toBe('CLAUDE');
+    expect(chain[0].model).toMatch(/sonnet/);
+    expect(chain.map((c) => c.provider)).toEqual(['CLAUDE', 'GLM', 'KIMI']);
+  });
+
+  it('POWERFUL/MAX lead with Opus, then Sonnet, then the cheap coders', () => {
+    for (const t of ['powerful', 'max'] as const) {
+      const chain = aiRepairModelChain(ALL, t);
+      expect(chain.map((c) => c.model)).toEqual([
+        expect.stringMatching(/opus/), expect.stringMatching(/sonnet/), 'glm-5.2', 'kimi-k2.7-code',
+      ]);
+      expect(chain[0].kind).toBe('anthropic');
+    }
+  });
+
+  it('a paid tier with no Anthropic key falls through to the cheap coders (never breaks)', () => {
+    const chain = aiRepairModelChain({ GLM_API_KEY: 'g1', KIMI_API_KEY: 'k1' } as NodeJS.ProcessEnv, 'max');
+    expect(chain.map((c) => c.provider)).toEqual(['GLM', 'KIMI']);
   });
 });
 

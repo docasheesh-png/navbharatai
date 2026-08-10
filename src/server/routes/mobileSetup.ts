@@ -32,7 +32,7 @@ import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // receives an app already proven to compile, and every heal is written back into the user's v5
 // workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
 import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
-import { aiRepairEnabled, aiRepairModelChain } from '../lib/mobileBuildAiRepair';
+import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
@@ -72,7 +72,8 @@ export function registerMobileSetupRoutes(app: Express): void {
       });
     }
 
-    const { sessionId, appName, appId, repo, iconDataUrl, ios } = (req.body || {}) as Record<string, unknown>;
+    const { sessionId, appName, appId, repo, iconDataUrl, ios, powerLevel } = (req.body || {}) as Record<string, unknown>;
+    const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
     const workspaceId = sessionWorkspaceId(uid, String(sessionId || ''));
     if (!workspaceId) return res.status(400).json({ error: 'Which app should be prepared?' });
 
@@ -111,11 +112,11 @@ export function registerMobileSetupRoutes(app: Express): void {
     //
     // A compile error found on the runner costs five minutes, an unreadable remote log, and a repair
     // that can only edit files by committing them. Found HERE it costs seconds, and the fix lands in
-    // the user's own v5 workspace. The AI chain is the same weak-tier-safe one the GitHub loop uses.
+    // the user's own v5 workspace. The AI chain follows the user's selected tier (same as the build).
     const preflight = await preflightAndHeal(
       appFiles,
       callRepairModel,
-      aiRepairEnabled() ? aiRepairModelChain() : [],
+      aiRepairEnabled() ? aiRepairModelChain(process.env, repairTier) : [],
     );
     if (!preflight.ok) {
       return res.status(422).json({

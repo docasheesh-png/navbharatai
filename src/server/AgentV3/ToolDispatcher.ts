@@ -235,6 +235,7 @@ import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
 import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
+import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5234,6 +5235,28 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_shell': {
+        // PHASE 5, and the one that makes the other four pay off. Composition is where a first build
+        // goes wrong — physics in the render callback, one particle layer added, audio never unlocked,
+        // a leaked WebGL context on unmount. All invisible in review, all obvious when played.
+        const gshRec = (input as Record<string, unknown>) || {};
+        const gshInclude = Array.isArray(gshRec.include)
+          ? gshRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gsh = generateGameShell(gshInclude);
+        const gshWritten: string[] = [];
+        for (const [path, content] of Object.entries(gsh.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gshWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('game shell');
+        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}`;
       }
 
       case 'generate_game_vfx': {

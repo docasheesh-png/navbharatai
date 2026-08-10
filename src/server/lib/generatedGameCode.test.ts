@@ -4,6 +4,7 @@ import { generateGameRuntime } from './GameRuntimeGenerator';
 import { generateGame3D } from './Game3DGenerator';
 import { generateGameController } from './GameControllerGenerator';
 import { generateGameVfxAudio } from './GameVfxAudioGenerator';
+import { generateGameShell } from './GameShellGenerator';
 import { generateMotion } from './MotionGenerator';
 
 /**
@@ -26,6 +27,7 @@ const PACKS: Array<{ name: string; files: Record<string, string> }> = [
   { name: '3d (phase 2)', files: generateGame3D().files },
   { name: 'controller (phase 3)', files: generateGameController().files },
   { name: 'vfx + audio (phase 4)', files: generateGameVfxAudio().files },
+  { name: 'shell (phase 5)', files: generateGameShell().files },
   { name: 'motion pack', files: generateMotion().files },
 ];
 
@@ -96,7 +98,7 @@ describe('every file a game generator writes into a user app is parseable TypeSc
 
   it('covers every game generator we ship — a new phase must be added here too', () => {
     // If a phase 5 lands without a line above, this fails and says why.
-    expect(PACKS).toHaveLength(5);
-    expect(PACKS.flatMap((p) => Object.keys(p.files)).length).toBeGreaterThanOrEqual(16);
+    expect(PACKS).toHaveLength(6);
+    expect(PACKS.flatMap((p) => Object.keys(p.files)).length).toBeGreaterThanOrEqual(19);
   });
 });

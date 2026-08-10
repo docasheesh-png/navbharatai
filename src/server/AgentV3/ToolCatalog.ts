@@ -2023,6 +2023,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_shell',
+      description:
+        'COMPOSE a runnable game from the other game layers. Call generate_game_runtime, '
+        + 'generate_game_3d, generate_game_controller and generate_game_vfx first — this wires them '
+        + 'together and is what turns four toolkits into a game you can actually play. Emits '
+        + 'src/game/Game.ts (the composition root), src/game/GameCanvas.tsx (React mount) and '
+        + 'src/game/ui/Hud.tsx (score/health/lives, pause and game-over overlays). '
+        + 'USE THIS RATHER THAN WIRING IT BY HAND. It already guarantees the things that are invisible '
+        + 'in review and obvious when played: gameplay runs at a FIXED 60Hz while the camera runs at the '
+        + 'display rate (physics in render makes the character jump higher on a 144Hz monitor), React '
+        + 'StrictMode double-mount is handled, dispose() releases the WebGL context (browsers cap live '
+        + 'contexts, so a leaked one takes the tab down after a few visits), context loss pauses instead '
+        + 'of going black, the HUD updates on EVENTS not per frame, audio is unlocked on first gesture, '
+        + 'and a device without WebGL gets an honest message. '
+        + 'Pass your world in through setup() and your gameplay through update() — do NOT edit the loop.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: game, gamecanvas, hud. Default = all.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_vfx',
       description:
         'Add VFX + audio + the feedback that ties them together. Call generate_game_runtime first (this '
@@ -3125,6 +3152,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_shell',
   'generate_game_vfx',
   'generate_game_controller',
   'generate_game_3d',

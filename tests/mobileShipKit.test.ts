@@ -139,6 +139,27 @@ describe('generateShipKit — self-heals a broken Gradle wrapper (autopsy 2026-0
   }
 });
 
+describe('generateShipKit — self-heals a missing splash drawable (autopsy 2026-08-10)', () => {
+  // Real user build failed at resource-linking: "resource drawable/splash not found … Android resource
+  // linking failed". Capacitor's launch theme (styles.xml) references @drawable/splash, but a fresh
+  // `cap add android` (Capacitor 8) can omit the splash asset → the reference doesn't resolve. This lives
+  // in the GENERATED android/ project (created on CI, gitignored), so the AI repair — which only edits repo
+  // files — can never see it. Both workflows must deterministically guarantee @drawable/splash exists.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: writes a placeholder @drawable/splash so resource linking never fails`, () => {
+      // detects the missing asset across any density bucket …
+      expect(wf).toContain('android/app/src/main/res/drawable*/splash.*');
+      // … and writes a real, resolvable placeholder drawable at the canonical path.
+      expect(wf).toContain('android/app/src/main/res/drawable/splash.xml');
+      expect(wf).toContain('layer-list');
+    });
+  }
+});
+
 describe('generateShipKit — honesty about what only the user can do', () => {
   const kit = generateShipKit({ appName: 'My Shop' });
 

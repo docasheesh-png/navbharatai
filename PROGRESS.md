@@ -29304,3 +29304,35 @@ self-heal shipped separately (#2234).
 **Verification:** `tsc -p tsconfig.server.json` clean for the touched files (pre-existing missing-dep errors
 in pg/exceljs/attachmentText are unrelated, present on clean main); mobile tests 113/113; new tier tests
 lock weak-never-Claude + each tier's chain + Anthropic rung shape.
+
+## 2026-08-10 — APK/AAB self-heals a missing @drawable/splash (resource-linking failure), + named class
+
+Admin report (screenshots): a fresh APK build failed at aapt2 — "resource drawable/splash (aka
+…:drawable/splash) not found. error: failed linking references → Android resource linking failed" — and
+the admin asked why the "LLM self-heal" didn't fix it.
+
+ROOT CAUSE: Capacitor's launch theme (`android/app/src/main/res/values/styles.xml`) references
+`@drawable/splash`, but when `@capacitor/splash-screen` ships no splash image, a fresh `npx cap add android`
+(Capacitor 8) omits the splash asset → the reference doesn't resolve and `processDebugResources` fails.
+
+WHY THE LLM REPAIR COULDN'T TOUCH IT (honest boundary, rule 6): the broken file is in the GENERATED
+`android/` project — created on CI, gitignored, absent from the user's repo. The AI repair only edits repo
+files (workflow, package.json, capacitor.config, app source), so it literally cannot see a file that doesn't
+exist until CI scaffolds it. The correct fix is a DETERMINISTIC self-heal in the build workflow, exactly
+like the gradle-wrapper heal.
+
+FIX:
+- `mobileShipKit.ts` `ENSURE_ANDROID_STEP` (shared by both APK + AAB workflows): after `npx cap sync
+  android`, if no `res/drawable*/splash.*` exists, write a minimal placeholder layer-list drawable at
+  `res/drawable/splash.xml` so `@drawable/splash` always resolves. Regression test locks it into both
+  generated workflows.
+- `mobileBuildRepair.ts`: added a named classifier class `ANDROID_RESOURCE_LINKING` (aapt2 "resource … not
+  found"/"failed linking references"), checked before the app-code extractor. It maps to a workflow refresh
+  — which now carries the splash heal — so an EXISTING repo that predates the fix self-heals: resource-link
+  fail → refresh our workflow → re-run → splash heal fires → success. Previously this swept into the generic
+  android-stage `STALE_WORKFLOW` fallback; naming it fixes the system's honesty (rule 5) and telemetry. The
+  loop-guard holds: an already-current workflow yields null (no empty commit, no loop). User-facing summary
+  carries no vendor/aapt/drawable words (White-Label Law).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for touched files; mobileShipKit 41/41 + repair suite
+121/121; emitted YAML inspected (printf carries literal \n, valid shell). PR #2237.

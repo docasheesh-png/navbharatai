@@ -356,6 +356,12 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 import { buildActuator } from './actuatorFactory';
 import { resolveNarrationLanguage } from '../lib/narrationLanguage';
 import { envFlag } from '../lib/envFlag';
+import {
+  workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
+  verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
+  workspaceIdFor,
+  safeWorkspaceUid,
+} from '../lib/workspaceIdentity';
 export { buildActuator };
 
 /**
@@ -529,7 +535,8 @@ export function candidateConversationIds(id: string, verifiedUid: string | null)
   if (id.startsWith('v3_')) {
     const sid = id.slice(3);
     if (sid) {
-      if (verifiedUid && /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid)) out.push(`agentv3-${verifiedUid}-${sid}`);
+      const verifiedWs = workspaceIdFor(verifiedUid, sid);
+      if (verifiedWs) out.push(verifiedWs);
       out.push(`${ANON_WORKSPACE_PREFIX}${sid}`);
     }
   }
@@ -605,14 +612,10 @@ export function terminalConversationStatus(
  * its random sessionId.
  */
 export function workspaceOwnershipOk(verifiedUid: string | null, claimedUid: string | null, workspaceId: string): boolean {
-  if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
-  // The shared-anon bucket carries no real identity to protect (sessionId-scoped only).
-  if (workspaceId.startsWith(ANON_WORKSPACE_PREFIX)) return true;
-  // The verified token always takes precedence over the claimed id (only widens the token-less
-  // admin/anon fallback). A real workspace requires the resolved uid to match its id.
-  const id = verifiedUid ?? claimedUid;
-  const uid = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon';
-  return workspaceId.startsWith(`agentv3-${uid}-`);
+  // The rule itself lives in lib/workspaceIdentity (audit finding #2) so the STORE layer and every
+  // other route share this exact decision instead of re-typing `agentv3-${uid}-`. Re-exported from
+  // here because callers and tests already import it from this module.
+  return sharedWorkspaceOwnershipOk(verifiedUid, claimedUid, workspaceId);
 }
 
 /**
@@ -627,9 +630,7 @@ export function workspaceOwnershipOk(verifiedUid: string | null, claimedUid: str
  * PURE + exported + unit-tested.
  */
 export function verifiedWorkspaceReadOk(verifiedUid: string | null, workspaceId: string): boolean {
-  if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
-  if (workspaceId.startsWith(ANON_WORKSPACE_PREFIX)) return true; // unguessable-sid capability (anon reads)
-  return !!verifiedUid && /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid) && workspaceId.startsWith(`agentv3-${verifiedUid}-`);
+  return sharedVerifiedWorkspaceReadOk(verifiedUid, workspaceId); // see lib/workspaceIdentity
 }
 
 async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
@@ -657,11 +658,11 @@ async function assertVerifiedWorkspaceOwner(req: Request, workspaceId: string): 
 }
 
 export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
-  const uid = userId && /^[A-Za-z0-9_-]{1,64}$/.test(userId) ? userId : 'anon';
-  if (typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId)) {
-    return `agentv3-${uid}-${sessionId}`;
-  }
-  return `agentv3-${uid}-${Date.now()}`;
+  // An unusable uid becomes the shared-anon bucket rather than a malformed id — that fallback is this
+  // builder's own policy; the id SHAPE comes from lib/workspaceIdentity.
+  const uid = safeWorkspaceUid(userId) ?? 'anon';
+  const session = typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId) ? sessionId : String(Date.now());
+  return workspaceIdFor(uid, session) as string; // uid is safe by construction above
 }
 
 /**

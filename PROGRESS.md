@@ -28976,3 +28976,56 @@ into the live source dir instead of a temp dir remains an OPEN item.
 
 16 new tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1131 files /
 13,011 tests, exit 0**.
+
+---
+
+## 2026-08-09 — Audit fix #2: the workspace-ownership invariant gets ONE home
+
+`agentv3-{uid}-{sessionId}` is an AUTHORIZATION decision wearing a naming convention: the uid embedded
+in that id IS who may reach the app. The audit found it re-typed by hand at **nine** sites, plus two
+routes carrying their own private `ownsWorkspace()`.
+
+**No leak today, and that is stated honestly rather than dramatised.** Both private copies were read
+and compared: `appDebug` and `nbaiDomains` are equally strict (verified uid, no anon exemption). The
+defect is structural, not active — an invariant that must never be wrong should not depend on eleven
+authors remembering to type the same template literal. The day a new route forgets it, the failure is
+silent and it is a data breach.
+
+### The fix: `lib/workspaceIdentity.ts`, dependency-free by design
+
+It imports NOTHING — no express, no firebase-admin. That is deliberate and it is the reason the
+duplication existed: a Firestore store (`WorkspaceFileStore`) could not import an Express route, so it
+re-derived the prefix. Now the store and the route share one definition.
+
+**THREE policies, because the differences are real** — and picking the wrong one is the mistake this
+file exists to prevent, so each is named and documented:
+
+1. `workspaceOwnershipOk` — BUILD path. Accepts a claimed uid when no token verified, so a user whose
+   token blips mid-build does not have their own build hard-fail. Spoofable by design; never gates a read.
+2. `verifiedWorkspaceReadOk` — PRIVATE READS. Demands the VERIFIED uid, because the claimed fallback is
+   spoofable (the uid is IN the id, so anyone who learned `agentv3-victim-{sid}` could claim it). Anon
+   workspaces stay reachable by their unguessable sid.
+3. `ownedByVerifiedUid` — STRICTEST: verified uid AND no anon exemption. For anything needing a real,
+   durable owner (custom domain, app debug) — an anon workspace has nobody to own the result.
+
+`workspacePrefixFor` returns **null** for an unusable uid rather than the dangerous `agentv3--`, which a
+range query would happily sweep across other users' rows.
+
+`workspaceOwnerUid` (reads the CLAIM) is kept separate from the three policies (which authorize), so
+"who does this say it belongs to?" can never be mistaken for "may this caller have it?".
+
+**Deliberately NOT unified:** the SESSION-id rules. `identityPolicy.SESSION_ID_RE` is 6–64 chars,
+`workspaceEdit` allows 1–128, and `deriveWorkspaceId` falls back to a timestamp. Merging them would
+silently tighten or loosen real validation — a behaviour change, not this fix. `workspaceIdFor`
+validates the uid only; each caller keeps its own session rule, with the reason recorded in place.
+
+Swept: `WorkspaceFileStore`, `workspaceFiles`, `build`, `zipUpload`, `appDebug`, `nbaiDomains`,
+`workspaceEdit`, `identityPolicy` (re-exports `ANON_WORKSPACE_PREFIX` so every existing importer is
+untouched), and `routes/agentv3.ts` (still exports both helpers, now delegating).
+
+22 tests, including the invariant itself: **no file outside the module may re-type `` `agentv3-${ ``**.
+If that test ever fails, the fix is to import a policy — not to add the file to an allowlist. One
+existing source-lock test (`zipUpload.test.ts`) asserted the raw template literal; it now asserts the
+shared POLICY instead, which is strictly stronger — it locks which of the three rules that route must use.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1132 files / 13,033 tests, exit 0**.

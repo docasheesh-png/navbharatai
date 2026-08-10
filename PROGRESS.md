@@ -29388,3 +29388,55 @@ Tests: 20 in `tests/chatComposerCore.test.ts` — delete taking its replies and 
 messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the exact charge with no
 minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
 written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
+
+---
+
+## 2026-08-10 — master import handler, part 4: the first thirty seconds after a project connects
+
+Parts 1-3 made getting a project IN fast. That is plumbing, and plumbing is not a reason to choose us —
+every builder can list files after an import. This is the part that is.
+
+### The idea
+The moment right after connecting is the product. A user who imports 2,460 files and immediately reads
+"3 imports point at files that do not exist, 14 components are never rendered, 2 front-end files import
+server-only modules" has a reason to have brought their app HERE. And the next thing they say is
+"fix these" — which is the first build.
+
+### Built from what already existed (safeguard 6 + rule 4)
+`analyzeArchitecture` and `findUnwiredFiles` were already in the repo and are deliberately conservative
+(they exclude entries, tests, configs, type declarations, stories and file-based routes so a reported
+item is very likely real). NOT rebuilt. `ConnectAudit.ts` contributes only the part that was missing:
+turning their output into something an owner can act on.
+
+**Zero model calls, zero cost.** That is what makes it safe to show unprompted.
+
+### Three deliberate limits — the reason this can be trusted
+1. **No score, no grade.** No "your app is 40% slower". None of that was measured here, and claiming it
+   would be invented authority.
+2. **A clean project gets a short honest line, never manufactured concern.** An audit that cries wolf
+   destroys trust in one screen — and then the next REAL finding is not believed.
+3. **It never offers to "fix" unused files.** Repairing that finding means deleting someone's files on a
+   guess. Reported, deliberately not offered.
+
+Every finding carries real examples, so a claim can be checked rather than trusted. Example counts are
+bounded at 3 while the COUNT stays true — a 3,000-item finding must not become a wall of text, and must
+not under-report either.
+
+### Wiring
+`POST /api/agentv3/connect-audit` indexes the workspace (bounded at 1,500 files, like every other
+indexing call here) and runs the analyzers. The panel fires it **after** the preview boot is signalled,
+fire-and-forget: a courtesy finding must never delay what the user actually asked for, and a failed
+audit returns 200 with an empty message rather than manufacturing an error over work nobody requested.
+
+### Verification
+9 tests in `ConnectAudit.test.ts` — including that a clean project's message contains no score/grade
+wording, and that the fix offer appears ONLY when something is genuinely repairable. `tsc` (frontend +
+server) clean; full suite green. `AppKnowledgeBase.ts` updated in the same change.
+
+### Note on the surrounding work
+Merging `main` (44 commits) brought in another session's fix for something recorded here as an OPEN root
+cause on 2026-08-04: the chunked upload's cross-instance state. `zipUploadStore.ts` now keeps the record
+in Firestore with each chunk as its own object, so a chunk landing on a different Cloud Run instance
+still finds its upload. Recording it honestly rather than patching it cosmetically is what let someone
+else close it properly. Another session also made the import end on the PREVIEW with a model-free boot,
+which part 4 sits after rather than duplicating.

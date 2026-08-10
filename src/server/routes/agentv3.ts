@@ -181,6 +181,7 @@ import {
   type SmokePlan, type SmokeResult,
 } from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
+import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -4548,6 +4549,38 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+    }
+  });
+
+  // CONNECT AUDIT (master import, part 4) — what the user is told in the first thirty seconds after
+  // their project lands. Deterministic and FREE: it indexes the workspace and runs the analyzers this
+  // repo already has (architecture + dead code), with no model call anywhere. See ConnectAudit.ts for
+  // why the moment after connecting, rather than connecting itself, is the thing worth building.
+  app.post('/api/agentv3/connect-audit', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const mem = getWorkspaceMemory(workspaceId);
+      const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+      // Bounded like every other indexing call here: a 16,000-file monorepo must not turn a courtesy
+      // audit into a minute of work. The counts stay honest because the audit reports what it READ.
+      await warmIndexFiles(mem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 1_500 });
+      res.json(auditConnectedProject(mem.graph()));
+    } catch (err: any) {
+      // A failed audit is a missing bonus, never a failed import — the project is already landed. Say
+      // so plainly rather than manufacturing a scary error over work the user did not ask for.
+      res.status(200).json({ fileCount: 0, findings: [], message: '', error: err?.message || 'audit unavailable' });
     }
   });
 

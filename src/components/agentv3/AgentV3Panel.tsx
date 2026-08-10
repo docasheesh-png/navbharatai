@@ -1309,6 +1309,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // in this file would have raced the first and booted the same sandbox twice.
       setTab('preview');
       setPreviewBootSignal(Date.now());
+      // CONNECT AUDIT (master import, part 4). Landing and running the project is plumbing — every
+      // builder does it. What makes bringing an app HERE worth doing is being told something about it
+      // you did not already know, for free, before spending anything. Deterministic and model-free
+      // (the analyzers this repo already has), so it costs the user nothing and cannot start a build.
+      //
+      // Fire-and-forget on purpose, AFTER the preview boot is signalled: a courtesy finding must never
+      // delay the thing the user actually asked for, and its absence must never look like a failed
+      // import. The import is already complete and reported by the time this runs.
+      void (async () => {
+        try {
+          const res = await fetch('/api/agentv3/connect-audit', {
+            method: 'POST',
+            headers: await authJsonHeaders(),
+            body: JSON.stringify({ workspaceId: targetWorkspaceId, userId, email }),
+          });
+          const audit = await res.json().catch(() => null);
+          if (audit?.message) setUserMsgs((c) => [...c, { role: 'agent', text: audit.message, ts: Date.now() }]);
+        } catch { /* a bonus that did not arrive is never reported as an import failure */ }
+      })();
     } catch (err) {
       setUserMsgs((c) => [...c, {
         role: 'agent',

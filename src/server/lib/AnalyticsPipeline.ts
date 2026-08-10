@@ -7,7 +7,6 @@
 // funnel aggregation) are unit-tested; the store is best-effort + VITEST-skip (never throws).
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from './firestoreDb';
 import { getServerDb } from './serverDb';
 
 const DAILY_COLLECTION = 'analytics_daily';

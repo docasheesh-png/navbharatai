@@ -15,7 +15,6 @@
 import * as admin from 'firebase-admin';
 import type { ProjectPlan } from './ProjectPlan';
 import { serializeProjectPlan, parseStoredProjectPlan } from './ProjectPlan';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 

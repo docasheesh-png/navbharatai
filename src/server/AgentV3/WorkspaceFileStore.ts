@@ -15,7 +15,6 @@
 // throws — a persistence failure must never break or block a build.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { isGreenSnapshotKey } from './GreenGuard';

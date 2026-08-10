@@ -82,7 +82,7 @@ import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
-import { duplicateModuleTarget, conventionRelative } from './ProjectIntegrityChecks';
+import { duplicateModuleTarget } from './ProjectIntegrityChecks';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):

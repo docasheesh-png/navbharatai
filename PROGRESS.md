@@ -28746,3 +28746,57 @@ cap both still apply.
 Tests: 3 more in `src/server/lib/BuildTimeEstimator.test.ts` (30 total) — each promise strictly larger
 than the last with the exact user-visible numbers, the no-number line after the budget is spent, and
 the floor/cap still holding. Gate: tsc clean both projects, full run 12,915/12,915.
+
+---
+
+## 2026-08-10 — AUTOPSY: build e61b13b1 (second Mitrify import) — three fixes proven live, two new root causes
+
+### Proven working in production (from yesterday's fixes)
+- **`PHASE_TIMING`** — "⏳ creating the database tables took 26s", "⏳ installing dependencies and
+  starting your app took 19s". The 153-second blind spot is genuinely closed.
+- **Heartbeats now name the live phase** — "minute 3 — still working (checking the live preview, 29s
+  so far)" instead of a four-minute-old narration line.
+- **The framework label agrees with itself** — `node-express` in BOTH the manifest and the report.
+  Yesterday the same app was `node-express` in one and `vite-react` in the other.
+- **Green Guard ran and was honest** — `GREEN_GUARD_NONE: "No verified working state exists yet for
+  this workspace — nothing to save or restore."` Correct: this build never earned green.
+
+### ROOT CAUSE 7 — the preview HOST's own error page counted as the app (the admin's screenshot)
+The screen showed E2B's **"Closed Port Error — the sandbox is running but there's no service running
+on port 3000 · Connection refused"**, while the report said **"✅ Live preview is up on port 3000"**.
+
+That page slipped through every rule in `analyzePreviewHtml`: it is long, it has real prose, no overlay
+markup, no "Cannot GET", no empty mount root, and it is HTML rather than JSON (yesterday's
+`jsonErrorBody` fix covers the JSON sibling — this is the HTML one I failed to sweep for at the time,
+which is a rule-3 miss on my part).
+
+**The damage went past a wrong verdict.** This page reading as "rendered" is what stopped the port FLIP
+from ever engaging: the flip only runs when the first port fails to render, so a host error page that
+reads as success PINS the preview to a port nothing is listening on — the exact bug the flip exists to
+fix. Mitrify serves on 5000; the flip would have found it. New `hostErrorPage()` recognises the host's
+own wording and requires a PAIR of signals, so a user's devops dashboard that merely says "connection
+refused on port 5432" is never mistaken for one.
+
+### ROOT CAUSE 8 — the migration was skipped for a condition that had already cleared
+Yesterday's fix turned `drizzle-kit: not found` into an honest skip. This report shows the skip firing
+for a NEW reason: the pre-boot install failed with **`exit status 217`** — and the SAME installer then
+succeeded nineteen seconds later inside the boot (`[health-check] installing dependencies… done`). So
+the app still booted against an empty database (`DB_SCHEMA_MISSING`, `relation "profiles" does not
+exist`); only the reason in the report had changed. Honest, but not fixed.
+
+The boot PROVES the dependencies are installed, so that is the honest moment to try again: the
+migration is now RETRIED once, after the boot, when it was skipped or failed before it. A second
+chance, not a cover-up — the first attempt's failure stays in the report, and a migration that already
+succeeded is never re-run.
+
+### OPEN ROOT CAUSE (rule 6) — why did that install fail?
+`exit status 217` from `_npmInstall`, with the identical installer succeeding 19 seconds later. The DB
+provisioning immediately before it fetched, unpacked and started a PostgreSQL server in the same
+sandbox, so resource pressure is a suspect — but a suspect is not a cause, and the earlier CRM build's
+`dev server was killed (out of memory)` hints at the same family without proving it. Recorded rather
+than guessed at; the retry above means it no longer costs the user their database either way.
+
+Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (34 total) — the exact closed-port page failing
+the verdict, the pair-of-signals guard against false positives, a genuine app still passing, the retry
+firing only when pending, and the first failure surviving in the report.
+Gate: tsc clean both projects, full run 12,971/12,971.

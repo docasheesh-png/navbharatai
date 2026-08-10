@@ -52,6 +52,36 @@ export function jsonErrorBody(html: string): string {
 }
 
 /**
+ * Is this the SANDBOX HOST's error page rather than the user's app? Returns the honest problem line,
+ * or '' when the page is the app. PURE.
+ *
+ * These pages are served by the preview host itself when nothing is listening on the requested port,
+ * so they always render "successfully" — real HTML, real prose, HTTP 200 in some cases. Every other
+ * rule in this module looks for a failure INSIDE the app; this one recognises that the app was never
+ * reached at all.
+ *
+ * Matched on the host's own distinctive wording, and deliberately requiring a PAIR of signals so a
+ * user's app that happens to mention a port cannot be mistaken for one (a devops dashboard is allowed
+ * to contain the words "connection refused").
+ */
+export function hostErrorPage(html: string): string {
+  const lower = (html || '').toLowerCase();
+  if (!lower) return '';
+  const closedPort = lower.includes('closed port error')
+    || /no service (?:is )?running on port/.test(lower)
+    || /connection refused on port/.test(lower);
+  if (!closedPort) return '';
+  // A second, independent signal from the same page — the host explaining itself to the user.
+  const hostVoice = lower.includes('the sandbox')
+    || lower.includes('sandbox logs')
+    || lower.includes('properly configured and running on the specified port')
+    || /\be2b\b/.test(lower);
+  if (!hostVoice) return '';
+  const port = /port\s*<?[^0-9]{0,8}(\d{2,5})/.exec(lower)?.[1];
+  return `nothing is listening on ${port ? `port ${port}` : 'that port'} — the preview host returned its own "closed port" page, so this is not your app`;
+}
+
+/**
  * Judge whether a preview's RENDERED HTML represents a working app. Conservative: only declares
  * `rendered` when there is genuine visible content AND no error/empty-mount signal.
  */
@@ -75,6 +105,21 @@ export function analyzePreviewHtml(html: string): PreviewVerdict {
   const jsonError = jsonErrorBody(h);
   if (jsonError) {
     problems.push(`the server returned an error instead of the app: ${jsonError}`);
+  }
+
+  // THE SANDBOX HOST'S OWN ERROR PAGE (real build report e61b13b1, Mitrify, 2026-08-10). The admin's
+  // screen showed the E2B "Closed Port Error" page — "the sandbox is running but there's no service
+  // running on port 3000 · Connection refused" — while the report said "✅ Live preview is up on port
+  // 3000". That page slipped through EVERY rule here: it is long, it has real prose, no overlay
+  // markup, no "Cannot GET", no empty mount root, and it is HTML rather than JSON.
+  //
+  // The damage went further than a wrong verdict. This page rendering as "the app" is what stopped the
+  // port FLIP from ever engaging: the flip only runs when the first port fails to render, so a host
+  // error page that reads as success pins the preview to a port nothing is listening on — which is the
+  // exact bug the flip was built to fix. Recognising it here is what makes that whole mechanism work.
+  const hostError = hostErrorPage(h);
+  if (hostError) {
+    problems.push(hostError);
   }
 
   if (problems.length === 0 && h.length < 40) {

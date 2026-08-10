@@ -5983,6 +5983,7 @@ export function registerAgentV3Routes(app: Express): void {
             const migration = needsDb && provided.DATABASE_URL ? detectMigrationCommand(importedFiles) : null;
             // PHASE MARKERS (autopsy d6deaaf0): these stretches are not tool calls, so before this the
             // heartbeat had nothing to name and the report showed a blank gap where the minutes went.
+            let migrationApplied = false;
             if (migration) {
               emitLive({ type: 'narration', agent: 'architect', text: `🗄️ Creating your app's database tables (${migration.label}) so pages that read data work in the preview…`, ts: Date.now() });
               opts.diag?.enterPhase?.('creating the database tables');
@@ -6031,6 +6032,7 @@ export function registerAgentV3Routes(app: Express): void {
                   });
                 } catch { /* diagnostics best-effort */ }
                 const mok = mres.exitCode === 0;
+                if (mok) migrationApplied = true;
                 opts.diag?.record({
                   phase: 'preview', severity: mok ? 'info' : 'warning',
                   code: mok ? 'IMPORT_DB_MIGRATIONS_APPLIED' : 'IMPORT_DB_MIGRATIONS_FAILED',
@@ -6050,6 +6052,8 @@ export function registerAgentV3Routes(app: Express): void {
             }
             opts.diag?.exitPhase?.();
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
+            // Remembered so the migration can be RETRIED after the boot — see the retry block below.
+            const migrationPending = !!migration && !migrationApplied;
             opts.diag?.enterPhase?.('installing dependencies and starting your app');
             // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
             // start → serve), never a hardcoded `npm run dev` — CoreUI's script is `start`, so the
@@ -6088,6 +6092,48 @@ export function registerAgentV3Routes(app: Express): void {
               emitLive({ type: 'narration', agent: 'architect', text: `⚠️ Heads up: the app's database is missing its "${missingTable}" table — pages that read data may fail until the app's migrations run.`, ts: Date.now() });
             }
             opts.diag?.exitPhase?.();
+            // RETRY THE MIGRATION AFTER THE BOOT (real report e61b13b1, 2026-08-10). The pre-boot
+            // install failed here with `exit status 217` — and the SAME installer then succeeded
+            // nineteen seconds later inside the boot ("[health-check] installing dependencies… done").
+            // So the migration was skipped for a condition that had already cleared, and the app booted
+            // against an empty database exactly as before the fix; only the reason in the report
+            // changed. The boot PROVES the dependencies are installed, so that is the honest moment to
+            // try again. This is a second chance, not a cover-up: the first attempt's failure stays in
+            // the report, and WHY that install failed while the next one worked is recorded in
+            // PROGRESS.md as an open root cause rather than guessed at here.
+            if (migrationPending && migration && provided.DATABASE_URL) {
+              opts.diag?.enterPhase?.('creating the database tables (second attempt)');
+              const rStartedAt = Date.now();
+              try {
+                const rcmd = `${shellEnvAssignment('DATABASE_URL', provided.DATABASE_URL)} ${migration.command}`;
+                const rres = await withTimeout(actuator.runCommand(workspaceId, rcmd), 150_000, 'import-db-migrate-retry');
+                try {
+                  opts.diag?.recordCommand?.({
+                    command: `${migration.command} (retry after install)`,
+                    exitCode: typeof rres.exitCode === 'number' ? rres.exitCode : null,
+                    stdout: rres.stdout ?? '', stderr: rres.stderr ?? '',
+                    durationMs: Date.now() - rStartedAt,
+                  });
+                } catch { /* diagnostics best-effort */ }
+                const rok = rres.exitCode === 0;
+                opts.diag?.record({
+                  phase: 'preview', severity: rok ? 'info' : 'warning',
+                  code: rok ? 'IMPORT_DB_MIGRATIONS_APPLIED' : 'IMPORT_DB_MIGRATIONS_FAILED',
+                  message: rok
+                    ? `The app's own database migrations ran clean on a second attempt (${migration.label}), once the dev-server boot had installed the dependencies — its tables now exist.`
+                    : `The app's database migration step (${migration.label}) also failed on a second attempt, after the boot installed the dependencies (exit ${rres.exitCode}) — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: rok,
+                });
+              } catch (e) {
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_FAILED',
+                  message: `The second attempt at the app's database migrations did not finish within its window — its tables may be missing, so pages that read data can fail even if the preview looks up.`,
+                  autoResolved: false,
+                  detail: e instanceof Error ? e.message.slice(0, 400) : String(e).slice(0, 400),
+                });
+              }
+              opts.diag?.exitPhase?.();
+            }
             opts.diag?.enterPhase?.('checking the live preview');
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {

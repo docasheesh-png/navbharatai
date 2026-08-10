@@ -233,6 +233,7 @@ import { generateI18n } from '../lib/I18nGenerator';
 import { generateMotion } from '../lib/MotionGenerator';
 import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
 import { generateGame3D } from '../lib/Game3DGenerator';
+import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5232,6 +5233,28 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_controller': {
+        // PHASE 3. The feel lives in a PURE motor (coyote time, jump buffering, variable jump height,
+        // air control, slope limit, ground snap) so those rules are testable arithmetic rather than
+        // something a human has to sense in a browser; the three.js class on top only raycasts.
+        const gcRec = (input as Record<string, unknown>) || {};
+        const gcInclude = Array.isArray(gcRec.include)
+          ? gcRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gc = generateGameController(gcInclude);
+        const gcWritten: string[] = [];
+        for (const [path, content] of Object.entries(gc.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('character controller');
+        return `Wired the character controller:\n${gcWritten.join('\n')}\n\n${gc.instructions}`;
       }
 
       case 'generate_game_3d': {

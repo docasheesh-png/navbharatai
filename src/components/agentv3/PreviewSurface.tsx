@@ -11,6 +11,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
+import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
@@ -122,7 +123,7 @@ export function veRgbToHex(color: string): string {
   return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
 }
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -188,8 +189,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
 
-  const runDiagnose = useCallback(async () => {
-    if (!workspaceId) return;
+  // Returns whether the app actually came up, so a caller that SWITCHED the view to Live in order to
+  // show this boot can put the view back when it fails instead of stranding the user on a dead tab.
+  const runDiagnose = useCallback(async (): Promise<boolean> => {
+    if (!workspaceId) return false;
     setDiagnosing(true);
     setDiagResult(null);
     setDiagStage({ label: 'Contacting the sandbox', pct: 5, seconds: 0 });
@@ -239,9 +242,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // A genuinely successful boot resets the watchdog's failure STREAK (the total backstop and
         // the cooldown still apply) — so the next sandbox death hours later can heal again.
         healRef.current.streak = 0;
+        return true;
       }
+      return false;
     } catch (e) {
       setDiagResult({ ok: false, reason: e instanceof Error ? e.message : 'Network error — could not reach the server.', detail: '' });
+      return false;
     } finally {
       setDiagnosing(false);
       setDiagStage(null);
@@ -294,6 +300,45 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     autoResumedFor.current = workspaceId;
     void runDiagnose();
   }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, runDiagnose]);
+
+  // AN IMPORTED PROJECT INSTALLS AND RUNS ITSELF — no AI turn (admin 2026-08-10: "koi user kitni bhi
+  // badi file upload kyu na kare, usko LLM/provider tak bhejne ki need hi nahi hai — IDE/VS Code jaise
+  // install kar ke preview chala dena hai bas").
+  //
+  // A .zip import used to end in the Files tab with nothing running the project. To actually SEE it the
+  // user had to type a message, which starts a full build turn and pushes the whole imported codebase
+  // through the model — paying for tens of thousands of tokens to do what `npm install && npm run dev`
+  // does. `runDiagnose` is already that exact operation with ZERO model calls (hydrate from the durable
+  // files → install → start the dev server → publish the URL), so an import just asks for it.
+  //
+  // C1 above cannot serve this: it is deliberately gated to once per workspace so it can never loop, and
+  // it only fires when there is no URL — while a re-import into a running workspace has BOTH. The nonce
+  // is the caller saying "there are new files", which is a different question from "is anything up?".
+  const bootedFor = useRef(0);
+  useEffect(() => {
+    if (!shouldBootImportedProject({
+      bootSignal,
+      bootedFor: bootedFor.current,
+      workspaceId,
+      // null (not probed yet) is deliberately distinct from false (no backend) — see the module.
+      livePreviewAvailable: sandbox ? sandbox.livePreviewAvailable : null,
+    })) return;
+    bootedFor.current = bootSignal as number;
+    // This IS the resume, so C1 must not fire a second one at the same sandbox.
+    autoResumedFor.current = workspaceId ?? null;
+    // Show the boot where it is happening. The install/start progress (stage label, real percentage,
+    // seconds heartbeat) lives in the Live view, so leaving the user on the in-browser render would
+    // hide a legitimately 30-90s operation behind a silent screen — the "is it working or stuck?"
+    // question this whole surface exists to answer.
+    const previousMode = mode;
+    setMode('live');
+    void runDiagnose().then((ok) => {
+      // Honest retreat: a project the sandbox cannot start (a plain static site has no dev server to
+      // boot, and a broken one genuinely fails) must not strand the user on a dead Live tab when the
+      // in-browser preview can render it right now. `diagResult` keeps the real reason on screen.
+      if (!ok) setMode(previousMode);
+    });
+  }, [bootSignal, workspaceId, sandbox, mode, runDiagnose]);
 
   // C1b — auto-REBOOT a dead live preview behind an EXISTING URL. C1 above only fires when there is NO
   // url — but a preview URL is PERMANENT while the dev server behind it is EPHEMERAL (sandbox

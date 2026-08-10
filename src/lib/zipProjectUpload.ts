@@ -59,7 +59,9 @@ export function chunkRange(i: number, chunkBytes: number, size: number): { start
 export async function uploadFileChunked(
   file: File,
   onProgress?: (p: ZipUploadProgress) => void,
-): Promise<{ uploadId: string; jsonHeaders: Record<string, string> }> {
+// `totalChunks` travels back with the id because commit must tell the server how many parts to
+// expect — the parts are separate objects now, and a missing one has to fail loudly.
+): Promise<{ uploadId: string; jsonHeaders: Record<string, string>; totalChunks: number }> {
   const jsonHeaders = await authJsonHeaders();
 
   // 1. Begin

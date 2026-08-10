@@ -113,7 +113,7 @@ export async function uploadFileChunked(
     await abort();
     throw e;
   }
-  return { uploadId, jsonHeaders };
+  return { uploadId, jsonHeaders, totalChunks: total };
 }
 
 /**
@@ -125,12 +125,15 @@ export async function uploadZipProject(
   workspaceId: string,
   onProgress?: (p: ZipUploadProgress) => void,
 ): Promise<ZipProjectResult> {
-  const { uploadId, jsonHeaders } = await uploadFileChunked(file, onProgress);
+  const { uploadId, jsonHeaders, totalChunks } = await uploadFileChunked(file, onProgress);
 
   // Commit → extract + land
   onProgress?.({ fraction: 1, sentBytes: file.size, totalBytes: file.size, phase: 'extracting' });
   const commitRes = await fetch('/api/zip-upload/commit', {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ uploadId, workspaceId }),
+    // totalChunks travels with the commit because the server assembles the parts itself now: the
+    // chunks live as separate objects (so any Cloud Run instance can accept one), and assembly must
+    // know how many to expect — a missing part has to fail loudly rather than build a truncated zip.
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ uploadId, workspaceId, totalChunks }),
   });
   const commit = await commitRes.json().catch(() => ({} as any));
   if (!commitRes.ok || !commit?.ok) {

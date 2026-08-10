@@ -31,6 +31,13 @@ import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 
 import { importDropSummary } from '../../lib/importDropReport';
+// CROSS-INSTANCE upload state — the fix for "Unknown or expired upload" on a big archive.
+// See zipUploadStore.ts: the record lives in Firestore and each chunk is its own object, so a
+// chunk that lands on a different Cloud Run instance than /begin still finds its upload.
+import {
+  sharedUploadsEnabled, beginSharedUpload, getSharedUpload, putSharedChunk,
+  noteSharedProgress, assembleSharedUpload, deleteSharedUpload,
+} from '../lib/zipUploadStore';
 
 /** One chunk stays far under Cloud Run's ~32 MB request cap even with protocol overhead. */
 export const ZIP_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -139,6 +146,20 @@ export function registerZipUploadRoutes(app: Express): void {
       return;
     }
     pending.set(uploadId, { uid, filePath, bytes: 0, createdAt: Date.now(), fileName });
+    // ALSO record it where every instance can see it. Cloud Run routes each of the ~21 chunk requests
+    // of a 161 MB upload independently, so the in-memory map above is only ever a fast local cache —
+    // it is this record that makes a chunk landing on another instance work instead of 403-ing.
+    if (sharedUploadsEnabled()) {
+      try {
+        await beginSharedUpload({ uploadId, uid, fileName, createdAt: Date.now(), chunksSeen: 0, bytes: 0 });
+      } catch {
+        // No shared store ⇒ we would be back to the single-instance behaviour that fails at random on
+        // a big file. Refusing here is honest; silently continuing would look like it worked until the
+        // upload died at 40%.
+        res.status(503).json({ error: 'Could not start the upload right now. Please try again in a moment.' });
+        return;
+      }
+    }
     res.json({ uploadId, chunkBytes: ZIP_CHUNK_BYTES });
   });
 
@@ -150,9 +171,47 @@ export function registerZipUploadRoutes(app: Express): void {
     const uploadId = String(req.header('X-Upload-Id') || '');
     const index = Number(req.header('X-Chunk-Index'));
     const total = Number(req.header('X-Total-Chunks'));
+    if (!validChunkMeta(index, total)) { res.status(400).json({ error: 'Bad chunk metadata.' }); return; }
+
+    // SHARED PATH — the one that makes a multi-chunk upload work at all on Cloud Run. The chunk is
+    // buffered and written to its own object, so it does not matter which instance served /begin.
+    if (sharedUploadsEnabled()) {
+      const rec = await getSharedUpload(uploadId);
+      if (!rec || !uid || rec.uid !== uid) { res.status(403).json({ error: 'Unknown or expired upload.' }); return; }
+      try {
+        const parts: Buffer[] = [];
+        let received = 0;
+        let tooBig = false;
+        await new Promise<void>((resolve, reject) => {
+          req.on('data', (d: Buffer) => {
+            received += d.length;
+            // One chunk is bounded by the client's slice size; this only guards a malformed caller.
+            if (!tooBig && received > ZIP_CHUNK_BYTES * 4) { tooBig = true; req.destroy(); return; }
+            parts.push(d);
+          });
+          req.on('end', resolve);
+          req.on('error', reject);
+        });
+        if (tooBig) { res.status(413).json({ error: 'That chunk is larger than the upload protocol allows.' }); return; }
+        const soFar = (rec.bytes ?? 0) + received;
+        if (soFar > MAX_ARCHIVE_BYTES) {
+          await deleteSharedUpload(uploadId);
+          res.status(413).json({ error: `This project is larger than the ${Math.round(MAX_ARCHIVE_BYTES / (1024 ** 3))} GB import limit.` });
+          return;
+        }
+        await putSharedChunk(uploadId, index, Buffer.concat(parts));
+        // Re-sending a chunk overwrites the same object, so `bytes` is a progress signal rather than a
+        // ledger — the authoritative total is measured at assembly time.
+        await noteSharedProgress(uploadId, Math.max(rec.chunksSeen ?? 0, index + 1), soFar);
+        res.json({ ok: true, received: soFar });
+      } catch {
+        res.status(500).json({ error: 'Chunk upload failed. Please try the import again.' });
+      }
+      return;
+    }
+
     const u = pending.get(uploadId);
     if (!uploadOwnedBy(u, uid)) { res.status(403).json({ error: 'Unknown or expired upload.' }); return; }
-    if (!validChunkMeta(index, total)) { res.status(400).json({ error: 'Bad chunk metadata.' }); return; }
     try {
       const ws = fs.createWriteStream(u.filePath, { flags: 'a' });
       let received = 0;
@@ -192,19 +251,43 @@ export function registerZipUploadRoutes(app: Express): void {
     const uid = await verifyFirebaseToken(req);
     const uploadId = typeof req.body?.uploadId === 'string' ? req.body.uploadId : '';
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    // Resolve the upload from whichever store owns it. In shared mode the record is durable, so this
+    // works on any instance; otherwise it is the original in-memory map.
+    const shared = sharedUploadsEnabled() ? await getSharedUpload(uploadId) : null;
     const u = pending.get(uploadId);
-    if (!uploadOwnedBy(u, uid)) { res.status(403).json({ error: 'Unknown or expired upload.' }); return; }
+    const ownsShared = !!shared && !!uid && shared.uid === uid;
+    if (!ownsShared && !uploadOwnedBy(u, uid)) { res.status(403).json({ error: 'Unknown or expired upload.' }); return; }
     // Same strict ownership rule the other file-writing routes use: the VERIFIED uid must own this
     // workspace. An import writes files, so it is never reachable by merely knowing a workspace id.
     if (!workspaceId || !workspaceId.startsWith(`agentv3-${uid}-`)) {
       discard(uploadId);
+      if (ownsShared) await deleteSharedUpload(uploadId);
       res.status(403).json({ error: 'This workspace does not belong to you.' });
       return;
+    }
+    // Assemble the chunk objects into one local archive — in index order, with every part verified
+    // present first, so a lost chunk fails with a clear reason instead of producing a corrupt zip.
+    let archivePath = u?.filePath ?? '';
+    if (ownsShared) {
+      const totalChunks = Number(req.body?.totalChunks);
+      if (!Number.isInteger(totalChunks) || totalChunks <= 0) {
+        res.status(400).json({ error: 'The import is missing its part count. Please try again.' });
+        return;
+      }
+      archivePath = path.join(os.tmpdir(), `nbai-zip-${uploadId}.zip`);
+      try {
+        await assembleSharedUpload(uploadId, totalChunks, archivePath);
+      } catch (err) {
+        await deleteSharedUpload(uploadId);
+        try { fs.unlinkSync(archivePath); } catch { /* best-effort */ }
+        res.status(422).json({ error: err instanceof Error ? err.message : 'The upload could not be assembled. Please try again.' });
+        return;
+      }
     }
     try {
       // From DISK, streaming — never readFileSync: buffering the archive is what made big imports
       // impossible regardless of the advertised cap (see the module comment on ProjectImportStream).
-      const extracted = await extractZipProjectFromDisk(u.filePath);
+      const extracted = await extractZipProjectFromDisk(archivePath);
       const files = extracted.files;
       const fileCount = Object.keys(files).length;
       if (fileCount === 0) {
@@ -234,7 +317,7 @@ export function registerZipUploadRoutes(app: Express): void {
       const dropped = { ...extracted.dropped, overCap: (extracted.dropped?.overCap ?? 0) + skipped.length };
       res.json({
         ok: true,
-        fileName: u.fileName,
+        fileName: shared?.fileName ?? u?.fileName ?? 'project.zip',
         fileCount,
         imported: written.length,
         skipped: skipped.length,
@@ -247,6 +330,12 @@ export function registerZipUploadRoutes(app: Express): void {
       res.status(422).json({ error: err?.message || 'That file could not be read as a zip archive.' });
     } finally {
       discard(uploadId); // the temp archive is never kept past a commit attempt
+      if (ownsShared) {
+        // The chunk objects have done their job. Best-effort: a cleanup failure must never fail an
+        // import the user already completed — a bucket lifecycle rule on `zip-uploads/` is the backstop.
+        await deleteSharedUpload(uploadId);
+        try { fs.unlinkSync(archivePath); } catch { /* best-effort */ }
+      }
     }
   });
 
@@ -256,6 +345,12 @@ export function registerZipUploadRoutes(app: Express): void {
     const uploadId = typeof req.body?.uploadId === 'string' ? req.body.uploadId : '';
     const u = pending.get(uploadId);
     if (uploadOwnedBy(u, uid)) discard(uploadId);
+    // A cancelled upload must also release its chunk objects, or an abandoned 161 MB import would sit
+    // in the bucket costing storage until a lifecycle rule swept it.
+    if (sharedUploadsEnabled()) {
+      const rec = await getSharedUpload(uploadId);
+      if (rec && uid && rec.uid === uid) await deleteSharedUpload(uploadId);
+    }
     res.json({ ok: true });
   });
 }

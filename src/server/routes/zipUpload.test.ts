@@ -144,7 +144,12 @@ describe('the 5 GB import (admin 2026-08-04) — real, because commit STREAMS fr
   it('THE REGRESSION THAT MADE EVEN 1 GB FICTION: commit must never buffer the whole archive', () => {
     // fs.readFileSync(zip) + jszip held the entire archive in memory — a 1 GB commit needed ~2-3 GB of
     // RAM, so the advertised cap was unreachable regardless of transport. Commit must stream from disk.
-    expect(SRC).toContain('extractZipProjectFromDisk(u.filePath)');
+    // The path variable is now `archivePath` rather than `u.filePath`, because commit may assemble the
+    // archive from the shared chunk objects first (see zipUploadStore.ts — the fix for a multi-chunk
+    // upload dying on a second Cloud Run instance). What must never change is that it is a PATH read
+    // from disk, never the archive held in memory, so that is what this asserts.
+    expect(SRC).toContain('extractZipProjectFromDisk(archivePath)');
+    expect(SRC).not.toContain('readFileSync(u.filePath)');
     expect(SRC).not.toContain('readFileSync(u.filePath)');
   });
 

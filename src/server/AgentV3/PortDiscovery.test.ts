@@ -35,8 +35,10 @@ describe('parseListeningPorts', () => {
 
 describe('rankPortCandidates — evidence order, infra exclusion, bounds', () => {
   it('log-parsed port first, then script, then expected', () => {
-    expect(rankPortCandidates({ parsed: 5000, scriptPort: 5173, expected: 3000, listening: [] }))
-      .toEqual([5000, 5173, 3000]);
+    const c = rankPortCandidates({ parsed: 5000, scriptPort: 5173, expected: 3000, listening: [] });
+    // EVIDENCE ORDER IS THE CONTRACT. The tail after it is the 2026-08-10 last-resort guess (below);
+    // what must never change is that real evidence leads.
+    expect(c.slice(0, 3)).toEqual([5000, 5173, 3000]);
   });
 
   it('THE REPORTED CASE: expectation said 3000, the OS says the app is on 5000 — 5000 is reachable', () => {
@@ -47,13 +49,14 @@ describe('rankPortCandidates — evidence order, infra exclusion, bounds', () =>
 
   it('NEVER offers infrastructure ports — the provisioned PostgreSQL (5432) must not be published as the app', () => {
     const c = rankPortCandidates({ parsed: null, scriptPort: null, expected: 3000, listening: [22, 5432, 3306, 27017, 6379, 8080] });
-    expect(c).toEqual([3000, 8080]);
+    expect(c.slice(0, 2)).toEqual([3000, 8080]);
+    for (const infra of [22, 53, 5432, 3306, 27017, 6379, 9229]) expect(c).not.toContain(infra);
   });
 
   it('dedupes, orders extra listeners common-dev-first, and stays bounded', () => {
     const c = rankPortCandidates({ parsed: 3000, scriptPort: 3000, expected: 3000, listening: [9999, 5173, 3000, 8080, 7777, 6666] });
     expect(c[0]).toBe(3000);
-    expect(c.slice(1, 3)).toEqual([5173, 8080]); // common dev ports beat arbitrary ones
+    expect(c.slice(1, 3)).toEqual([5173, 8080]); // common dev ports beat arbitrary ones (both LISTENING)
     expect(c.length).toBeLessThanOrEqual(MAX_PORT_CANDIDATES);
     expect(new Set(c).size).toBe(c.length);
   });
@@ -71,7 +74,9 @@ describe('wiring — flip on evidence, verdicts earned', () => {
 
   it('the scan + ranking are used by the diagnose path', () => {
     expect(SRC).toContain("'preview-port-scan'");
-    expect(SRC).toContain('rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening })');
+    // `framework` joined the call on 2026-08-10 so the last-resort tail leads with that framework's
+    // own default port (a node-express app reaches 5000 before it reaches a Vite port).
+    expect(SRC).toContain('rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening, framework })');
   });
 
   it('the flip engages ONLY when the first page did not render (happy path costs nothing)', () => {
@@ -80,5 +85,47 @@ describe('wiring — flip on evidence, verdicts earned', () => {
 
   it('a flip target wins only when its page RENDERED', () => {
     expect(SRC).toContain('if (attempt.url && attempt.served.rendered) { winner = attempt; winnerPort = cand; break; }');
+  });
+});
+
+describe('LAST-RESORT TAIL — "3000 nahi chale to 5000 try karo" (admin 2026-08-10)', () => {
+  /**
+   * Tier 4 (visit every genuinely-listening port) is strictly better than guessing — but it produces
+   * NOTHING when the listening scan cannot run, comes back empty, or simply runs a moment before the
+   * server finishes binding. In that case the flip had no second candidate at all and the preview
+   * stayed pinned to a dead port: the very failure it exists to prevent. So after every piece of real
+   * evidence is exhausted, the familiar ports are tried anyway.
+   */
+  it('with NO listening scan, a wrong expectation still gets a second port to try', () => {
+    const c = rankPortCandidates({ parsed: null, scriptPort: null, expected: 3000, listening: [] });
+    expect(c[0]).toBe(3000);            // the expectation is still tried first
+    expect(c.length).toBeGreaterThan(1); // …and it is no longer a dead end
+  });
+
+  it('the framework hint leads the tail — a node-express app reaches 5000 before a Vite port', () => {
+    const c = rankPortCandidates({ parsed: null, scriptPort: null, expected: 3000, listening: [], framework: 'node-express' });
+    expect(c[0]).toBe(3000);
+    expect(c[1]).toBe(5000);
+    // …and the same call for a Vite app prefers 5173 instead.
+    expect(rankPortCandidates({ parsed: null, scriptPort: null, expected: 3000, listening: [], framework: 'vite-react' })[1]).toBe(5173);
+  });
+
+  it('the guess NEVER overrides evidence — it only fills the space evidence left empty', () => {
+    const c = rankPortCandidates({ parsed: 7777, scriptPort: null, expected: null, listening: [8888], framework: 'node-express' });
+    expect(c[0]).toBe(7777);  // the boot log's own testimony
+    expect(c[1]).toBe(8888);  // the port the OS proved is listening
+    expect(c.indexOf(5000)).toBeGreaterThan(1); // the guess comes after both
+  });
+
+  it('NO evidence at all ⇒ NO guessing (nothing booted; four visits would prove only that)', () => {
+    expect(rankPortCandidates({ parsed: null, scriptPort: null, expected: null, listening: [] })).toEqual([]);
+    expect(rankPortCandidates({ parsed: null, scriptPort: null, expected: null, listening: [], framework: 'node-express' })).toEqual([]);
+  });
+
+  it('stays bounded and infra-free even with the tail', () => {
+    const c = rankPortCandidates({ parsed: 3000, scriptPort: null, expected: null, listening: [], framework: 'node-express' });
+    expect(c.length).toBeLessThanOrEqual(MAX_PORT_CANDIDATES);
+    expect(new Set(c).size).toBe(c.length);
+    expect(c).not.toContain(5432);
   });
 });

@@ -28800,3 +28800,70 @@ Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (34 total) — the exact c
 the verdict, the pair-of-signals guard against false positives, a genuine app still passing, the retry
 firing only when pending, and the first failure surviving in the report.
 Gate: tsc clean both projects, full run 12,971/12,971.
+
+### 2026-08-10 — HEAL LEDGER: the "a heal did not survive" suspicion becomes a MEASUREMENT
+
+**The open root cause from report 02be22e3, taken as far as evidence allows.** Three deterministic
+self-heals ran, and the IDENTICAL three ran again twenty seconds later. Each repair pass re-reads every
+file FRESH from the sandbox (`readEvalSnapshot`) and the dedupe heal only fires when the content
+genuinely still differs — so the second run PROVES the first heal's write was absent on the next read.
+I refused to guess the mechanism (rule 4), but a suspicion recorded in prose cannot be acted on later,
+so the fact is now captured with names and counts.
+
+**Why a shared, workspace-keyed ledger and not a field on the dispatcher:** the two passes run on
+DIFFERENT `ToolDispatcher` instances — the reviewer gets a CHILD dispatcher from `SubAgent` — so any
+per-instance memory would be blind to exactly the case worth catching. Keyed by workspace, it is the
+smallest thing both can see. The dispatcher only WRITES to it (a plain import — no new constructor
+parameter threaded through the sub-agent spawn); the ROUTE reads it at settle, because that is where
+the diagnostics object lives.
+
+All three file-writing self-heals now report (import/export reconcile, wrong-source repoint,
+duplicate-import dedupe). The build starts with a clean sheet so "twice" means twice in THIS build, and
+a repeat lands as `HEAL_NOT_DURABLE`, severity warning, **autoResolved: false** — it is a real defect,
+not a note. ADMIN-ONLY: a user never needs to know our repair passes ran twice.
+
+The next report that shows this will name the exact files, which is what makes the mechanism findable
+instead of re-suspected. Memory is bounded (500 paths per workspace, 200 workspaces) so a pathological
+build cannot grow it.
+
+Tests: 11 in `tests/healLedger.test.ts` — a single heal is normal and silent, the reported two-file
+case captured with counts, the message stating what a repeat PROVES rather than suspects, workspace
+isolation, the per-build reset, junk tolerance, the memory bound, and wiring assertions that all three
+heals report and that the finding is recorded unresolved.
+Gate: tsc clean both projects, full run 12,982/12,982.
+
+### 2026-08-10 — The flip's LAST-RESORT tail (admin: "3000 par nahi chale to 5000 par try kiya jayega")
+
+**The flip system already existed** (built 2026-08-07 for the admin's original "ek par na chale to
+dusra" ask; wired into the Diagnose route then, and into the import boot in #2206). It also could not
+possibly have worked until yesterday, because the E2B "Closed Port Error" page counted as a rendered
+app — the flip only engages when the first port FAILS to render, so a host error page reading as
+success pinned the preview to the dead port. That was #2212.
+
+**But re-reading the ranking against the admin's exact words exposed a REAL remaining gap.**
+`COMMON_DEV_PORTS` was used only to ORDER the ports the OS reported as listening
+(`if (listening.includes(p))`). It never proposed a port that was not observed. That is the right
+instinct — evidence over guessing — but it produces NOTHING when the listening scan cannot run, comes
+back empty, or simply runs a moment before the server finishes binding. In that case the flip had no
+second candidate AT ALL, and the preview stayed pinned to a dead port: exactly the failure it exists
+to prevent. The admin's scenario ("3000 fails, try 5000") was therefore not actually reachable.
+
+**Added tier 5 — a bounded guess, strictly AFTER every piece of real evidence:**
+- it runs only when at least one real candidate exists (no evidence at all means nothing booted
+  anywhere, and four browser visits would only prove a dev server that never started is still not
+  running);
+- the FRAMEWORK's own default port leads the tail, so a `node-express` app reaches 5000 before a Vite
+  port, and a `vite-react` app reaches 5173 first (`framework` is now passed at both call sites);
+- ordering guarantees it can never override evidence — it only fills the space evidence left empty;
+- still deduped, still infra-free (5432 can never be published as the app), still capped at
+  MAX_PORT_CANDIDATES.
+
+Three existing tests encoded the OLD decision ("never invent a port not listening"). They were
+REPLACED with the superseding contract and the reasoning recorded in place, not weakened: evidence
+order is still asserted, and the infra-exclusion test now asserts the INTENT (no infra port anywhere
+in the list) rather than an exact array that the tail legitimately extends.
+
+Tests: 5 new + 3 updated in `src/server/AgentV3/PortDiscovery.test.ts` (16 total) — a wrong
+expectation with no scan is no longer a dead end, the framework hint leading the tail for both
+node-express and vite-react, the guess never outranking evidence, no-evidence-no-guessing, and the
+bound/infra guarantees holding with the tail. Gate: tsc clean both projects, full run 12,987/12,987.

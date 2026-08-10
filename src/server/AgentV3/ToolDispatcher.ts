@@ -1,5 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
+import { noteHeal } from './HealLedger';
 import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
@@ -2910,6 +2911,7 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
+                noteHeal(this.workspaceId, fx.file, content);
               }
               this.narrate('fix.importKind', { count: rec.fixes.length });
             }
@@ -2948,6 +2950,7 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+                noteHeal(this.workspaceId, file, content);
               }
               this.narrate('fix.repointedImports', { count: wrongRes.fixes.length });
             }
@@ -2970,6 +2973,8 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
+                // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
+                noteHeal(this.workspaceId, file, deduped);
                 this.narrate('fix.duplicateImport', { file });
               }
             }

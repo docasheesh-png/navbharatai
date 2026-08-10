@@ -29274,3 +29274,33 @@ Tests: 20 in `tests/chatComposerCore.test.ts` — delete taking its replies and 
 messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the exact charge with no
 minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
 written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
+
+## 2026-08-10 — APK build-repair now follows the user's selected Pro tier (weak/normal/strong/…)
+
+Admin (2026-08-10): "apk builder me jo llm/provider call hogi, woh navbharatai pro (jo user se select kiya
+hai) vaise hi hogi weak/normal/strong etc." The self-healing APK/AAB build already had an AI repair tier
+(`mobileBuildAiRepair.ts` + `tryAiRepair`), but it was HARDCODED to the weak-safe cheap coders (GLM→Kimi)
+because "this route cannot see the user's tier". This wires the tier through so the repair uses the SAME
+Model Routing Policy the main build does.
+
+- `mobileBuildAiRepair.ts`: `AiRepairModel` gains `provider:'CLAUDE'` + `kind:'openai'|'anthropic'`;
+  new `RepairTier` + `normalizeRepairTier(powerLevel)` (unknown ⇒ `weak`, the safe default). Rewrote
+  `aiRepairModelChain(env, tier)`: weak = GLM→Kimi; normal = GLM→Kimi→Sonnet; strong = Sonnet→GLM→Kimi;
+  powerful/max = Opus→Sonnet→GLM→Kimi. 🔒 **The free-tier no-Claude absolute rule is enforced TWICE** —
+  Claude rungs are only appended for paid tiers AND a final filter strips any Claude rung when tier==='weak',
+  so a future edit can't leak Sonnet/Opus onto a free build. Missing paid keys fall through to the cheap
+  coders (never break).
+- `mobileBuildAiRepairClient.ts`: `callRepairModel` now speaks BOTH protocols — OpenAI chat-completions
+  (GLM/Kimi) and the Anthropic messages API (Claude), selected by the rung's `kind`.
+- Routes `mobileShip.ts` (`/autofix`) + `mobileSetup.ts` (`/setup` preflight): read `powerLevel` from the
+  request and pass the resolved tier into the chain.
+- Client: `AgentV3Panel` persists the selected tier to `localStorage['nbai_power_level']`; `APKBuilder`
+  reads it and threads it → `StoreBuildPanel` → both requests. Absent ⇒ server defaults to weak-safe.
+
+Also note (already present, reported to admin): the deterministic repair tier (`mobileBuildRepair.ts`,
+~14 named classes) + the AI tier together already "self-heal GitHub build problems"; the gradle-wrapper.jar
+self-heal shipped separately (#2234).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for the touched files (pre-existing missing-dep errors
+in pg/exceljs/attachmentText are unrelated, present on clean main); mobile tests 113/113; new tier tests
+lock weak-never-Claude + each tier's chain + Anthropic rung shape.

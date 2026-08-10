@@ -56,6 +56,14 @@ export interface SubAgentDeps {
    * every sub-agent's turns count toward the user's charge — previously they were dropped entirely.
    */
   usageSink?: import('./UsageSink').UsageSink;
+
+  /**
+   * The language the PLATFORM's own narration speaks for this build (ROADMAP item 6). Sub-agents
+   * emit into the SAME feed as the Architect, so a child dispatcher left on the default would put
+   * English lines back into a Hindi build — the exact mixed feed the catalogue exists to kill.
+   * Threaded, not re-derived: one build has one language, decided once from the user's prompt.
+   */
+  narrationLang?: import('../lib/narrationLanguage').NarrationLanguage;
 }
 
 export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
@@ -65,6 +73,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     const childDispatcher = new ToolDispatcher(
       deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
     );
+    childDispatcher.setNarrationLanguage(deps.narrationLang ?? 'en');
     // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
     // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client
     // reducer set done:true and overwrote the top-level summary (the "Step limit reached (40)"

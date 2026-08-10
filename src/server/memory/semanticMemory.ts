@@ -1,4 +1,5 @@
 // Semantic conversation memory (RAG) — the PURE, dependency-free core (admin 2026-07-17).
+import { parseEnvFlag } from '../lib/envFlag';
 //
 // WHY: today an AI only "remembers" the recent-history WINDOW the client resends (last ~20 turns) plus
 // curated profile facts. Anything older that slid out of the window is forgotten. This adds retrieval-
@@ -54,7 +55,7 @@ export function memoryEmbedModel(): string {
  */
 export function semanticMemoryEnabled(): boolean {
   const v = (process.env.SEMANTIC_MEMORY || '').trim().toLowerCase();
-  return v === 'on' || v === 'true' || v === '1' || v === 'yes';
+  return parseEnvFlag(v) === true;
 }
 
 function clampInt(raw: string | undefined, def: number, min: number, max: number): number {

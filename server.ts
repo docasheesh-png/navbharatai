@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import crypto from 'crypto';
 import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude } from './src/server/lib/aiClients';
+import { LEGACY_EMBEDDED_API_KEY } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
@@ -46,8 +46,6 @@ import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
 import { registerFigmaProxyRoutes } from './src/server/routes/figmaProxy';
 import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
-import { getSecretValue } from './src/server/lib/secrets';
-import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
 import { registerMobileShipRoutes } from './src/server/routes/mobileShip';
@@ -62,10 +60,6 @@ import { registerAuthRoutes } from './src/server/routes/auth';
 import { registerGithubAuthRoutes } from './src/server/routes/githubAuth';
 import { registerFirebaseAuthRoutes } from './src/server/routes/firebaseAuth';
 import { registerCreateOrderRoute } from './src/server/routes/createOrder';
-import { getSecurityContext, NAVBHARAT_OS_V2, getBharatContext, getApiKeysInstruction, getVishwakarmaBasicContext, getVishwakarmaProContext, getVishwakarmaVipContext } from './src/server/lib/prompts';
-import { callGemini, callGroq, callDeepSeek, callOpenAI, callClaude, callOpenRouter } from './src/server/lib/aiCalls';
-import { generateOfflineResponse } from './src/server/lib/offlineResponse';
-import { aiRouter } from './src/server/lib/aiRouter';
 import { registerAuditRoutes } from './src/server/routes/audit';
 import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
@@ -102,12 +96,8 @@ import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
-import { registerConventionRoutes } from './src/server/routes/convention';
 import { registerBuildEstimateRoutes } from './src/server/routes/buildEstimate';
-import { registerDocsRoutes } from './src/server/routes/docs';
-import { registerOpenApiRoutes } from './src/server/routes/openapi';
 import { registerRetrospectiveRoutes } from './src/server/routes/retrospective';
-import { registerTestGenRoutes } from './src/server/routes/testgen';
 import { registerDesignRoutes } from './src/server/routes/design';
 import { registerDeployArtifactsRoutes } from './src/server/routes/deployArtifacts';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
@@ -162,20 +152,10 @@ const traceMiddleware = (req: any, res: any, next: any) => {
 };
 
 import { Cashfree } from 'cashfree-pg';
-import { GoogleGenAI } from '@google/genai';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
-import axios from 'axios';
 import path from 'path';
 import https from 'https';
-import * as cheerio from 'cheerio';
 import fs from 'fs';
-import { AIRuntimeManager } from './src/server/AI/AIRuntimeManager';
-import { UniversalAIRouter } from './src/server/AI/UniversalAIRouter';
-import { getProviderStats, recordProviderLatency } from './src/server/AI/Router/AIRouter';
 import { auditEnv } from './src/server/audit_env';
-import { BuildJobManager } from './src/server/AppMakerLab/jobs/BuildJobManager';
-import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from './src/server/AppMakerLab/AppEngine';
 
 auditEnv();
 
@@ -183,7 +163,7 @@ auditEnv();
 // serverStats singleton — extracted to src/server/lib/serverStats.ts (Phase 1).
 
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore';
 // Fallback: load .env file first, then .env.example (skip placeholder values)
 const isEnvPlaceholder = (v: string) =>
   v.startsWith('your_') || v.endsWith('_here') || v === '' || v === 'undefined';
@@ -601,18 +581,10 @@ setInterval(() => {
   registerObservabilityRoutes(app);
   // P-PME.2 — release-notes generator (stateless blueprint-diff → structured notes).
   registerReleaseNotesRoutes(app);
-  // P-CGE.3 — convention & naming check (stateless file/identifier/import analysis).
-  registerConventionRoutes(app);
   // P-PME.4 — build-time estimate / deadline prediction (stateless complexity+history → ETA).
   registerBuildEstimateRoutes(app);
-  // P-CGE.2 — documentation generators (stateless blueprint/routes/signatures → README/API/TSDoc).
-  registerDocsRoutes(app);
-  // P-CGE.5 — OpenAPI generator (stateless route specs → OpenAPI 3.0.3 document).
-  registerOpenApiRoutes(app);
   // P-PME.5 — build retrospective engine (stateless failed-build → classification + warnings).
   registerRetrospectiveRoutes(app);
-  // P-CGE.4 — test scaffold generator (stateless function/route/mock defs → Vitest skeletons).
-  registerTestGenRoutes(app);
   // P-DESIGN.5 — AI design pass (real multi-model FREE router): suggestions + palette/type-scale.
   registerDesignRoutes(app);
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).

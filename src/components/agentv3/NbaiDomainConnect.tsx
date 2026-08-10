@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react';
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
+import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
 interface DnsRecord { type: string; name: string; value: string; note?: string; }
 interface DomainStatus {
@@ -34,15 +35,59 @@ export interface NbaiDomainConnectProps {
   onBack: () => void;
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const { auth } = await import('../../lib/firebase');
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* best-effort; the server will 401 if unauthenticated */ }
-  return headers;
+/**
+ * The connect flow's stage, in the user's words (admin 2026-08-09: "DNS record daal diye — par ab
+ * kya karna hai? connect karne ka button hi nahi hai?"). The raw API states (OWNERSHIP_PENDING /
+ * HOST_ACTIVE / CERT_PENDING) are engineering vocabulary; a non-technical user reading them cannot
+ * tell whether the ball is in their court or ours. This maps the three real states to ONE plain
+ * sentence plus the ONE next action — and it stays honest, because each sentence describes exactly
+ * the state the API reported (nothing is claimed done until the API says active).
+ *
+ * Pure + exported for tests.
+ */
+export function connectStage(
+  s: { active: boolean; ownershipState: string; hostState: string; sslState: string },
+): { headline: string; action: 'check' | 'none'; note: string } {
+  if (s.active) {
+    return { headline: 'Live! Your domain is connected, with HTTPS.', action: 'none', note: 'Publish your app once so the domain serves your latest build.' };
+  }
+  const ownershipDone = /ACTIVE/i.test(s.ownershipState || '');
+  const hostDone = /ACTIVE/i.test(s.hostState || '');
+  if (!ownershipDone) {
+    return {
+      headline: 'Waiting for your DNS records to spread across the internet.',
+      action: 'check',
+      note: 'This usually takes a few minutes (sometimes longer). Tap Check — nothing is lost if it is not ready yet.',
+    };
+  }
+  if (!hostDone) {
+    return {
+      headline: 'Ownership confirmed — now pointing your domain at your app.',
+      action: 'check',
+      note: 'Almost done. Tap Check again in a minute.',
+    };
+  }
+  return {
+    headline: 'Almost there — issuing your free HTTPS certificate.',
+    action: 'check',
+    note: 'The certificate is created automatically; this can take a few minutes. Tap Check.',
+  };
 }
+
+/**
+ * A DNS record name the way a REGISTRAR's add-record form wants it (admin 2026-08-08, Hostinger
+ * screenshot): those forms take names RELATIVE to the domain — the apex is "@", a subdomain is just
+ * its prefix — while the hosting API hands back fully-qualified names. Pure, exported for tests.
+ */
+export function relativeRecordName(name: string, domain: string): string {
+  const fq = (name || '').replace(/\.$/, '').toLowerCase();
+  const d = (domain || '').replace(/\.$/, '').toLowerCase();
+  if (!fq || !d) return name;
+  if (fq === d) return '@';
+  if (fq.endsWith(`.${d}`)) return fq.slice(0, -(d.length + 1));
+  return name;
+}
+
 
 export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProps) {
   const [domain, setDomain] = useState('');
@@ -287,6 +332,41 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
       {/* Step 2 — the real DNS records + live status */}
       {result && (
         <div className="flex flex-col gap-2">
+          {/* WHAT NOW? — FIRST, not last (admin 2026-08-09: "DNS record daal diye, par ab kya karna
+              hai? connect karne ka button hi nahi hai?"). The status bar and its Check button used to
+              sit BELOW the records, the automatic-setup block and the registrar picker — three
+              screens down on a phone — so the one action the user needed was invisible and the page
+              looked like it had no next step. State first, action first; the records below are
+              reference material. */}
+          {(() => {
+            const stage = connectStage(result);
+            return (
+              <div className={`flex flex-col gap-2 px-3 py-3 rounded-xl border ${result.active ? 'bg-green-500/10 border-green-500/25' : 'bg-amber-500/10 border-amber-500/25'}`}>
+                <div className="flex items-center gap-2 min-w-0">
+                  {result.active
+                    ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                    : <TirangaLoader className="w-4 h-4 shrink-0" />}
+                  <span className={`text-[12px] font-bold ${result.active ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
+                </div>
+                <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
+                {stage.action === 'check' && (
+                  <button
+                    onClick={checkStatus}
+                    disabled={checking}
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-[12px] font-bold"
+                  >
+                    {checking ? <TirangaLoader className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    {checking ? 'Checking…' : 'Check now'}
+                  </button>
+                )}
+                {/* The raw states stay available — dim, small, owner-only diagnosis — because a
+                    support question is answered by them, but they must never be the headline. */}
+                <p className="text-[9px] text-zinc-500/80 font-mono">
+                  ownership: {short(result.ownershipState)} · host: {short(result.hostState)} · SSL: {short(result.sslState)}
+                </p>
+              </div>
+            );
+          })()}
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Add these DNS records at your registrar</span>
           {result.records.length === 0 && (
             // Freshly-attached domains often report their records a few seconds AFTER create (the
@@ -304,8 +384,22 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">{rec.type}</span>
                 {rec.note && <span className="text-[10px] text-zinc-500">{rec.note}</span>}
               </div>
-              <Field label="Name" value={rec.name} k={`n${i}`} copied={copied} onCopy={copy} />
+              {/* THE CARD SHOWS EXACTLY WHAT GETS PASTED (admin 2026-08-09: "jo jo copy paste hoga,
+                  wahi wahi dikhna chahiye — mere users non-technical hain"). Registrar forms lead
+                  with a "Type" dropdown and take names RELATIVE to the domain ("@" for the apex) —
+                  Hostinger, GoDaddy, Namecheap, all of them. So Type is a first-class copyable
+                  Field, and NAME displays and copies the RELATIVE form directly. The earlier
+                  version showed the full name with a "if rejected, type @ instead" footnote — a
+                  half-measure: the user should never be asked to translate. */}
+              <Field label="Type" value={rec.type} k={`t${i}`} copied={copied} onCopy={copy} />
+              <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`n${i}`} copied={copied} onCopy={copy} />
               <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
+              <p className="text-[10px] text-zinc-500">
+                At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
+                {relativeRecordName(rec.name, cleanDomain) === '@' && (
+                  <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
+                )}
+              </p>
             </div>
           ))}
 
@@ -421,31 +515,25 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
             </div>
           )}
 
-          <div className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border ${result.active ? 'bg-green-500/10 border-green-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
-            <div className="flex items-center gap-2 min-w-0">
-              {result.active
-                ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                : <TirangaLoader className="w-4 h-4 shrink-0" />}
-              <span className={`text-[11px] truncate ${result.active ? 'text-green-200' : 'text-amber-200/90'}`}>
-                {result.active
-                  ? `Live! ${result.domain} is connected with HTTPS.`
-                  : `Pending — add the records, then check. (ownership: ${short(result.ownershipState)}, host: ${short(result.hostState)}, SSL: ${short(result.sslState)})`}
-              </span>
-            </div>
-            {!result.active && (
-              <button
-                onClick={checkStatus}
-                disabled={checking}
-                className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] font-medium disabled:opacity-40 text-zinc-200"
-              >
-                {checking ? <TirangaLoader className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />} Check
-              </button>
-            )}
-          </div>
+          {/* The status + Check button now live at the TOP of this block (see the comment there);
+              a second copy here would be two sources of truth for one state. What remains is the
+              closing reassurance, which belongs after the reference material. */}
           <p className="text-[10px] text-zinc-500 leading-relaxed">
             DNS changes can take a few minutes to a few hours. Publish your app once after connecting, so the
             domain serves your latest build. HTTPS is issued automatically once the records resolve.
           </p>
+          {/* A second Check within thumb reach for the user who scrolled down to add records —
+              same handler, so there is exactly one implementation of the action. */}
+          {!result.active && (
+            <button
+              onClick={checkStatus}
+              disabled={checking}
+              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-200 hover:bg-indigo-500/10 text-[11px] font-bold disabled:opacity-40"
+            >
+              {checking ? <TirangaLoader className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />}
+              {checking ? 'Checking…' : 'Check now'}
+            </button>
+          )}
         </div>
       )}
     </div>

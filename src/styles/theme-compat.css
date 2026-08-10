@@ -94,10 +94,49 @@ html[data-theme] .bg-teal-600.text-white,     html[data-theme] .bg-cyan-600.text
 html[data-theme] .bg-pink-600.text-white,
 html[data-theme] [class*="bg-gradient-"].text-white { color: #ffffff; }
 
-/* ── Fixed-dark exemption: deliberately branded-dark product surfaces (NavBharatAI Pro v3.0, Doctor
-   AI / SDA chat, NavBharatAI Voice) re-declare the palette back to GitHub-dark on their own subtree,
-   so the SAME cascade renders them dark under every app theme. No internal edits — one attribute on
-   each root element. */
+/* ── The -950/darkest chrome family (admin report 2026-08-08: "Pro v5 ke andar theme badalne se
+   background dark hi rahta hai"). ROOT CAUSE: the map above covers the -900/-800 shades and the
+   GitHub hexes, but the v5 panel's ROOT is `bg-zinc-950` — a literal this layer never remapped, so
+   the whole v5 surface ignored every theme. Fixing one class would fix one screen; this maps the
+   ENTIRE darkest-shade family (all five Tailwind gray scales), the near-solid /80+/90/95 chrome
+   variants (translucency over same-color chrome is invisible, so solid is a faithful remap), and the
+   -700 raised/hover chrome the v5 panel leans on. */
+html[data-theme] .bg-zinc-950,
+html[data-theme] .bg-neutral-950,
+html[data-theme] .bg-gray-950,
+html[data-theme] .bg-slate-950,
+html[data-theme] .bg-stone-950,
+html[data-theme] .bg-zinc-950\/90,
+html[data-theme] .bg-zinc-950\/95,
+html[data-theme] .bg-neutral-950\/80          { background-color: var(--surface-base); }
+/* Translucent dark "wells" (device-frame stage, dimmed panels): a solid raised surface reads as the
+   same soft contrast in BOTH themes; keeping 40% black over a light base would render a muddy gray. */
+html[data-theme] .bg-zinc-950\/40,
+html[data-theme] .bg-zinc-950\/60             { background-color: var(--surface-raised); }
+html[data-theme] .bg-zinc-700,
+html[data-theme] .bg-gray-700,
+html[data-theme] .bg-neutral-700              { background-color: var(--surface-raised); }
+
+/* ── Hover states of the SAME mapped neutrals. Tailwind's `hover:bg-zinc-800` is a DIFFERENT class
+   from `bg-zinc-800`, so every hover was escaping the remap — on a light theme, hovering any v5
+   button flashed it dark. Same palette, same targets, applied at :hover. */
+html[data-theme] .hover\:bg-zinc-900:hover,
+html[data-theme] .hover\:bg-gray-900:hover,
+html[data-theme] .hover\:bg-neutral-900:hover { background-color: var(--surface-card); }
+html[data-theme] .hover\:bg-zinc-800:hover,
+html[data-theme] .hover\:bg-zinc-700:hover,
+html[data-theme] .hover\:bg-zinc-600:hover,
+html[data-theme] .hover\:bg-gray-800:hover,
+html[data-theme] .hover\:bg-gray-700:hover,
+html[data-theme] .hover\:bg-neutral-800:hover { background-color: var(--surface-raised); }
+
+/* ── Fixed-dark exemption (an ESCAPE HATCH — currently used by NO surface, verified 2026-08-08):
+   a subtree that must stay branded-dark under every theme can set `data-fixed-dark` on its root and
+   this block re-declares the palette back to GitHub-dark for that subtree only. The earlier version
+   of this comment claimed Pro v3.0 / Doctor AI / Voice use it — none of them ever set the attribute,
+   and the admin explicitly asked for Pro v5 to FOLLOW the theme, so a listed-but-unwired exemption
+   was exactly the kind of stale claim that misleads a fix. Keep the hatch; wire it only when a
+   surface genuinely needs to opt out. */
 [data-fixed-dark] {
   --surface-base: #0d1117;
   --surface-card: #161b22;

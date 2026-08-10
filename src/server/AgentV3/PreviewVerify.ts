@@ -24,6 +24,63 @@ function visibleText(html: string): string {
     .trim();
 }
 
+/** Words that separate a server ERROR payload from a friendly JSON greeting like {"status":"ok"}. */
+const JSON_ERROR_WORDS = /\b(error|failed|failure|required|missing|invalid|unauthori[sz]ed|forbidden|not\s+found|cannot|can't|unexpected|exception|denied|unavailable|timeout|timed\s+out|crash)\b/i;
+
+/**
+ * If the page body is a JSON ERROR envelope, return its message; otherwise ''. PURE.
+ *
+ * Deliberately narrow, because an API-first project may legitimately answer `/` with JSON: the body
+ * must PARSE as a JSON object, be small enough to be a status envelope rather than real data, and
+ * either carry an explicit error field (`error`, `stack`, a 4xx/5xx `statusCode`) or a message that
+ * READS as a failure. `{"message":"API is running"}` is therefore left alone, while
+ * `{"message":"secret option required for sessions"}` is caught.
+ */
+export function jsonErrorBody(html: string): string {
+  const body = (html || '').trim();
+  if (!body.startsWith('{') || body.length > 2000) return '';
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return ''; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '';
+  const obj = parsed as Record<string, unknown>;
+  const message = [obj.message, obj.error, obj.msg, obj.detail].find((v) => typeof v === 'string' && v.trim()) as string | undefined;
+  const status = typeof obj.statusCode === 'number' ? obj.statusCode : typeof obj.status === 'number' ? obj.status : 0;
+  const explicit = 'error' in obj || 'stack' in obj || 'errors' in obj || (status >= 400 && status <= 599);
+  if (!explicit && !(message && JSON_ERROR_WORDS.test(message))) return '';
+  const shown = (message ?? JSON.stringify(obj)).trim();
+  return shown.length > 200 ? `${shown.slice(0, 200)}…` : shown;
+}
+
+/**
+ * Is this the SANDBOX HOST's error page rather than the user's app? Returns the honest problem line,
+ * or '' when the page is the app. PURE.
+ *
+ * These pages are served by the preview host itself when nothing is listening on the requested port,
+ * so they always render "successfully" — real HTML, real prose, HTTP 200 in some cases. Every other
+ * rule in this module looks for a failure INSIDE the app; this one recognises that the app was never
+ * reached at all.
+ *
+ * Matched on the host's own distinctive wording, and deliberately requiring a PAIR of signals so a
+ * user's app that happens to mention a port cannot be mistaken for one (a devops dashboard is allowed
+ * to contain the words "connection refused").
+ */
+export function hostErrorPage(html: string): string {
+  const lower = (html || '').toLowerCase();
+  if (!lower) return '';
+  const closedPort = lower.includes('closed port error')
+    || /no service (?:is )?running on port/.test(lower)
+    || /connection refused on port/.test(lower);
+  if (!closedPort) return '';
+  // A second, independent signal from the same page — the host explaining itself to the user.
+  const hostVoice = lower.includes('the sandbox')
+    || lower.includes('sandbox logs')
+    || lower.includes('properly configured and running on the specified port')
+    || /\be2b\b/.test(lower);
+  if (!hostVoice) return '';
+  const port = /port\s*<?[^0-9]{0,8}(\d{2,5})/.exec(lower)?.[1];
+  return `nothing is listening on ${port ? `port ${port}` : 'that port'} — the preview host returned its own "closed port" page, so this is not your app`;
+}
+
 /**
  * Judge whether a preview's RENDERED HTML represents a working app. Conservative: only declares
  * `rendered` when there is genuine visible content AND no error/empty-mount signal.
@@ -37,6 +94,32 @@ export function analyzePreviewHtml(html: string): PreviewVerdict {
   // must not be misread as a generic blank page by the length check below).
   if (/cannot get \//i.test(h) || /\b404\b[^<]{0,40}not found/i.test(lower)) {
     problems.push('the server returned 404 / "Cannot GET" — the dev server is not serving the app at this path');
+  }
+
+  // A JSON ERROR BODY WHERE THE APP SHOULD BE (build report d6deaaf0, Mitrify, 2026-08-09). The
+  // preview showed literally `{"message":"secret option required for sessions"}` — express-session
+  // rejecting EVERY request because it had no secret — and this analyser passed it as "rendered",
+  // so the build reported "✅ Live preview is up" over an app that served nothing but an error. It
+  // slipped through every existing rule: 48 characters (over the blank-page threshold), no overlay
+  // markup, no "Cannot GET", no empty mount root. A machine-readable error is still an error.
+  const jsonError = jsonErrorBody(h);
+  if (jsonError) {
+    problems.push(`the server returned an error instead of the app: ${jsonError}`);
+  }
+
+  // THE SANDBOX HOST'S OWN ERROR PAGE (real build report e61b13b1, Mitrify, 2026-08-10). The admin's
+  // screen showed the E2B "Closed Port Error" page — "the sandbox is running but there's no service
+  // running on port 3000 · Connection refused" — while the report said "✅ Live preview is up on port
+  // 3000". That page slipped through EVERY rule here: it is long, it has real prose, no overlay
+  // markup, no "Cannot GET", no empty mount root, and it is HTML rather than JSON.
+  //
+  // The damage went further than a wrong verdict. This page rendering as "the app" is what stopped the
+  // port FLIP from ever engaging: the flip only runs when the first port fails to render, so a host
+  // error page that reads as success pins the preview to a port nothing is listening on — which is the
+  // exact bug the flip was built to fix. Recognising it here is what makes that whole mechanism work.
+  const hostError = hostErrorPage(h);
+  if (hostError) {
+    problems.push(hostError);
   }
 
   if (problems.length === 0 && h.length < 40) {

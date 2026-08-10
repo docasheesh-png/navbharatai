@@ -18,3 +18,22 @@ export async function authJsonHeaders(forceRefresh = false): Promise<Record<stri
   } catch { /* no token — server degrades to an anonymous path (never hard-blocks) */ }
   return headers;
 }
+
+/**
+ * Just the Authorization header — no content type — for GET callers and for `authedFetch`, which
+ * merges it into a caller-supplied `headers`.
+ *
+ * Added by audit finding #3b: the repo already had TWO shared token helpers (this module and
+ * `authedFetch.authHeaders`) and EIGHT private copies grew anyway, under four different names. The
+ * copies were not written out of ignorance — the bare-header shape simply did not exist here, so each
+ * caller that did not want `Content-Type` wrote the whole helper again. One shape per real need is
+ * what actually stops the next copy.
+ */
+export async function authHeader(forceRefresh = false): Promise<Record<string, string>> {
+  try {
+    const tok = await auth.currentUser?.getIdToken(forceRefresh);
+    return tok ? { Authorization: `Bearer ${tok}` } : {};
+  } catch {
+    return {}; // signed out / Firebase not ready — the server answers 401, which the caller surfaces
+  }
+}

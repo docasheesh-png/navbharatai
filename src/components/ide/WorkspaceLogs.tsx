@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Activity, RefreshCw, AlertTriangle } from 'lucide-react';
-import { auth } from '../../App';
+import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
 /**
  * REAL workspace logs — the live record of the app the user is building, from two genuine sources:
@@ -28,11 +28,6 @@ const LIVE_POLL_ACTIVE_MS = 2500;   // while a build is running
 const LIVE_POLL_IDLE_MS = 10000;    // idle watch — cheap, keeps the view live if a build starts
 const MAX_LINES = 400;              // bounded scrollback
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try { const tok = await auth.currentUser?.getIdToken(); if (tok) headers.Authorization = `Bearer ${tok}`; } catch { /* token optional */ }
-  return headers;
-}
 
 function fmtTime(ts: number): string {
   try { return new Date(ts).toLocaleTimeString(); } catch { return ''; }

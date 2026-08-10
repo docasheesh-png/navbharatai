@@ -56,6 +56,8 @@ import { workspaceLock } from '../project/WorkspaceLock';
 import { userCostStore } from '../lib/UserCostStore';
 import { userBuildHistoryStore, type BuildStatus } from '../lib/UserBuildHistoryStore';
 import { usdToInr } from '../lib/UsdInrRate';
+import { envFlag } from '../lib/envFlag';
+import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -230,7 +232,7 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { prompt, files, userKey, isEdit, agentic } = req.body || {};
       if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt (string) is required' });
-      const enabled = process.env.PRO_AGENTIC_ENGINE === '1' || agentic === true;
+      const enabled = envFlag('PRO_AGENTIC_ENGINE') || agentic === true;
       const hasExistingFiles = !!(files && typeof files === 'object' && Object.keys(files).length > 0);
       if (!enabled || !shouldConfirm({ prompt, hasExistingFiles, isEdit: isEdit === true })) {
         return res.json({ confirm: false });
@@ -256,7 +258,7 @@ export function registerBuildRoutes(app: Express): void {
     return res.json({ grade: null });
     try {
       const { spec, prompt, files, userKey, agentic } = req.body || {};
-      const enabled = process.env.PRO_AGENTIC_ENGINE === '1' || agentic === true;
+      const enabled = envFlag('PRO_AGENTIC_ENGINE') || agentic === true;
       if (!enabled || !files || typeof files !== 'object' || Object.keys(files).length === 0) {
         return res.json({ grade: null });
       }
@@ -903,7 +905,8 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const uid = await verifyFirebaseToken(req);
       if (!uid) return res.json({ apps: [] });
-      const prefix = `agentv3-${uid}-`;
+      const prefix = workspacePrefixFor(uid);
+      if (!prefix) { res.json({ ok: true, apps: [] }); return; }
       const apps = (await listUserWorkspaceApps(uid)).map((a) => {
         const sessionId = a.workspaceId.startsWith(prefix) ? a.workspaceId.slice(prefix.length) : a.workspaceId;
         const when = a.savedAt > 0 ? new Date(a.savedAt).toISOString().slice(0, 10) : '';

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
+import { SecretRequestCard } from './SecretRequestCard';
+import { saveSecret } from '../../lib/secretsApi';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
@@ -11,6 +13,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
@@ -50,20 +53,13 @@ import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
-import { db, sanitizeFirestoreData, auth } from '../../App';
+import { db, sanitizeFirestoreData } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */
-async function authJsonHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  try {
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server soft-falls-back */ }
-  return headers;
-}
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 /**
  * AgentV3Panel — NavBharatAI Pro v5.0 (Vargen 3.0), a Claude-Code-style chat
@@ -278,6 +274,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Project-import (.zip) progress — a large archive takes real time, so the user always sees where it is.
   const [zipImporting, setZipImporting] = useState(false);
   const [zipProgress, setZipProgress] = useState('');
+  // Rises once per import to ask the Preview to install-and-run the project it just received. A nonce
+  // rather than a boolean because a SECOND import into the same workspace must boot again, and
+  // PreviewSurface's own auto-resume is deliberately gated to once per workspace.
+  const [previewBootSignal, setPreviewBootSignal] = useState(0);
   // Stop any live dictation when the panel unmounts (never leave the mic hot).
   useEffect(() => () => { try { voiceRef.current?.stop(); } catch { /* already stopped */ } }, []);
   // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
@@ -1273,9 +1273,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
       setUserMsgs((c) => [...c, {
         role: 'agent',
+        // It also says what happens NEXT, because the import now starts the app itself: the user should
+        // be looking at the Preview, not wondering whether they still have to ask for something.
         text: result.dropSummary
-          ? `✅ Imported “${result.fileName}”.\n\n${result.dropSummary}\n\nYour project is in Files — tell me what to change.`
-          : `✅ Imported ${result.fileCount} file${result.fileCount === 1 ? '' : 's'} from “${result.fileName}”. Your project is in Files — tell me what to change.`,
+          ? `✅ Imported “${result.fileName}”.\n\n${result.dropSummary}\n\nInstalling dependencies and starting your app in Preview — your files are in the Files tab.`
+          : `✅ Imported ${result.fileCount} file${result.fileCount === 1 ? '' : 's'} from “${result.fileName}”. Installing dependencies and starting your app in Preview — your files are in the Files tab.`,
         ts: Date.now(),
       }]);
       // Pull the landed project into the IDE/Files view through the SAME bridge a build's own file
@@ -1289,7 +1291,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const data = await res.json().catch(() => null);
         if (res.ok && data?.files && typeof data.files === 'object') onFilesSync?.(data.files);
       } catch { /* the files are already durable server-side; the Files view refreshes on next load */ }
-      setTab('files');
+      // IMPORT = INSTALL + RUN, WITH NO AI TURN (admin 2026-08-10: "koi user kitni bhi badi file upload
+      // kyu na kare, usko LLM/provider tak bhejne ki need hi nahi hai — IDE/VS Code jaise install kar ke
+      // preview chala dena hai bas").
+      //
+      // Landing the files was only half of what a user means by "open my project". The import used to
+      // finish on the FILES tab with nothing running it, so the only way to see the app was to type a
+      // message — which starts a full build turn and pushes the whole project through the model. A real
+      // report showed exactly that: 37 imported files, 11 model calls, ~21-25k input tokens each, to do
+      // what `npm install && npm run dev` does for free. Wrong twice over — it costs the user money for
+      // nothing, and it makes the model responsible for an operation that is pure infrastructure.
+      //
+      // So the import ends on the PREVIEW and asks it to boot. The boot itself is PreviewSurface's
+      // existing model-free path (`preview-diagnose`: hydrate the sandbox from the durable files, install
+      // dependencies, start the dev server, publish the URL — zero model calls). Signalling it rather
+      // than repeating it here keeps ONE boot implementation with one honest progress UI; a second copy
+      // in this file would have raced the first and booted the same sandbox twice.
+      setTab('preview');
+      setPreviewBootSignal(Date.now());
     } catch (err) {
       setUserMsgs((c) => [...c, {
         role: 'agent',
@@ -3299,6 +3318,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 )}
               </div>
             )}
+            {state.pendingSecrets && (
+              <SecretRequestCard
+                prompt={state.pendingSecrets.prompt}
+                secrets={state.pendingSecrets.secrets}
+                onSave={async (vals) => {
+                  // Straight to the encrypted vault over the authenticated API — the value never goes
+                  // back up the build stream, which is stored in the transcript and the admin report.
+                  if (!userId) return false;
+                  for (const [name, value] of Object.entries(vals)) {
+                    await saveSecret(userId, name, value);
+                  }
+                  return true;
+                }}
+                onDone={(saved) => { respond(state.pendingSecrets!.callId, saved); }}
+              />
+            )}
             {state.pendingPermission && (
               <div className="px-3 py-2.5 bg-amber-950/50 border border-amber-900 rounded">
                 <div className="flex items-center gap-2 text-xs text-amber-200 mb-2">
@@ -3889,6 +3924,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 // requiring a manual "Diagnose" click. Suppressed during an active build (the live URL
                 // arrives from the build itself — no need to boot a second sandbox).
                 autoResume={!running}
+                // A just-imported project must RUN, not sit in Files waiting to be asked about. C1's
+                // auto-resume is once-per-workspace by design (it must never loop), so an import into a
+                // workspace whose preview already resumed would never boot — this nonce is the explicit
+                // "these are new files, install and start them" request. Same model-free path either way.
+                bootSignal={previewBootSignal}
                 onFixError={(errText) => {
                   // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
                   // (collapse the workspace) so the user can review and send the fix request.

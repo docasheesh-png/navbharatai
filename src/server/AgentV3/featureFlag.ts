@@ -1,4 +1,5 @@
 // AgentV3 feature flag (strangler-fig, D1).
+import { envFlag, parseEnvFlag } from '../lib/envFlag';
 //
 // Default OFF: the live app is never affected by v5.0 until explicitly enabled,
 // and even then can be limited to an allowlist of users while the engine is
@@ -7,7 +8,7 @@
 
 /** True when v5.0 is globally enabled via AGENTV3_ENABLED=true. */
 export function isAgentV3GloballyEnabled(): boolean {
-  return process.env.AGENTV3_ENABLED === 'true';
+  return envFlag('AGENTV3_ENABLED');
 }
 
 /** Parsed allowlist of userIds from AGENTV3_ALLOWLIST (comma-separated). */
@@ -70,7 +71,7 @@ export function isAgentV3FreeUser(userId?: string | null, email?: string | null)
  * the single flag that keeps the whole money path inert until it is explicitly turned on.
  */
 export function isAgentV3PaidPublicEnabled(): boolean {
-  return process.env.AGENTV3_PAID_PUBLIC === 'true';
+  return envFlag('AGENTV3_PAID_PUBLIC');
 }
 
 /**
@@ -83,7 +84,7 @@ export function isAgentV3PaidPublicEnabled(): boolean {
  * behavior). Turn on with AGENTV3_CREDIT_GATE=true.
  */
 export function isAgentV3CreditGateEnabled(): boolean {
-  return process.env.AGENTV3_CREDIT_GATE === 'true';
+  return envFlag('AGENTV3_CREDIT_GATE');
 }
 
 /**
@@ -113,7 +114,7 @@ export function buildRequiresSignIn(verifiedUserId: string | null, email: string
  */
 export function costRoutingEnabled(): boolean {
   const v = (process.env.AGENTV3_COST_ROUTING || '').trim().toLowerCase();
-  return v === 'on' || v === 'true';
+  return parseEnvFlag(v) === true;
 }
 
 /**

@@ -15,6 +15,7 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
+import { parseEnvFlag } from '../../lib/envFlag';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -395,7 +396,7 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
  * it (breaker trip = 0 → pure short-cooldown behaviour). Thresholds are tunable without a deploy.
  */
 export function circuitBreakerConfig(env: NodeJS.ProcessEnv = process.env): CircuitBreakerOptions {
-  if ((env.AGENTV3_CIRCUIT_BREAKER ?? '').trim().toLowerCase() === 'off') return { breakerTripAfter: 0 };
+  if (parseEnvFlag(env.AGENTV3_CIRCUIT_BREAKER) === false) return { breakerTripAfter: 0 };
   const num = (name: string, def: number): number => {
     const n = Number((env[name] ?? '').trim());
     return Number.isFinite(n) && n > 0 ? n : def;

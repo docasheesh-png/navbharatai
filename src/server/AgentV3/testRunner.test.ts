@@ -193,10 +193,17 @@ describe('vaccineEnabled — Phase 2 opt-in flag', () => {
     process.env.AGENTV3_VACCINE = 'on';
     expect(vaccineEnabled()).toBe(true);
   });
-  it("stays OFF for any other value", () => {
-    for (const v of ['true', '1', 'yes', 'off', '']) {
+  it('is ON for any explicit yes, OFF for an explicit no or an empty value', () => {
+    // CONTRACT CHANGED DELIBERATELY (audit finding #1, 2026-08-09): rejecting `1`/`on` was the
+    // DEFECT, not a safeguard — the admin's habit is `on`, so a money gate written that way was
+    // silently OFF. An explicit YES is still required; only the spellings widened.
+    for (const v of ['true', '1', 'yes', 'on']) {
       process.env.AGENTV3_VACCINE = v;
-      expect(vaccineEnabled()).toBe(false);
+      expect(vaccineEnabled(), v).toBe(true);
+    }
+    for (const v of ['off', 'false', '0', '']) {
+      process.env.AGENTV3_VACCINE = v;
+      expect(vaccineEnabled(), v).toBe(false);
     }
   });
 });

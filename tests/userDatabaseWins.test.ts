@@ -1,3 +1,4 @@
+import { narrationText } from '../src/server/AgentV3/narrationCatalogue';
 import { describe, it, expect } from 'vitest';
 import { braceBlock } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
@@ -55,7 +56,10 @@ describe('A connected database is never replaced by the sandbox one', () => {
     const at = dispatcher.indexOf('isUserOwnedDatabaseUrl(connectedUrl)');
     expect(at).toBeGreaterThan(-1);
     const branch = dispatcher.slice(at, at + 800);
-    expect(branch).toContain('Using the database you connected in Settings');
+    // The sentence moved into the narration catalogue (ROADMAP item 6) so it can be spoken in the
+    // user's own language; the branch must still SAY it, and the words must still mean it.
+    expect(branch).toContain("this.narrate('db.usingConnected'");
+    expect(narrationText('en', 'db.usingConnected', {})).toContain('Using the database you connected in Settings');
     expect(branch).toContain('return;');
     // The provisioning call must come AFTER this branch, never before it.
     expect(dispatcher.indexOf('sandbox-postgres-provision')).toBeGreaterThan(at);

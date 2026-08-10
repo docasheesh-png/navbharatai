@@ -1,0 +1,51 @@
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   Font-scale compatibility layer (admin report 2026-08-08: "text size change karne se app ka text
+   badal jata hai, par AI ke message aur response wala size same rahta hai").
+
+   ROOT CAUSE — px is immune to the zoom. The accessibility Text Size control works by scaling the
+   ROOT font size (`html { font-size: calc(100% * var(--nb-font-scale)) }`), so everything sized in
+   rem — Tailwind's text-xs/text-sm and all spacing — scales with it. But the app also carries
+   ~1,800 arbitrary-value utilities like `text-[13px]`, and CSS pixels do not care what the root
+   font size is. The chat message bubbles are sized exactly that way — so the one surface a user
+   most needs to READ was the one surface the zoom could not touch.
+
+   THE CLASS FIX (same one-choke-point discipline as theme-compat.css): remap every px text utility
+   the app uses to its rem equivalent, at N/16 rem. At 100% zoom this is byte-identical rendering
+   (N/16 rem == N px with the default 16px root); at any other zoom these now follow the user's
+   choice. Individual call sites keep their familiar class names — no 1,800-line diff, no drift.
+
+   CASCADE: imported OUTSIDE any @layer (like theme-compat.css), so these normal declarations beat
+   Tailwind's layered utilities without !important. The one variant in use (`sm:text-[10px]`) gets a
+   media-scoped rule BELOW its base sizes — same specificity, later source order — so responsive
+   overrides keep working.
+
+   Maintenance: if a NEW px size is ever introduced, tests/fontScaleCompat.test.ts fails with the
+   missing size, so this file cannot silently rot. Better: prefer text-xs/text-sm (already scalable)
+   in new code.
+   ───────────────────────────────────────────────────────────────────────────────────────────── */
+
+.text-\[6px\]   { font-size: 0.375rem; }
+.text-\[7px\]   { font-size: 0.4375rem; }
+.text-\[7\.5px\] { font-size: 0.46875rem; }
+.text-\[8px\]   { font-size: 0.5rem; }
+.text-\[8\.5px\] { font-size: 0.53125rem; }
+.text-\[9px\]   { font-size: 0.5625rem; }
+.text-\[9\.5px\] { font-size: 0.59375rem; }
+.text-\[10px\]  { font-size: 0.625rem; }
+.text-\[10\.5px\] { font-size: 0.65625rem; }
+.text-\[11px\]  { font-size: 0.6875rem; }
+.text-\[11\.5px\] { font-size: 0.71875rem; }
+.text-\[12px\]  { font-size: 0.75rem; }
+.text-\[13px\]  { font-size: 0.8125rem; }
+.text-\[14px\]  { font-size: 0.875rem; }
+.text-\[15px\]  { font-size: 0.9375rem; }
+.text-\[16px\]  { font-size: 1rem; }
+.text-\[18px\]  { font-size: 1.125rem; }
+
+/* px line-height alongside scalable font-size would overlap lines at 200% — remap the ones in use. */
+.leading-\[14px\] { line-height: 0.875rem; }
+
+/* Responsive variants in use — later source order restores their override over the base rules. */
+@media (min-width: 640px) {
+  .sm\:text-\[10px\] { font-size: 0.625rem; }
+}

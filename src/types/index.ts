@@ -87,7 +87,9 @@ export type SettingsScreen =
   | 'git' | 'logs' | 'report' | 'metrics' | 'profile'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.
   // ('hosting' info-screen was merged into 'cloudeploy' as a duplicate — admin 2026-07-29.)
-  | 'domain' | 'auth' | 'storage' | 'cloudeploy';
+  | 'domain' | 'auth' | 'storage' | 'cloudeploy'
+  // Legal & Trust pages (admin 2026-08-08): one screen per document, driven by the legal registry.
+  | 'legal_privacy' | 'legal_terms' | 'legal_dpa' | 'legal_security' | 'legal_nda';
 
 export type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
 

@@ -13,7 +13,6 @@
 // (no same-origin), so a share can never touch the platform.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from './firestoreDb';
 import { getServerDb } from './serverDb';
 
 const SHARES_COLLECTION = 'shares';

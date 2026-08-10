@@ -15,13 +15,22 @@ afterEach(() => {
 });
 
 describe('freeTierCheapEnabled — the dormant master switch', () => {
-  it('is OFF unless the env is exactly "true"', () => {
+  it('is OFF unless the admin explicitly says yes — in any spelling', () => {
+    // CONTRACT CHANGED DELIBERATELY (audit finding #1, 2026-08-09): the old strictness was the
+    // DEFECT, not a safeguard — rejecting `true`/`1` bought no safety (an admin typing them plainly
+    // means ON) while `on` vs `true` silently disagreed across the codebase. One shared parser now
+    // accepts every spelling of yes/no; an opt-in still requires an EXPLICIT yes, which is the part
+    // that actually mattered.
     delete process.env.AGENTV3_FREE_TIER_CHEAP;
     expect(freeTierCheapEnabled()).toBe(false);
-    process.env.AGENTV3_FREE_TIER_CHEAP = '1';
-    expect(freeTierCheapEnabled()).toBe(false); // only 'true' counts
-    process.env.AGENTV3_FREE_TIER_CHEAP = 'true';
-    expect(freeTierCheapEnabled()).toBe(true);
+    for (const v of ['true', 'on', '1']) {
+      process.env.AGENTV3_FREE_TIER_CHEAP = v;
+      expect(freeTierCheapEnabled(), v).toBe(true);
+    }
+    for (const v of ['off', 'false', '0', '']) {
+      process.env.AGENTV3_FREE_TIER_CHEAP = v;
+      expect(freeTierCheapEnabled(), v).toBe(false);
+    }
   });
 });
 

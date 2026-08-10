@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Loader2, AlertTriangle, BookOpen, FileText, User,
   Stethoscope, ClipboardList, X, RefreshCw,
@@ -16,6 +16,7 @@ import { escapeHtml } from '../../lib/escapeHtml';
 import { newSdaCaseId } from '../../lib/sdaCaseId';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
+import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -251,7 +252,22 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [loading, setLoading] = useState(false);
   const [teachingMode, setTeachingMode] = useState(false);
   const [showPatientPanel, setShowPatientPanel] = useState(true);
-  const [showTools, setShowTools] = useState(true);
+  // Quick Tools: the doctor's hide/show choice is REMEMBERED (it used to reset open on every mount,
+  // so "hide" had to be re-done every visit — see sdaChrome.ts). Default: closed on a phone, open on
+  // a wide screen. Lazy initializer so storage is read once, not on every render.
+  const [showTools, setShowTools] = useState<boolean>(() =>
+    initialToolsOpen(
+      typeof window !== 'undefined' ? window.localStorage : null,
+      typeof window !== 'undefined' ? window.innerWidth : 1024,
+    ),
+  );
+  const toggleTools = useCallback(() => {
+    setShowTools((prev) => {
+      const next = !prev;
+      saveToolsOpen(typeof window !== 'undefined' ? window.localStorage : null, next);
+      return next;
+    });
+  }, []);
   const [patient, setPatient] = useState<PatientSnapshot>({});
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
@@ -732,19 +748,23 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
         {/* Header */}
-        <div className="shrink-0 bg-[#0d1520] border-b border-emerald-900/30 px-4 py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        {/* Compact on a phone (admin 2026-08-08): the stethoscope tile and the second title line are
+            wide-screen affordances — on a narrow screen the title alone identifies the surface, and
+            "Doctor Use Only" is carried by the always-visible disclaimer row above the composer. Both
+            return at `sm`. Padding tightened; nothing removed from the wide layout. */}
+        <div className="shrink-0 bg-[#0d1520] border-b border-emerald-900/30 px-4 py-1.5 sm:py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {!showPatientPanel && (
-              <button onClick={() => setShowPatientPanel(true)} className="p-1.5 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-emerald-400 transition-colors">
+              <button onClick={() => setShowPatientPanel(true)} className="p-1.5 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-emerald-400 transition-colors shrink-0">
                 <User className="w-4 h-4" />
               </button>
             )}
-            <div className="w-7 h-7 rounded-lg bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center">
+            <div className="hidden sm:flex w-7 h-7 rounded-lg bg-emerald-900/40 border border-emerald-700/40 items-center justify-center shrink-0">
               <Stethoscope className="w-3.5 h-3.5 text-emerald-400" />
             </div>
-            <div>
-              <p className="text-[12px] font-black text-white tracking-wide">Senior Doctor Assistant</p>
-              <p className="text-[9px] text-emerald-600 font-medium">Clinical Decision Support · Doctor Use Only</p>
+            <div className="min-w-0">
+              <p className="text-[12px] font-black text-white tracking-wide truncate">Senior Doctor Assistant</p>
+              <p className="hidden sm:block text-[9px] text-emerald-600 font-medium">Clinical Decision Support · Doctor Use Only</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -889,26 +909,31 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           <div ref={bottomRef} />
         </div>
 
-        {/* Disclaimer */}
-        <div className="shrink-0 px-4 py-1.5 bg-[#0d1520] border-t border-white/5">
-          <p className="text-[8px] text-[#2d3748] text-center">
-            SDA is a clinical decision support tool. All diagnoses and treatment decisions remain the sole responsibility of the treating physician.
-          </p>
-        </div>
-
-        {/* Quick Tools Row */}
-        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/20 px-4 py-2">
-          <div className="flex items-center gap-1.5 mb-1.5">
+        {/* Quick Tools + disclaimer — ONE row (admin 2026-08-08: "space bina baat ki cheezo se ghira
+            hua hai … visibility maximum chahiye"). The disclaimer used to own a full-width row of its
+            own directly above this one; two rows of permanent chrome for ~12 words of text is the kind
+            of space a phone cannot spare. It is still ALWAYS visible — clinical-safety text is never
+            hidden behind a tap — it simply shares the row with the tools toggle, and carries its full
+            wording in the title attribute. Merging the rows is the whole saving; nothing was removed. */}
+        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/20 px-4 py-1.5">
+          <div className="flex items-center gap-3">
             <button
-              onClick={() => setShowTools(p => !p)}
-              className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-emerald-400 transition-colors"
+              onClick={toggleTools}
+              title={showTools ? 'Hide Quick Tools' : 'Show Quick Tools'}
+              className="flex items-center gap-1 shrink-0 text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-emerald-400 transition-colors"
             >
               {showTools ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
               Quick Tools
             </button>
+            <p
+              title="SDA is a clinical decision support tool. All diagnoses and treatment decisions remain the sole responsibility of the treating physician."
+              className="flex-1 min-w-0 text-[8px] leading-tight text-[#2d3748] text-right truncate"
+            >
+              Decision support only — the treating physician remains responsible.
+            </p>
           </div>
           {showTools && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
               {QUICK_TOOLS.map(tool => {
                 const Icon = tool.icon;
                 return (
@@ -1036,9 +1061,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             </button>
           </div>
 
-          <p className="text-[9px] text-[#2d3748] mt-1.5 text-center">
-            📎 Docs · 🎤 Dictate · 🔊 Talk to SDA · 🧮 Clinical Tools
-          </p>
+          {/* The emoji legend row that sat here (Docs / Dictate / Talk-to-SDA / Clinical-Tools) was
+              DELETED (admin 2026-08-08). Every entry labelled a control visible in this very row —
+              the paperclip, the mic, the speaker button — each of which already carries a `title`
+              tooltip, and the tools toggle is one row above. It was a caption for buttons the eye can
+              already see, costing a permanent row of a phone screen. No function lost.
+              (Deliberately NOT quoting the old string verbatim: the regression test asserts that exact
+              text is absent from this file, and a comment reproducing it would defeat the test.) */}
         </div>
       </div>
     </div>

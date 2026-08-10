@@ -1991,6 +1991,163 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'request_secrets',
+      description:
+        'ASK THE USER for API keys / credentials this app needs, right now, while you are building. A '
+        + 'popup opens with a field per key; the user fills the values, they are saved to their own '
+        + 'encrypted vault (Settings → Secrets & API Keys) AND written into the app\'s .env immediately, '
+        + 'so you can use them in this same build via process.env / import.meta.env. '
+        + 'USE THIS instead of writing a placeholder key and continuing — a feature built on a fake key '
+        + 'cannot work. Name the EXACT env var your code will read, and say plainly what it is for and '
+        + 'where the user gets it. Keys the user already saved are filtered out automatically, so just '
+        + 'ask for what the app needs. NEVER ask for NavBharatAI\'s own provider keys (they are refused). '
+        + 'If the user skips, keep building and leave that feature as a visibly disabled "needs setup" '
+        + 'state — never fake it.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          secrets: {
+            type: 'array',
+            description: 'The keys to ask for.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'The EXACT env var name your code reads, e.g. STRIPE_SECRET_KEY.' },
+                why: { type: 'string', description: 'Plain language: what it is for and where to get it, e.g. "To take card payments — from your Stripe dashboard → Developers → API keys".' },
+              },
+              required: ['name', 'why'],
+            },
+          },
+        },
+        required: ['secrets'],
+      },
+    },
+    {
+      name: 'generate_game_shell',
+      description:
+        'COMPOSE a runnable game from the other game layers. Call generate_game_runtime, '
+        + 'generate_game_3d, generate_game_controller and generate_game_vfx first — this wires them '
+        + 'together and is what turns four toolkits into a game you can actually play. Emits '
+        + 'src/game/Game.ts (the composition root), src/game/GameCanvas.tsx (React mount) and '
+        + 'src/game/ui/Hud.tsx (score/health/lives, pause and game-over overlays). '
+        + 'USE THIS RATHER THAN WIRING IT BY HAND. It already guarantees the things that are invisible '
+        + 'in review and obvious when played: gameplay runs at a FIXED 60Hz while the camera runs at the '
+        + 'display rate (physics in render makes the character jump higher on a 144Hz monitor), React '
+        + 'StrictMode double-mount is handled, dispose() releases the WebGL context (browsers cap live '
+        + 'contexts, so a leaked one takes the tab down after a few visits), context loss pauses instead '
+        + 'of going black, the HUD updates on EVENTS not per frame, audio is unlocked on first gesture, '
+        + 'and a device without WebGL gets an honest message. '
+        + 'Pass your world in through setup() and your gameplay through update() — do NOT edit the loop.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: game, gamecanvas, hud. Default = all.',
+          },
+        },
+      },
+    },
+    {
+      name: 'generate_game_vfx',
+      description:
+        'Add VFX + audio + the feedback that ties them together. Call generate_game_runtime first (this '
+        + 'uses its event bus and game-feel), and generate_game_3d for the particles. Emits src/game/fx: a '
+        + 'POOLED particle system (one draw call per blend layer, 9 presets — muzzleFlash, impact, dust, '
+        + 'explosion, smoke, sparks, heal, pickup, blood), a Web Audio manager with the unlock-on-gesture '
+        + 'that browsers require (missing it is THE reason a web game has no sound), pitch variation, a '
+        + 'voice cap and 3D panning, and bindGameFeedback. '
+        + 'THE POINT IS bindGameFeedback: ONE table maps each game event to its particle + sound + camera '
+        + 'trauma + hit-stop, so a hit reads as force instead of a state change. Author reactions in that '
+        + 'table and keep gameplay emitting events only — never call particles or audio inline from '
+        + 'gameplay code, or the reactions drift and half the game ends up feeling weaker. '
+        + 'Adds no dependency. Sound FILES are the app\'s to supply; a missing one plays silently and warns.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: particles, audio, feedback. Default = all.',
+          },
+        },
+      },
+    },
+    {
+      name: 'generate_game_controller',
+      description:
+        'Add the character controller for a game. Call generate_game_runtime (and generate_game_3d for '
+        + '3D) first. Emits src/game/play: a PURE motor holding all the "feel" arithmetic, plus a thin '
+        + 'three.js controller that does the raycasts. '
+        + 'IT INCLUDES THE THINGS THAT MAKE MOVEMENT FEEL GOOD, and they look like bugs on paper so do NOT '
+        + 'strip them: coyote time (jump still works ~100ms after walking off a ledge — without it a '
+        + 'player who presses a frame late gets nothing and the game feels unresponsive), jump buffering '
+        + '(a jump pressed just before landing fires on touchdown), variable jump height (releasing early '
+        + 'cuts the arc), separate air control, step offset so the character does not snag on every kerb, '
+        + 'a slope limit with sliding, and ground snap so it does not launch off bumps. It EMITS '
+        + 'PLAYER_JUMPED / PLAYER_LANDED — hook VFX and audio to those events, never inside the controller.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: motor, character. Default = both.',
+          },
+        },
+      },
+    },
+    {
+      name: 'generate_game_3d',
+      description:
+        'Add the 3D layer for a game (three.js). Call generate_game_runtime FIRST — this builds on its '
+        + 'camera damping and game-feel. Emits src/game/three: a renderer configured with sRGB output + '
+        + 'ACES filmic tone mapping and a CAPPED pixel ratio (without those a scene looks washed out and '
+        + 'runs at a crawl on a phone), 9 lighting presets (day/sunset/night/overcast/horror/desert/forest/'
+        + 'underwater/neon) each with hemisphere + key + ambient, fitted shadow camera and matched fog, '
+        + 'material presets with believable roughness/metalness plus shared PALETTES, camera rigs '
+        + '(third-person with wall collision, first-person, top-down, side-scroller) and procedural world '
+        + 'building — seeded value-noise terrain and InstancedMesh scatter. '
+        + 'THE LOOK COMES FROM THESE SETTINGS, NOT FROM ASSET DETAIL: use ONE palette for the whole scene, '
+        + 'share materials, scatter with instancing, and keep bloom subtle. Adds the `three` dependency.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: renderer, lighting, materials, camera, world. Default = all.',
+          },
+        },
+      },
+    },
+    {
+      name: 'generate_game_runtime',
+      description:
+        'Add NavBharatAI\'s GAME RUNTIME to the project — the engine layer a game is built on. Call this '
+        + 'FIRST for any game, 2D or 3D, before writing gameplay. It emits src/game/core: a FIXED-TIMESTEP '
+        + 'loop with interpolated rendering and a delta clamp (so physics is identical on a 144Hz monitor '
+        + 'and a cheap phone, and an alt-tab cannot teleport the player), polled Input with keyboard + '
+        + 'mouse + touch-joystick + virtual buttons behind ONE action map, an EventBus, an object Pool, '
+        + 'game state with save/load, and GameFeel (trauma-squared screen shake, hit-stop, easing, '
+        + 'frame-rate-independent damp). NO dependency is added and nothing here is engine-specific, so it '
+        + 'serves a 2D canvas and a 3D scene equally. '
+        + 'DO NOT hand-roll a requestAnimationFrame loop, a keydown handler or a bullet array — every one '
+        + 'of those has a known failure (frame-rate-dependent physics, lost key presses, GC stutter) that '
+        + 'this runtime already solves. Put gameplay in update(fixedDelta), never in render.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: loop, input, events, pool, feel, state. Default = all; imports are pulled in automatically.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_animation',
       description:
         'Add a dependency-free MOTION pack so the app feels alive instead of assembled: a motion.css of '
@@ -2994,6 +3151,12 @@ export const CATALOG_TOOL_NAMES = [
   'generate_backup',
   'analyze_requirements',
   'generate_i18n',
+  'request_secrets',
+  'generate_game_shell',
+  'generate_game_vfx',
+  'generate_game_controller',
+  'generate_game_3d',
+  'generate_game_runtime',
   'generate_animation',
   'generate_ui_states',
   'generate_state',

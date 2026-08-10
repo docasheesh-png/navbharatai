@@ -27987,3 +27987,1404 @@ Part 4 — the connect-time audit (the "30 seconds after connecting" idea the ad
 Also still open from earlier: two-way write-back to the opened folder, which is the genuinely novel half
 of "Open Folder" and deliberately NOT attempted in the same change as the read path — writing to a
 user's real disk is irreversible from our side and deserves its own design.
+---
+## 2026-08-08 — Pro v5 theme bug: the -950 family never followed the theme (admin report)
+
+Admin: "Pro v5 ke andar theme badalne se background dark hi rahta hai." Root cause was one missing
+shade family in the DNA theming layer: `theme-compat.css` remapped -900/-800 and the GitHub hexes,
+but the v5 panel's ROOT is `bg-zinc-950` — a literal the layer never covered, so the entire v5
+surface ignored every theme. Class fix, one file:
+- The whole darkest family (`zinc/neutral/gray/slate/stone-950`) + near-solid variants (/90 /95 /80)
+  → `--surface-base`; translucent -950 wells (/40 /60) and the -700 chrome → `--surface-raised`.
+- HOVER states were a sibling escape: `hover:bg-zinc-800` is a DIFFERENT class from `bg-zinc-800`,
+  so on light themes every hover flashed dark. All mapped-neutral hover forms now remap too.
+- Honesty: the `[data-fixed-dark]` comment claimed Pro v3.0 / Doctor AI / Voice use the exemption —
+  none ever set the attribute. Comment corrected (escape hatch kept, currently unused by anything).
+5 new regression tests in tests/themeSystem.test.ts, including one that pins the v5 root literal to
+its compat rule so the reported symptom cannot silently return.
+
+Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,607/12,607.
+
+## 2026-08-08 — Doctor AI (SDA) chat: the chrome was eating a third of the phone screen
+
+Admin (with screenshots): "page ka space bina baat ki cheezo se ghira hua hai … quick tool hide bhi kar
+do na, fir bhi itna sara space occupy hai … visibility maximum chahiye." Two distinct defects:
+
+1. **Hiding Quick Tools did not STICK.** `useState(true)` re-opened the panel on every mount, so the
+   doctor re-hid it every single visit — a control whose choice the app forgets is broken, not merely
+   inconvenient. New pure `sdaChrome.ts` remembers it (localStorage, injectable + never throws, so
+   Safari private mode cannot break the chat). No saved choice ⇒ CLOSED on a phone (≤640px), open on a
+   wide screen, where the tools cost nothing.
+2. **Permanent chrome ate ~a third of the viewport.** Three rows removed/merged, nothing de-featured:
+   - The one-sentence disclaimer owned a full-width row directly above the tools row → the two are now
+     ONE row (toggle left, disclaimer right). **The disclaimer is still always on screen** — clinical
+     safety text is never hidden behind a tap — with the full legal wording in its `title`.
+   - The emoji legend row ("Docs / Dictate / Talk to SDA / Clinical Tools") was DELETED: every entry
+     captioned a control visible in that very row (paperclip, mic, speaker — each already carrying a
+     tooltip) and the tools toggle one row above. A caption for buttons the eye can already see.
+   - Header compacted on phones only (stethoscope tile + the second title line hide below `sm`,
+     padding tightened); the wide layout is unchanged.
+
+Net: ~3 rows of permanent chrome back to the conversation, plus the tools panel no longer defaulting
+open on phones. 12 regression tests (`tests/sdaChrome.test.ts`) covering the preference in both
+directions, storage-failure fallbacks, and source contracts that the legend is gone AND the safety text
+is still rendered. Note the test caught a self-inflicted trap: the first version of the deletion comment
+quoted the removed string verbatim, which defeated the "it is gone" assertion — same class as the
+PROGRESS.md conflict-marker trap recorded 2026-08-08.
+
+Gate: frontend tsc clean (no server files touched), real `npm run build` green, full run 12,619/12,619.
+
+
+## 2026-08-08 — Preview warmup: the "Bolt feels instant" slice (world-best slice 4)
+
+**Report (admin, LTE screenshot): "Loading preview… 7/10 packages · 13s — Bolt me turant, hamare me
+kyu nahi?"** Measured the real bottleneck first: NOT compiling (server-precompiled, #2138), NOT
+serial fetching (the loader Promise.all's, and modulepreload already covered top-level entries).
+It is a TWO-LEVEL WATERFALL: (1) a package's internal chunk imports are only discoverable after its
+entry module arrives and parses — a chain of dependent round trips at mobile RTT; (2) the mirror's
+in-memory cache dies with the instance, i.e. on EVERY deploy (~10 today), so those round trips also
+paid mirror→esm.sh upstream latency. Bolt avoids both by keeping node_modules on the device; we get
+the same effect from the server side:
+- **`fetchMirroredModule` extracted** from the /api/esm route (one pipeline — the route now calls
+  it) + **`sharedMirrorCache`** as the route's default store, so warming actually warms what users
+  read. Honest statuses preserved (400/404/502 byte-identical).
+- **`PreviewDepWarmup.ts`**: bounded BFS crawl (96 modules / depth 5 / 2MB scan) of the mirror
+  graph through that same pipeline — fetching IS the warming. Memoized per dependency-set (1h),
+  in-flight-deduped, VITEST-guarded, 100% best-effort (a failed warmup = exactly today's behavior).
+- **Full-graph preloads**: when the crawl is done, buildReactPreview ships a
+  `<link rel="modulepreload">` for EVERY discovered module — entries AND chunks, BFS order,
+  same-origin, injection-guarded (`buildWarmPreloads`, cap = crawl bound) — so the phone fetches the
+  whole graph in ONE parallel burst instead of walking it. Cold path byte-identical to today.
+12 new tests (extraction, BFS + bounds + skip-on-failure, memo/dedupe/key, preload emission caps +
+escaping, shared-cache invariant, cold-vs-warm page). Honest note: the FIRST-ever render of a new
+dependency set still pays the old waterfall (crawl runs in background); every render after — every
+reload, every reopen, every other user on the instance — gets the burst.
+
+## 2026-08-08 — Songcraft in chat + Text Size in the slide-out menu (50–200 %)
+
+Two admin asks, shipped together.
+
+**1. Songs worth hearing (`src/server/AI/songcraft.ts`).** "Gaana likhwaye to realistic gaane likhe —
+emotions, joy, rhythm itni acchi ki log madhosh ho jaye." Asked plainly for lyrics, a model reaches for
+the same rhymes every time (pyaar/bahaar, dil/manzil, chaand/raat) and NAMES emotions instead of showing
+them — it rhymes, scans badly and moves nobody. So the fix is a CRAFT BRIEF of checkable rules, not an
+adjective: a real mukhda/antara shape, a steady syllable count per stanza (±2) with a held rhyme scheme,
+ONE concrete photographable image per line, the emotion word banned where an image can do the work,
+Indian-life detail (barish, tiffin, mandir ki ghanti), joy=movement / sadness=stillness, and the
+worn-out rhyme pairs explicitly forbidden. Honours the standing no-interrogation rule: it WRITES, then
+offers one line of adjustment. Injected ONLY on a real song request (`isSongRequest`), so every other
+conversation's prompt and cost stay byte-identical; applies to every tier — a free user's song gets the
+same craft as a paid one.
+  - **Root-caused a real i18n bug while testing it:** the tokenizer used `[^\p{L}\p{N}]`, and Devanagari
+    matras are category **Mn (marks), not letters** — so "गाना" was shredded into "ग न" and every
+    Devanagari request silently failed to match. Now `\p{M}` is included. Swept the repo for siblings:
+    `SlugGenerator` already had it right; no other tokenizer is affected.
+
+**2. Text Size, 50 %–200 %, one tap away (`TextSizeSlider.tsx`).** The control a user reaches for when
+they are ALREADY struggling to read was three taps deep in Settings, and capped at a timid 90–140 %.
+Now a real slider in the ☰ menu's System Matrix, spanning 50–200 % with a live percentage and a Reset.
+Settings keeps its +/− stepper — the control was ADDED where it is needed, not moved away from where it
+is documented. A slider (not +/−) because the range is now 15 steps: fifteen taps is a chore, one drag
+is a control; keyboard users get stepping from the arrow keys for free.
+  - **Root-caused a DRIFTED DUPLICATE:** `main.tsx` applies the stored scale before React mounts (no
+    flash of unscaled text) and re-implemented the clamp with `0.9`/`1.4` inlined. Widening `a11y.ts`
+    alone would have pinned every user back to 140 % on boot and then jumped them to their real size
+    after hydration — a setting that looks broken. `main.tsx` now imports `clampFontScale` +
+    `FONT_SCALE_STORAGE_KEY`: one definition, test-locked so it cannot drift again.
+  - `AppKnowledgeBase.ts` entry `text_size` added (both paths, the real range, Hinglish keywords) so
+    every AI in the app can answer "font bada kaise karun?".
+
+31 new tests (`tests/songcraft.test.ts`, `tests/textSize.test.ts`).
+Gate: tsc clean both projects, real `npm run build` green, full run 12,662/12,662.
+
+## 2026-08-08 — Legal & Trust: five full documents, each on its own page, buttons in Settings
+
+Admin (from a competitors-checklist reel): Privacy Policy, Terms of Service, DPA, Security documents,
+NDA — "sabhi ke liye ek alag page banao, setting me sabhi ke button dedo", at 10x the detail of the
+earlier summary. Shipped:
+
+- `src/content/legal/` — five documents written against the app's REAL behaviour, not a template:
+  DPDP Act rights + grievance contact + Singapore cross-border disclosure + clinical-data rules
+  (Privacy); tokens-as-prepaid-credit, failed-build-never-charged, user OWNS built apps, 7-day
+  unused-token refunds, Doctor-AI-is-for-doctors, New Delhi jurisdiction (Terms); processor duties,
+  72-hour breach clock, sub-processor CATEGORIES with the named list under NDA — the standard
+  enterprise resolution of the white-label tension, chosen as the safe default (DPA); a four-part
+  security set whose every claim maps to a real control in the code, including an honest "we do NOT
+  yet claim SOC 2/ISO" section (Security); a mutual fill-and-sign template with intentional blanks
+  (NDA). Every file carries a NOT-LEGAL-ADVICE note for lawyer review.
+- ONE registry (`content/legal/index.ts`) drives everything: the Settings "Legal & Trust" card builds
+  its five tiles from `LEGAL_DOCS.map(...)`, and every `legal_*` screen renders `LegalDocPage` — a
+  document cannot exist without a button nor a button without a page. `SettingsScreen` union extended.
+- Privacy table converted to bullets after checking the renderer: react-markdown here has no GFM
+  plugin, so a md table would have rendered as raw pipe characters.
+- AppKnowledgeBase `legal_trust` entry (Hinglish keywords: gopniyata, niyam, refund, kanoon…).
+- 34 tests (`tests/legalDocs.test.ts`): per-document completeness sections, the WHITE-LABEL law as a
+  regression test (no AI vendor/model name in any legal page — Cashfree/Google/Apple allowed), the
+  honesty notes, and full wiring contracts.
+
+Assumed defaults for the admin to confirm/change (announced, per the 60-second rule): refunds =
+unused purchased tokens, 7 days; governing courts = New Delhi; grievance/security/DPA/NDA contact =
+info@navbharatai.com; log retention 90 days; account-deletion window 30 days; DPA breach notice 72h.
+Follow-up worth doing when asked: PUBLIC (no-login) URLs for privacy+terms — Play Console asks for a
+public privacy-policy link.
+
+Gate: tsc clean both projects, real build green, full run 12,696/12,696.
+
+### Same PR, two more root causes: the zoom that missed the chat, and the bundle the docs broke
+
+**1. Text Size zoom missed the AI messages (admin screenshot).** The zoom scales the ROOT font size,
+so rem-based utilities follow it — but the app carries ~1,800 arbitrary `text-[Npx]` utilities, and px
+is immune to the root. The chat bubbles were sized in px: the one surface a user most needs to READ
+was the one the zoom could not touch. Class fix, one file (`src/styles/font-scale-compat.css`, same
+unlayered-cascade discipline as theme-compat.css): every px text utility in use remapped to its exact
+rem equivalent (byte-identical at 100%, scaling at every other zoom), the px line-height in use
+remapped too (fixed leading + scaled text = overlapping lines), the one responsive variant preserved
+via a later media rule. ANTI-ROT: the test greps the REAL component tree and fails if any px text
+utility exists that the compat file does not cover — the sweep immediately proved itself by catching
+four half-pixel sizes (7.5/8.5/9.5/10.5/11.5px) the manual survey missed.
+
+**2. The legal docs broke the CI bundle budget (653.5 KB > 650 KB main chunk).** Root cause: ~45 KB of
+document text statically imported by SettingsPanel landed in the MAIN chunk — every user downloading
+five legal documents to open a chat. Fix is the class, not the budget: `content/legal/meta.ts` (titles
+only, few hundred bytes) feeds the Settings tiles; LegalDocPage dynamic-imports the full registry into
+its own lazy chunk. Main chunk: 653.5 → 635.3 KB. Test-locked: SettingsPanel may never statically
+import the heavy index again, and meta ↔ registry can never drift.
+
+Gate: tsc clean, real build green, bundle budget green locally, full run 12,703/12,703.
+
+## 2026-08-09 — DNS record cards now answer the registrar's own form (the "Type me kya choose karu?" freeze)
+
+Admin, with a live Hostinger screenshot beside our connect page: the registrar's add-record form
+leads with a "Type" dropdown (A/MX/AAAA/CNAME/SRV/TXT/CAA) — and our card answered it with only a
+tiny corner badge, so the user froze at "Choose type". Second freeze on the same form: registrar
+Name boxes want RELATIVE names ("@" for the apex, the bare prefix for a subdomain) while our cards
+show fully-qualified ones — pasted as-is they get rejected or silently doubled
+(mitrify.in.mitrify.in). The card now maps 1:1 onto the form: TYPE is a first-class copyable Field
+(same row style as Name/Value), and a per-record hint says exactly what to do — 'in the "Type"
+dropdown choose A … leave TTL as-is', plus the relative-Name fallback ('type @ instead — it means
+the same thing there') via new pure `relativeRecordName` (exported, trailing-dot/case tolerant,
+foreign names untouched). tests/dnsRecordTypeHint.test.ts.
+
+## 2026-08-09 — Name box shows EXACTLY what gets pasted (admin: "jo copy paste hoga, wahi dikhna chahiye — fix karo!!")
+
+The previous entry's fix was rightly called out as a half-measure: the card still displayed the
+fully-qualified name (mitrify.in) with a footnote saying "if rejected, type @ instead". A
+non-technical user should NEVER be asked to translate — and since every registrar form (Hostinger,
+GoDaddy, Namecheap, …) takes relative names, the FQDN display was simply the wrong default. Now the
+NAME Field displays and COPIES the relative form directly ("@" for the apex, "_acme-challenge" for
+the challenge), the copy button carries exactly those bytes, and the one remaining plain line
+explains '"@" simply means your domain'. The old fallback sentence is test-pinned to never return.
+Lesson (external-adaptation applied to my own output): when the user's screen and the target form
+disagree, change the SCREEN to match the form — never hand the user a translation rule.
+
+## 2026-08-09 — "Ab kya karna hai? Connect ka button hi nahi hai" — the next action was three screens down
+
+Admin, after the auto-DNS reported "Nameservers live — 3 records applied automatically": *"DNS record
+daal diye. Par ab kya karna hai! Connect karne ka button hi nahi hai?"* Two defects, one symptom:
+1. **Layout.** The status bar AND its "Check" button were rendered LAST — below the records list,
+   the automatic-setup block and the registrar picker. On a phone that is three screens down, so
+   the single action the user needed was invisible and the page read as having no next step.
+2. **Vocabulary.** The line itself was `Pending — add the records, then check. (ownership:
+   OWNERSHIP_PENDING, host: HOST_PENDING, SSL: CERT_PENDING)` — engineering states that cannot tell
+   a non-technical user whose move it is, or whether anything is progressing.
+Fixed: new pure `connectStage()` maps the three real API states to ONE plain sentence + the ONE next
+action ("Waiting for your DNS records to spread across the internet… nothing is lost if it is not
+ready yet" → "Ownership confirmed — now pointing your domain at your app" → "Almost there — issuing
+your free HTTPS certificate" → "Live!"). The block moved to the TOP of the result area with a real
+indigo "Check now" button; the raw states remain as dim mono detail (support still needs them) but
+are never the headline; a second Check sits at the bottom for the user who scrolled to copy records
+(same handler — one implementation, test-pinned). Honesty preserved: nothing says "Live" except the
+API's own `active` flag, even when all three sub-states read ACTIVE (test-pinned).
+
+## 2026-08-09 — Three native-feel fixes (admin): desktop Apple login, Capacitor splash, tap vibration → tone
+
+**1. Desktop Apple login (root-caused in code, config caveat recorded honestly).** Google's provider
+is statically imported; Apple's handler did `await import('firebase/auth')` INSIDE the click. On a
+cold cache that network wait consumes the browser's transient user activation, so `signInWithPopup`
+is popup-BLOCKED → falls back to `signInWithRedirect` → which silently dies on desktop Chrome's
+storage-partitioned return ("missing initial state"). That asymmetry is exactly why Google worked
+and Apple did not. Fix: the module promise starts at MODULE LOAD (`firebaseAuthModuleForApple`);
+the click-time await resolves from memory in the same tick and the popup keeps its activation.
+⚠️ HONEST CAVEAT (rule 6): the live site is unreachable from this sandbox (proxy policy), so the fix
+could not be verified against production. If Apple STILL fails after deploy, the remaining suspect is
+CONSOLE config, which only the admin can check: Firebase Console → Authentication → Apple must have
+the **Services ID + Apple Team ID + private key** filled for WEB (native iOS working proves nothing
+about web), and the Apple Developer portal's Services ID must list the Firebase authDomain return URL
+(`https://<authDomain>/__/auth/handler`) as a registered Return URL.
+
+**2. Splash: Capacitor logo out, NavBharatAI logo in, 1s not 2s.** The 11 `drawable*/splash.png`
+files were the STOCK Capacitor artwork — that is the logo the admin saw at every app open. All 11
+regenerated from `public/logo.png` on the app's own dark surface (#0d1117 — the same color as
+`SplashScreen.backgroundColor`, so splash → app is one continuous surface), each density/orientation
+at its correct dimensions, stamped with a PNG tEXt marker so a test can prove stock artwork never
+returns. `launchShowDuration` 2000→1000 ("jhatt se open"); the splash itself cannot be REMOVED (the
+WebView genuinely boots; no splash = a blank sheet, which is worse) and `launchAutoHide: true` is
+untouched per the 2026-07-26 anti-brick rule. Takes effect in the NEXT .aab build.
+
+**3. Tap vibration → touch tone ("tak").** The app-wide tap feedback drove the Haptics vibration
+motor — on many Androids a strong whole-hand buzz at chat-typing frequency. New `tapTone.ts`: a
+synthesised WebAudio tick (1.8kHz, ~35ms exponential decay, gain 0.08 — Android's own keyboard
+behaviour), zero asset bytes, starts the same millisecond the finger lands, and respects silent mode
+the way vibration never did. `installTapHaptics` now takes an injectable `tick` (default the tone),
+needs no Haptics plugin, keeps the 60ms anti-storm throttle; the one stray `navigator.vibrate(30)`
+in AIChat's send button now uses the same tone, and a sweep asserts `navigator.vibrate` is gone.
+
+Tests: nativeShell tap block rewritten (proves the motor is NEVER touched), 9 new in
+tests/nativePolish.test.ts (activation prefetch contract, per-bucket splash marker + IHDR orientation
+check, tone envelope/resume/never-throws, vibrate-free sweep).
+Gate: tsc clean both projects, real build green, full run 12,725/12,725.
+
+## 2026-08-09 — Store billing slice 1: Apple + Google purchase verification and wallet credit (admin: "apple/google payment setup karwao")
+
+Both stores REQUIRE their own billing for digital goods bought inside the app, and our wallet top-up
+is exactly that — this is the NATIVE funding rail for the SAME one wallet Cashfree funds on web (one
+money model, two rails; the credit itself flows through the existing `computeCreditedWallet`).
+
+Shipped (server, dormant behind `STORE_BILLING`):
+- **`storeBilling.ts`** — the pack catalogue as DATA (stores need fixed price points, unlike the
+  web's free-form amount): ₹99/₹249/₹499/₹999 defaults, `STORE_PACKS` JSON override, and junk config
+  falls back to the defaults rather than leaving the app with nothing to sell. `packForProduct` is
+  the single place a product becomes money — an UNKNOWN id (a retired store product) credits nothing.
+- **`storeVerify.ts`** — real verification against Apple's App Store Server API (ES256 JWT from the
+  admin's .p8; production tried first with automatic SANDBOX fallback on 404, because a TestFlight
+  purchase is not fraud; refunded/revoked refuses) and Google's Play Developer API (service-account
+  JWT → access token → purchases.products.get; ONLY `purchaseState 0` credits — a PENDING UPI
+  purchase is not money). Injectable fetch, so money code is provable in CI where neither store exists.
+- **`/api/payment/store/verify`** — verified uid required; the product comes from the STORE's answer
+  and is priced from OUR catalogue (a client cannot buy ₹99 and claim ₹999); the store transaction
+  id IS the `payment_transactions` doc id, so a re-delivered or retried purchase credits exactly
+  once; credit happens in a Firestore transaction. `/api/payment/store/packs` reports honestly
+  whether each platform is actually configured. 21 tests, written around the ways it could WRONGLY
+  credit (forged token, client-chosen product, refund, pending, replay).
+
+**Still to come (slice 2), and honestly blocked on the admin's console work:** the native plugin +
+buy UI + platform routing (web → Cashfree, native → store). Products must exist in App Store Connect
+and Play Console before that code can be exercised at all, and Apple's "Agreements, Tax, and
+Banking" + Google's payments profile take days to approve — so the admin checklist was handed over
+first, in parallel with this slice.
+
+## 2026-08-09 — Store markup: the store's cut comes out of the STORE PRICE, never our margin
+
+Admin: *"Google aur Apple apna % lete hai — hamare ₹ kam nahi hone chahiye!!"* Correct, and the fix
+is arithmetic, not hope. A pack now carries TWO amounts, deliberately separate:
+- `priceInr` — what the STORE charges, marked up to absorb the commission (₹119 / ₹299 / ₹599 / ₹1199)
+- `creditInr` — what the WALLET gets, identical to the web rail (₹99 / ₹249 / ₹499 / ₹999)
+At 15% every default pack nets ≥ its credit (₹119→₹101.15, ₹1199→₹1019.15) — **test-pinned**, so a
+future price edit that would quietly fund the store out of our margin fails CI.
+Why markup and not a smaller credit: charging ₹99 and crediting ₹84 reads as cheating the user;
+charging ₹119 for ₹99 of credit, with the reason on screen, is the same arithmetic told honestly —
+and is what every large app does on mobile. `storePriceForCredit()` is the calculation in code, so a
+price change is derived rather than guessed, and `netAfterStoreFee()` states the real net.
+⚠️ Recorded honestly: 15% is right for BOTH stores on the first $1M/year — Google applies it
+automatically, **Apple requires a one-time enrolment in the App Store Small Business Program**;
+without it the rate is 30% and these prices under-recover. India's GST also sits in the middle (the
+stores collect and remit). `STORE_FEE_PCT` exists so the admin retunes from the FIRST REAL PAYOUT
+report, which is the only honest source for the final rate. The transaction record now stores
+`storePriceInr` / `storeFeePct` / `storeNetInr` alongside the credit, so a payout can be reconciled
+without re-deriving anything.
+---
+
+## 2026-08-09 — Reported build = the WHOLE session (0 → 100), with per-part Download AND Copy
+
+**Admin ask (verbatim):** "jab koi user app bana kar report kare, to puri report, sabhi edit sath
+0 to 100 admin ko send ho! Admin ke pas option ho kitne part download/copy karne hai — 1st, 2nd,
+3rd … all. Aur sirf download ka option aa raha hai, copy bhi add karo! Aur han, build report JSON
+me hi copy hi, text me nhi."
+
+**Root cause of what was wrong (not a UI gap — a DATA gap).** Pressing "Report" submitted exactly
+ONE report: whichever build the user happened to be looking at. Every earlier build and every edit
+of that session — the part that actually explains how the app got into its final state — was never
+sent. So the admin inbox held the last frame of a film, and no autopsy (rule 5) could see the
+sequence that produced it. Adding buttons to that record would have divided nothing into parts.
+
+**Fix, in order:**
+1. `report-to-admin` now gathers the workspace's whole durable history (up to 20 builds) plus the
+   report in hand, dedupes by `startedAt`, orders oldest → newest, and stores it. Best-effort: if
+   the history read fails the record is byte-identical to what it was before — a submit can never
+   fail because of this.
+2. `AdminBuildReportRecord` gained `session { builds, count, omittedBuilds }` and `meta.sessionParts`.
+   Every build is trimmed for storage and the set is byte-capped by the SAME `capSessionReports` the
+   user-side stitch uses — the newest is always kept, dropped ones are COUNTED, never silently lost.
+   A single-build session stores no `session` block at all (an "All" and a "1st part" that are the
+   same bytes is a choice with nothing behind it).
+3. New PURE `src/components/adminReportParts.ts` owns the numbering, the labels and — the part that
+   matters — the payload BOUNDARY: `'all'` = the entire record; an index = that ONE build wrapped
+   with the identifying meta and `part {index, of, label}`, so a pasted part is never an anonymous
+   blob and never the whole session wearing a part label. Nonsense/out-of-range keys return `''` so
+   the button disables instead of copying "undefined".
+4. **Copy everywhere Download exists**, and the payload is JSON — the report modal (part picker +
+   Copy JSON + Download JSON), the all-builds session row, and every single build inside it. New
+   shared `src/lib/copyText.ts`: `navigator.clipboard` does not exist in a non-secure context and
+   `writeText` REJECTS when the document is unfocused — both look identical to a user who pastes and
+   gets their old clipboard back, so it falls back to `execCommand` and returns an honest boolean.
+   The UI reports "copied" only when a copy genuinely happened (rule 3).
+5. Copy and Download now share ONE loader (`fetchWorkspaceReportJson`) and one saver
+   (`saveJsonFile`), so the two buttons cannot drift into handing over different bytes. The modal's
+   `<pre>` renders the SAME string the buttons hand over — what you see is what you copy.
+6. Numbering is by BUILD order: the expanded list arrives newest-first, so its ordinal counts from
+   the far end — "1st part" there is the same build as "1st part" in the oldest → newest session
+   download. A report carrying more than one build shows a "N parts" badge in the inbox list.
+
+Tests: 25 new in `tests/adminReportParts.test.ts` — ordinal edge cases (11th/21st/23rd), the session
+genuinely reaching the record, the focused build surviving the byte cap with the omission COUNTED,
+every part boundary (including "a part is not the session"), every part parsing as JSON, and the
+clipboard's honest false. `tests/adminAllBuilds.test.ts`'s download contract updated to assert both
+halves of the split (auth header on the fetch, blob + filename on the save) rather than weakened.
+Gate: tsc clean both projects, real build green, bundle 637.4/650 KB, full run 12,775/12,775.
+
+**Same-day follow-up — the session budget was sized for the WRONG SINK (caught pre-merge).**
+The first cut fitted the session with `capSessionReports`, whose 6 MB budget was chosen for an HTTP
+download. This record goes into a **Firestore document**, whose hard limit is **1 MiB**. A normal
+multi-build session would therefore have produced an oversized document, Firestore would have
+REJECTED the write, and the admin would have received **nothing** — including the focused build that
+arrived fine before the change. A feature meant to give the admin more would have given less.
+Root cause (rule 4): a shared helper was reused without re-deriving its budget for the new sink.
+Fix: the session's allowance is now DERIVED — `1 MiB − (the focused report + meta) − 96 KB headroom`
+for Firestore's own field-name/UTF-8 accounting — and fitted by a new `fitSessionToDocument`, which
+is deliberately NOT `capSessionReports`: that one keeps the newest build "even if huge" (right for a
+download, fatal against a hard limit), this one drops oldest-first and will store ZERO builds rather
+than lose the write. The `session` block is kept even when empty, because `omittedBuilds` is the only
+place the admin learns earlier builds existed; `partsSummary` says so instead of "Single build".
+Siblings swept: the two other `capSessionReports` call sites are both HTTP bodies — 6 MB is correct
+there, no change. Regression tests encode both failures (the whole record must fit a document; a
+session where not even one build fits still declares its omission).
+
+---
+
+## 2026-08-09 — AUTOPSY: build report d6deaaf0 (Mitrify import) — a "clean" build that served nothing
+
+**What the report claimed:** `ok: true`, `✅ Live preview is up on port 3000`, 1 self-heal, 3 unresolved.
+**What the admin's screen showed:** `{"message":"secret option required for sessions"}` — the app
+answered EVERY request with an error. The build was reported as a success over a dead app.
+
+### Ledger
+- ❌ **Still broken (3):** (1) `npm run db:push` → exit 127, `sh: 1: drizzle-kit: not found`, so the
+  database stayed empty; (2) `relation "profiles" does not exist` — every data page dead; (3) the app
+  served an error body at `/` while the preview verdict said "up".
+- 🔀 **Worked around (2):** in-browser preview could not load the packages → silently switched to the
+  live server; the manifest says `framework: node-express` while the report says `vite-react` — ONE
+  build carrying two different answers for the same question.
+- ⏭️ **Skipped (2, both correct and disclosed):** 8 credential-printing `console.log`s were found and
+  deliberately NOT changed ("do not change any files"), and the E2E scaffold was skipped.
+- 🥵 **Struggle (1):** 8m 46s wall clock for a read-only survey, of which the actual AI work was 30s
+  (two calls). The remaining ~8 minutes were import (80s) + install + preview boot.
+- ✅ **Self-heal (1):** the APP's own `ensureSchema` tried to repair the schema and failed — ours
+  healed nothing here, so the green checkmark was measuring someone else's failed attempt.
+
+### THE MISSING SUBSYSTEM (step 2)
+A **pre-flight "can this app actually run here?" contract**: dependencies present before any project
+script runs, the app's own required secrets provisioned, and the preview verdict EARNED by reading
+what the app actually returns. All three were absent, and each absence produced one symptom above.
+
+### Root causes killed (step 3 — the class, not the instance)
+1. **Env discovery read a file the project may not have.** `envVarNames` parsed only
+   `.env.example`/`.env.sample`/`.env.template`. Mitrify commits none, so the list was EMPTY — which
+   is why no `SESSION_SECRET` was conjured (express-session then rejected every request) AND why the
+   honest "these external services still need real values" note never appeared. One gap, three
+   symptoms. It now ALSO scans the source for `process.env.X` / `import.meta.env.X`: an example file
+   is a courtesy, a `process.env` read is the truth every project has. Bounded (source extensions
+   only, 4 MB cap) and order-stable (the documented template still leads).
+2. **The install guarantee was attached to the dev-server COMMAND, not the WORKSPACE.** Anything else
+   needing a project binary ran outside it — migrations today, lint/test/codegen tomorrow. New
+   `ensureDependencies()` on the actuator (reusing the SAME staleness check and installer as the
+   boot, so the two cannot drift) is now called BEFORE the migration. Zero added time: it is the same
+   install the boot runs seconds later. A failed install SKIPS the migration with an honest record
+   instead of buying a confusing exit 127.
+3. **THE HONESTY FAILURE — a JSON error body counted as a rendered app.** `analyzePreviewHtml` had
+   rules for "Cannot GET", overlays, empty mounts and blank pages; a 48-character machine-readable
+   error passed all of them. New `jsonErrorBody()` catches an error envelope — deliberately narrow,
+   so `{"message":"API is running"}` is left alone while `{"message":"secret option required…"}` is
+   caught, and the verdict quotes what the app actually returned.
+
+### OPEN root cause (rule 6 — recorded, not patched)
+**The framework detector gives two different answers in one build** (`node-express` in the manifest,
+`vite-react` in the report). That disagreement is very likely what makes an in-browser preview be
+attempted for a server app and then abandoned — the 🔀 workaround above. Not fixed in this pass: the
+evidence identifies the contradiction but not yet which of the two writers is wrong, and guessing at
+a value that steers the whole preview strategy is exactly the surface patch rule 4 forbids. Next
+autopsy or a targeted trace should settle it.
+
+Tests: 16 new in `tests/importAutopsyMitrify.test.ts` — the exact Mitrify file shape (no
+`.env.example`) now yielding SESSION_SECRET, regex state-safety across repeated scans, install-before-
+migrate ordering and its skip path, the exact error body the admin saw, and the false-positive guards
+that keep a healthy API greeting passing. Gate: tsc clean both projects, full run 12,795/12,795.
+
+### Second pass over the SAME report (admin: "autopsy me kuch bacha hai fix karne layak?")
+
+Two more root causes, both missed by the first pass — and the first of them is the more serious,
+because it made the report lie about the ENGINE'S OWN quality rather than about the user's app.
+
+**ROOT CAUSE 4 — a permanent failure was counted as the build's ONE self-heal.** The report showed
+`healCount: 1`, and that heal was `$ npm run db:push → exit 127` carrying `autoResolved: true`. It was
+never healed: the tables were never created, and the run's own next two entries
+(`IMPORT_DB_MIGRATIONS_FAILED`, `DB_SCHEMA_MISSING`) say so and stayed unresolved. The cause was
+`RECOVERABLE_ON_SUCCESS`, which forgives every `SANDBOX_CMD_FAILED` on a build that ultimately
+succeeded — "a successful build recovered from them by definition". That inference is sound for a
+retried tool call and FALSE for a failure whose consequence outlived it. Worse, `healCount` feeds
+`firstPassQuality` — the admin's headline engine number — so the engine was crediting itself for its
+own unrepaired failure.
+The first fix attempted was "forgive only if the same command later ran clean". An EXISTING test
+(PaisaTrack, 2026-07-21) proved that too blunt: `npx tsc --noEmit` failed twice, the agent fixed the
+code, the build succeeded and tsc was never re-run — genuinely recovered, no re-run evidence. Both
+cases are real, so the discriminator had to be the EVIDENCE, not the command: a failure is forgiven
+unless the run still carries an unresolved, non-observation problem that NAMES that command
+(`failureHasSurvivingConsequence`). Mitrify's db:push is named by two surviving problems → stays a
+failure; PaisaTrack's tsc is named by none → still forgiven. `deriveRootCause` takes the same
+evidence so the two can never disagree.
+
+**ROOT CAUSE 5 — one build carried TWO answers for its own framework** (`node-express` in the
+manifest, `vite-react` in the report). `meta.framework` is captured ONCE when the diagnostics object
+is constructed at build start, from the request default; the import detected the real framework 12
+seconds later and only the manifest heard about it. This is the exact sibling of the stale `model`
+label that `honestModelLabel` was written to fix on 2026-07-27 — same object, same moment of capture,
+same "the truth arrives later" shape — which is why hunting siblings (rule 3) found it. New
+`setFramework()` is now called at BOTH places the label is reassigned: the import landing and the
+drift correction. A blank value can never erase a known one.
+
+**STILL OPEN (rule 6) — an unexplained 153-second hole.** Between `IMPORT_PREVIEW_SERVING`
+(ts 1786282510925) and the next recorded step (ts 1786282664021) the run recorded nothing but
+heartbeats. Total wall clock was 8m46s for a read-only survey whose actual model work was 30s across
+two calls. The earlier "hole in the recording" fix covered the boot; this gap sits AFTER it, so it is
+a different one and the report does not yet say what filled it. Not guessed at here — the next
+report with instrumentation over that window should name it.
+
+Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (24 total) — the exact db:push case staying
+unresolved with `counts.autoResolved: 0`, PaisaTrack still forgiven, a later-clean command forgiven,
+a failed build untouched, observations never counting as a consequence, and a source sweep proving
+every framework reassignment tells the report. Gate: tsc clean both projects, full run 12,803/12,803.
+
+### 2026-08-09 — The app keeps its OWN port (admin: "report me port 3000, lekin mitrify to 5000 par hai")
+
+**The report was not lying — and that is the point.** The app really was on port 3000, because
+NavBharatAI put it there: the import boot wrote a fixed `PORT` into the app's dev `.env`, moving every
+PORT-honoring app off its own port.
+
+**Why that pin existed, and why it was the wrong half of the fix.** It answered the 2026-08-07 bug
+(the Preview tab showing E2B's "Closed Port Error" for 3000 while the app served 5000). That bug had
+TWO answers shipped together: a CLIENT fix making a freshly VERIFIED url outrank the saved historical
+one — the real cause — and this server pin, which made the app unable to move. The client fix cured
+the cause; the pin cured the symptom by changing the user's app.
+
+**The cost the admin found.** Forcing the port silently contradicts everything else in the user's own
+project that names the real one — their README, their OAuth redirect URIs, a hardcoded dev proxy or
+CORS origin — and on an import turn whose instruction was literally "do not change any files", moving
+the app's port is precisely the change we promised not to make. It also made the report's honest
+statement ("port 3000") read as a bug to the one person who knows the app.
+
+**Fixed at the cause.** Nothing assigns a port any more; the import boot DISCOVERS it — the app's own
+boot log first, then `devScriptPort`, then the ports the sandbox OS reports as genuinely LISTENING —
+and visits candidates until one actually serves the app. This is the evidence-first flip system built
+on 2026-08-07 (admin: "ek par na chale to dusra, dusre par na chale to teesra?"), which until now was
+wired ONLY into the Diagnose route; the import path had one guess and no way to correct it, which is
+exactly why a pin felt necessary there. The determinism the pin bought is replaced by evidence, which
+is strictly stronger: it is right even for an app that ignores `PORT` altogether. The flip stays
+cost-free on the happy path — it engages only when the first port fails to render.
+
+**A hazard closed on the way:** an EMPTY `PORT=` is now never written either. Every other var is safe
+as `''` because apps test it for truthiness, but a port is PARSED — `Number(process.env.PORT ?? 5000)`
+turns `''` into 0 and the server binds a RANDOM port that no preview could find. Absent is the only
+safe placeholder; a real user-provided value is still honoured.
+
+`tests/previewFreshUrl.test.ts` asserted the OPPOSITE invariant. It was REPLACED, not deleted, with
+the superseding decision and the reasoning recorded in place — the client half of that fix (the real
+cause) is untouched and still asserted. 4 new tests in `tests/importAutopsyMitrify.test.ts` (28 total).
+Gate: tsc clean both projects, full run 12,807/12,807.
+
+---
+
+## 2026-08-09 — The platform speaks the user's language too (ROADMAP item 6, half 1)
+
+**Root cause, stated exactly.** `LANGUAGE_RULE` makes the MODEL mirror the user's language, and it works.
+What it cannot reach is the ~157 narration lines OUR SERVER emits during a build ("🗄️ Provisioning a
+local PostgreSQL…", "🔧 Added 2 missing import(s)…") — they never pass through a model, so no prompt rule
+can translate them. A Hindi user reads Hindi from the AI and English from the platform, in one feed. The
+roadmap's own line said to do this half first because it is the jarring half.
+
+**Fixed as a CLASS, not as strings** (fourth rule, step 2). Every such line is now an ID with typed
+parameters in `AgentV3/narrationCatalogue.ts`; call sites hold an id, never a sentence. 🔒 Completeness is
+enforced by the COMPILER — `Catalogue` is a mapped type over every id, so a language table missing one
+line fails `tsc`. A half-translated language cannot ship, and a new id cannot be added without translating
+it everywhere. That is what keeps "fully working / not built yet" true per-language.
+
+**Language decided from the user's own words, by SCRIPT** (`lib/narrationLanguage.ts`) — deterministic,
+free, and incapable of disagreeing with itself between two lines of one build. A 20% share threshold, and
+code/paths/urls stripped first, so `Build a dashboard app and label it डैशबोर्ड` stays English while
+`मुझे Firebase के साथ ऐप बनाओ` is Hindi. **Romanised Hinglish resolves to ENGLISH on purpose**: the model
+answers such a prompt in English too, and Devanagari output there would make the platform disagree with
+the AI in the very same feed — the exact bug this closes. Other Indian scripts are RECOGNISED but resolve
+to English rather than being served Hindi they did not ask for; adding Tamil later is one complete
+catalogue plus one line, nothing else moves.
+
+**Siblings hunted** (rule 3): sub-agents emit into the SAME feed, so `SubAgent.ts` threads the build's
+language into every child dispatcher — a child left on the default would have put English lines back into
+a Hindi build.
+
+23 tests (`tests/narrationLanguage.test.ts`), including completeness across every supported language, a
+"Hindi is not a copy-paste of English" check, identifiers/paths/package names never translated, and the
+white-label assertion that no vendor or model name can reach a narration line. Three existing source-lock
+tests (`dbProvisionVerify`, `userDatabaseWins`, `secretPreflightWiring`) now lock the branch AND the
+catalogue's words — strictly stronger than the string match they replaced, not weakened to pass.
+
+Scope, honestly: this slice covers the 23 lines in `ToolDispatcher.ts`. The ~131 in `routes/agentv3.ts`
+are the next slice; until they land, a Hindi build shows Hindi for the dispatcher's lines and English for
+the route's. `AppKnowledgeBase.ts` states that limit plainly rather than promising the whole feed.
+
+Verification gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1120 files /
+12,774 tests, exit 0**.
+
+### Correction, same day, BEFORE the merge — I had built a SECOND language detector
+
+The slice above shipped its own script counter (`detectScript`, ranges table, 0.20 threshold). Then a
+read of the surrounding code — the redundant-work check that safeguard #6 exists for, done late — found
+`AgentV3/LanguageDetect.detectLanguageHint`: the SAME script counting, at threshold **0.15**, already
+deciding the app's generated-text language and the weak-tier notice, and already handling romanised
+Indic via `detectRomanizedIndic`.
+
+Two detectors would have drifted, and the drift had a specific victim: a prompt landing between 0.15 and
+0.20 Devanagari would take the AI to Hindi and leave the platform in English — **the exact defect this
+work exists to remove**, reintroduced by the fix for it. Caught before merge; the duplicate is deleted
+and `narrationLanguage.ts` now owns NO detection at all, only the mapping onto languages we can write.
+A source-level test asserts it holds no script table, code-point range or threshold, so the duplicate
+cannot grow back.
+
+**What the evidence then corrected in the design** (two assumptions I had written down were simply wrong):
+
+1. `mujhe ek todo app banao…` does NOT come back as romanised Hindi — `detectRomanizedIndic` refuses it
+   because ordinary English words outnumber the markers. The English narration is right, but not for the
+   reason first recorded.
+2. `Build a dashboard app and label it डैशबोर्ड` DOES come back as Hindi from the shared detector. So
+   delegating wholesale would have made the platform speak Hindi while the model — mirroring the user's
+   own words per `LANGUAGE_RULE` — replied in English. A new mismatch, in place of the old one.
+
+The reconciliation is that the two consumers ask different questions of one measurement. The app's text
+language is right to be generous; the platform's own voice must track the language the model REPLIES in,
+which is stricter. So `LanguageHint` now exposes `scriptShare` (additive, no behaviour change for any
+existing caller — the value was already computed for the threshold), and narration requires a MAJORITY
+(`NARRATION_SCRIPT_SHARE` 0.5) of the SAME count. One counter, one table, two documented bars.
+
+Also corrected: Marathi. It shares the Devanagari block, `devanagariLanguage` already separates it from
+Hindi, and mapping `mr` onto the Hindi catalogue would be exactly the confident-wrong-language failure
+this module warns about. It falls through to English until a Marathi catalogue exists.
+
+Gate after the correction: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1123 files
+/ 12,848 tests, exit 0**.
+## 2026-08-09 — GREEN GUARD, layer 1 of 2: the decision core (admin: "app banne ke baad kharab nahi honi chahiye")
+
+**The admin's question, which is the sharpest one asked of this project:** "pehli build me 4-5 min me
+app 100% ban jati hai, working app — to baad me 20 min tak usko edit kar ke kharab kyu kiya jata hai?
+Iska koi permanent solution nahi hai? … ek double layer protection banao."
+
+**WHY IT HAPPENS — mechanism, not theory (verified in code):**
+1. The durable project is saved at the END of every turn, whatever the outcome (`saveWorkspaceFiles`
+   at settle). So the saved state is "the LAST turn", never "the last WORKING turn". A bad edit
+   overwrites the good app, and the good version survives only as a git commit inside a sandbox that
+   is eventually recycled — i.e. the working app is genuinely gone.
+2. When an edit breaks something, the engine's answer is MORE model passes (repair → heal → review →
+   autofix). Each pass is a fresh chance to break something else, and it is where the twenty minutes
+   go. Repair is expensive and probabilistic; going back is cheap and certain.
+
+**THE PRINCIPLE WAS ALREADY PROVEN HERE, AT THE WRONG SCALE.** `EndgameRepair`'s convergence guard
+snapshots files before a repair and rolls them back when the error count gets worse — "monotone by
+construction: it helps or does nothing, never harms." Exactly right, applied to ONE pass and ONE
+metric. Green Guard raises that same property to the level that matters — the whole TURN.
+
+**SHIPPED IN THIS PR — the PURE decision half** (`GreenGuard.ts`, no I/O, fully unit-tested):
+- `decideGreenGuard` — green now ⇒ SAVE as last known good; not green now but green before ⇒ RESTORE;
+  never green ⇒ NONE (nothing good exists to protect, and restoring rubbish over rubbish helps nobody).
+  An absent/unknown verdict is never treated as green — green must be EARNED (the visited-and-really-
+  rendered verdict, which only became trustworthy with #2196's honest preview checks).
+- `restorePlan` — writes back changed files AND removes files the bad turn ADDED. That second half is
+  what makes it a restore instead of an overlay: writing good files on top while leaving new ones
+  behind produces a THIRD state that was never tested — neither the working app nor the broken one.
+  That hybrid is the classic way a "rollback" quietly makes things worse; closed by construction.
+- `greenGuardMessage` — the user is always TOLD, never silently rewritten, in plain language with no
+  vendor name (white-label law).
+- `greenWorkspaceKey` — the snapshot lives in the SAME durable file store under a `::green` suffix.
+  Deliberately not a new storage system: that store already solves one-document-per-file (so a big
+  project never hits the 1 MB document limit), sharded writes and bounded deletes. A snapshot store of
+  my own would have to re-earn all of it — and, on this exact day, would have re-learned the 1 MB
+  lesson the hard way (see the report-parts entry above).
+- Kill switch `AGENTV3_GREEN_GUARD=off`.
+
+**SIBLING FIXED IN THE SAME CHANGE (rule 3):** `listUserWorkspaceApps` prefix-scans `agentv3-<uid>-`,
+and a snapshot key shares that prefix — so the user would have seen their app TWICE and could have
+opened the backup by mistake. Snapshots are now excluded there.
+
+**HONEST STATUS — this does NOTHING for a user yet.** It is the decision core only; nothing calls it.
+Layer 2 (capturing the snapshot at settle, and performing the restore) is the next PR, and until that
+lands the admin's problem is unchanged. Recorded plainly rather than reported as solved (rule 2: there
+are only two states, fully working or not built yet — this is infrastructure toward the first).
+
+Tests: 14 in `tests/greenGuard.test.ts` — both layers' rules, the hybrid trap, restore idempotence,
+a deleted file coming back, the white-label check on the user message, and a source assertion that the
+app list excludes snapshots. Gate: tsc clean both projects, full run 12,821/12,821.
+
+### GREEN GUARD, layer 2 — now WIRED (the half the user actually feels)
+
+Layer 1 shipped the decision core and honestly recorded that it did nothing yet. This wires it into
+the exact line that caused the problem: the settle-time `saveWorkspaceFiles(workspaceId, toSave)`,
+which persisted whatever the turn produced, good or broken.
+
+- **The green signal is EARNED, not inferred.** `previewGreen` is set in exactly TWO places, both
+  beside a `recordPreviewVerified()` call — the render-rescue and the preview-verify paths, each of
+  which opened the app in a REAL browser and saw it render (the verify path also requires zero console
+  errors). A build that merely "finished" never sets it. Protecting a state we never verified would be
+  the same lie in a new place, and a test asserts there are exactly two setters.
+- **Green ⇒ the file set is ALSO written to `<workspaceId>::green`,** after the project save, so a
+  failure writing the snapshot can never cost the user their actual files.
+- **Was-green-and-now-broken ⇒ restored:** the good files are written back to the sandbox AND the
+  durable store, and the files the failed attempt ADDED are removed from both — without that second
+  half the result is a hybrid third state that was never tested (see layer 1's note).
+- **The failed attempt is never destroyed.** It is saved under `<workspaceId>::attempt` BEFORE
+  anything is undone, so a restore costs the user nothing and a deliberate work-in-progress is
+  recoverable rather than erased. Test asserts the ordering.
+- **Sandbox deletion goes through a PURE, tested `buildRemoveCommand`.** The actuator has no delete
+  primitive, so removal is a shell command — which is exactly why the path filter is strict
+  (workspace-relative, no traversal, no metacharacters), the list is capped, and unsafe paths are
+  DROPPED rather than escaped. A restore is not worth inventing a command-injection surface for.
+- **It can never cost a user their save.** The whole block is inside try/catch with `if (!saved)`
+  falling through to the original save, and it is flag-gated (`AGENTV3_GREEN_GUARD=off`). Its decision
+  is recorded in the build report either way (`GREEN_GUARD_SAVE|RESTORE|NONE`, `GREEN_GUARD_RESTORED`).
+
+**HONEST LIMITS, stated rather than discovered later:**
+1. It protects a turn that ends NOT-GREEN. It does NOT catch a turn that ends green while having
+   broken something the preview does not exercise (a route the check never visits). Narrowing that
+   needs a per-route fingerprint of the working app — the natural next slice.
+2. `before.green` is inferred from "a verified-good snapshot exists", not from a fresh check at turn
+   start. That is deliberately conservative and correct for the reported case, but it means a
+   deliberate, long-running rewrite that legitimately does not render yet WILL be rolled back — which
+   is why the attempt is preserved and the user is told, rather than silently overwritten.
+3. Unverified in production: this sandbox cannot reach the live site, so the proof is the next real
+   build report.
+
+Tests: 22 in `tests/greenGuard.test.ts` (8 new for layer 2) — the injection surface, the cap, exactly
+two green setters each beside a real-browser verification, attempt-kept-before-undo ordering, the
+fall-through save, and the flag gate. Gate: tsc clean both projects, full run 12,876/12,876.
+
+---
+
+## 2026-08-09 — ROUTE FINGERPRINT: the largest remaining way a working app got broken
+
+**Admin, right after Green Guard shipped:** "jo jo bacha hai usko bhi smart fix karo."
+
+**THE HOLE.** Green Guard judged "green" by opening ONE url — the home page. So an edit that left the
+home page rendering while breaking `/admin`, `/checkout` or `/profile` ended the turn GREEN, the broken
+state became the new LAST KNOWN GOOD, and the guard cheerfully protected the damage. Worse than a
+missed catch: the guard actively preserved the regression. This is the failure a user finds days later.
+
+**THE SMART PART IS THE SAMPLE, NOT THE SWEEP.** A real app declares hundreds of routes (the Mitrify
+report counted 186); visiting them all would add minutes to every build — a worse product than the bug.
+Instead: only the app's own VISITABLE pages are considered (an `/api` endpoint is not a screen, a
+`:id` route has no real value to substitute, an asset is not a page); a small DETERMINISTIC sample is
+taken (home first, then shallowest-then-alphabetical, capped at 5) so the same app yields the same
+routes every turn and two records are always comparable; and the check runs ONLY on a turn that already
+looks green, so a failing build pays nothing extra.
+
+**THE COMPARISON IS DELIBERATELY ASYMMETRIC**, and that is what keeps it from false-failing honest
+builds: a route that rendered before and does not now is a REGRESSION; a route that NEVER rendered is
+not held against the turn (it may need a login, seed data, or may not exist yet); and a route that was
+not reachable this turn is simply NOT MEASURED, never "broken" — the same honesty rule the preview
+verdict follows (an unmeasured thing must not be reported as a failure).
+
+**A regression VETOES green** (`previewGreen = false`), which hands the turn straight to Green Guard's
+restore — so the damage is undone instead of enshrined — and records `ROUTE_REGRESSION` naming the
+exact pages, with the line the admin needs: "the home page still loaded, so it would have passed
+unnoticed."
+
+The fingerprint lives under its OWN key (`<workspaceId>::greenmeta`), never inside the snapshot, so a
+restore can never write our bookkeeping file into the user's app. A corrupt record degrades to "no
+fingerprint" rather than throwing. Independent kill switch `AGENTV3_ROUTE_FINGERPRINT=off` — the extra
+page visits can be stopped without disabling Green Guard.
+
+**STILL OPEN (unchanged, stated again rather than quietly dropped):**
+1. A deliberate long rewrite that legitimately does not render yet is still rolled back. The attempt is
+   preserved under `<workspaceId>::attempt` and the user is told, but there is no one-sentence way to
+   ask for it back — that escape hatch is the next slice.
+2. The 153-second silent window and the 8m46s read-only survey remain unexplained.
+3. Everything from today is unverified in production; the proof is the next real build report.
+
+Tests: 19 in `tests/routeFingerprint.test.ts` — the sample's determinism and bounds, every not-a-page
+and not-visitable rejection, the caught bug (home fine + /admin broken), the three asymmetry rules,
+corrupt-record tolerance, and wiring assertions that the check only runs on a green turn and that a
+regression vetoes green. Gate: tsc clean both projects, full run 12,895/12,895.
+
+### Same day — WHERE DID THE TIME GO: the heartbeat could only ever name a tool
+
+**The open item from the d6deaaf0 autopsy, now measurable instead of guessed at.** That report had five
+consecutive heartbeats all pointing at the SAME narration line from minute 1, a 153-second window with
+nothing but heartbeats, and 8m46s of wall clock for a read-only survey whose actual model work was 30
+seconds. I recorded it as an open root cause rather than inventing an explanation.
+
+**ROOT CAUSE: `heartbeat()` could only name a TOOL the agent had called.** But the long stretches of a
+build are not tool calls at all — importing a repository, provisioning a database, `npm install`,
+booting the dev server, verifying the preview. During every one of them the heartbeat fell back to
+`last: <the most recent narration>`, which is why five minutes of real work were all labelled with a
+line from minute one. The report could not answer "where did the time go?" because **nothing was ever
+recording it**. That is a hole in the RECORDING, exactly like the 2026-08-04 "238-second window with no
+events" finding — the same class, one level further out.
+
+**FIX:** `enterPhase(name)` / `exitPhase()` on the diagnostics. An ACTIVE PHASE now outranks a stale
+last-activity line in the heartbeat ("minute 3 — still working (installing dependencies and starting
+your app, 130s so far)"), and closing a phase writes a `PHASE_TIMING` line so the report carries a
+plain timeline of where the minutes went. An in-flight TOOL still wins — a named tool is more specific
+than a phase. A new phase SUPERSEDES an unclosed one rather than nesting, so a forgotten `exitPhase`
+can never freeze the heartbeat on a stale label (and the superseded phase still contributes its
+timing). Sub-3s steps are not written — that is noise, not signal.
+
+Marked so far: creating the database tables, installing dependencies and starting your app, checking
+the live preview — i.e. precisely the stretches that produced the silent window. This does not make a
+build faster by itself; it makes the next report SAY where the time went, which is the prerequisite for
+cutting it honestly rather than by guesswork.
+
+Tests: 6 more in `tests/routeFingerprint.test.ts` (25 total) — the heartbeat naming the phase and its
+elapsed seconds, the timing line, the sub-3s suppression, the supersede-not-nest rule, tools still
+outranking phases, and a source assertion that the import's long stretches are actually marked.
+Gate: tsc clean both projects, full run 12,901/12,901.
+
+### Same day — "KEEP MY CHANGES": Green Guard's one honest false positive now has an exit
+
+**The last open item of the double-layer protection.** Green Guard restores whenever a verified-working
+app stops working. That is right almost always, and WRONG in exactly one case: a user who asked for
+something large ON PURPOSE — a framework migration, a rewrite — whose app legitimately does not render
+yet. Their work was already preserved under `<workspaceId>::attempt`, but there was **no way to ask for
+it back**. A safety net the user cannot leave is a cage.
+
+**The fix is an EXACT PHRASE, deliberately not a classifier.** The restore message now states the exact
+words ("reply **keep my changes**"), and only those words — plus the Hinglish equivalents a real user of
+this app types (`mere changes rakho`, `wo wapas do`, `purana wala wapas`) — are honoured. An intent
+classifier would be the wrong tool here even at a high win rate: guessing wrong either strands the user
+or restores a broken tree over a working app, and neither is worth a probabilistic bet. A phrase
+appearing INSIDE a longer instruction still counts ("keep my changes and add a login"), because people
+write instructions rather than commands — but nothing beyond the stated phrase is inferred. Explicitly
+NOT matched: "undo that", "revert", "keep the design the same", "do not change my code".
+
+**Where it runs, and why there:** BEFORE the file guardian. The guardian's existing job is to carry the
+durable project into the sandbox, so writing the attempt into the durable store first means the
+guardian delivers it by its own proven path — no second restore mechanism to keep in step with the
+first. The turn then proceeds normally, so "keep my changes and add a login" does BOTH in one go
+instead of costing the user a turn.
+
+**Honest in both directions:** handing the attempt back does not pretend it works
+(`attemptRestoredMessage` says plainly that this version did not run correctly when it was made), and
+when there is nothing preserved the user is told so rather than the request silently doing nothing.
+`attemptWorkspaceKey()` is now the single source of the key for both the writer and the reader.
+
+With this, the double-layer protection the admin asked for is complete: prevent (last known good),
+undo (auto-restore), catch what the home page hides (route fingerprint), explain the time (phase
+timing), and escape (keep my changes). **Still unverified in production — the proof is the next real
+build report.**
+
+Tests: 7 more in `tests/greenGuard.test.ts` (29 total) — the exact phrases and the Hinglish set, the
+near-misses that must NOT match, the message advertising the hatch, the honest "this did not run
+correctly" hand-back, and wiring assertions that it runs before the guardian and says something honest
+when there is nothing to give back. Gate: tsc clean both projects, full run 12,908/12,908.
+
+---
+
+## 2026-08-09 — AUTOPSY: build 02be22e3 (CRM `continue`) — THE FIRST LIVE PROOF OF GREEN GUARD
+
+**The production evidence I had been asking for.** This report carries
+`GREEN_GUARD_SAVE — "The turn ended with a verified working app — recorded as the last known good
+state."` So Green Guard (#2204) IS live, DID run, and DID capture a baseline on a real user build.
+Everything shipped today between #2196 and #2207 is no longer only unit-tested.
+
+### Ledger
+- ❌ **Still broken (3):** `READINESS_BLOCKER — 5 fake/incomplete code issue(s) (placeholder /
+  not-implemented / fake data)` unresolved (the app SHIPPED with placeholder code — a rule-2 violation
+  inside the generated app); `TEST_SUITE playwright: FAIL (exit=1)` unresolved; the `@types/react` v19
+  vs `react` v18 mismatch was described by the reviewer and never fixed.
+- 🔀 **Worked around (2):** `RENDER_RESCUE` — the build finished NOT-ok and was upgraded to success
+  because the preview rendered (honest for billing, but the 50/50 question stands: why did it finish
+  not-ok?); and the dev server was **KILLED (out of memory)** and silently restarted by the health
+  check.
+- ⏭️ **Skipped (2):** the 5 placeholder features were found and never fixed; the Playwright failure was
+  recorded and never investigated.
+- 🥵 **Struggle (3):** **8m18s** of wall clock for `continue` on a **24-file** app, with only 7 model
+  calls; `typecheck` alone took 34s and the dev-server start 33s; and the ETA **never converged** —
+  "~3 min" at the start, "about 3 min more" at minute 4, still "about 3 min more" at minute 8, then it
+  finished 19 seconds later.
+- ✅ **Self-heal (3, and this is the alarming bucket):** added 2 missing imports, removed a duplicate
+  import in `src/App.tsx`, removed one in `src/main.tsx` — **and then the identical three heals ran
+  AGAIN** twenty seconds later.
+
+### FIXED HERE — the guard's first live lesson was about its own honesty
+The recorded reason said **"a verified working app"** on a build whose own health said **"NOT READY ·
+66/100 — 5 incomplete features (placeholder code)"**. Two lines of ONE report contradicting each other
+— exactly the class this project keeps killing. What the guard actually verified is narrow: the app was
+opened in a real browser and it rendered. That is worth protecting, and it is NOT the same claim as
+"working". The reason now says what was measured, and carries the build's own readiness verdict
+(`hasUnresolvedReadinessBlocker`) so an unfinished baseline is recorded as *"the best known state, not
+a finished one"* instead of hiding behind a green word. The DECISION is unchanged: a snapshot that
+loads is still worth protecting, because the alternative is protecting nothing.
+
+### OPEN ROOT CAUSE (rule 6 — recorded, not guessed at)
+**A self-heal did not survive to the next reader.** `evaluate` ran twice (the post-answer integrity
+pass, then the reviewer). `readEvalSnapshot` re-reads every file FRESH from the sandbox each time, and
+the duplicate-import heal is guarded by `if (deduped !== content)` — so the second run finding the SAME
+duplicates proves the first heal's writes were **not present in the sandbox when the second read
+happened**. Either a lost write or something restoring older content over it. Between the two runs the
+post-answer pass logged "loading the durable project (24 files)", which is a suspect but NOT proof, and
+guessing the mechanism is precisely what rule 4 forbids. Needs a targeted trace. Cost today: duplicate
+work and a heal tally that counts the same repair twice.
+
+### PROACTIVE (step 6) — the ceiling this report shows, stated plainly
+This was a **weak-tier** build (`powerLevel: weak`, `noClaude: true`, 18 KIMI turns, ₹27.04). The
+placeholder code and the duplicate imports are what that tier produces, and no amount of downstream
+healing turns them into a finished app — the heals are the engine cleaning up its own output. The 50/50
+law's real question here is not "why did the heal miss one?" but "why is the builder generating
+duplicate imports and placeholder functions at all?" That is an upstream prompt/contract problem, and
+it is where the next real quality jump lives — not in another repair pass.
+
+Tests: 5 more in `tests/greenGuard.test.ts` (33 total) — the reason saying only what was measured, the
+unfinished-build caveat, no caveat when clean, and a wiring assertion that the readiness verdict really
+reaches the record. Gate: tsc clean both projects, full run 12,912/12,912.
+
+### Same report — the ETA repeated a promise it had already broken
+
+**From build 02be22e3's timeline:** "about 3 min more to go" at minute 4, the SAME "about 3 min more
+to go" at minute 8 — and then it finished 19 seconds later.
+
+**ROOT CAUSE — the floor swallowed the doubling.** The overrun step was
+`max(FLOOR, (base/2) * 2^done)`. Whenever `base/2` fell under the 3-minute floor (the common case,
+since most estimates are a few minutes), the clamp ate the first doubling entirely: with base = 3 min,
+`done=0` gave `max(3, 1.5) = 3` and `done=1` gave `max(3, 3) = 3`. Two different overruns, identical
+promise. The doubling existed specifically to stop the "same number, over and over" sawtooth that an
+earlier autopsy (2026-08-04) had already fixed once — this is that same bug leaking back through the
+clamp rather than through the formula.
+
+**FIX:** floor the BASE step, then double THAT — `min(CAP, max(FLOOR, base/2) * 2^done)`. Every
+successive promise is now strictly larger than the last (3 min → 6 min), and after the promise budget
+is spent it stops naming numbers at all and says plainly that it is taking longer. The floor and the
+cap both still apply.
+
+Tests: 3 more in `src/server/lib/BuildTimeEstimator.test.ts` (30 total) — each promise strictly larger
+than the last with the exact user-visible numbers, the no-number line after the budget is spent, and
+the floor/cap still holding. Gate: tsc clean both projects, full run 12,915/12,915.
+
+---
+
+## 2026-08-10 — AUTOPSY: build e61b13b1 (second Mitrify import) — three fixes proven live, two new root causes
+
+### Proven working in production (from yesterday's fixes)
+- **`PHASE_TIMING`** — "⏳ creating the database tables took 26s", "⏳ installing dependencies and
+  starting your app took 19s". The 153-second blind spot is genuinely closed.
+- **Heartbeats now name the live phase** — "minute 3 — still working (checking the live preview, 29s
+  so far)" instead of a four-minute-old narration line.
+- **The framework label agrees with itself** — `node-express` in BOTH the manifest and the report.
+  Yesterday the same app was `node-express` in one and `vite-react` in the other.
+- **Green Guard ran and was honest** — `GREEN_GUARD_NONE: "No verified working state exists yet for
+  this workspace — nothing to save or restore."` Correct: this build never earned green.
+
+### ROOT CAUSE 7 — the preview HOST's own error page counted as the app (the admin's screenshot)
+The screen showed E2B's **"Closed Port Error — the sandbox is running but there's no service running
+on port 3000 · Connection refused"**, while the report said **"✅ Live preview is up on port 3000"**.
+
+That page slipped through every rule in `analyzePreviewHtml`: it is long, it has real prose, no overlay
+markup, no "Cannot GET", no empty mount root, and it is HTML rather than JSON (yesterday's
+`jsonErrorBody` fix covers the JSON sibling — this is the HTML one I failed to sweep for at the time,
+which is a rule-3 miss on my part).
+
+**The damage went past a wrong verdict.** This page reading as "rendered" is what stopped the port FLIP
+from ever engaging: the flip only runs when the first port fails to render, so a host error page that
+reads as success PINS the preview to a port nothing is listening on — the exact bug the flip exists to
+fix. Mitrify serves on 5000; the flip would have found it. New `hostErrorPage()` recognises the host's
+own wording and requires a PAIR of signals, so a user's devops dashboard that merely says "connection
+refused on port 5432" is never mistaken for one.
+
+### ROOT CAUSE 8 — the migration was skipped for a condition that had already cleared
+Yesterday's fix turned `drizzle-kit: not found` into an honest skip. This report shows the skip firing
+for a NEW reason: the pre-boot install failed with **`exit status 217`** — and the SAME installer then
+succeeded nineteen seconds later inside the boot (`[health-check] installing dependencies… done`). So
+the app still booted against an empty database (`DB_SCHEMA_MISSING`, `relation "profiles" does not
+exist`); only the reason in the report had changed. Honest, but not fixed.
+
+The boot PROVES the dependencies are installed, so that is the honest moment to try again: the
+migration is now RETRIED once, after the boot, when it was skipped or failed before it. A second
+chance, not a cover-up — the first attempt's failure stays in the report, and a migration that already
+succeeded is never re-run.
+
+### OPEN ROOT CAUSE (rule 6) — why did that install fail?
+`exit status 217` from `_npmInstall`, with the identical installer succeeding 19 seconds later. The DB
+provisioning immediately before it fetched, unpacked and started a PostgreSQL server in the same
+sandbox, so resource pressure is a suspect — but a suspect is not a cause, and the earlier CRM build's
+`dev server was killed (out of memory)` hints at the same family without proving it. Recorded rather
+than guessed at; the retry above means it no longer costs the user their database either way.
+
+Tests: 8 more in `tests/importAutopsyMitrify.test.ts` (34 total) — the exact closed-port page failing
+the verdict, the pair-of-signals guard against false positives, a genuine app still passing, the retry
+firing only when pending, and the first failure surviving in the report.
+Gate: tsc clean both projects, full run 12,971/12,971.
+
+### 2026-08-10 — HEAL LEDGER: the "a heal did not survive" suspicion becomes a MEASUREMENT
+
+**The open root cause from report 02be22e3, taken as far as evidence allows.** Three deterministic
+self-heals ran, and the IDENTICAL three ran again twenty seconds later. Each repair pass re-reads every
+file FRESH from the sandbox (`readEvalSnapshot`) and the dedupe heal only fires when the content
+genuinely still differs — so the second run PROVES the first heal's write was absent on the next read.
+I refused to guess the mechanism (rule 4), but a suspicion recorded in prose cannot be acted on later,
+so the fact is now captured with names and counts.
+
+**Why a shared, workspace-keyed ledger and not a field on the dispatcher:** the two passes run on
+DIFFERENT `ToolDispatcher` instances — the reviewer gets a CHILD dispatcher from `SubAgent` — so any
+per-instance memory would be blind to exactly the case worth catching. Keyed by workspace, it is the
+smallest thing both can see. The dispatcher only WRITES to it (a plain import — no new constructor
+parameter threaded through the sub-agent spawn); the ROUTE reads it at settle, because that is where
+the diagnostics object lives.
+
+All three file-writing self-heals now report (import/export reconcile, wrong-source repoint,
+duplicate-import dedupe). The build starts with a clean sheet so "twice" means twice in THIS build, and
+a repeat lands as `HEAL_NOT_DURABLE`, severity warning, **autoResolved: false** — it is a real defect,
+not a note. ADMIN-ONLY: a user never needs to know our repair passes ran twice.
+
+The next report that shows this will name the exact files, which is what makes the mechanism findable
+instead of re-suspected. Memory is bounded (500 paths per workspace, 200 workspaces) so a pathological
+build cannot grow it.
+
+Tests: 11 in `tests/healLedger.test.ts` — a single heal is normal and silent, the reported two-file
+case captured with counts, the message stating what a repeat PROVES rather than suspects, workspace
+isolation, the per-build reset, junk tolerance, the memory bound, and wiring assertions that all three
+heals report and that the finding is recorded unresolved.
+Gate: tsc clean both projects, full run 12,982/12,982.
+
+### 2026-08-10 — The flip's LAST-RESORT tail (admin: "3000 par nahi chale to 5000 par try kiya jayega")
+
+**The flip system already existed** (built 2026-08-07 for the admin's original "ek par na chale to
+dusra" ask; wired into the Diagnose route then, and into the import boot in #2206). It also could not
+possibly have worked until yesterday, because the E2B "Closed Port Error" page counted as a rendered
+app — the flip only engages when the first port FAILS to render, so a host error page reading as
+success pinned the preview to the dead port. That was #2212.
+
+**But re-reading the ranking against the admin's exact words exposed a REAL remaining gap.**
+`COMMON_DEV_PORTS` was used only to ORDER the ports the OS reported as listening
+(`if (listening.includes(p))`). It never proposed a port that was not observed. That is the right
+instinct — evidence over guessing — but it produces NOTHING when the listening scan cannot run, comes
+back empty, or simply runs a moment before the server finishes binding. In that case the flip had no
+second candidate AT ALL, and the preview stayed pinned to a dead port: exactly the failure it exists
+to prevent. The admin's scenario ("3000 fails, try 5000") was therefore not actually reachable.
+
+**Added tier 5 — a bounded guess, strictly AFTER every piece of real evidence:**
+- it runs only when at least one real candidate exists (no evidence at all means nothing booted
+  anywhere, and four browser visits would only prove a dev server that never started is still not
+  running);
+- the FRAMEWORK's own default port leads the tail, so a `node-express` app reaches 5000 before a Vite
+  port, and a `vite-react` app reaches 5173 first (`framework` is now passed at both call sites);
+- ordering guarantees it can never override evidence — it only fills the space evidence left empty;
+- still deduped, still infra-free (5432 can never be published as the app), still capped at
+  MAX_PORT_CANDIDATES.
+
+Three existing tests encoded the OLD decision ("never invent a port not listening"). They were
+REPLACED with the superseding contract and the reasoning recorded in place, not weakened: evidence
+order is still asserted, and the infra-exclusion test now asserts the INTENT (no infra port anywhere
+in the list) rather than an exact array that the tail legitimately extends.
+
+Tests: 5 new + 3 updated in `src/server/AgentV3/PortDiscovery.test.ts` (16 total) — a wrong
+expectation with no scan is no longer a dead end, the framework hint leading the tail for both
+node-express and vite-react, the guess never outranking evidence, no-evidence-no-guessing, and the
+bound/infra guarantees holding with the tail. Gate: tsc clean both projects, full run 12,987/12,987.
+
+### 2026-08-10 — WHY `exit status 217` was unexplainable: we were throwing npm's own words away
+
+**The open root cause from report e61b13b1** was "the pre-boot install failed with `exit status 217`
+while the SAME installer succeeded nineteen seconds later". I recorded it honestly as open because I
+had no evidence — and this is exactly WHY there was none.
+
+**ROOT CAUSE OF THE MISSING EVIDENCE.** Nine call sites handled a failed sandbox command as:
+
+    .catch((err) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }))
+
+The E2B SDK REJECTS on a non-zero exit and carries the command's real `stdout` / `stderr` / `exitCode`
+**on the error object**. That handler threw all of it away and kept `err.message`, which is the bare
+status line. So the one moment we most need a tool's own words is the exact moment we discarded them —
+and the failure was unexplainable BY CONSTRUCTION, no matter how many reports we collected. The same
+`217` would have come back forever.
+
+This is the same class as the 2026-08-04 "238-second window with no events" and yesterday's heartbeat
+blind spot: not a hole in what happened, a hole in the RECORDING.
+
+**FIX (rule 4 step 2 — the class, not the instance):** one shared `commandFailureResult(err)` reads the
+error's own output and falls back to the message only when there genuinely is nothing else. The status
+line still rides along (it names something the output alone does not) but never REPLACES the output.
+`commandLogTail` keeps the LAST lines, because npm's real cause is always at the end and the head is
+install noise. All nine sites swept across three files; a test asserts the lossy pattern is gone from
+every one and that all nine now go through the single helper, so no future call site can re-invent it.
+
+The next install failure will carry npm's actual error into the report. That does not fix 217 — it is
+what makes fixing it possible.
+
+Tests: 9 in `tests/sandboxCommandError.test.ts` — the reported case keeping npm output, the message as
+a fallback rather than a replacement, no duplicated status line, a transport failure still reporting
+-1, junk tolerance, the tail keeping the end, and the repo-wide sweep.
+Gate: tsc clean both projects, full run 12,996/12,996.
+
+---
+
+## 2026-08-09 — Full v5 audit, fix #1: one way to read a boolean env flag
+
+**Admin instruction:** scan the whole of NavBharatAI Pro v5 and find every flaw, big and small.
+
+### What the audit actually found — including the four classes that came back CLEAN
+
+Honesty first, because a padded list is worse than a short one. Four classic bug classes were scanned
+across the ~100k-line v5 surface and are genuinely NOT present: `Number(env)` NaN propagation (every
+site is `Number.isFinite`-guarded), error-swallowing empty catches in the engine, unbounded module-level
+caches, and RegExp built from unescaped user text (the one candidate, `orphanPageWiring`, is gated by
+`/^[A-Z][A-Za-z0-9]*$/`, so a metacharacter cannot reach it). A 52-hit "not all code paths return a
+value" class was ALSO discarded: every hit is an Express handler, where the return value is ignored.
+Those five classes were removed from the report rather than counted.
+
+What is real: **~290 items in 4 classes** — and they are not equal. Roughly 284 are duplication and
+dead code; about 6 genuinely bite. Reported to the admin with that split stated plainly.
+
+### Fix #1 (this change) — the flag dialects
+
+A boolean env flag was read **seven** different ways in one codebase:
+
+    process.env.X === 'true'            v === 'on' || v === 'true' || v === '1'
+    process.env.X === 'on'              v === 'on' || v === 'true'          // '1' fails
+    process.env.X === '1'               v === '1' || v === 'true'           // 'on' fails
+    /^(on|true|1)$/i.test(raw.trim())   process.env.X === 'off'             // 'OFF'/'false' do NOT disable
+
+**Why this is a money bug, not tidiness.** The admin turns features on by writing **`on`** — CLAUDE.md
+records seven flags set exactly that way. Under a `=== 'true'` reader, `AGENTV3_PAID_PUBLIC=on` leaves
+**billing switched off** and every user builds free, with nothing in any log to say so. The kill-switch
+side fails the other way and is worse: `AGENTV3_CIRCUIT_BREAKER=OFF` disables **nothing** while the
+operator believes a dangerous path is stopped. Neither failure is visible — the value is accepted, it
+just does not mean what it says. None of them trims, so a stray space in a Cloud Run value silently
+flips the meaning too.
+
+One parser now (`lib/envFlag.ts`): `parseEnvFlag` → `true | false | null`, where `null` is
+deliberately distinct from `false` (a typo takes the documented DEFAULT instead of silently disabling a
+default-ON guard). `envFlag(name, default)` and `envKillSwitch(name)` cover both directions. **44 call
+sites swept.**
+
+**What was deliberately NOT swept** — the sweep's correctness includes what it left alone.
+`AGENTV3_CHEAP_FLOOR` (`off|glm|kimi|on|both`), the power tiers (where `off` is a TIER NAME),
+`ENGINEER_QUOTA` (`off|0|unlimited|<n>`) and the numeric `'off' → 0` parsers carry more than two states;
+collapsing them to a boolean would destroy real meaning. Test-locked so a later sweep cannot "finish
+the job" and break them.
+
+### Two real defects the tests caught in the fix itself
+
+1. **The lock test found a SEVENTH dialect I had missed.** The first sweep covered six; the
+   source-level assertion then failed on 21 more sites using `=== 'on'` exactly (`AGENTV3_LINT_GATE`,
+   `AGENTV3_AUTOFIX`, `AGENTV3_INTEGRITY_GATE`, `AGENTV3_ESCALATION`, …). They work TODAY only because
+   CLAUDE.md happens to document them as `on`; `true` would have silently failed. Swept too.
+2. **I broke a generated app, and the audit of my own diff caught it.** `MaintenanceModeGenerator`
+   holds the middleware it writes INTO THE USER'S PROJECT inside a template literal. The sweep rewrote
+   a line in there to call our server helper — producing an app that cannot resolve the import.
+   Reverted, every other edit audited for the same mistake (clean), and the class is now test-locked:
+   an `envFlag(` inside a template literal fails CI.
+
+### Tests changed on purpose — and why that is not "changing a test to match broken behaviour"
+
+Nine existing tests asserted the strictness itself ("is OFF unless the env is exactly `true`", "stays
+OFF for `true`, `1`, `yes`"). Those tests encoded the DEFECT as the contract. Rejecting `1`/`on` bought
+no safety — an admin typing them plainly means ON — while the disagreement between readers was the
+whole bug. Each was rewritten to the corrected contract with the reason in-place; an opt-in still
+requires an EXPLICIT yes, which is the part that ever mattered.
+
+One more incidental find, recorded rather than fixed: several `*Generator.test.ts` files emit a scratch
+`._<name>_emitted_<pid>.ts` into the REAL `src/server/lib/` directory and delete it again, so any test
+that walks the source tree races them. The new test is written to be immune; the generators writing
+into the live source dir instead of a temp dir remains an OPEN item.
+
+16 new tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1131 files /
+13,011 tests, exit 0**.
+
+---
+
+## 2026-08-09 — Audit fix #2: the workspace-ownership invariant gets ONE home
+
+`agentv3-{uid}-{sessionId}` is an AUTHORIZATION decision wearing a naming convention: the uid embedded
+in that id IS who may reach the app. The audit found it re-typed by hand at **nine** sites, plus two
+routes carrying their own private `ownsWorkspace()`.
+
+**No leak today, and that is stated honestly rather than dramatised.** Both private copies were read
+and compared: `appDebug` and `nbaiDomains` are equally strict (verified uid, no anon exemption). The
+defect is structural, not active — an invariant that must never be wrong should not depend on eleven
+authors remembering to type the same template literal. The day a new route forgets it, the failure is
+silent and it is a data breach.
+
+### The fix: `lib/workspaceIdentity.ts`, dependency-free by design
+
+It imports NOTHING — no express, no firebase-admin. That is deliberate and it is the reason the
+duplication existed: a Firestore store (`WorkspaceFileStore`) could not import an Express route, so it
+re-derived the prefix. Now the store and the route share one definition.
+
+**THREE policies, because the differences are real** — and picking the wrong one is the mistake this
+file exists to prevent, so each is named and documented:
+
+1. `workspaceOwnershipOk` — BUILD path. Accepts a claimed uid when no token verified, so a user whose
+   token blips mid-build does not have their own build hard-fail. Spoofable by design; never gates a read.
+2. `verifiedWorkspaceReadOk` — PRIVATE READS. Demands the VERIFIED uid, because the claimed fallback is
+   spoofable (the uid is IN the id, so anyone who learned `agentv3-victim-{sid}` could claim it). Anon
+   workspaces stay reachable by their unguessable sid.
+3. `ownedByVerifiedUid` — STRICTEST: verified uid AND no anon exemption. For anything needing a real,
+   durable owner (custom domain, app debug) — an anon workspace has nobody to own the result.
+
+`workspacePrefixFor` returns **null** for an unusable uid rather than the dangerous `agentv3--`, which a
+range query would happily sweep across other users' rows.
+
+`workspaceOwnerUid` (reads the CLAIM) is kept separate from the three policies (which authorize), so
+"who does this say it belongs to?" can never be mistaken for "may this caller have it?".
+
+**Deliberately NOT unified:** the SESSION-id rules. `identityPolicy.SESSION_ID_RE` is 6–64 chars,
+`workspaceEdit` allows 1–128, and `deriveWorkspaceId` falls back to a timestamp. Merging them would
+silently tighten or loosen real validation — a behaviour change, not this fix. `workspaceIdFor`
+validates the uid only; each caller keeps its own session rule, with the reason recorded in place.
+
+Swept: `WorkspaceFileStore`, `workspaceFiles`, `build`, `zipUpload`, `appDebug`, `nbaiDomains`,
+`workspaceEdit`, `identityPolicy` (re-exports `ANON_WORKSPACE_PREFIX` so every existing importer is
+untouched), and `routes/agentv3.ts` (still exports both helpers, now delegating).
+
+22 tests, including the invariant itself: **no file outside the module may re-type `` `agentv3-${ ``**.
+If that test ever fails, the fix is to import a policy — not to add the file to an allowlist. One
+existing source-lock test (`zipUpload.test.ts`) asserted the raw template literal; it now asserts the
+shared POLICY instead, which is strictly stronger — it locks which of the three rules that route must use.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1132 files / 13,033 tests, exit 0**.
+
+---
+
+## 2026-08-09 — Audit fix #3: one admin gate, and no credential in a URL
+
+Started as "two identical `adminOk()` copies" on the duplication list. Reading them turned it into the
+most serious finding of the audit so far.
+
+### What the copy actually was
+
+    function adminOk(req) {
+      return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
+    }
+
+identical in `routes/health.ts` and `routes/observability.ts`, and a THIRD inline copy in
+`routes/agentv3.ts` that the duplicate-name detector missed because it is an expression, not a named
+function — the source-level test in this change is what found it.
+
+Meanwhile the admin panel's real gate is a timestamped HMAC token with a TTL, a constant-time compare
+and TOTP MFA. The copies were weaker in four separate ways:
+
+1. **The admin PASSWORD travels in the URL.** Query strings land in Cloud Run access logs, browser
+   history, `Referer` headers and every proxy between. The one credential that (with MFA) protects the
+   whole admin panel was being written to logs on every request.
+2. **`===` on a secret** — not constant-time, while `safeStrEqual` sat six lines away in the module
+   this was copied from.
+3. **No TTL, no MFA, no rate limit.** A password recovered from a log grants these endpoints forever;
+   a real admin token expires.
+4. **No `adminCredential()` normalisation.** A Cloud Run value with a trailing newline 403s these
+   routes forever while the panel keeps working — a silent split-brain.
+
+Behind that gate: observability traces, metrics, the error feed, DORA and LLM telemetry (which names
+providers — the White-Label Law's admin-only side), plus `POST /api/admin/backup/firestore`, which
+triggers a real Firestore export.
+
+### Root cause — the SAME shape as finding #2
+
+The real gate was a closure INSIDE `registerAdminRoutes`, so it could not be imported. A security
+primitive that cannot be imported gets re-typed, and the copy is always weaker than the original. The
+primitives now live in `lib/adminAuth.ts` (no route dependencies); `routes/admin.ts` re-exports them so
+every existing caller and test is untouched.
+
+### Honest note on what changed for the admin
+
+`?admin=<password>` no longer works on those endpoints — by design. Nothing in the app used it (no UI
+calls them; the panel already sends `x-admin-token`), so this breaks no user flow. The only lost
+capability is the THROTTLE BYPASS on `/api/agentv3/diag?test=1`: the diagnosis is still served, and a
+throttled live probe returns an honest message instead of running.
+
+16 tests, including the invariant: **no route may read an admin credential from a query/body, and none
+may compare `ADMIN_PASSWORD` directly.** That assertion is what caught the third copy.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1133 files / 13,049 tests, exit 0**.
+
+---
+
+## 2026-08-09 — Audit fix #3b: ONE client token path (and the mistake I made getting there)
+
+The duplication list flagged eight components each carrying "attach the signed-in user's Firebase ID
+token", under FOUR names (`authHeader`, `authHeaders`, `authJsonHeaders`, `teamAuthHeader`) and two
+ways of reaching Firebase (a static `import { auth }` vs a dynamic `import('firebase/auth') +
+getApp()`).
+
+**All eight were behaviourally equivalent when read — no bug shipped from this**, and that is stated
+plainly rather than dramatised. It is worth fixing because finding #3 is what a drifted auth helper
+becomes given time: a copy that could not import the real thing was re-typed weaker, and the weaker
+one put the admin password in a URL.
+
+### The part worth recording: I nearly made it worse, twice
+
+1. **I wrote a NINTH module.** Halfway through, `authedFetch.ts` turned up — a shared helper whose own
+   header already says "so the Authorization header is built in exactly ONE place" and cites the
+   four-copies lesson. I was adding another one beside it.
+2. **Worse: `src/lib/authHeaders.ts` ALREADY EXISTED**, and my `Write` overwrote it (six files import
+   it, and its `authJsonHeaders(forceRefresh)` carries a capability none of the copies had). Restored
+   from git; the tests then failed on exactly the files whose import I had broken, which is how it
+   surfaced within the same session.
+
+So the real picture was not "one shared helper + eight copies". It was **TWO shared helpers + eight
+copies** — the strongest possible evidence that writing the rule down (this repo did, twice) does not
+prevent the next copy.
+
+### Why the copies existed — and the actual fix
+
+Not ignorance: the SHAPE each caller needed was missing. `authHeaders.ts` only offered the JSON variant,
+so every GET caller that did not want `Content-Type` wrote the whole helper again. `authedFetch.ts`
+only offered the bare variant. **One shape per real need** is what stops the next copy, so
+`authHeaders.ts` now exports both `authJsonHeaders(forceRefresh)` and `authHeader(forceRefresh)`, and
+`authedFetch.authHeaders()` keeps its exported name (eight files import it) while delegating instead of
+minting a token itself.
+
+Nine call sites swept, plus `src/lib/pushApi.ts` — a tenth copy the test found, not the scan.
+
+⚠️ **Deliberately untouched: the GitHub token.** `localStorage.gh_token` is a DIFFERENT credential that
+`/api/github/*` forwards to GitHub as `token <x>`. It is spelled `Authorization: Bearer …` too. Routing
+those callers through the Firebase helper would send the wrong credential and 401 every repository
+list. Test-locked so a later "tidy-up" cannot merge them.
+
+10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1134 files /
+13,059 tests, exit 0** · `npm run build` ✓.
+
+---
+
+## 2026-08-09 — Audit fix #4: 80 dead imports removed, 22 unused LOCALS deliberately left
+
+The audit's fourth and lowest-severity class: symbols the compiler proves nothing reads. Real, but
+cosmetic — no user ever saw a bug from it, and that is said plainly rather than counted alongside the
+security fixes.
+
+**80 dead IMPORTS removed across 26 files** — 48 of them in `server.ts` alone (nine unused names on one
+line; `openai`, `@anthropic-ai/sdk`, `@google/genai`, `axios`, `cheerio`, `AIRuntimeManager`,
+`UniversalAIRouter`, `BuildJobManager`, eleven unused `firebase/firestore` names…), 22 in
+`routes/pro.ts`, 8 in `routes/agentv3.ts`, and a `firestoreDatabaseId` import repeated across fourteen
+Firestore store modules.
+
+**Verified before deleting, because the first absolute rule outranks tidiness.** An unused NAME is
+always safe to drop; a whole import LINE is only safe if the module has no top-level side effects —
+removing it also removes the module load. Every local module in the whole-line set
+(`AIRuntimeManager`, `UniversalAIRouter`, `BuildJobManager`, `AppEngine`, `offlineResponse`,
+`aiRouter`, `aiCalls`, `secrets`) was checked for top-level executable statements; the only apparent
+hits were text inside prompt template literals. The third-party ones are pure SDKs.
+
+**22 unused LOCALS were deliberately NOT touched** (`msgs`, `modelFlash`, `MAX_HISTORY_STEPS`,
+destructured-but-unused params like `githubToken` / `proMemorySummary` / `proEditLog`, …). An unused
+import is provably inert; an unused local is a QUESTION — a destructuring that documents a payload's
+shape, a constant a nearby code path is meant to use, a parameter kept for positional compatibility.
+Deleting those needs a reading of each site, not a sweep, and a sweep is exactly how a "cleanup"
+becomes an outage. Recorded here rather than done blind.
+
+Boot smoke check (mandatory for a server change, and `server.ts` is the entry point): built bundle
+starts and `GET /api/health` answers **HTTP 200**. The Firestore "Unable to detect a Project Id" lines
+in that log are this sandbox having no GCP credentials, unrelated to the change.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1136 files / 13,131 tests,
+exit 0** · `npm run build` ✓ · boot + health probe ✓.
+
+### The audit, closed out
+
+Four classes reported, four addressed: flag dialects (#2215, money), the ownership choke point (#2216,
+security), the admin gate (#2217, security — the password in a URL), the client token path (#2220), and
+this. Five classes were scanned and REMOVED from the report as clean rather than padded into it:
+`Number(env)` NaN, engine empty-catches, unbounded caches, RegExp from user text, and the 52 "not all
+code paths return a value" hits that are all Express handlers.
+
+---
+
+## 2026-08-10 — Two vendor names were reaching users mid-build (White-Label Law)
+
+Found while starting ROADMAP item 6's second slice (translating the route's narration): two
+user-facing build narration lines named the AI vendor outright.
+
+    'Escalating to Sonnet to fix the issues found in review…'
+    '🔧 Review found issues — GLM/KIMI fixing them once…'
+
+Both `events.emit({ type: 'narration' … })` — the stream every builder watches — and both on the
+ESCALATION path, i.e. exactly when the engine is working hardest and the user is reading most closely.
+This is a direct breach of the standing rule: *to the user it is always NavBharatAI doing the work.*
+
+**Why it survived.** CLAUDE.md says "a regression test asserts that user-facing streams contain none of
+the forbidden vendor tokens", and such tests DO exist — for billing payloads (`userCostBreakdown`),
+report bodies (`userFacingReport`) and history summaries (`redactProviderError`). Build NARRATION, the
+single most-read user-facing stream in the product, had no such test. The law was enforced everywhere
+it had been remembered, and nowhere it had not.
+
+**Fixed without making the product worse.** Anonymising must not become withholding: an escalation the
+user cannot see would be a worse product than one that names a vendor. The lines now say what is
+happening and why, in NavBharatAI's own voice — "Bringing in NavBharatAI's stronger engine to fix what
+the review found…" — and a test asserts BOTH halves (no vendor name, and the escalation is still
+announced).
+
+The new guard walks every `type: 'narration'` emission in the server and fails on a vendor name in the
+LITERAL text. It deliberately inspects only string literals: a narration whose text comes from a
+variable can legitimately carry admin-only content that is redacted downstream, and flagging those
+would train the next author to silence the test rather than fix a leak. It also asserts the scan found
+>50 emissions, so a regex that quietly matches nothing cannot make the whole guard vacuous.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1138 files / 13,164 tests,
+exit 0**.
+
+---
+
+## 2026-08-10 — ONE INPUT BOX FOR EVERY AI (admin ask) — slice 1: the decisions
+
+**Admin:** "NavBharatAI app me jitne bhi AI hai, sabka input box ek jaisa hai. Sabhi AI's ke input ka
+acche-acche cheezein utha kar BEST input box banao, aur wahi sabhi jagah laga do." Three named wants:
+(1) delete a sent message everywhere, PLUS edit, WhatsApp-style; (2) the ON-SEND / SEARCH / CLEAR row
+that only NavBharatAI FREE has; (3) voice chat, today only in the professionals, everywhere — as a
+PAID feature with the price shown in the user's own language.
+**Export is CUT** — the admin confirmed ("han kato!"), so the shared row is ON SEND / SEARCH / CLEAR.
+
+**The four surfaces today:** `ide/AIChat.tsx` (FREE — has the toolbar), `agentv3/AgentV3Panel.tsx`
+(Pro v5 — has delete), `sda/SDAChat.tsx` (Doctor — has voice), `professionals/ProfessionalChat.tsx`.
+Each has its own composer; nobody has all three good things.
+
+**RATE CONFIRMED BY THE ADMIN:** the ask contained two different numbers — "0.2 paisa/sec" for the
+charge and "2 paisa / sec" for the popup, a 10× gap on real user money. Asked rather than assumed;
+answer: **2 paise per second (₹1.20/min)**. One constant drives BOTH the charge and the popup, so they
+can never disagree.
+
+### Shipped in this slice — the decisions, isolated from any screen
+
+**`chatMessageActions.ts` — what delete and edit MEAN in a chat with an AI.** The hard part is not the
+buttons. Unlike WhatsApp, every assistant reply is an ANSWER TO a particular message, so:
+- **DELETE** removes the message *and the replies that belong to it*, up to the user's next message.
+  Leaving an orphan behind reads as the AI answering a question nobody asked — worse than the message
+  the user wanted gone. An assistant message can never be deleted: it is not the user's text, and
+  removing it would silently rewrite what they were told.
+- **EDIT** rewinds to that point and hands the new text back to be re-sent, because a user edits when
+  they want a DIFFERENT ANSWER, not a different transcript. Keeping the later turns would leave
+  answers derived from the old wording sitting under the new one — coherent-looking and quietly wrong.
+  A no-change edit is a no-op (opening the editor must not cost the conversation); an emptied edit is
+  a delete; every edit is MARKED so history never pretends the original wasn't sent.
+- A 15-minute window: unlimited editing would let a user rewind instructions the builder has already
+  acted on, showing a transcript that no longer matches the app on disk.
+
+**`voiceChatBilling.ts` — the money and the consent.** Per-second billing is honest under THE
+ONE-WALLET LAW's own terms: that law forbids INVENTING a cost, and voice's cost genuinely IS time,
+measured by the clock — the same carve-out image generation already has. It never rounds up (whole
+seconds only, exact ₹ from there — the `inrToDebitTokens` remainder-carry lesson), a call that never
+started costs nothing, and the popup is WRITTEN in each language rather than translated word-for-word
+(the admin asked for exactly that). Every version states the rate per second AND per minute, that
+charging starts when the call connects and stops when it ends, and that it comes from the same one
+balance — plus a live meter showing time AND money together. No vendor name anywhere: a consent popup
+is the most user-facing surface there is.
+
+### ⚠️ A CONSTRAINT FOUND WHILE SURVEYING — voice charges NOTHING today
+`src/server/sonic/` contains no wallet, no spend, no charge of any kind; `ProfessionalVoiceButton`
+opens the voice surface directly. The code comment calls it "a paid, logged-in-only feature", but that
+is only a comment — no money has ever moved. **Therefore the consent popup CANNOT ship before the
+metering does**: a popup that says "2 paise per second" while nothing is charged is a lie told to
+every user, which breaks the second and third absolute rules. Voice is now a single indivisible slice:
+popup + per-second metering + wallet debit land together, or none of them do.
+
+**OPEN QUESTION FOR THE ADMIN (recorded, not assumed):** does a Professional Pass holder pay for
+voice? THE ONE-WALLET LAW says a Pass holder is never charged the wallet on top ("the Pass IS the
+payment"), but voice's cost is per-second and was not priced into the Pass. Either answer is
+defensible; it is the admin's money and the admin's promise, so it is not mine to pick.
+
+**HONEST STATUS — nothing is user-visible yet.** These are the shared decisions; the composer
+component and its wiring are slice 2, and voice is slice 3.
+
+Tests: 20 in `tests/chatComposerCore.test.ts` — delete taking its replies and refusing assistant
+messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the exact charge with no
+minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
+written in Devanagari rather than transliterated, and the no-vendor-name guarantee.

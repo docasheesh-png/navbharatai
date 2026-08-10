@@ -77,21 +77,51 @@ now been audited against live code; there is no ⬜ left in this section.
 
 ---
 
-## 1 · 🟢 THE SIX THAT MATTER MOST
+## 1 · 🟢 WHAT ACTUALLY MATTERS MOST
+
+> **⚠️ This section was called "THE SIX" and the six do not exist (verified 2026-08-08).** Two are DONE
+> (production-DB migration shipped in #2177; zero-setup auth was already built). One is INFRA-BLOCKED and
+> was mislabelled "large" (React Native). One is half-shipped (Render done, Railway's API unverifiable
+> from here). One turned out to be half-built already (regional languages — the prompt side ships). Only
+> the template gallery checked out as straightforwardly open, and even its headline feature — real
+> screenshots — needs a capture pipeline that does not exist.
+>
+> Left as-is, this list would have sent a session to rebuild working features and to ship a framework
+> button the sandbox cannot run. Verify every line against code before starting.
 
 Ordered by what a user would actually feel.
 
-1. **React Native / Expo — real native mobile apps.** The single biggest capability gap against Bolt.
-   Today's Capacitor wrapper ships a webview, which is not the same product. 🔵 Large.
-2. **Sandbox → production database migration.** The dev sandbox's Postgres dies when the app is
-   published, so a user's LIVE app still needs them to create a durable database by hand. Everything
-   before this step (provisioning, connecting, Studio) is built — this is the last gap in the chain.
-3. **Zero-setup auth.** One click, no keys: signup / login / session / reset on top of the database we
-   already provision. Replit's headline feature.
+1. **React Native / Expo — real native mobile apps.** 🔒 **RECLASSIFIED INFRA-BLOCKED (2026-08-08) —
+   it was sitting here as "just large", and that mislabel is dangerous.** Verified: `react-native`/`expo`
+   appear in NO framework registry (`frameworkOptions.ts` lists vite-react, nextjs, spring-boot …); the
+   three files that mention react-native contain detection patterns, not capability; and the fullstack
+   E2B image ships Node/Go/Mongo/JDK with **no Expo tooling and no Android SDK**.
+   So registering the framework would create a build option the sandbox **cannot run** — the exact
+   rule-2 failure already recorded for item 7 ("a 'Rust' build that 403s = a fake feature"). Left in §1,
+   a session could spend a week on it and ship a button that 403s.
+   **Real blocker:** rebuild + republish the E2B template with Expo (multi-GB) — admin infra, not a code
+   session. Today's Capacitor wrapper ships a webview, which is a different product, honestly labelled.
+2. ~~**Sandbox → production database migration.**~~ — ✅ **DONE (#2177, 2026-08-07).** After a successful
+   publish the app's OWN migrations now run against the connected database (Prisma / Drizzle / Knex /
+   TypeORM / Sequelize / Flyway / Alembic), gated by an allowlist of forward-only apply verbs that fails
+   CLOSED — `prisma migrate deploy` is allowed, `migrate reset` can never be. Honest at every branch:
+   non-Postgres says so, no migration tool is silent, a failure leaves the app published with a plain
+   line saying it cannot save data yet.
+3. ~~**Zero-setup auth.**~~ — ✅ **ALREADY BUILT (verified 2026-08-08 by reading the generated code, not
+   the description).** `generate_auth` with `type: 'supabase'` IS this item — its own header says
+   "ROADMAP #1 Phase 1.3: the ZERO-SETUP path … login works on the first build with no keys to paste".
+   The whole chain connects: Supabase OAuth → one-tap creates a project in the USER's account and saves
+   `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` → the vault→app pipe injects them into `.env` →
+   the generated module reads those exact names via `import.meta.env`. It also fails LOUDLY when the
+   keys are absent rather than shipping a login screen that silently never works.
 4. **AWS / Azure / Railway deploy providers.** Render shipped (and its UI was wired 2026-08-07). Three
    more provider modules, same shape as `renderDeploy.ts`.
-5. **Visual template gallery.** Sixteen starters exist but as *text only*. Screenshots + categories +
-   "build this" kills cold-start and drops weak-tier cost toward zero.
+5. **Visual template gallery.** ✅ **VERIFIED GENUINELY OPEN (2026-08-08)** — the first §1 item this
+   week that checked out as actually missing. `TemplatesPanel.tsx` has 14 starters, each carrying only
+   `id`, `name`, a Lucide `icon` and a `prompt`; there is no screenshot, thumbnail or category field
+   anywhere, and no `/api/templates` endpoint. (`savedTemplates` does exist, so the save-as-template
+   half is partly there — check it before rebuilding that piece.) Screenshots + categories + "build
+   this" kills cold-start and drops weak-tier cost toward zero.
 6. **Regional languages** — ⚠️ **RE-SCOPED 2026-08-08; the old "prompt + UI, 3–4 PR" line was wrong in
    both directions.** The *prompt* half is **already shipped**: `LANGUAGE_RULE` in
    `AgentV3/systemPrompt.ts` names Tamil/Bengali/Marathi explicitly, sits at the top of every prompt

@@ -45,7 +45,10 @@ describe('project-mode gating', () => {
   it("projectModeEnabled: 'on' = all users, 'off'/unset = disabled", () => {
     expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'on' } as NodeJS.ProcessEnv)).toBe(true);
     expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'off' } as NodeJS.ProcessEnv)).toBe(false);
-    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'true' } as NodeJS.ProcessEnv)).toBe(false); // not an allowlisted identity
+    // Audit finding #1: 'true' now reads as a plain YES (it used to fall through to the allowlist
+    // and match nobody — an admin writing `true` got silence instead of the mode they asked for).
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'true' } as NodeJS.ProcessEnv)).toBe(true);
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'false' } as NodeJS.ProcessEnv)).toBe(false);
     expect(projectModeEnabled({} as NodeJS.ProcessEnv)).toBe(false);
   });
 

@@ -154,6 +154,9 @@ export type AgentEvent =
   // "Step limit reached (40)" while the Architect (cap 80) was still running.
   | { type: 'agent_done'; agent: AgentRole; ok: boolean; summary: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
+  // The build needs credentials from the user. Carries NAMES ONLY — the value is written straight to
+  // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
+  | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }

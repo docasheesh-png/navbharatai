@@ -10,10 +10,16 @@ import { getProviderStats } from '../AI/Router/AIRouter';
 import { doraMetrics } from '../lib/DoraMetrics';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
+import { adminRequestOk } from '../lib/adminAuth';
 
-function adminOk(req: Request): boolean {
-  return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
-}
+/**
+ * Admin gate — the SHARED one (audit finding #3). This used to be a private copy that compared the
+ * admin PASSWORD against `req.query.admin`, which wrote that password into Cloud Run access logs,
+ * browser history and every proxy `Referer` on the way. It also used `===` on a secret, had no TTL
+ * and no MFA. It now goes through the same timestamped, constant-time, expiring token the admin
+ * panel uses — read from the `x-admin-token` header, never from a URL.
+ */
+const adminOk = (req: Request): boolean => adminRequestOk(req);
 
 export function registerObservabilityRoutes(app: Express): void {
   // Recent traces (span trees), newest first. ?limit=N (default 50, max 200).

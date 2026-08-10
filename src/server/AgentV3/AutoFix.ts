@@ -9,6 +9,7 @@
 
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { renderRepairGuidance } from './RuntimeErrorClassify';
+import { envFlag } from '../lib/envFlag';
 
 export interface RuntimeError {
   t: number;
@@ -21,7 +22,7 @@ export interface RuntimeError {
  * pass, so — like escalation — it stays opt-in until the admin turns it on, never a surprise cost.
  */
 export function autoFixEnabled(): boolean {
-  return process.env.AGENTV3_AUTOFIX === 'on';
+  return envFlag('AGENTV3_AUTOFIX');
 }
 
 /**
@@ -48,7 +49,7 @@ export function reviewerAutoFixEnabled(): boolean {
  * cost path, never blocks a build.
  */
 export function reviewerWarningAutoFixEnabled(): boolean {
-  return process.env.AGENTV3_REVIEW_AUTOFIX_WARNINGS === 'on';
+  return envFlag('AGENTV3_REVIEW_AUTOFIX_WARNINGS');
 }
 
 export interface ReviewerAutofixRecord {

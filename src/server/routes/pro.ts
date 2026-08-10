@@ -1,19 +1,8 @@
-import path from 'path';
-import { setCorsHeaders } from '../lib/cors';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenAI } from '@google/genai';
 import type { Express, Request, Response } from 'express';
 import { sendSafeError } from '../lib/httpError';
-import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from '../AppMakerLab/AppEngine';
 import { aiRouter } from '../lib/aiRouter';
-import { AppContextInjector } from '../AppContext/AppContextInjector';
-import { CREATOR_IDENTITY } from '../lib/prompts';
-import { VirtualFileSystem } from '../project/ProjectModel';
-import { reviewCode, formatReviewReport } from '../pro/ProCodeReview';
 import { deployVercel, deployNetlify, deployGitHubPages, deployCloudflarePages } from '../pro/ProDeploy';
-import { buildDocumentContext } from '../lib/attachmentText';
-import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels } from '../lib/visionModels';
+import { claudeVisionAnswerModel } from '../lib/visionModels';
 
 /**
  * Pro engine routes extracted from the server.ts monolith (Phase 1, AI-core step d).

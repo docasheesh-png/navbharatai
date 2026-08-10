@@ -24,7 +24,6 @@
 // VITEST-friendly I/O wrapper (in-memory mirror only under tests): never throws, never blocks a build.
 
 import * as admin from 'firebase-admin';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 import { appendEvents, eventsSince, emptyLiveBuffer, type LiveBuffer } from './LiveEventBuffer';
 

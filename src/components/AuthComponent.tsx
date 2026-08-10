@@ -152,6 +152,10 @@ function describeAuthError(err: any): string {
  * failures that are config — not code — name the exact Firebase Console fix so the
  * admin can resolve them without a developer console.
  */
+// Prefetched at module load so handleAppleSignIn's await resolves instantly inside the click
+// handler — see the DESKTOP FIX note there. A load failure is retried by the handler's own await.
+const firebaseAuthModuleForApple = import('firebase/auth');
+
 function describeSocialError(err: any): string {
   const code = err?.code || '';
   switch (code) {
@@ -672,7 +676,16 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     // Apple is a Firebase OAuthProvider ('apple.com'). On native iOS the socialSignIn helper routes
     // through the native "Sign in with Apple" sheet; on web it uses the popup (Apple's web OAuth).
     // OAuthProvider is resolved dynamically (v12 umbrella types don't surface it — see the note above).
-    const { OAuthProvider } = (await import('firebase/auth')) as any;
+    //
+    // DESKTOP FIX (admin 2026-08-09, "desktop browser me Apple login nahi ho raha"): this await used
+    // to FETCH the firebase/auth chunk inside the click handler. On a cold cache that network wait
+    // consumed the browser's transient user activation, so the signInWithPopup that followed was
+    // popup-BLOCKED → fell back to signInWithRedirect → which silently dies on desktop Chrome's
+    // storage-partitioned return ("missing initial state"). Google never hit this because its
+    // provider is statically imported. The module promise now starts at MODULE LOAD (below), so by
+    // click time this await resolves from memory in the same tick and the popup keeps the user
+    // activation it needs.
+    const { OAuthProvider } = (await firebaseAuthModuleForApple) as any;
     const provider = new OAuthProvider('apple.com');
     provider.addScope('email');
     provider.addScope('name');

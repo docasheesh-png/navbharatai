@@ -53,6 +53,20 @@ export interface IEngineerActuator {
    */
   runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /**
+   * Make sure the project's dependencies are installed BEFORE a command that needs its binaries.
+   *
+   * WHY THIS EXISTS AS A WORKSPACE-LEVEL GUARANTEE (build report d6deaaf0, Mitrify, 2026-08-09):
+   * the install used to be attached to the dev-server LAUNCH path only. Anything else that needs a
+   * project binary ran outside that guarantee — so `npm run db:push` executed against an empty
+   * node_modules and died with `sh: 1: drizzle-kit: not found` (exit 127), the app's tables were
+   * never created, and every data page failed. The install is not extra work: it is the SAME install
+   * the boot performs seconds later, moved ahead of the first command that depends on it.
+   *
+   * Optional so actuators without real isolation (Local/Docker) simply do not offer it; callers must
+   * treat its absence, and a failure, as "carry on and report honestly" — never as a hard stop.
+   */
+  ensureDependencies?(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }>;
+  /**
    * Fetch a URL from inside the sandbox and return the HTML body.
    * Requires a real sandbox; LocalActuator rejects for the same reason as runCommand.
    */

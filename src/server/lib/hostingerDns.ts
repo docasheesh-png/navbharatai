@@ -15,10 +15,12 @@
  * No fake success is possible — the outcome reported is the API's real answer.
  */
 
+import { envFlag } from './envFlag';
+
 const HOSTINGER_API = 'https://developers.hostinger.com/api/dns/v1';
 
 export function hostingerDnsEnabled(): boolean {
-  return /^(on|true|1)$/i.test((process.env.AGENTV3_HOSTINGER_DNS || '').trim());
+  return envFlag('AGENTV3_HOSTINGER_DNS');
 }
 
 type HFetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{

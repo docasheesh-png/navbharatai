@@ -9,7 +9,7 @@
 // never hang more than a few seconds, while creating a database genuinely takes minutes. A single
 // global ceiling would either strand the fast calls or kill the slow one mid-flight.
 
-import { auth } from './firebase';
+import { authHeader } from './authHeaders';
 
 /**
  * Authorization header for the signed-in user, or `{}` when signed out.
@@ -18,12 +18,10 @@ import { auth } from './firebase';
  * than the client guessing at the session state and rendering its own wrong story.
  */
 export async function authHeaders(): Promise<Record<string, string>> {
-  try {
-    const token = await auth.currentUser?.getIdToken(); // refreshes if expired
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    return {};
-  }
+  // Audit finding #3b: this used to be a SECOND implementation of the token path, beside
+  // `lib/authHeaders`. Same behaviour, two owners — exactly the drift this module's own header warns
+  // about. The name stays (eight files import it); the implementation is now the one path.
+  return authHeader();
 }
 
 /** Default ceiling — long enough for a normal API call, short enough that a stalled server surfaces. */

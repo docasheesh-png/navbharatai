@@ -26,7 +26,6 @@ import type {
 } from './ConversationStore';
 import { isEnumerableUserId } from './ConversationStore';
 import type { TurnUsage } from './ClaudeClient';
-import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { getServerDb } from '../lib/serverDb';
 
 const COLLECTION = 'agentv3_conversations';

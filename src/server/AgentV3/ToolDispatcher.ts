@@ -1,6 +1,10 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
+import { noteHeal } from './HealLedger';
+import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
+import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -78,7 +82,7 @@ import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
-import { duplicateModuleTarget, conventionRelative } from './ProjectIntegrityChecks';
+import { duplicateModuleTarget } from './ProjectIntegrityChecks';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
@@ -227,6 +231,11 @@ import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateMotion } from '../lib/MotionGenerator';
+import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
+import { generateGame3D } from '../lib/Game3DGenerator';
+import { generateGameController } from '../lib/GameControllerGenerator';
+import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
+import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -316,6 +325,7 @@ import { redactSecrets, redactDeep } from './SecretRedactor';
 // primitive; see lib/browseTarget.ts.
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
+import { envKillSwitch } from '../lib/envFlag';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -457,6 +467,27 @@ export class ToolDispatcher {
   }
 
   /**
+   * The language THIS BUILD's platform narration speaks (ROADMAP item 6). Defaults to English, and
+   * the composition root sets it from the user's own prompt exactly as `LANGUAGE_RULE` tells the
+   * model to — so the AI and the platform can never disagree inside one feed.
+   */
+  private narrationLang: NarrationLanguage = 'en';
+
+  /** Set by the composition root from `resolveNarrationLanguage(userPrompt)` before the build runs. */
+  setNarrationLanguage(lang: NarrationLanguage): void {
+    this.narrationLang = lang;
+  }
+
+  /**
+   * Emit one platform narration line. THE choke point: call sites name a message id, never a
+   * sentence, so a new line is translatable by construction and no call site can forget the
+   * language. Best-effort like every other narration — it must never be able to break a build.
+   */
+  private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
+    this.events?.emit({ type: 'narration', agent, text: narrationText(this.narrationLang, id, params), ts: Date.now() });
+  }
+
+  /**
    * Bake the "made by NavBharatAI" badge into the app's HTML entry so it ships with the live
    * preview AND any later deploy (both serve the workspace files). Idempotent (never a second
    * badge) and best-effort — a failure here must NEVER break a build or block the preview (first
@@ -523,6 +554,31 @@ export class ToolDispatcher {
     this.onDatabaseUnavailable = fn;
   }
 
+  /**
+   * Ask the USER for credentials the app needs, mid-build.
+   *
+   * Injected for the same reason as the database fallback: the dispatcher must not know about the
+   * vault, Firestore or the approval plumbing — only that "someone can ask the user for these names".
+   * The composition root supplies it when there is a verified user to ask.
+   *
+   * Returns the env pairs that were saved (read back from the vault by the caller), or null if the
+   * user skipped, the ask timed out, or nothing could be saved. THE VALUES NEVER TRAVEL THROUGH THE
+   * BUILD'S EVENT STREAM — the client writes them straight to the encrypted vault and the caller reads
+   * them back server-side (see secretRequest.ts).
+   */
+  private onSecretsNeeded?: (asks: SecretAsk[]) => Promise<Record<string, string> | null>;
+
+  /** Wire the ask above. Supplied only when there is a verified user whose vault we can write to. */
+  setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<Record<string, string> | null>): void {
+    this.onSecretsNeeded = fn;
+  }
+
+  /** Names already in the user's vault, so the build never asks twice for the same key. */
+  private savedSecretNames: string[] = [];
+  setSavedSecretNames(names: string[]): void {
+    this.savedSecretNames = Array.isArray(names) ? names : [];
+  }
+
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & API Keys). */
   setUserSecrets(env: Record<string, string>): void {
     this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
@@ -576,7 +632,7 @@ export class ToolDispatcher {
       let verdicts: SecretVerdict[] = [];
       try { verdicts = await verifyInjectedSecrets(this.userSecretsEnv); } catch { verdicts = []; }
       if (verdicts.length === 0) {
-        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & API Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
+        this.narrate('secrets.loaded', { count: names.length });
       } else {
         const { loaded, problems } = preflightNarration(verdicts);
         this.events?.emit({ type: 'narration', agent: 'architect', text: loaded, ts: Date.now() });
@@ -620,13 +676,13 @@ export class ToolDispatcher {
     const connectedUrl = dotEnvValue(envNow, 'DATABASE_URL') ?? this.userSecretsEnv?.DATABASE_URL ?? '';
     if (isUserOwnedDatabaseUrl(connectedUrl)) {
       this.postgresProvisioned = true; // decided — never reconsider mid-build
-      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Using the database you connected in Settings — your app will read and write your own data, so no temporary sandbox database is needed.', ts: Date.now() });
+      this.narrate('db.usingConnected', {});
       return;
     }
     this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
     this.postgresProvisionedAt = Date.now();
     try {
-      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
+      this.narrate('db.provisioning', {});
       // NOTE: the E2B provisionBackend arms the in-sandbox keepalive watchdog itself (single choke
       // point) — every provisioning path (first provision, mid-build revival, preview-boot revival)
       // gets the keepalive without each caller re-wiring it.
@@ -672,10 +728,10 @@ export class ToolDispatcher {
           // user's own account), so ASK for it rather than continuing toward a certain failure.
           const rescued = await this.rescueDatabase();
           if (!rescued) {
-            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ The sandbox database did not pass its connection test — I wrote DATABASE_URL and will keep going; the next database step will retry it.', ts: Date.now() });
+            this.narrate('db.connectionTestFailed', {});
           }
         } else {
-          this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
+          this.narrate('db.ready', {});
         }
       }
     } catch {
@@ -802,7 +858,7 @@ export class ToolDispatcher {
       const { content: fixed, reverted } = revertSqliteToPostgres(content);
       if (reverted) {
         getWorkspaceMemory(this.workspaceId).recordAudit('postgres-lock: reverted a schema downgrade to sqlite back to postgresql');
-        this.events?.emit({ type: 'narration', agent: 'architect', text: '🔒 Kept your database on PostgreSQL — it\'s provisioned and ready. A failing migration means the schema needs fixing (a relation or field), not a switch to SQLite. Fixing the schema instead.', ts: Date.now() });
+        this.narrate('db.postgresLocked', {});
         return fixed;
       }
     }
@@ -962,7 +1018,7 @@ export class ToolDispatcher {
    *  deterministic fix, additive-only + idempotent + a no-op on an ambiguous router (orphanPageWiring.ts),
    *  so it can never break a working router. Best-effort. Kill switch: AGENTV3_ORPHAN_PAGE_GUARD=off. */
   async healOrphanPages(): Promise<string> {
-    if (process.env.AGENTV3_ORPHAN_PAGE_GUARD === 'off') return '';
+    if (envKillSwitch('AGENTV3_ORPHAN_PAGE_GUARD')) return '';
     try {
       return await withTimeout((async () => {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
@@ -992,7 +1048,7 @@ export class ToolDispatcher {
    *  statement-leading, paren-balanced calls only; anything ambiguous is left as an honest finding),
    *  idempotent, persisted through the same durable write path. Kill switch: AGENTV3_CRED_LOG_GUARD=off. */
   async healCredentialLogs(): Promise<string> {
-    if (process.env.AGENTV3_CRED_LOG_GUARD === 'off') return '';
+    if (envKillSwitch('AGENTV3_CRED_LOG_GUARD')) return '';
     try {
       return await withTimeout((async () => {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
@@ -1774,7 +1830,7 @@ export class ToolDispatcher {
    * a duplicate (safe), never wrongly refuses. Kill switch: AGENTV3_DUP_MODULE_GUARD=off.
    */
   private duplicateModuleRefusal(path: string): string | null {
-    if (process.env.AGENTV3_DUP_MODULE_GUARD === 'off') return null;
+    if (envKillSwitch('AGENTV3_DUP_MODULE_GUARD')) return null;
     let known: string[] = [];
     try { known = getWorkspaceMemory(this.workspaceId).graph().files; } catch { return null; }
     const dup = duplicateModuleTarget(path, known);
@@ -1804,16 +1860,12 @@ export class ToolDispatcher {
    * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
    */
   private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
-    if (process.env.AGENTV3_DUP_IMPORT_GUARD === 'off') return content;
+    if (envKillSwitch('AGENTV3_DUP_IMPORT_GUARD')) return content;
     if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;
     try {
       const { content: next, removed } = dedupeDuplicateImports(content);
       if (removed.length > 0) {
-        this.events?.emit({
-          type: 'narration', agent,
-          text: `🔧 Removed ${removed.length} duplicate import(s) in \`${path}\` that would have broken the preview ("Duplicate declaration").`,
-          ts: Date.now(),
-        });
+        this.narrate('fix.duplicateImports', { count: removed.length, file: path }, agent);
         try { getWorkspaceMemory(this.workspaceId).recordAudit(`[DUP-IMPORT] removed ${removed.length} duplicate import(s) in ${path}: ${removed.join('; ')}`); } catch { /* audit best-effort */ }
       }
       return next;
@@ -1821,7 +1873,7 @@ export class ToolDispatcher {
   }
 
   private async hookWriteNote(files: Record<string, string>): Promise<string> {
-    if (process.env.AGENTV3_HOOKS_WRITE_GUARD === 'off') return '';
+    if (envKillSwitch('AGENTV3_HOOKS_WRITE_GUARD')) return '';
     if (!files || Object.keys(files).length === 0) return '';
     try {
       const report = await analyzeHooksRules(files);
@@ -1839,7 +1891,7 @@ export class ToolDispatcher {
    * AGENTV3_PKG_PIN_GUARD=off.
    */
   private pinPackageJsonContent(path: string, content: string): string {
-    if (process.env.AGENTV3_PKG_PIN_GUARD === 'off') return content;
+    if (envKillSwitch('AGENTV3_PKG_PIN_GUARD')) return content;
     if (!/(^|\/)package\.json$/.test(path)) return content;
     try {
       let out = content;
@@ -1849,11 +1901,7 @@ export class ToolDispatcher {
         try {
           getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
         } catch { /* audit best-effort */ }
-        this.events?.emit({
-          type: 'narration', agent: 'architect',
-          text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
-          ts: Date.now(),
-        });
+        this.narrate('fix.pinnedDeps', { changed: pinned.changed.join('; ') });
       }
       // FRAMEWORK CORE-DEPS GUARD (CargoPilot autopsy 2026-07-19): a written package.json must never
       // DROP the framework's own runtime deps (next/react/vite/…). If it does, a later `npm install`
@@ -1865,11 +1913,7 @@ export class ToolDispatcher {
         try {
           getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-CORE] restored framework core deps in ${path}: ${core.added.join('; ')}`);
         } catch { /* audit best-effort */ }
-        this.events?.emit({
-          type: 'narration', agent: 'architect',
-          text: `🔧 Kept the framework's core dependencies in package.json (${core.added.join('; ')}) so the dev server can't lose its own runtime.`,
-          ts: Date.now(),
-        });
+        this.narrate('fix.coreDeps', { added: core.added.join('; ') });
       }
       return out;
     } catch {
@@ -1934,11 +1978,7 @@ export class ToolDispatcher {
         if (process.env.AGENTV3_NEXT_MW_FIX !== 'off' && (this.framework === 'nextjs' || this.framework === 'next')) {
           const corrected = nextMiddlewareCorrectPath(path);
           if (corrected && corrected !== path) {
-            this.events?.emit({
-              type: 'narration', agent,
-              text: `🔧 Moved \`${path}\` to \`${corrected}\` — Next.js only runs middleware from the project root, so the route guards were silently disabled where it was written.`,
-              ts: Date.now(),
-            });
+            this.narrate('fix.nextMiddlewareMoved', { from: path, to: corrected }, agent);
             try { getWorkspaceMemory(this.workspaceId).recordAudit(`[NEXT-MW] relocated misplaced middleware ${path} → ${corrected}`); } catch { /* audit best-effort */ }
             path = corrected;
           }
@@ -2355,7 +2395,7 @@ export class ToolDispatcher {
             const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
             if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
               this.postgresReprovisionAttempts += 1;
-              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database had gone to sleep — restarting PostgreSQL before your database step…', ts: Date.now() });
+              this.narrate('db.asleepRestarting', {});
               await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
               this.postgresProvisionedAt = Date.now();
             }
@@ -2382,7 +2422,7 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The Prisma schema had an incomplete relation — completed it with `prisma format` and re-ran the command successfully.', ts: Date.now() });
+                this.narrate('fix.prismaRelation', {});
                 // The formatter rewrote schema.prisma in the sandbox — sync the durable copy so
                 // restores/edits see the completed relation, not the broken original.
                 const schemaPath = `${dirMatch ? `${dirMatch[1].replace(/\/+$/, '')}/` : ''}prisma/schema.prisma`;
@@ -2420,7 +2460,7 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database toolkit wasn\'t installed yet — installed it and re-ran the step successfully.', ts: Date.now() });
+                this.narrate('fix.toolkitInstalled', {});
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
@@ -2448,7 +2488,7 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database client had not been generated yet — generated it and re-ran the step successfully.', ts: Date.now() });
+                this.narrate('fix.clientGenerated', {});
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
@@ -2481,7 +2521,7 @@ export class ToolDispatcher {
                 const retry = await this.actuator.runCommand(this.workspaceId, command);
                 if (retry.exitCode === 0) {
                   ({ exitCode, stdout, stderr } = retry);
-                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 A database enum wasn't available on SQLite — rewired the code that used it (${missingEnums.join(', ')}) to plain string values and re-ran the step successfully.`, ts: Date.now() });
+                  this.narrate('fix.enumOnSqlite', { enums: missingEnums.join(', ') });
                 }
               }
             } catch { /* self-heal is best-effort — the original failure is still reported */ }
@@ -2501,7 +2541,7 @@ export class ToolDispatcher {
           if (canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
             this.postgresReprovisionAttempts += 1;
             try {
-              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database went away — restarting PostgreSQL in the sandbox…', ts: Date.now() });
+              this.narrate('db.wentAwayRestarting', {});
               const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
               const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
               if (Object.keys(lines).length > 0) {
@@ -2513,7 +2553,7 @@ export class ToolDispatcher {
               if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.postgresProvisionedAt = Date.now(); // revival verified — reset the preflight gate
-                this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Database is back — re-ran the step against PostgreSQL.', ts: Date.now() });
+                this.narrate('db.backOnline', {});
               } else {
                 // The revival itself could not bring the DB back — another attempt would repeat the same
                 // failure, so this is genuinely dead (not merely reaped). Confirm + release the lock now.
@@ -2530,7 +2570,7 @@ export class ToolDispatcher {
           }
           if (this.postgresConfirmedDead) {
             getWorkspaceMemory(this.workspaceId).recordAudit('postgres confirmed dead in sandbox — releasing the provider lock so the app can use SQLite for the preview');
-            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ NavBharatAI couldn\'t keep PostgreSQL running in the preview sandbox, so the live preview will use SQLite. Your PostgreSQL setup still applies when you deploy to your own database.', ts: Date.now() });
+            this.narrate('db.fellBackToSqlite', {});
           }
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
@@ -2877,8 +2917,9 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
+                noteHeal(this.workspaceId, fx.file, content);
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Auto-fixed ${rec.fixes.length} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`, ts: Date.now() });
+              this.narrate('fix.importKind', { count: rec.fixes.length });
             }
           } catch { /* reconcile is best-effort — a failure just leaves the honest blocker below */ }
           // MISSING-IMPORT SELF-HEAL (root cause — admin jungle-game report 104f5b09): a generated file
@@ -2898,7 +2939,7 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${addRes.added.length} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`, ts: Date.now() });
+              this.narrate('fix.missingImports', { count: addRes.added.length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // WRONG-SOURCE SELF-HEAL (Kanban build 2026-07-13): a NAMED import points at a module that does
@@ -2915,8 +2956,9 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+                noteHeal(this.workspaceId, file, content);
               }
-              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
+              this.narrate('fix.repointedImports', { count: wrongRes.fixes.length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
@@ -2937,7 +2979,9 @@ export class ToolDispatcher {
                 try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
-                this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Removed a duplicate import in \`${file}\` that would have broken the preview ("Duplicate declaration").`, ts: Date.now() });
+                // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
+                noteHeal(this.workspaceId, file, deduped);
+                this.narrate('fix.duplicateImport', { file });
               }
             }
           } catch { /* best-effort — a failure just leaves the honest blocker below */ }
@@ -2957,7 +3001,7 @@ export class ToolDispatcher {
                   const newPkg = depRes.files['package.json'];
                   try { await this.actuator.writeFile(this.workspaceId, 'package.json', newPkg); } catch { /* best-effort */ }
                   try { this.onFileWrite?.('package.json', newPkg); } catch { /* best-effort */ }
-                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${depRes.added.length} missing dependency(ies) to package.json (${depRes.added.map((d) => d.package).join(', ')}) so the app installs and runs.`, ts: Date.now() });
+                  this.narrate('fix.missingDeps', { count: depRes.added.length, packages: depRes.added.map((d) => d.package).join(', ') });
                 }
               }
             } catch { /* best-effort — a failure just leaves the honest 'missing dependency' finding below */ }
@@ -5116,6 +5160,199 @@ export class ToolDispatcher {
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
       }
 
+      case 'request_secrets': {
+        // ASK THE USER FOR A KEY, MID-BUILD (admin 2026-08-08). Previously the build either wrote a
+        // placeholder and carried on toward a feature that could never work, or finished and told the
+        // user afterwards which keys to go and paste. Both put the dead end AFTER the build.
+        //
+        // The VALUE never passes through here: the popup writes it straight to the encrypted vault
+        // through the authenticated secrets API, and this only learns the names and reads them back.
+        // Sending a live credential up the build's event stream would put it in the transcript and the
+        // admin report, both of which are stored.
+        const reqRec = (input as Record<string, unknown>) || {};
+        const rawAsks = Array.isArray(reqRec.secrets) ? (reqRec.secrets as Array<Partial<SecretAsk>>) : [];
+        const plan = planSecretRequest(rawAsks, this.savedSecretNames);
+
+        // Report the filtered-out names to the AGENT rather than dropping them silently — it needs to
+        // know a key it planned for is already present (so it can wire it) or was refused (so it stops
+        // planning around it).
+        const notes: string[] = [];
+        if (plan.alreadyHave.length) notes.push(`Already saved (no need to ask): ${plan.alreadyHave.join(', ')}.`);
+        if (plan.rejected.length) notes.push(`Refused — not a usable app key: ${plan.rejected.join(', ')}. Do not ask for NavBharatAI's own provider keys.`);
+        if (plan.ask.length === 0) {
+          return notes.length ? notes.join(' ') : 'request_secrets: nothing to ask for — the app already has every key it named.';
+        }
+        if (!this.onSecretsNeeded) {
+          // An offer we cannot honour is worse than none: without a verified user there is no vault to
+          // save into, so say so instead of showing a popup that would lose the input.
+          return `Cannot ask for keys in this session (no signed-in user). Tell the user to add ${plan.ask.map((a) => a.name).join(', ')} in Settings → Secrets & API Keys. ${notes.join(' ')}`.trim();
+        }
+
+        this.events?.emit({ type: 'narration', agent: 'architect', text: `🔑 ${secretRequestPrompt(plan)}`, ts: Date.now() });
+        let saved: Record<string, string> | null = null;
+        try { saved = await this.onSecretsNeeded(plan.ask); } catch { saved = null; }
+
+        const askedNames = plan.ask.map((a) => a.name);
+        if (!saved || Object.keys(saved).length === 0) {
+          const line = secretRequestResult('skipped', askedNames);
+          this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
+          // The build CONTINUES. Skipping is a real answer, and the agent is told to leave the feature
+          // visibly disabled rather than fake it.
+          return `${line} Build the rest of the app normally and leave that feature as a visibly disabled "needs setup" state — never a fake success. ${notes.join(' ')}`.trim();
+        }
+
+        // Merge into the app's .env NOW. The vault is only read at build START, so a key saved
+        // mid-build would otherwise not exist for the running app until the next build — which is
+        // exactly the gap `rescueDatabase` was written to close for the database.
+        let wrote = false;
+        try {
+          let existing = '';
+          try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'secrets-env-read'); } catch { existing = ''; }
+          const merged = mergeDotEnv(existing, saved);
+          await this.actuator.writeFile(this.workspaceId, '.env', merged);
+          try { this.onFileWrite?.('.env', merged); } catch { /* durable record is best-effort */ }
+          // The user's real keys must never reach their git repo.
+          try {
+            let gi = '';
+            try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'secrets-gi-read'); } catch { gi = ''; }
+            const nextGi = gitignoreWithEnv(gi);
+            if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
+          } catch { /* gitignore hardening is best-effort */ }
+          wrote = true;
+        } catch { wrote = false; }
+
+        // Keep the in-memory set current so a later ask in the SAME build does not re-request these.
+        this.savedSecretNames = [...this.savedSecretNames, ...Object.keys(saved)];
+
+        const savedNames = Object.keys(saved);
+        if (!wrote) {
+          // Saved to the vault but not written to this sandbox — true, and the difference matters: the
+          // key is safe and will apply next build, but the app running right now still lacks it.
+          const line = `🔐 Saved ${savedNames.join(', ')} to your keys. They could not be written into the running app just now — they will apply on the next build.`;
+          this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
+          return `${line} ${notes.join(' ')}`.trim();
+        }
+        const okLine = secretRequestResult('saved', savedNames);
+        this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
+        return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_shell': {
+        // PHASE 5, and the one that makes the other four pay off. Composition is where a first build
+        // goes wrong — physics in the render callback, one particle layer added, audio never unlocked,
+        // a leaked WebGL context on unmount. All invisible in review, all obvious when played.
+        const gshRec = (input as Record<string, unknown>) || {};
+        const gshInclude = Array.isArray(gshRec.include)
+          ? gshRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gsh = generateGameShell(gshInclude);
+        const gshWritten: string[] = [];
+        for (const [path, content] of Object.entries(gsh.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gshWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('game shell');
+        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}`;
+      }
+
+      case 'generate_game_vfx': {
+        // PHASE 4. The value is not the particle system — it is bindGameFeedback, ONE table mapping each
+        // event to particle + sound + trauma + hit-stop. Authored anywhere else it drifts, and half the
+        // game ends up feeling weaker than the other half for no reason anyone can name.
+        const gfxRec = (input as Record<string, unknown>) || {};
+        const gfxInclude = Array.isArray(gfxRec.include)
+          ? gfxRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gfx = generateGameVfxAudio(gfxInclude);
+        const gfxWritten: string[] = [];
+        for (const [path, content] of Object.entries(gfx.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gfxWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('game VFX and audio');
+        return `Wired VFX and audio:\n${gfxWritten.join('\n')}\n\n${gfx.instructions}`;
+      }
+
+      case 'generate_game_controller': {
+        // PHASE 3. The feel lives in a PURE motor (coyote time, jump buffering, variable jump height,
+        // air control, slope limit, ground snap) so those rules are testable arithmetic rather than
+        // something a human has to sense in a browser; the three.js class on top only raycasts.
+        const gcRec = (input as Record<string, unknown>) || {};
+        const gcInclude = Array.isArray(gcRec.include)
+          ? gcRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gc = generateGameController(gcInclude);
+        const gcWritten: string[] = [];
+        for (const [path, content] of Object.entries(gc.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('character controller');
+        return `Wired the character controller:\n${gcWritten.join('\n')}\n\n${gc.instructions}`;
+      }
+
+      case 'generate_game_3d': {
+        // PHASE 2 of game building. What makes a three.js scene look good is colour management, lighting
+        // shape, fitted shadows and restraint in post — not asset detail. Those decisions live in the
+        // generated code so the model does not have to rediscover them (and get them wrong) each time.
+        const g3Rec = (input as Record<string, unknown>) || {};
+        const g3Include = Array.isArray(g3Rec.include)
+          ? g3Rec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const g3 = generateGame3D(g3Include);
+        const g3Written: string[] = [];
+        for (const [path, content] of Object.entries(g3.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          g3Written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('3D layer');
+        // Naming the install is not optional: a 3D layer whose `three` dependency is never added
+        // produces an app that cannot build, which is the honest-failure rule applied to a generator.
+        const g3Deps = g3.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}`;
+      }
+
+      case 'generate_game_runtime': {
+        // THE ENGINE LAYER (admin 2026-08-09). AI-generated games play badly far more often because the
+        // model hand-rolls the runtime than because the art is simple: a raw-delta loop makes physics
+        // frame-rate dependent, event-driven input drops presses, and allocating bullets in the loop
+        // hands the GC work every frame. This ships a runtime that has already solved those, so every
+        // later generator (world, enemies, VFX) inherits a correct foundation. Pure generator in
+        // GameRuntimeGenerator.ts; no dependency, engine-agnostic.
+        const grRec = (input as Record<string, unknown>) || {};
+        const grInclude = Array.isArray(grRec.include)
+          ? grRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gr = generateGameRuntime(grInclude);
+        const grWritten: string[] = [];
+        for (const [path, content] of Object.entries(gr.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          grWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('game runtime');
+        return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}`;
+      }
+
       case 'generate_animation': {
         // The audit's last frontend ❌ — micro-interactions were LLM-authored ad hoc, so most builds got
         // a different hand-rolled transition or none at all. Pure generator in MotionGenerator.ts:
@@ -7015,21 +7252,31 @@ export class ToolDispatcher {
       }
 
       case 'deploy': {
+        // A DEPLOY THAT DID NOT DEPLOY MUST NOT REPORT SUCCESS (autopsy build aed2906d, 2026-08-09).
+        //
+        // Every branch below used to RETURN a sentence. A returned string is a SUCCESSFUL tool result, so
+        // the build timeline recorded `✓ deploy (0s)` twice, no URL was ever emitted, and the agent was
+        // left guessing — it went off running `ls -la dist/` and `pwd && ls -la` trying to work out what
+        // had happened. The user had asked for one thing, a live link, and got neither the link nor an
+        // error. THROWING is how every other tool reports a failure here (it becomes a TOOL_ERROR the
+        // agent can read and act on), so deploy now uses the same convention as the rest of the catalog.
+        // The message text is unchanged — it was already the right explanation, it was just being
+        // delivered as if it were good news.
         if (!this.deploy) {
-          return 'Deployment is not configured in this context.';
+          throw new Error('Deployment is not configured in this context.');
         }
         if (!this.actuator.downloadDistFiles) {
-          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+          throw new Error('Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.');
         }
         let files: Map<string, Buffer>;
         try {
           files = await this.actuator.downloadDistFiles(this.workspaceId);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+          throw new Error(`Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`);
         }
         if (files.size === 0) {
-          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+          throw new Error('No built files found. Run "npm run build" to produce dist/ before deploying.');
         }
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
@@ -7101,7 +7348,7 @@ export class ToolDispatcher {
         const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let renameSkipped = 0;
-        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+        if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
           for (const f of codeFilesAll.slice(0, 50)) {
             try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
           }
@@ -7149,7 +7396,7 @@ export class ToolDispatcher {
         const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let addPropSkipped = 0;
-        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+        if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
           for (const f of codeFilesAll.slice(0, 50)) {
             try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
           }

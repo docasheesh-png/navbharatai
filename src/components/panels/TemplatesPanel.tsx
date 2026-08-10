@@ -58,8 +58,21 @@ export const CURATED_TEMPLATES: TemplateDefinition[] = [
     prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.',
   },
   {
-    id: 'rn_app', name: 'React Native App', icon: Smartphone, isPro: true,
-    prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.',
+    // WAS "React Native App", and it promised something this platform cannot do (verified 2026-08-08):
+    // `react-native`/`expo` are in no framework registry, nothing in the analyser or the drift guards
+    // recognises them, and the E2B image ships no Expo tooling. The prompt went straight to the builder,
+    // which would scaffold vite-react, write React Native files into it, and produce an app whose
+    // preview can never run — the user picks "React Native App", waits, and gets something broken.
+    //
+    // That is the same trap ROADMAP.md already forbids for frameworks ("a 'Rust' build that 403s = a
+    // fake feature"), sitting in the TEMPLATE list where the framework guard does not reach.
+    //
+    // Deleting it would have thrown away what the user actually wanted. NavBharatAI really does ship
+    // installable Android apps — the APK Builder wraps the built app with Capacitor and produces a REAL
+    // signed .apk/.aab for the Play Store. So the template now builds the mobile-first app that path
+    // needs, and its name says what the user will genuinely end up holding.
+    id: 'rn_app', name: 'Mobile App (installable)', icon: Smartphone, isPro: true,
+    prompt: 'Build a MOBILE-FIRST app designed to be installed on a phone. Requirements:\n1. Phone-sized layout first (single column, 360-430px), scaling up gracefully on tablet/desktop\n2. Bottom tab navigation between a Home screen and a Detail screen (real routing, not a mock)\n3. Touch-sized targets (min 44x44px), no hover-only interactions, safe-area padding for notches\n4. Local persistence so state survives a reload\n5. Works offline for already-loaded screens\n\nApp theme: dark mode with indigo accent. Include sample data and list rendering.\nAfter it is built, tell me I can turn this into a real installable Android app from More → Your App → Download APK.',
   },
   {
     id: 'portfolio', name: 'Portfolio Site', icon: Globe,

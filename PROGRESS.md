@@ -28724,3 +28724,25 @@ it is where the next real quality jump lives — not in another repair pass.
 Tests: 5 more in `tests/greenGuard.test.ts` (33 total) — the reason saying only what was measured, the
 unfinished-build caveat, no caveat when clean, and a wiring assertion that the readiness verdict really
 reaches the record. Gate: tsc clean both projects, full run 12,912/12,912.
+
+### Same report — the ETA repeated a promise it had already broken
+
+**From build 02be22e3's timeline:** "about 3 min more to go" at minute 4, the SAME "about 3 min more
+to go" at minute 8 — and then it finished 19 seconds later.
+
+**ROOT CAUSE — the floor swallowed the doubling.** The overrun step was
+`max(FLOOR, (base/2) * 2^done)`. Whenever `base/2` fell under the 3-minute floor (the common case,
+since most estimates are a few minutes), the clamp ate the first doubling entirely: with base = 3 min,
+`done=0` gave `max(3, 1.5) = 3` and `done=1` gave `max(3, 3) = 3`. Two different overruns, identical
+promise. The doubling existed specifically to stop the "same number, over and over" sawtooth that an
+earlier autopsy (2026-08-04) had already fixed once — this is that same bug leaking back through the
+clamp rather than through the formula.
+
+**FIX:** floor the BASE step, then double THAT — `min(CAP, max(FLOOR, base/2) * 2^done)`. Every
+successive promise is now strictly larger than the last (3 min → 6 min), and after the promise budget
+is spent it stops naming numbers at all and says plainly that it is taking longer. The floor and the
+cap both still apply.
+
+Tests: 3 more in `src/server/lib/BuildTimeEstimator.test.ts` (30 total) — each promise strictly larger
+than the last with the exact user-visible numbers, the no-number line after the budget is spent, and
+the floor/cap still holding. Gate: tsc clean both projects, full run 12,915/12,915.

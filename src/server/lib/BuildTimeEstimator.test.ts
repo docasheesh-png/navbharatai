@@ -268,3 +268,43 @@ describe('liveEtaTick — a broken estimate must stop making fresh promises (mit
     }
   });
 });
+
+describe('the ETA never repeats a promise it has already broken (real report 02be22e3)', () => {
+  /**
+   * That build said "about 3 min more to go" at minute 4 and the SAME "about 3 min more to go" at
+   * minute 8, then finished 19 seconds later. Cause: the step was `max(FLOOR, (base/2) * 2^done)`, so
+   * whenever base/2 fell under the floor — the common case — the clamp ATE the first doubling:
+   * with base = 3 min, done=0 gave max(3, 1.5) = 3 and done=1 gave max(3, 3) = 3. A promise repeated
+   * verbatim after it has already been broken reads as a frozen lie.
+   */
+  const THREE_MIN = 3 * 60_000;
+
+  it('each successive promise is STRICTLY larger than the last', () => {
+    // Overrun #1, then overrun #2, with the original 3-minute estimate as the base.
+    const first = liveEtaTick(THREE_MIN + 1_000, THREE_MIN, THREE_MIN, 0);
+    const second = liveEtaTick(THREE_MIN * 2, THREE_MIN, THREE_MIN, 1);
+    expect(first.revised).toBe(true);
+    expect(second.revised).toBe(true);
+    const firstStep = first.totalMs - (THREE_MIN + 1_000);
+    const secondStep = second.totalMs - THREE_MIN * 2;
+    expect(secondStep).toBeGreaterThan(firstStep);
+    // The exact numbers a user would read: 3 min, then 6 min — never 3 then 3.
+    expect(first.text).toContain('3 min');
+    expect(second.text).toContain('6 min');
+  });
+
+  it('after the promise budget is spent it stops naming numbers at all', () => {
+    const third = liveEtaTick(THREE_MIN * 3, THREE_MIN, THREE_MIN, 2);
+    expect(third.text).toMatch(/taking longer than estimated/);
+    expect(third.text).not.toMatch(/more to go/);
+  });
+
+  it('the step is still floored and still capped', () => {
+    // A tiny base still promises at least the floor…
+    const tiny = liveEtaTick(70_000, 60_000, 10_000, 0);
+    expect(tiny.totalMs - 70_000).toBe(3 * 60_000);
+    // …and a huge one cannot run away past the cap.
+    const huge = liveEtaTick(60 * 60_000, 30 * 60_000, 60 * 60_000, 1);
+    expect(huge.totalMs - 60 * 60_000).toBeLessThanOrEqual(15 * 60_000);
+  });
+});

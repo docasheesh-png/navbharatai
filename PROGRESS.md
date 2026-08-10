@@ -28831,3 +28831,39 @@ case captured with counts, the message stating what a repeat PROVES rather than 
 isolation, the per-build reset, junk tolerance, the memory bound, and wiring assertions that all three
 heals report and that the finding is recorded unresolved.
 Gate: tsc clean both projects, full run 12,982/12,982.
+
+### 2026-08-10 — The flip's LAST-RESORT tail (admin: "3000 par nahi chale to 5000 par try kiya jayega")
+
+**The flip system already existed** (built 2026-08-07 for the admin's original "ek par na chale to
+dusra" ask; wired into the Diagnose route then, and into the import boot in #2206). It also could not
+possibly have worked until yesterday, because the E2B "Closed Port Error" page counted as a rendered
+app — the flip only engages when the first port FAILS to render, so a host error page reading as
+success pinned the preview to the dead port. That was #2212.
+
+**But re-reading the ranking against the admin's exact words exposed a REAL remaining gap.**
+`COMMON_DEV_PORTS` was used only to ORDER the ports the OS reported as listening
+(`if (listening.includes(p))`). It never proposed a port that was not observed. That is the right
+instinct — evidence over guessing — but it produces NOTHING when the listening scan cannot run, comes
+back empty, or simply runs a moment before the server finishes binding. In that case the flip had no
+second candidate AT ALL, and the preview stayed pinned to a dead port: exactly the failure it exists
+to prevent. The admin's scenario ("3000 fails, try 5000") was therefore not actually reachable.
+
+**Added tier 5 — a bounded guess, strictly AFTER every piece of real evidence:**
+- it runs only when at least one real candidate exists (no evidence at all means nothing booted
+  anywhere, and four browser visits would only prove a dev server that never started is still not
+  running);
+- the FRAMEWORK's own default port leads the tail, so a `node-express` app reaches 5000 before a Vite
+  port, and a `vite-react` app reaches 5173 first (`framework` is now passed at both call sites);
+- ordering guarantees it can never override evidence — it only fills the space evidence left empty;
+- still deduped, still infra-free (5432 can never be published as the app), still capped at
+  MAX_PORT_CANDIDATES.
+
+Three existing tests encoded the OLD decision ("never invent a port not listening"). They were
+REPLACED with the superseding contract and the reasoning recorded in place, not weakened: evidence
+order is still asserted, and the infra-exclusion test now asserts the INTENT (no infra port anywhere
+in the list) rather than an exact array that the tail legitimately extends.
+
+Tests: 5 new + 3 updated in `src/server/AgentV3/PortDiscovery.test.ts` (16 total) — a wrong
+expectation with no scan is no longer a dead end, the framework hint leading the tail for both
+node-express and vite-react, the guess never outranking evidence, no-evidence-no-guessing, and the
+bound/infra guarantees holding with the tail. Gate: tsc clean both projects, full run 12,987/12,987.

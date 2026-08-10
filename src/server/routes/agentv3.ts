@@ -3381,7 +3381,7 @@ export function registerAgentV3Routes(app: Express): void {
           try {
             listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'preview-port-scan')).stdout);
           } catch { /* the scan is best-effort — without it the flip simply has no extra candidates */ }
-          for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening })) {
+          for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: effectivePort, listening, framework })) {
             if (cand === winnerPort) continue;
             const attempt = await visit(cand);
             if (attempt.url && attempt.served.rendered) { winner = attempt; winnerPort = cand; break; }
@@ -6166,7 +6166,7 @@ export function registerAgentV3Routes(app: Express): void {
                 try {
                   listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'import-preview-port-scan')).stdout);
                 } catch { /* best-effort — without the scan the flip simply has no extra candidates */ }
-                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening })) {
+                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening, framework })) {
                   if (cand === bootPort) continue;
                   const attempt = await visit(cand);
                   if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }

@@ -13,6 +13,7 @@ import { firestoreBackup } from '../lib/FirestoreBackup';
 import { doraMetrics } from '../lib/DoraMetrics';
 import { serverStats } from '../lib/serverStats';
 import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
+import { adminRequestOk } from '../lib/adminAuth';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -39,9 +40,14 @@ export function buildReadiness(ready: boolean, uptimeSec: number, backupConfigur
   return { ready, uptime: uptimeSec, checks: { initialized: ready, backupConfigured } };
 }
 
-function adminOk(req: Request): boolean {
-  return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
-}
+/**
+ * Admin gate — the SHARED one (audit finding #3). This used to be a private copy that compared the
+ * admin PASSWORD against `req.query.admin`, which wrote that password into Cloud Run access logs,
+ * browser history and every proxy `Referer` on the way. It also used `===` on a secret, had no TTL
+ * and no MFA. It now goes through the same timestamped, constant-time, expiring token the admin
+ * panel uses — read from the `x-admin-token` header, never from a URL.
+ */
+const adminOk = (req: Request): boolean => adminRequestOk(req);
 
 /** Assemble per-dependency health checks from real, live server state. */
 function collectHealthChecks(): HealthCheck[] {

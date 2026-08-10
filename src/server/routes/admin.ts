@@ -42,64 +42,25 @@ import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSucces
  * Behavior unchanged. All routes are gated by the HMAC day-token middleware.
  */
 /** Constant-time comparison for secret material (sha256/HMAC hex digests, tokens). */
-function safeStrEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
-}
-
-/** Admin session lifetime (SEC Phase 5, F8). Default 30 days — long enough not to log the admin out
- *  mid-work, but no longer INFINITE: a leaked token now expires instead of granting permanent access.
- *  Env-tunable (`ADMIN_TOKEN_TTL_HOURS`); clamped to a sane [1h, 365d] range. */
-export function adminTokenTtlMs(rawHours?: string): number {
-  const h = Number(rawHours);
-  const hours = Number.isFinite(h) && h > 0 ? h : 720; // 720h = 30 days
-  return Math.min(Math.max(hours, 1), 365 * 24) * 60 * 60 * 1000;
-}
-
-/**
- * Mint a TIME-STAMPED admin token: `<issuedAtMs>.<HMAC(pass, "admin:v2:<user>:<issuedAtMs>")>`. The
- * issued-at is part of the signed payload, so it can't be forged forward, and `verifyAdminTokenValue`
- * rejects it once older than the TTL. Replaces the old static (never-expiring) HMAC. Pure.
- */
-export function mintAdminToken(pass: string, username: string, issuedAtMs: number): string {
-  const sig = crypto.createHmac('sha256', pass).update(`admin:v2:${username}:${issuedAtMs}`).digest('hex');
-  return `${issuedAtMs}.${sig}`;
-}
-
-/**
- * Verify a timestamped admin token: the signature must match AND the token must be within the TTL.
- * A malformed / legacy (dotless) / expired token fails — the admin simply logs in again (their
- * password still works). Constant-time signature compare. Pure + unit-tested.
- */
-export function verifyAdminTokenValue(token: string, pass: string, username: string, nowMs: number, ttlMs: number): boolean {
-  if (!token || !pass) return false;
-  const dot = token.indexOf('.');
-  if (dot <= 0) return false; // legacy static / malformed → must re-login
-  const issuedAt = Number(token.slice(0, dot));
-  const sig = token.slice(dot + 1);
-  if (!Number.isFinite(issuedAt) || issuedAt <= 0) return false;
-  if (nowMs - issuedAt > ttlMs) return false; // expired
-  if (issuedAt - nowMs > 60_000) return false; // issued in the future (clock skew tolerance) → reject
-  const expected = crypto.createHmac('sha256', pass).update(`admin:v2:${username}:${issuedAt}`).digest('hex');
-  return safeStrEqual(sig, expected);
-}
-
-/**
- * Normalise an admin credential read from the environment. Cloud Run / console /
- * gcloud frequently store a value with a trailing newline, stray whitespace, or
- * wrapping quotes; if login and token-verification disagree on that, login can
- * succeed while every subsequent dashboard call 403s (they'd HMAC different keys).
- * Trimming + stripping a single layer of surrounding quotes on BOTH sides keeps
- * the issued token and the verifier consistent.
- */
-export function adminCredential(raw: string | undefined, fallback = ''): string {
-  const norm = (v: string): string => v.trim().replace(/^['"]([\s\S]*)['"]$/, '$1').trim();
-  return norm(String(raw ?? '')) || norm(fallback);
-}
-const adminUsername = (): string => adminCredential(process.env.ADMIN_USERNAME, 'aashishcpmt09');
-const adminPassword = (): string => adminCredential(process.env.ADMIN_PASSWORD, '');
+// The admin auth primitives live in lib/adminAuth (audit finding #3) so any route can import the
+// REAL gate instead of hand-rolling a weaker one. Re-exported here because existing callers and tests
+// import them from this module.
+export {
+  adminTokenTtlMs,
+  mintAdminToken,
+  verifyAdminTokenValue,
+  adminCredential,
+  safeStrEqual,
+} from '../lib/adminAuth';
+import {
+  adminTokenTtlMs,
+  mintAdminToken,
+  verifyAdminTokenValue,
+  adminCredential,
+  safeStrEqual,
+  adminUsername,
+  adminPassword,
+} from '../lib/adminAuth';
 
 // ── P-SEC.3 — Admin TOTP MFA ───────────────────────────────────────────────
 // Second factor for admin-panel access. The active secret resolves from either an

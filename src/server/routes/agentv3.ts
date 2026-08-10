@@ -362,6 +362,7 @@ import {
   workspaceIdFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
+import { adminRequestOk } from '../lib/adminAuth';
 export { buildActuator };
 
 /**
@@ -2712,8 +2713,11 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/diag', async (req: Request, res: Response) => {
     const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
     const wantsTest = req.query.test === '1';
-    const adminOk =
-      !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
+    // Audit finding #3: this used to compare the admin PASSWORD against `?admin=` in the URL, which
+    // wrote that password into every access log. It now takes the same expiring, constant-time admin
+    // token the panel uses. Losing the query path only costs the admin the THROTTLE bypass — the
+    // diagnosis itself is still served, and a throttled probe returns an honest message.
+    const adminOk = adminRequestOk(req);
     // The live probe makes ONE tiny real Claude call. Admins can run it anytime;
     // otherwise it's throttled to one every 30s globally so it can't be abused.
     const now = Date.now();

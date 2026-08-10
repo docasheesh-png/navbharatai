@@ -29029,3 +29029,56 @@ existing source-lock test (`zipUpload.test.ts`) asserted the raw template litera
 shared POLICY instead, which is strictly stronger — it locks which of the three rules that route must use.
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1132 files / 13,033 tests, exit 0**.
+
+---
+
+## 2026-08-09 — Audit fix #3: one admin gate, and no credential in a URL
+
+Started as "two identical `adminOk()` copies" on the duplication list. Reading them turned it into the
+most serious finding of the audit so far.
+
+### What the copy actually was
+
+    function adminOk(req) {
+      return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
+    }
+
+identical in `routes/health.ts` and `routes/observability.ts`, and a THIRD inline copy in
+`routes/agentv3.ts` that the duplicate-name detector missed because it is an expression, not a named
+function — the source-level test in this change is what found it.
+
+Meanwhile the admin panel's real gate is a timestamped HMAC token with a TTL, a constant-time compare
+and TOTP MFA. The copies were weaker in four separate ways:
+
+1. **The admin PASSWORD travels in the URL.** Query strings land in Cloud Run access logs, browser
+   history, `Referer` headers and every proxy between. The one credential that (with MFA) protects the
+   whole admin panel was being written to logs on every request.
+2. **`===` on a secret** — not constant-time, while `safeStrEqual` sat six lines away in the module
+   this was copied from.
+3. **No TTL, no MFA, no rate limit.** A password recovered from a log grants these endpoints forever;
+   a real admin token expires.
+4. **No `adminCredential()` normalisation.** A Cloud Run value with a trailing newline 403s these
+   routes forever while the panel keeps working — a silent split-brain.
+
+Behind that gate: observability traces, metrics, the error feed, DORA and LLM telemetry (which names
+providers — the White-Label Law's admin-only side), plus `POST /api/admin/backup/firestore`, which
+triggers a real Firestore export.
+
+### Root cause — the SAME shape as finding #2
+
+The real gate was a closure INSIDE `registerAdminRoutes`, so it could not be imported. A security
+primitive that cannot be imported gets re-typed, and the copy is always weaker than the original. The
+primitives now live in `lib/adminAuth.ts` (no route dependencies); `routes/admin.ts` re-exports them so
+every existing caller and test is untouched.
+
+### Honest note on what changed for the admin
+
+`?admin=<password>` no longer works on those endpoints — by design. Nothing in the app used it (no UI
+calls them; the panel already sends `x-admin-token`), so this breaks no user flow. The only lost
+capability is the THROTTLE BYPASS on `/api/agentv3/diag?test=1`: the diagnosis is still served, and a
+throttled live probe returns an honest message instead of running.
+
+16 tests, including the invariant: **no route may read an admin credential from a query/body, and none
+may compare `ADMIN_PASSWORD` directly.** That assertion is what caught the third copy.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1133 files / 13,049 tests, exit 0**.

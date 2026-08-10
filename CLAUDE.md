@@ -368,7 +368,15 @@ the code (it is actually read somewhere) on 2026-07-11.
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
-  `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both)
+  `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both), `CASHFREE_WEBHOOK_SECRET`
+  (✅ **SET in Cloud Run by the admin 2026-08-10** — the third delivery path for a payment is now live;
+  see the Payment-recovery entry below, whose "NOT set" warning this supersedes. NOTE for whoever sets
+  it next: Cashfree PG has **no separate webhook secret** — the signature is an HMAC-SHA256 over
+  `timestamp + rawBody` keyed by the merchant's **Client Secret**, so this value is the SAME string as
+  `CASHFREE_SECRET_KEY`. The endpoint itself was already registered at
+  `https://navbharatai.com/api/payment/webhook`, webhook version `2023-08-01`, events
+  success/failed/refund. To verify it end-to-end, use the Cashfree dashboard's per-endpoint **Test**
+  button and read the **Logs** tab: 400 = secret not configured, 401 = wrong value, 200 = working.)
 - **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`,
   ⚠️ AUTO-DNS (2026-08-06): `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` now ALSO power the
   managed-DNS zones path (`cloudflareManagedDns.ts` — nameserver delegation, "DNS hum set kar dein").
@@ -405,6 +413,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   explicitly-billed routes are disjoint), a FAILED action is never charged, an unmeasured provider
   charges ZERO rather than an invented number, an empty wallet is refused BEFORE any provider call, an
   unreadable balance fails OPEN, and the daily rollup is dated on the server clock.
+  (Re-confirmed `on` by the admin 2026-08-10.)
 - **E2B sandbox cost control (shipped 2026-08-04):** `AGENTV3_SANDBOX_IDLE_MINUTES` (default 15, was a
   hardcoded 45 — a 5-minute build was followed by 45 idle billed minutes), `AGENTV3_SANDBOX_TOUCH_MINUTES`
   (default 5 — how often a LIVE build refreshes its durable stamp so the cross-instance orphan reaper can
@@ -413,10 +422,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_MAX_BUILD_SECONDS` + 10 min past last activity so it can never reach a running build.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
-  the user's own unfinished orders against Cashfree. ⚠️ This exists because `CASHFREE_WEBHOOK_SECRET` is
-  NOT set, so every webhook is rejected (the signature cannot be verified) — a user who paid by UPI and
-  closed the app satisfied neither delivery route and was never credited. Setting the webhook secret is
-  still worth doing (credit in seconds instead of on the next visit), but the money no longer depends on it.
+  the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say
+  `CASHFREE_WEBHOOK_SECRET` is **NOT** set — **the admin SET it in Cloud Run on 2026-08-10**, so all
+  THREE delivery paths (webhook → redirect → reconcile-on-sign-in) are now live. Do not reason from the
+  old "webhooks are all rejected" premise. This reconcile path stays the safety net and must NOT be
+  removed now that the webhook works: the webhook is a *speed* upgrade (credit in seconds instead of on
+  the user's next visit), while reconcile is what guarantees a UPI payer who never returns to the app is
+  still credited — three independent paths to a user's money is the point, not redundancy to prune.
 - **Flipped ON by the admin 2026-08-08 (all four audited against live code first — see `ROADMAP.md` §0):**
   `AGENTV3_PARALLEL_BUILD` (frontend + backend build concurrently; ONE `parallelBuild` value drives the
   per-path write lock, the dispatch decision AND the architect prompt, so "parallel on, lock off" cannot
@@ -561,6 +573,17 @@ Bedrock test-chat page — neither is in use.)
   just `[CRITICAL]`. Cosmetic/a11y/style warnings are always excluded (`selectAutoFixableWarnings`). Rides the
   SAME single bounded C9 repair pass — no new cost path. Default OFF; flip on after a canary proves it clean.
   (The C9 critical auto-fix itself stays default-ON; kill switch `AGENTV3_REVIEWER_AUTOFIX=off`.)
+  ⛔ **DO NOT propose turning this OFF to make long builds shorter — it cannot help, and it costs real
+  quality (recorded 2026-08-10 because a session, mine, recommended exactly that from memory instead of
+  from the code, and the admin nearly acted on it).** Two code facts settle it: (1) it adds NO pass —
+  `reviewerWarningAutoFixEnabled()` only widens what the SINGLE C9 pass repairs (`AutoFix.ts`); and (2)
+  ALL post-build work is already hard-capped by `ADVISORY_CAP_MS = 120_000` in `routes/agentv3.ts`, i.e.
+  2 minutes total once the app is built and durably saved. A 20-minute build therefore spent that time
+  in the BUILD LOOP, inside `maxBuildSeconds()` (default **1800s = 30 min**) — post-build gates are not
+  even a candidate. Meanwhile OFF means real functional bugs ship: the Notes-report defects
+  ("auto-focus broke", "sort ignores edits", "isAtLimit blocks Add") were all WARNINGS, which is exactly
+  why C9 alone missed them. When a build feels too long, investigate the loop; never disable a
+  correctness gate for a time saving that does not exist.
 - **`AGENTV3_LINT_GATE`** — NOW SET to `on` (admin, 2026-07-11) → moved up into the configured "AgentV3
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.

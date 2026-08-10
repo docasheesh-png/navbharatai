@@ -1,4 +1,5 @@
 import { Sandbox } from 'e2b';
+import { commandFailureResult } from '../../lib/sandboxCommandError';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
@@ -253,7 +254,7 @@ export class E2BActuator implements IEngineerActuator {
     if (hasLock) {
       const ci = await sandbox.commands.run('npm ci', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
-      }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+      }).catch((err: any) => commandFailureResult(err));
       if (ci.exitCode === 0) return { success: true, log: ci.stdout + ci.stderr };
       // npm ci failed (stale lock, missing lock entry) — fall through to npm install
     }
@@ -261,7 +262,7 @@ export class E2BActuator implements IEngineerActuator {
     // Step 2: npm install (resolves all deps, creates/updates lock file)
     const install = await sandbox.commands.run('npm install', {
       cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
-    }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+    }).catch((err: any) => commandFailureResult(err));
     const installLog = install.stdout + install.stderr;
     if (install.exitCode === 0) return { success: true, log: installLog };
 
@@ -269,7 +270,7 @@ export class E2BActuator implements IEngineerActuator {
     if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {
       const retry = await sandbox.commands.run('npm install --legacy-peer-deps', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
-      }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+      }).catch((err: any) => commandFailureResult(err));
       const retryLog = retry.stdout + retry.stderr;
       return {
         success: retry.exitCode === 0,

@@ -28867,3 +28867,37 @@ Tests: 5 new + 3 updated in `src/server/AgentV3/PortDiscovery.test.ts` (16 total
 expectation with no scan is no longer a dead end, the framework hint leading the tail for both
 node-express and vite-react, the guess never outranking evidence, no-evidence-no-guessing, and the
 bound/infra guarantees holding with the tail. Gate: tsc clean both projects, full run 12,987/12,987.
+
+### 2026-08-10 — WHY `exit status 217` was unexplainable: we were throwing npm's own words away
+
+**The open root cause from report e61b13b1** was "the pre-boot install failed with `exit status 217`
+while the SAME installer succeeded nineteen seconds later". I recorded it honestly as open because I
+had no evidence — and this is exactly WHY there was none.
+
+**ROOT CAUSE OF THE MISSING EVIDENCE.** Nine call sites handled a failed sandbox command as:
+
+    .catch((err) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }))
+
+The E2B SDK REJECTS on a non-zero exit and carries the command's real `stdout` / `stderr` / `exitCode`
+**on the error object**. That handler threw all of it away and kept `err.message`, which is the bare
+status line. So the one moment we most need a tool's own words is the exact moment we discarded them —
+and the failure was unexplainable BY CONSTRUCTION, no matter how many reports we collected. The same
+`217` would have come back forever.
+
+This is the same class as the 2026-08-04 "238-second window with no events" and yesterday's heartbeat
+blind spot: not a hole in what happened, a hole in the RECORDING.
+
+**FIX (rule 4 step 2 — the class, not the instance):** one shared `commandFailureResult(err)` reads the
+error's own output and falls back to the message only when there genuinely is nothing else. The status
+line still rides along (it names something the output alone does not) but never REPLACES the output.
+`commandLogTail` keeps the LAST lines, because npm's real cause is always at the end and the head is
+install noise. All nine sites swept across three files; a test asserts the lossy pattern is gone from
+every one and that all nine now go through the single helper, so no future call site can re-invent it.
+
+The next install failure will carry npm's actual error into the report. That does not fix 217 — it is
+what makes fixing it possible.
+
+Tests: 9 in `tests/sandboxCommandError.test.ts` — the reported case keeping npm output, the message as
+a fallback rather than a replacement, no duplicated status line, a transport failure still reporting
+-1, junk tolerance, the tail keeping the end, and the repo-wide sweep.
+Gate: tsc clean both projects, full run 12,996/12,996.

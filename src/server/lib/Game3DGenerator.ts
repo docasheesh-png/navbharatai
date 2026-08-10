@@ -80,24 +80,55 @@ export function createRenderer(options: RendererOptions = {}): THREE.WebGLRender
   return renderer;
 }
 
-/** Keep the canvas correct through rotation and window resize. Returns a disposer. */
+/**
+ * Keep the canvas correct through rotation, window resize AND layout changes. Returns a disposer.
+ *
+ * PASS THE CONTAINER whenever the game is not the whole page. Sizing to window.innerWidth is right for
+ * a fullscreen game and wrong for every embedded one — the canvas overflows its panel and the view is
+ * stretched. And a window 'resize' event never fires when a sidebar collapses or a flex sibling grows,
+ * so a window-only listener misses the most common layout change there is; ResizeObserver catches it.
+ */
 export function handleResize(
   renderer: THREE.WebGLRenderer,
   camera: THREE.PerspectiveCamera,
+  container?: HTMLElement | null,
 ): () => void {
+  const measure = () => {
+    if (container) {
+      const r = container.getBoundingClientRect();
+      // A container collapsed to zero (display:none, an unopened tab) would make aspect NaN and blank
+      // the canvas permanently — keep the last good size instead.
+      if (r.width > 0 && r.height > 0) return { w: r.width, h: r.height };
+      return null;
+    }
+    return { w: window.innerWidth, h: window.innerHeight };
+  };
+
   const onResize = () => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    camera.aspect = w / h;
+    const size = measure();
+    if (!size) return;
+    camera.aspect = size.w / size.h;
     // Without this the view stays stretched after a rotate — the most visible mobile bug there is.
     camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
+    // updateStyle=false when embedded: the CSS size is the layout's business, not the renderer's.
+    renderer.setSize(size.w, size.h, !container);
   };
+
+  onResize(); // size correctly on the first frame, not only after the first resize
+
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', onResize);
+
+  let observer: ResizeObserver | null = null;
+  if (container && typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(onResize);
+    observer.observe(container);
+  }
+
   return () => {
     window.removeEventListener('resize', onResize);
     window.removeEventListener('orientationchange', onResize);
+    observer?.disconnect();
   };
 }
 `;
@@ -310,9 +341,9 @@ export class CameraRig {
   private readonly distance: number;
   private readonly height: number;
   private readonly stiffness: number;
-  private readonly collidables: THREE.Object3D[];
+  private collidables: THREE.Object3D[];
   private readonly ray = new THREE.Raycaster();
-  private yaw = 0;
+  private yawAngle = 0;
   private pitch = -0.2;
   private readonly desired = new THREE.Vector3();
 
@@ -325,9 +356,22 @@ export class CameraRig {
     this.camera = new THREE.PerspectiveCamera(options.fov ?? 60, window.innerWidth / window.innerHeight, 0.1, 1000);
   }
 
+  /**
+   * The character controller needs this so movement is CAMERA-RELATIVE: pressing forward must go where
+   * the player is looking, not along a fixed world axis. Without it, turning the camera makes the
+   * controls feel inverted and unusable.
+   */
+  get yaw(): number { return this.yawAngle; }
+
+  /**
+   * The world is usually built AFTER the rig exists, so colliders cannot only be a constructor option —
+   * otherwise third-person camera collision silently never works and the view clips through walls.
+   */
+  setCollidables(list: THREE.Object3D[]): void { this.collidables = list; }
+
   /** Feed the frame's look delta (Input.lookX/lookY). */
   look(dx: number, dy: number, sensitivity = 0.0025): void {
-    this.yaw -= dx * sensitivity;
+    this.yawAngle -= dx * sensitivity;
     this.pitch -= dy * sensitivity;
     // Clamped just short of straight up/down: at exactly ±90° the view flips over.
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
@@ -336,7 +380,7 @@ export class CameraRig {
   update(target: THREE.Vector3, delta: number): void {
     if (this.kind === 'first-person') {
       this.camera.position.copy(target).add(new THREE.Vector3(0, this.height * 0.8, 0));
-      this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+      this.camera.rotation.set(this.pitch, this.yawAngle, 0, 'YXZ');
       return;
     }
     if (this.kind === 'top-down') {
@@ -354,9 +398,9 @@ export class CameraRig {
 
     // third-person / orbit
     const offset = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.yawAngle) * Math.cos(this.pitch),
       -Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch),
+      Math.cos(this.yawAngle) * Math.cos(this.pitch),
     ).multiplyScalar(this.distance);
 
     const focus = target.clone().add(new THREE.Vector3(0, this.height, 0));

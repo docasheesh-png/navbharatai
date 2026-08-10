@@ -245,6 +245,17 @@ export class CharacterController {
   }
 
   setColliders(list: THREE.Object3D[]): void { this.colliders = list; }
+
+  /**
+   * Put the character back at a spawn point. Restart MUST clear the motor state, not just the position:
+   * a player who died mid-fall would otherwise respawn still carrying that downward velocity — and with
+   * jumping still true, so their first jump does nothing.
+   */
+  reset(x = 0, y = 0, z = 0): void {
+    this.state = initialMotorState();
+    this.object.position.set(x, y, z);
+  }
+
   get velocity(): { x: number; y: number; z: number } { return { x: this.state.vx, y: this.state.vy, z: this.state.vz }; }
   get isGrounded(): boolean { return this.state.grounded; }
   get speed(): number { return Math.hypot(this.state.vx, this.state.vz); }

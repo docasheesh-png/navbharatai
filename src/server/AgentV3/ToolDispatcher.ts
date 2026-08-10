@@ -234,6 +234,7 @@ import { generateMotion } from '../lib/MotionGenerator';
 import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
 import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
+import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5233,6 +5234,28 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_vfx': {
+        // PHASE 4. The value is not the particle system — it is bindGameFeedback, ONE table mapping each
+        // event to particle + sound + trauma + hit-stop. Authored anywhere else it drifts, and half the
+        // game ends up feeling weaker than the other half for no reason anyone can name.
+        const gfxRec = (input as Record<string, unknown>) || {};
+        const gfxInclude = Array.isArray(gfxRec.include)
+          ? gfxRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gfx = generateGameVfxAudio(gfxInclude);
+        const gfxWritten: string[] = [];
+        for (const [path, content] of Object.entries(gfx.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gfxWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('game VFX and audio');
+        return `Wired VFX and audio:\n${gfxWritten.join('\n')}\n\n${gfx.instructions}`;
       }
 
       case 'generate_game_controller': {

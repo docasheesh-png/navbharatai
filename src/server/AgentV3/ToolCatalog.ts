@@ -2023,6 +2023,31 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_vfx',
+      description:
+        'Add VFX + audio + the feedback that ties them together. Call generate_game_runtime first (this '
+        + 'uses its event bus and game-feel), and generate_game_3d for the particles. Emits src/game/fx: a '
+        + 'POOLED particle system (one draw call per blend layer, 9 presets — muzzleFlash, impact, dust, '
+        + 'explosion, smoke, sparks, heal, pickup, blood), a Web Audio manager with the unlock-on-gesture '
+        + 'that browsers require (missing it is THE reason a web game has no sound), pitch variation, a '
+        + 'voice cap and 3D panning, and bindGameFeedback. '
+        + 'THE POINT IS bindGameFeedback: ONE table maps each game event to its particle + sound + camera '
+        + 'trauma + hit-stop, so a hit reads as force instead of a state change. Author reactions in that '
+        + 'table and keep gameplay emitting events only — never call particles or audio inline from '
+        + 'gameplay code, or the reactions drift and half the game ends up feeling weaker. '
+        + 'Adds no dependency. Sound FILES are the app\'s to supply; a missing one plays silently and warns.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: particles, audio, feedback. Default = all.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_controller',
       description:
         'Add the character controller for a game. Call generate_game_runtime (and generate_game_3d for '
@@ -3100,6 +3125,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_vfx',
   'generate_game_controller',
   'generate_game_3d',
   'generate_game_runtime',

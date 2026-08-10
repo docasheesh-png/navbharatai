@@ -38,6 +38,30 @@ describe('colour management — the mistake that makes every scene look wrong', 
     expect(renderer).toContain('camera.updateProjectionMatrix()');
     expect(renderer).toContain("addEventListener('orientationchange'");
   });
+
+  it('sizes to the CONTAINER when embedded, not to the window', () => {
+    // window.innerWidth is right for a fullscreen game and wrong for every embedded one: the canvas
+    // overflows its panel and the view is stretched.
+    expect(renderer).toContain('container?: HTMLElement | null');
+    expect(renderer).toContain('container.getBoundingClientRect()');
+    expect(renderer).toContain('renderer.setSize(size.w, size.h, !container)');
+  });
+
+  it('observes the container — a sidebar collapse never fires a window resize', () => {
+    expect(renderer).toContain('new ResizeObserver(onResize)');
+    expect(renderer).toContain("typeof ResizeObserver !== 'undefined'");
+    expect(renderer).toContain('observer?.disconnect()');
+  });
+
+  it('sizes on the FIRST frame, not only after something resizes', () => {
+    expect(renderer).toContain('onResize(); // size correctly on the first frame');
+  });
+
+  it('a zero-sized container keeps the last good size instead of blanking forever', () => {
+    // An unopened tab or display:none gives 0×0; dividing by it makes aspect NaN and the canvas never
+    // recovers even after it becomes visible.
+    expect(renderer).toContain('if (r.width > 0 && r.height > 0)');
+  });
 });
 
 describe('lighting — the biggest single lever on how a scene feels', () => {

@@ -2023,6 +2023,30 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_3d',
+      description:
+        'Add the 3D layer for a game (three.js). Call generate_game_runtime FIRST — this builds on its '
+        + 'camera damping and game-feel. Emits src/game/three: a renderer configured with sRGB output + '
+        + 'ACES filmic tone mapping and a CAPPED pixel ratio (without those a scene looks washed out and '
+        + 'runs at a crawl on a phone), 9 lighting presets (day/sunset/night/overcast/horror/desert/forest/'
+        + 'underwater/neon) each with hemisphere + key + ambient, fitted shadow camera and matched fog, '
+        + 'material presets with believable roughness/metalness plus shared PALETTES, camera rigs '
+        + '(third-person with wall collision, first-person, top-down, side-scroller) and procedural world '
+        + 'building — seeded value-noise terrain and InstancedMesh scatter. '
+        + 'THE LOOK COMES FROM THESE SETTINGS, NOT FROM ASSET DETAIL: use ONE palette for the whole scene, '
+        + 'share materials, scatter with instancing, and keep bloom subtle. Adds the `three` dependency.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: renderer, lighting, materials, camera, world. Default = all.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_runtime',
       description:
         'Add NavBharatAI\'s GAME RUNTIME to the project — the engine layer a game is built on. Call this '
@@ -3052,6 +3076,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_3d',
   'generate_game_runtime',
   'generate_animation',
   'generate_ui_states',

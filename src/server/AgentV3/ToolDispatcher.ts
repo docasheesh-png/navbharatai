@@ -232,6 +232,7 @@ import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/Requiremen
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateMotion } from '../lib/MotionGenerator';
 import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
+import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -5231,6 +5232,31 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_3d': {
+        // PHASE 2 of game building. What makes a three.js scene look good is colour management, lighting
+        // shape, fitted shadows and restraint in post — not asset detail. Those decisions live in the
+        // generated code so the model does not have to rediscover them (and get them wrong) each time.
+        const g3Rec = (input as Record<string, unknown>) || {};
+        const g3Include = Array.isArray(g3Rec.include)
+          ? g3Rec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const g3 = generateGame3D(g3Include);
+        const g3Written: string[] = [];
+        for (const [path, content] of Object.entries(g3.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          g3Written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('3D layer');
+        // Naming the install is not optional: a 3D layer whose `three` dependency is never added
+        // produces an app that cannot build, which is the honest-failure rule applied to a generator.
+        const g3Deps = g3.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}`;
       }
 
       case 'generate_game_runtime': {

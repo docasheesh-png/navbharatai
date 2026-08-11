@@ -8,6 +8,11 @@ import { SolidProvider } from './SolidProvider';
 import { AlpineProvider } from './AlpineProvider';
 import { VanillaProvider } from './VanillaProvider';
 import { StaticProvider } from './StaticProvider';
+import { NextjsProvider } from './NextjsProvider';
+import { AngularProvider } from './AngularProvider';
+import { SvelteKitProvider } from './SvelteKitProvider';
+import { NuxtProvider } from './NuxtProvider';
+import { RemixProvider } from './RemixProvider';
 
 /**
  * ONE KIT, EVERY SCAFFOLD.
@@ -77,6 +82,57 @@ describe('every wired scaffold both SHIPS the kit and LOADS it', () => {
       expect(files[loadedBy].length).toBeGreaterThan("import './index.css';\n".length + 40);
     });
   }
+});
+
+/**
+ * The frameworks whose global stylesheet is wired somewhere OTHER than an entry-file import. Each is a
+ * different mechanism, and getting one wrong emits a stylesheet nothing loads — which looks exactly
+ * like success until you open the app.
+ */
+describe('the SSR/framework scaffolds each load the kit their own way', () => {
+  it('Next folds it into the globals.css that app/layout.tsx already imports', () => {
+    const files = new NextjsProvider().getFiles([]);
+    expect(files['app/globals.css']).toContain('.nb-empty');
+    expect(files['app/globals.css'].startsWith(DESIGN_KIT_CSS)).toBe(true);
+    expect(files['app/layout.tsx']).toContain("import './globals.css'");
+  });
+
+  it('Angular folds it into the styles.css that angular.json already declares', () => {
+    const files = new AngularProvider().getFiles([]);
+    expect(files['src/styles.css']).toContain('.nb-empty');
+    expect(files['src/styles.css'].startsWith(DESIGN_KIT_CSS)).toBe(true);
+    expect(files['angular.json']).toContain('src/styles.css');
+  });
+
+  it('SvelteKit imports it from the ROOT LAYOUT, which every route renders through', () => {
+    const files = new SvelteKitProvider().getFiles([]);
+    expect(files['src/app.css']).toBe(DESIGN_KIT_CSS);
+    expect(files['src/routes/+layout.svelte']).toContain("import '../app.css'");
+    // The layout must still render its children, or the kit arrives and the pages do not.
+    expect(files['src/routes/+layout.svelte']).toContain('{@render children()}');
+  });
+
+  it('Nuxt registers it in the config css array — an emitted file alone is never loaded', () => {
+    const files = new NuxtProvider().getFiles([]);
+    expect(files['assets/css/main.css']).toBe(DESIGN_KIT_CSS);
+    expect(files['nuxt.config.ts']).toContain("css: ['~/assets/css/main.css']");
+  });
+
+  it('each of them keeps whatever the scaffold already had', () => {
+    // Prepending must not have replaced the scaffold's own rules.
+    expect(new NextjsProvider().getFiles([])['app/globals.css'].length).toBeGreaterThan(DESIGN_KIT_CSS.length);
+    expect(new AngularProvider().getFiles([])['src/styles.css'].length).toBeGreaterThan(DESIGN_KIT_CSS.length);
+  });
+});
+
+describe('the scaffolds deliberately left alone', () => {
+  it('Remix is NOT wired — its SSR stylesheet idiom cannot be verified here', () => {
+    // Remix needs `import x from './app.css?url'` plus a links() export, and a wrong guess ships an
+    // app that either fails to build or flashes unstyled on every navigation. Claiming the kit while
+    // shipping something unverified would be worse than leaving it out honestly.
+    const files = new RemixProvider().getFiles([]);
+    expect(Object.keys(files).some((f) => f.endsWith('.css'))).toBe(false);
+  });
 });
 
 describe('the static scaffold, which has no bundler', () => {

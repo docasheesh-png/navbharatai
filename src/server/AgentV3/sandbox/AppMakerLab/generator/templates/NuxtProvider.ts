@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -15,6 +16,8 @@ const PKG = JSON.stringify({
 }, null, 2);
 
 const NUXT_CONFIG = `export default defineNuxtConfig({
+  // Nuxt loads global CSS from this array — without it the stylesheet is emitted and never loaded.
+  css: ['~/assets/css/main.css'],
   devtools: { enabled: false },
   devServer: { host: '0.0.0.0', port: 3000 },
 });
@@ -62,6 +65,7 @@ export class NuxtProvider implements ITemplateProvider {
     return {
       'package.json': PKG,
       'nuxt.config.ts': NUXT_CONFIG,
+      'assets/css/main.css': DESIGN_KIT_CSS,
       'app.vue': APP_VUE,
       'pages/index.vue': INDEX_VUE,
       'error.vue': ERROR_VUE,

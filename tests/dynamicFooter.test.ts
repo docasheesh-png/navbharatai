@@ -16,7 +16,7 @@ describe('dynamic per-AI footer', () => {
 
   it('the focused footer is exactly History / AI / Mode / Settings', () => {
     const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 1600);
+    const branch = src.slice(branchStart, branchStart + 2600);
     expect(branch).toContain("label: 'History'");
     expect(branch).toContain("label: 'AI'");
     expect(branch).toContain("label: 'Mode'");
@@ -25,7 +25,7 @@ describe('dynamic per-AI footer', () => {
 
   it("Mode is a disabled 'coming soon' item, not a real view", () => {
     const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 1600);
+    const branch = src.slice(branchStart, branchStart + 2600);
     expect(branch).toMatch(/label: 'Mode',\s*comingSoon: true/);
     expect(branch).toContain('disabled={comingSoon}');
     expect(branch).toContain("addToast('Mode switching — coming soon'");
@@ -33,19 +33,23 @@ describe('dynamic per-AI footer', () => {
 
   it('the AI item points at the active AI (professional vs free) and History/Settings navigate', () => {
     const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 1600);
+    const branch = src.slice(branchStart, branchStart + 2600);
     expect(branch).toContain("activeView === 'professionals' ? 'professionals' : 'nbi_chat'");
     expect(branch).toContain("id: 'history' as ViewType");
     expect(branch).toContain("id: 'settings' as ViewType");
     expect(branch).toContain('toggleTab(id)');
   });
 
-  it('History from the Free footer opens History scoped to Free sessions only', () => {
+  it('History is scoped to where it was opened from — Free → free (locked), Professionals → professional', () => {
     const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 1600);
-    expect(branch).toContain("if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : 'all')");
-    // the scoped filter resets to 'all' when leaving History, and is passed into HistoryView
+    const branch = src.slice(branchStart, branchStart + 2600);
+    expect(branch).toContain("setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : activeView === 'professionals' ? 'professional' : 'all')");
+    // the scoped filter resets to 'all' when leaving History
     expect(src).toContain("if (activeView !== 'history') setHistoryInitialFilter('all')");
-    expect(src).toContain('initialFilter={historyInitialFilter}');
+    // Free is LOCKED to its own sessions (the filter tabs are hidden so it can't be switched to the whole app)
+    expect(src).toContain("lockFilter={historyInitialFilter === 'free'}");
+    // Professionals gets the dedicated professional-only history, never the generic session list.
+    expect(src).toContain("historyInitialFilter === 'professional'");
+    expect(src).toContain('<ProfessionalHistoryView');
   });
 });

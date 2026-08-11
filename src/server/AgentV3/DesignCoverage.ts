@@ -35,7 +35,8 @@
 //
 // Pure + dependency-free → fully unit-testable.
 
-export type DesignDefect = 'BARE_MARKUP' | 'NO_HEADING' | 'RAW_TABLE' | 'LIST_WITHOUT_EMPTY_STATE';
+export type DesignDefect =
+  | 'BARE_MARKUP' | 'NO_HEADING' | 'RAW_TABLE' | 'LIST_WITHOUT_EMPTY_STATE' | 'NO_STYLESHEET';
 
 export interface PageFinding {
   file: string;
@@ -156,13 +157,59 @@ export function analyzePage(path: string, content: string): PageFinding | null {
   return { file: path, defects, classedRatio: Math.round(classedRatio * 100) / 100, elements: total };
 }
 
-/** Judge every page in the project. Pure; never throws. */
+/**
+ * A plain .html page — the OTHER half of the reported problem, and the one with the sharpest failure.
+ *
+ * A multi-page static site is generated one file at a time, and the classic bug is that index.html
+ * links the stylesheet while about.html / contact.html simply do not. Those pages then render as
+ * genuinely raw HTML — Times New Roman on white — which is the most literal possible version of "bas
+ * HTML feel dete hai". Nothing in the stack notices: each file is valid HTML on its own.
+ *
+ * The test here is deliberately NOT class coverage. A simple static page can be styled entirely through
+ * element selectors (`body`, `h1`) with almost no classes, and flagging that would be a false positive.
+ * "This page has no CSS attached to it AT ALL" is unambiguous, so that is the only thing judged.
+ */
+export function analyzeHtmlPage(path: string, content: string): PageFinding | null {
+  if (!/\.html?$/i.test(path)) return null;
+
+  const { total, classed } = countHtmlElements(content);
+  if (total < 6) return null;
+
+  const hasLinkedStylesheet = /<link\b[^>]*rel\s*=\s*["']?stylesheet/i.test(content);
+  const hasStyleBlock = /<style\b/i.test(content);
+  const hasInline = /\bstyle\s*=\s*["']/.test(content);
+  // A CDN framework (Tailwind/Bootstrap play CDN) counts — the page is styled, just not by a local file.
+  const hasCdnFramework = /<script\b[^>]*(tailwind|cdn\.jsdelivr|unpkg\.com|cdnjs)/i.test(content);
+
+  const defects: DesignDefect[] = [];
+  if (!hasLinkedStylesheet && !hasStyleBlock && !hasInline && !hasCdnFramework) defects.push('NO_STYLESHEET');
+  if (!/<h[1-3]\b/i.test(content)) defects.push('NO_HEADING');
+
+  if (defects.length === 0) return null;
+  return {
+    file: path,
+    defects,
+    classedRatio: total > 0 ? Math.round((classed / total) * 100) / 100 : 0,
+    elements: total,
+  };
+}
+
+/** Judge every page in the project — components AND plain HTML pages. Pure; never throws. */
 export function analyzeDesignCoverage(files: Record<string, string>): DesignCoverageReport {
   const findings: PageFinding[] = [];
   let pagesExamined = 0;
 
   for (const [path, content] of Object.entries(files || {})) {
     if (typeof content !== 'string') continue;
+
+    if (/\.html?$/i.test(path)) {
+      if (countHtmlElements(content).total < 6) continue;
+      pagesExamined++;
+      const htmlFinding = analyzeHtmlPage(path, content);
+      if (htmlFinding) findings.push(htmlFinding);
+      continue;
+    }
+
     if (!isPageFile(path)) continue;
     if (ALTERNATIVE_STYLING_RE.some((re) => re.test(content))) continue;
     if (countHtmlElements(content).total < 6) continue;
@@ -178,6 +225,11 @@ export function analyzeDesignCoverage(files: Record<string, string>): DesignCove
 }
 
 const DEFECT_TEXT: Record<DesignDefect, string> = {
+  NO_STYLESHEET:
+    'it has NO stylesheet attached at all — no <link rel="stylesheet">, no <style> block, no inline '
+    + 'styles. It renders as raw browser-default HTML while the other pages look designed. Link the '
+    + 'SAME stylesheet the other pages use (this is almost always a forgotten <link> in the <head>), and '
+    + 'give the page the same header/container structure as the rest of the site',
   BARE_MARKUP:
     'it is bare markup — the elements carry almost no classes, so it renders as unstyled HTML while the '
     + 'rest of the app looks designed. Give it the page container, real spacing, and the kit classes '

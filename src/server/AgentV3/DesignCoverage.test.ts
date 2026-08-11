@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  analyzeDesignCoverage, analyzePage, isPageFile, countHtmlElements, hasStylingSignal,
-  designRepairInstruction, designCoverageSummary,
+  analyzeDesignCoverage, analyzePage, analyzeHtmlPage, isPageFile, countHtmlElements, hasStylingSignal,
+  designRepairInstruction, designCoverageSummary, type DesignDefect,
 } from './DesignCoverage';
 
 /**
@@ -279,5 +279,86 @@ describe('the repair instruction — a generic prompt produces a generic restyle
     expect(designCoverageSummary(analyzeDesignCoverage({}))).toContain('No page-level components');
     expect(designCoverageSummary(analyzeDesignCoverage({ 'src/pages/Home.tsx': DESIGNED_PAGE }))).toContain('use the app');
     expect(designCoverageSummary(report)).toContain('1 of 2');
+  });
+});
+
+/**
+ * PLAIN HTML PAGES — the other half of the report, and the sharpest version of it.
+ *
+ * A multi-page static site is generated one file at a time, and the classic bug is that index.html
+ * links the stylesheet while about.html simply does not. That page renders as Times New Roman on
+ * white: the most literal possible "bas HTML feel dete hai". Each file is valid HTML on its own, so
+ * nothing in the stack notices.
+ */
+describe('static HTML pages', () => {
+  const STYLED = `<!doctype html><html><head><link rel="stylesheet" href="style.css"></head>
+    <body><header><h1>Shop</h1></header><main><section><p>a</p><p>b</p></section><footer><span>c</span></footer></main></body></html>`;
+
+  const FORGOT_THE_LINK = `<!doctype html><html><head><title>About</title></head>
+    <body><header><h1>About</h1></header><main><section><p>a</p><p>b</p></section><footer><span>c</span></footer></main></body></html>`;
+
+  it('flags the inner page that forgot the stylesheet', () => {
+    expect(analyzeHtmlPage('about.html', FORGOT_THE_LINK)!.defects).toContain('NO_STYLESHEET');
+  });
+
+  it('says nothing about the page that has it', () => {
+    expect(analyzeHtmlPage('index.html', STYLED)).toBeNull();
+  });
+
+  it('catches the real shape: one good page, two raw ones', () => {
+    const report = analyzeDesignCoverage({
+      'index.html': STYLED,
+      'about.html': FORGOT_THE_LINK,
+      'contact.html': FORGOT_THE_LINK,
+    });
+    expect(report.pagesExamined).toBe(3);
+    expect(report.findings.map((f) => f.file).sort()).toEqual(['about.html', 'contact.html']);
+  });
+
+  it('does NOT use class coverage for HTML — element selectors are legitimate styling', () => {
+    // A simple static page styled entirely through `body {}` / `h1 {}` has almost no classes and is
+    // perfectly well designed. Judging it on classes would be a false positive.
+    const noClasses = `<!doctype html><html><head><link rel=stylesheet href=s.css></head>
+      <body><header><h1>T</h1></header><main><p>a</p><p>b</p><section>c</section><footer>d</footer></main></body></html>`;
+    expect(analyzeHtmlPage('page.html', noClasses)).toBeNull();
+  });
+
+  it('a <style> block, inline styles or a CDN framework all count as styled', () => {
+    const variants = [
+      '<style>body{color:red}</style>',
+      '',
+      '<script src="https://cdn.jsdelivr.net/npm/tailwindcss"></script>',
+    ];
+    const inlineBody = '<body><div style="padding:8px"><h1>T</h1><p>a</p><p>b</p><span>c</span><section>d</section></div></body>';
+    for (const head of variants) {
+      const html = head
+        ? `<!doctype html><html><head>${head}</head><body><h1>T</h1><p>a</p><p>b</p><span>c</span><section>d</section><footer>e</footer></body></html>`
+        : `<!doctype html><html><head></head>${inlineBody}</html>`;
+      expect(analyzeHtmlPage('p.html', html), head || 'inline').toBeNull();
+    }
+  });
+
+  it('a tiny fragment is not judged', () => {
+    expect(analyzeHtmlPage('partial.html', '<div><span>x</span></div>')).toBeNull();
+  });
+
+  it('the repair instruction explains the forgotten <link>, not a vague restyle', () => {
+    const report = analyzeDesignCoverage({ 'index.html': STYLED, 'about.html': FORGOT_THE_LINK });
+    const text = designRepairInstruction(report);
+    expect(text).toContain('about.html');
+    expect(text).not.toContain('index.html');
+    expect(text).toContain('forgotten <link>');
+  });
+
+  it('every defect has repair text — an unmapped one would print "undefined" to the model', () => {
+    const defects: DesignDefect[] = ['BARE_MARKUP', 'NO_HEADING', 'RAW_TABLE', 'LIST_WITHOUT_EMPTY_STATE', 'NO_STYLESHEET'];
+    for (const d of defects) {
+      const text = designRepairInstruction({
+        pagesExamined: 1, ok: false,
+        findings: [{ file: 'x.tsx', defects: [d], classedRatio: 0, elements: 10 }],
+      });
+      expect(text, d).not.toContain('undefined');
+      expect(text.length, d).toBeGreaterThan(200);
+    }
   });
 });

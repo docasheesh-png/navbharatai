@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn, Wallet } from 'lucide-react';
+import { Send, Loader2, Sparkles, X, FileText, Clock, LogIn, Wallet } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
-import { fetchPassStatus, buyProfessionalPass, type PassStatus } from './professionalPass';
+import { fetchPassStatus, type PassStatus } from './professionalPass';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
@@ -68,35 +68,22 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   // same wallet as a build). Telling an empty-balance user they "used their free messages" would be
   // simply untrue, and would offer them the wrong action.
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login' | 'wallet'>(null);
-  const [buying, setBuying] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
   // snaps back to 1 line when send() clears the input.
   const composerRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
 
+  // ADMIN 2026-08-10 — "pass system hata do". The Professional Pass is gone, so there is no purchase
+  // to start from this screen any more. What remains is the free-allowance COUNTER, which is real and
+  // worth showing: it tells a signed-in user how many messages they have left today. The status call
+  // stays for exactly that.
   const refreshPass = React.useCallback(() => { fetchPassStatus().then((p) => setPass(p)).catch(() => {}); }, []);
-  // Load pass/quota state on mount and whenever the signed-in user changes (also picks up a pass that
-  // was just granted after returning from the Cashfree checkout).
   useEffect(() => {
     refreshPass();
     const unsub = auth.onAuthStateChanged(() => refreshPass());
     return () => unsub();
   }, [refreshPass]);
-
-  const startBuyPass = async () => {
-    if (buying || !pass) return;
-    setBuying(true);
-    try {
-      const outcome = await buyProfessionalPass(pass.priceInr, pass.passDays);
-      if (outcome === 'granted') { setPaywall(null); refreshPass(); } // simulator (dev) → pass active now
-      // 'redirecting' → the gateway page took over; on return the app refetches status.
-    } catch (e: any) {
-      alert(e?.message || 'Could not start the Pass purchase. Please try again.');
-    } finally {
-      setBuying(false);
-    }
-  };
 
   useEffect(() => {
     try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-120))); } catch { /* ignore */ }
@@ -172,22 +159,13 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
         <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center"><Sparkles className="w-4 h-4" /></div>
         <span className="font-bold text-sm">{config.name}</span>
-        {/* Pass / free-quota chip — only when the paid gate is on for a signed-in user. */}
-        {pass?.enabled && pass?.signedIn && (
-          pass.unlimited ? (
-            <span className="ml-auto flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-              <Crown className="w-3 h-3" /> {pass.hasPass ? 'Pass active' : 'Unlimited'}
-            </span>
-          ) : (
-            <button
-              onClick={() => setPaywall('paywall')}
-              title="Get the Professional Pass for unlimited access"
-              className="ml-auto flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[#c9d1d9]"
-            >
-              <span className={pass.remainingFree <= 3 ? 'text-amber-300' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
-              <Crown className="w-3 h-3 text-amber-400" />
-            </button>
-          )
+        {/* Free-allowance chip — only when the daily gate is on for a signed-in user. It is a COUNTER
+            now, not an upsell: it used to be a button that opened a Pass paywall, and there is nothing
+            left to sell. Unlimited accounts show nothing at all rather than a crown they cannot act on. */}
+        {pass?.enabled && pass?.signedIn && !pass.unlimited && (
+          <span className="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[#c9d1d9]">
+            <span className={pass.remainingFree <= 3 ? 'text-amber-300' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+          </span>
         )}
       </div>
 
@@ -282,13 +260,6 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
                 >
                   <Wallet className="w-4 h-4" /> Add credit
                 </button>
-                <button
-                  onClick={startBuyPass}
-                  disabled={buying}
-                  className="mt-2 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-60 text-[#8b949e] text-xs font-semibold"
-                >
-                  {buying ? 'Opening checkout…' : `Or get the Professional Pass — ₹${pass?.priceInr ?? 99}/month, unlimited`}
-                </button>
               </>
             ) : paywall === 'login' ? (
               <>
@@ -298,20 +269,20 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
               </>
             ) : (
               <>
-                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Crown className="w-6 h-6" /></div>
-                <h3 className="font-bold text-white mb-1">Get the Professional Pass</h3>
+                {/* Was a "Get the Professional Pass — ₹99/month" checkout. The Pass is gone (admin
+                    2026-08-10), so this card no longer sells anything: it states the allowance, says
+                    when it returns, and offers the one action that genuinely helps today. */}
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Clock className="w-6 h-6" /></div>
+                <h3 className="font-bold text-white mb-1">That's today's free messages</h3>
                 <p className="text-sm text-[#8b949e] mb-4">
-                  You've used your {pass?.freeDailyLimit ?? 50} free messages for today. Unlock <span className="text-white font-semibold">unlimited</span> access to every professional.
+                  You've used all {pass?.freeDailyLimit ?? 50} of them. They come back tomorrow — or add credit and carry on now, paying only for what you use.
                 </p>
                 <button
-                  onClick={startBuyPass}
-                  disabled={buying}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-60 text-black font-bold flex items-center justify-center gap-2"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
+                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center justify-center gap-2"
                 >
-                  {buying ? <TirangaLoader className="w-4 h-4" /> : <Crown className="w-4 h-4" />}
-                  {buying ? 'Opening checkout…' : `Get Pass — ₹${pass?.priceInr ?? 99}/month`}
+                  <Wallet className="w-4 h-4" /> Add credit
                 </button>
-                <p className="text-[11px] text-[#586069] mt-2">Cancel anytime · secure payment</p>
               </>
             )}
           </div>

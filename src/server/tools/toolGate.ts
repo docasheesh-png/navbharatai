@@ -7,10 +7,12 @@
 // and costs nothing to run, so it stays free and unmetered — metering it would be friction with no
 // saving behind it.
 //
-// ONE SUBSCRIPTION, NOT TWO. This deliberately rides the SAME master switch, the SAME Professional Pass
-// and the SAME free-list as the professionals: the customer makes one decision ("₹99/month for the
-// assistants and the tools") instead of juggling two products. Only the counter and the daily
-// allowance are separate — see ToolUsageStore for why.
+// ONE BILLING MODEL, NOT TWO (updated 2026-08-10, "pass system hata do"). This used to ride the same
+// ₹99/month Professional Pass as the professionals so the customer made one subscription decision for
+// both. The Pass is gone — it was a second billing model competing with the one the platform actually
+// adopted (THE ONE-WALLET LAW: every AI draws on the same balance, and the price of the thing IS the
+// limit) — so what is left here is the free daily allowance and the shared free-list. The pass reads
+// below are inert: nothing can grant a pass any more, so `hasActivePass` is false for every real user.
 //
 // THE DECISION ITSELF IS NOT REIMPLEMENTED. `decideProfessionalAccess` is already pure and exhaustively
 // tested, and the rules here are identical (flag off → allow; free-list and pass → unlimited; signed
@@ -19,7 +21,7 @@
 
 import { decideProfessionalAccess } from '../professionals/access';
 import {
-  professionalPaidEnabled, professionalPassPriceInr, professionalPassDays, isProfessionalFreeUser,
+  professionalPaidEnabled, isProfessionalFreeUser,
 } from '../professionals/professionalPaid';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { toolUsageStore, type ToolBucket } from './ToolUsageStore';
@@ -52,7 +54,11 @@ export function imageFreeDailyLimit(): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 3;
 }
 
-/** Monthly image cap for a Pass holder — unlimited chat is affordable, unlimited image generation is not. */
+/**
+ * Daily image cap for an account that is otherwise unlimited here. It existed because unlimited chat
+ * was affordable under the Pass and unlimited image generation never was. With the Pass removed
+ * nothing reaches this in production; it is kept so the cap survives if an unlimited tier ever returns.
+ */
 export function imagePassDailyLimit(): number {
   const n = Number(process.env.AI_IMAGE_PASS_DAILY_LIMIT);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 25;
@@ -80,9 +86,10 @@ const BUCKET_LABEL: Record<ToolBucket, string> = {
 /**
  * Decide access for one Other AI tool action. `uid`/`email` MUST be the server-verified identity.
  *
- * A Pass holder is unlimited on `ai_tool` but still capped on `image`, because unlimited image
- * generation is the one promise the ₹99 price genuinely cannot carry. That cap is metered on the same
- * counter, so a Pass holder's images are counted too.
+ * The pass branches are dead weight in production since the Pass was removed (2026-08-10) — nothing
+ * can grant one — but they are left intact rather than ripped out mid-flight: this function guards
+ * money on every Other AI action, and the honest sequencing is to remove the pass STORE and its
+ * grant path first (a separate change), then delete these branches once nothing can set them.
  */
 export async function gateToolAction(
   uid: string | null,
@@ -109,13 +116,15 @@ export async function gateToolAction(
         allow: false,
         status: 402,
         body: {
-          error: 'Your balance is empty. Add credit to keep using NavBharatAI, or get the Professional Pass for unlimited access.',
+          // ADMIN 2026-08-10 ("pass system hata do"): the Pass offer that used to close this sentence
+          // was a LIVE LIE — this branch runs today (AI_WALLET_SPEND on since 2026-08-08) while the
+          // Pass has never been sellable, so an empty-balance user was sent to buy something that does
+          // not exist. Adding credit is the only instruction that actually resolves their block.
+          error: 'Your balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use.',
           code: 'wallet_empty',
           reason: 'wallet-empty',
           bucket,
           balanceInr: balanceInr ?? 0,
-          passPriceInr: professionalPassPriceInr(),
-          passDays: professionalPassDays(),
         },
       };
     }
@@ -157,15 +166,14 @@ export async function gateToolAction(
     body: {
       error: login
         ? `Please sign in to use this tool. New users get free ${label} every day.`
-        : hasActivePass
-          ? `You've used your ${dailyLimit} ${label} for today. This one resets tomorrow.`
-          : `You've used your ${dailyLimit} free ${label} for today. Get the Professional Pass for unlimited access.`,
+        // One message for both cases now (admin 2026-08-10) — with the Pass gone there is no longer a
+        // "pass holder vs everyone else" distinction to draw here, and no product to point anyone at.
+        : `You've used your ${dailyLimit} free ${label} for today. They reset tomorrow.`,
       code: login ? 'login_required' : 'tool_paywall',
       reason: decision.reason,
       bucket,
       remainingFree: 0,
       dailyLimit,
-      ...(hasActivePass ? {} : { passPriceInr: professionalPassPriceInr(), passDays: professionalPassDays() }),
     },
   };
 }

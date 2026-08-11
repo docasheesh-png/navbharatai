@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { chargeReceipt, chargeHint, readChargeHeaders, APK_PRICE_INR } from '../../lib/apkChargeNotice';
 import { PublishToNavStore } from './PublishToNavStore';
 import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
@@ -133,6 +134,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
+  /** What the last download cost — shown in plain words so a charge is never silent. */
+  const [chargeNote, setChargeNote] = useState('');
 
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
@@ -345,6 +348,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         setError(data?.error || 'Could not download that file.');
         return;
       }
+      // TELL THE USER, EVERY TIME (admin 2026-08-10). The server reports what it charged; we say it
+      // in plain words. `applied` is false for a free-list account or a zero price, so this can never
+      // claim a charge nobody paid — and it names the per-BUILD rule, because "it charged me twice!"
+      // is the guaranteed support message if a bare price is shown for a file people re-download.
+      const charge = readChargeHeaders((n) => res.headers.get(n));
       const blob = await res.blob();
       const name = /apk/i.test(artifact.name)
         ? (buildKind === 'apk' ? 'app-debug.apk' : 'app-release.apk')
@@ -355,6 +363,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       a.download = name;
       a.click();
       URL.revokeObjectURL(url);
+      setChargeNote(chargeReceipt({ priceInr: charge.priceInr, applied: charge.applied }));
     } catch {
       setError('Could not download that file.');
     } finally {
@@ -564,6 +573,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   <span className="text-xs font-normal opacity-70">{fmtSize(a.sizeBytes)}</span>
                 </button>
               ))}
+              {/* THE PRICE, BEFORE THE CLICK (admin 2026-08-10: "har bar user ko bataya jaye"). A
+                  charge the user only discovers afterwards is a charge taken behind their back — and
+                  the per-BUILD rule is stated here because a bare price on a re-downloadable file
+                  guarantees the "it charged me twice!" message. */}
+              {APK_PRICE_INR > 0 && (
+                <p className="text-[11px] text-[#8b949e] text-center">{chargeHint(APK_PRICE_INR)}</p>
+              )}
+              {/* …and what it actually cost, once the file is in their hands. */}
+              {chargeNote && (
+                <p className="text-[11px] text-emerald-300 text-center font-semibold">{chargeNote}</p>
+              )}
               {/* Publish straight from this build (admin 2026-08-04). Offered ONLY for the .apk: the
                   Nav App Store installs apps, and a .aab is a Play Store bundle no phone can install —
                   showing it here would promise something that cannot work. */}

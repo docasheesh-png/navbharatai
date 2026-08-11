@@ -51,6 +51,8 @@ let listenersAttached = false;
  * people to ignore us) or nobody. Returns null when unavailable; null means UNKNOWN, and the broadcast
  * never sends to an unknown.
  */
+let cachedVersionCode: number | null = null;
+
 async function currentVersionCode(): Promise<number | null> {
   try {
     const { App } = await import('@capacitor/app');
@@ -75,8 +77,12 @@ export async function initPushNotifications(userId: string): Promise<void> {
     const { token } = await FirebaseMessaging.getToken();
     if (!token) return;
 
-    const versionCode = await currentVersionCode();
-    const ok = await registerDeviceToken(userId, token, platform, versionCode);
+    // Read ONCE. A running app's versionCode cannot change, so re-reading it on every token refresh
+    // is pointless work — and it was worse than pointless: it put a dynamic import plus two awaits in
+    // front of the refresh re-registration, which CI caught as a race (the re-register had not landed
+    // when the next line ran). Cached here, the refresh path below stays synchronous.
+    cachedVersionCode = await currentVersionCode();
+    const ok = await registerDeviceToken(userId, token, platform, cachedVersionCode);
     if (ok) {
       registeredForUid = userId;
       currentToken = token;
@@ -105,7 +111,7 @@ export async function initPushNotifications(userId: string): Promise<void> {
       await FirebaseMessaging.addListener('tokenReceived', (event) => {
         if (registeredForUid) {
           currentToken = event.token;
-          void currentVersionCode().then((v) => registerDeviceToken(registeredForUid!, event.token, nativePlatform(), v));
+          void registerDeviceToken(registeredForUid, event.token, nativePlatform(), cachedVersionCode);
         }
       });
     }

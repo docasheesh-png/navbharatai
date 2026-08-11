@@ -111,9 +111,9 @@ describe('pushNotifications (native mobile push bootstrap)', () => {
     await initPushNotifications('user-1');
     expect(listeners.tokenReceived).toBeTypeOf('function');
     listeners.tokenReceived({ token: 'fcm-tok-REFRESHED' });
-    // The re-register now reads the device's build FIRST, so it settles a tick later than it used to.
-    // Still fire-and-forget in production — only the test has to wait for it.
-    await new Promise((r) => setTimeout(r, 0));
+    // Back to a single microtask: the version is cached at init, so the refresh path no longer awaits
+    // a dynamic import before re-registering. CI caught the racy version of this.
+    await Promise.resolve();
     expect(registerMock).toHaveBeenLastCalledWith('user-1', 'fcm-tok-REFRESHED', 'android', null);
   });
 

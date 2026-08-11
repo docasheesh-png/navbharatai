@@ -202,8 +202,17 @@ describe('the admin can really do it, and cannot do it by accident', () => {
 
   it('THE DEVICE REPORTS ITS VERSION — without this the cohort is always "unknown"', () => {
     expect(client).toContain('async function currentVersionCode()');
-    expect(client).toContain('registerDeviceToken(userId, token, platform, versionCode)');
+    // Asserted by SHAPE, not by variable name — the previous version of this line broke on a rename
+    // while the behaviour was unchanged, which is a test failing for the wrong reason.
+    expect(client).toMatch(/registerDeviceToken\(userId, token, platform, \w+\)/);
     expect(route).toContain('appVersionCode');
+  });
+
+  it('the version is read ONCE, not on every token refresh', () => {
+    // Re-reading a value that cannot change put a dynamic import in front of the refresh
+    // re-registration and made it racy — CI caught it. Caching is the fix, so it is asserted.
+    expect(client).toContain('let cachedVersionCode');
+    expect(client).toContain('A running app\'s versionCode cannot change');
   });
 
   it('a junk version from a client is treated as unknown, never as a number', () => {

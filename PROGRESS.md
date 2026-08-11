@@ -30079,3 +30079,59 @@ are gone. Gate: tsc clean both projects, `npm run build` ✓, full run **13,598/
 is written and tested but not yet wired to any screen), and paid voice chat (slice 3 — consent popup,
 per-second metering and the wallet debit must ship together, since `src/server/sonic/` charges nothing
 today and a popup alone would lie).
+
+---
+
+## 2026-08-10 — Delete + edit a sent message, on every AI (slice 3)
+
+**Admin:** "NavBharatAI Pro me send kiye hue text ko delete kar sakte hai — yah sabhi jagah hona
+chahiye, saath me edit bhi kar sake (WhatsApp ke tarah)."
+
+v5.0 already had a real delete (unsend) and edit on the last user message. This slice brings both to
+the other three AIs, applying the rules slice 1 wrote and tested (`lib/chatMessageActions.ts`).
+
+**The design point that makes this different from WhatsApp:** an assistant reply is an ANSWER TO a
+particular question. Delete therefore takes the replies with it (an orphaned answer reads as the AI
+answering something nobody asked), and edit REWINDS to that point so the AI answers the new question
+— the user edits because they want a different answer, not a different transcript.
+
+**Three real defects found while wiring it:**
+
+1. **The free chat's Clear button did NOTHING.** It fired a magic-string sentinel through
+   `onSendSuggestion`, and nothing in the codebase ever passed that prop or handled the sentinel — the
+   optional-call swallowed it. The button rendered, looked alive, and was inert for every real user.
+   It now goes through `onMessagesChange`, which the only host (NBIChatPanel) genuinely owns, and is
+   offered ONLY when a host can honour it.
+2. **The free chat's "edit" was a duplicate, not an edit.** It copied the text into the composer and
+   left the original message AND its answers in the thread, so re-sending produced the same question
+   twice with two different answers under it.
+3. **A re-ask after a rewind would have sent the taken-back turns.** `setMessages` does not update the
+   `messages` a closure already captured, so both Doctor AI and the professionals needed the surviving
+   transcript passed explicitly into their send path. On a clinical surface that is not cosmetic.
+
+**DOCTOR AI NEEDED REAL CARE — and this is the part that would have been a lie if shipped naively.**
+`/api/sda-chat` keeps a per-case clinical store: `patientData` and `redFlags` are ACCUMULATED from
+each reply into one blob and **never re-derived from the transcript**. So deleting a bubble on the
+client would leave the finding it produced still live in the AI's reasoning — the doctor believing
+they had retracted something while the assistant carried on treating it as fact. A clinical-safety
+bug, not a UI one. `rewindCase()` therefore **rotates the case id**: the next turn finds no entry for
+the new id, so the server starts a fresh clinical store and re-seeds from the SURVIVING transcript.
+It errs toward FORGETTING (state rebuilds over a turn or two) and that is deliberate — the doctor is
+present and can restate anything that matters, whereas a silently-retained retracted finding is the
+failure nobody can see. Red flags are cleared for the same reason.
+
+**Other care:** the controls are hidden while a SEARCH is filtering, because they are addressed by
+position and a filtered list renumbers everything (a delete on the third visible bubble would remove
+the third message of the whole conversation). They are hidden while a turn is in flight — a rewind
+under a running answer is not a state we can honestly draw. The professionals use POSITION as the id,
+because adding a real id field would invalidate every conversation already saved on every user's
+device, and their edit keeps the `edited` marker rather than letting a plain re-send drop it.
+
+Tests: 15 in `tests/messageEditWiring.test.ts` — the search guard, that every screen calls the shared
+rules rather than its own, that the dead Clear and the fake edit are gone and the host really honours
+the new prop, that Doctor AI's rewind rotates the case id, clears red flags and persists, and that
+both re-ask paths carry the surviving transcript instead of stale state. Gate: tsc clean both
+projects, `npm run build` ✓, full run **13,607/13,607**.
+
+**STILL OPEN:** paid voice chat (consent popup + per-second metering + wallet debit must ship
+together — `src/server/sonic/` charges nothing today, so a popup alone would lie).

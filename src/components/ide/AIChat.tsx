@@ -11,7 +11,9 @@ import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { AgentProgress, BuildStep } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
-import { filterMessages, enterShouldSend } from '../../lib/chatToolbar';
+import { MessageEditActions } from '../chat/MessageEditActions';
+import { filterMessages, enterShouldSend, searchActive } from '../../lib/chatToolbar';
+import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
@@ -297,6 +299,16 @@ interface AIChatProps {
   onLanguagePick?: (lang: string) => void;
   onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   onSendSuggestion?: (text: string) => void;
+  /**
+   * Replace the transcript — used by Clear and by per-message delete/edit.
+   *
+   * REAL DEFECT FOUND 2026-08-10 while wiring the shared toolbar: Clear used to fire a magic-string
+   * sentinel through `onSendSuggestion`, and NOTHING in the codebase ever passed that prop OR handled
+   * the sentinel. The optional-call swallowed it, so the button rendered, looked alive, and did
+   * nothing — a "looks done, does nothing" control shipped to real users. Clear now goes through this
+   * prop, which the only host (NBIChatPanel) genuinely owns.
+   */
+  onMessagesChange?: (next: Message[]) => void;
   onStop?: () => void;
   // Guider (Hybrid) confirmation card: a proposed design awaiting Approve / Edit / Answer.
   guiderPlan?: { language?: string; designProposal?: string; clarifyingQuestions?: string[] } | null;
@@ -339,6 +351,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onLanguagePick,
   onDownloadZip,
   onSendSuggestion,
+  onMessagesChange,
   onStop,
   guiderPlan,
   guiderReplanning,
@@ -1281,19 +1294,31 @@ export const AIChat: React.FC<AIChatProps> = ({
                     <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
                   )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
-                  {/* B9: Edit user message button */}
-                  {msg.sender === 'user' && (
-                    <button
-                      onClick={() => {
-                        onInputChange(msg.text || '');
-                        setEditingMsgId(msg.id);
-                        setTimeout(() => textareaRef.current?.focus(), 50);
+                  {/* EDIT + DELETE on a sent message (admin 2026-08-10: "delete kar sake, saath me
+                      edit bhi — WhatsApp ke tarah").
+                      The old "edit" here only COPIED the text into the composer and left the original
+                      message and its answers sitting in the thread — so re-sending produced the same
+                      question twice with two different answers under it. That is not an edit, it is a
+                      duplicate. It now rewinds to that point (shared rule, chatMessageActions) so the
+                      AI answers the question the user actually meant. */}
+                  {msg.sender === 'user' && onMessagesChange && !searchActive(chatSearchQuery) && (
+                    <MessageEditActions
+                      text={String(msg.text ?? '')}
+                      disabled={isLoading}
+                      className="opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
+                      onDelete={() => onMessagesChange(deleteMessage(messages as any, msg.id) as any)}
+                      onEdit={(next) => {
+                        const r = editMessage(messages as any, msg.id, next);
+                        onMessagesChange(r.messages as any);
+                        if (r.resend) {
+                          // The rewind leaves the edited message in place, so the composer carries the
+                          // new text and the host's own send path takes it from here.
+                          onInputChange(r.resend);
+                          setEditingMsgId(msg.id);
+                          setTimeout(() => textareaRef.current?.focus(), 50);
+                        }
                       }}
-                      title="Edit and resend this message"
-                      className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-indigo-400"
-                    >
-                      <MessageSquare className="w-2.5 h-2.5" />
-                    </button>
+                    />
                   )}
                   {/* Copy message button — appears on hover */}
                   <button
@@ -1623,7 +1648,9 @@ export const AIChat: React.FC<AIChatProps> = ({
               searchOpen={showChatSearch}
               onSearchOpenChange={setShowChatSearch}
               searchMatches={filterMessages(messages as any, chatSearchQuery).length}
-              onClear={() => onSendSuggestion?.('__CLEAR_CHAT__')}
+              // Only offered when the host can actually honour it — a Clear that silently does
+              // nothing is exactly what this replaced.
+              onClear={onMessagesChange ? () => onMessagesChange([]) : undefined}
               charCount={input.length}
               leftSlot={isPinned ? (
                 <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">

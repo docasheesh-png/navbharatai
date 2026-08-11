@@ -8,7 +8,9 @@ import { fetchPassStatus, type PassStatus } from './professionalPass';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
-import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
+import { MessageEditActions } from '../chat/MessageEditActions';
+import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
+import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -26,7 +28,28 @@ export interface ProfessionalChatConfig {
   endpoint?: string;
 }
 
-interface Msg { role: 'user' | 'assistant'; content: string; }
+interface Msg { role: 'user' | 'assistant'; content: string; edited?: boolean; }
+
+/**
+ * The professionals' transcript has no message ids — it is a plain `{role, content}[]` persisted to
+ * localStorage, and adding a real id field would invalidate every conversation already saved on every
+ * user's device. So the POSITION is the id, and these two adapters translate in and out of the shared
+ * delete/edit rules. The index is only ever the true one because the edit/delete controls are hidden
+ * while a search is filtering the list (see `searchActive`).
+ */
+const msgId = (index: number) => String(index);
+const withIds = (list: readonly Msg[]) => list.map((m, i) => ({
+  id: msgId(i),
+  sender: (m.role === 'user' ? 'user' : 'ai') as 'user' | 'ai',
+  text: m.content,
+  edited: m.edited,
+}));
+const fromIds = (list: ReadonlyArray<{ sender: 'user' | 'ai'; text?: string; edited?: boolean }>): Msg[] =>
+  list.map((m) => ({
+    role: m.sender === 'user' ? 'user' : 'assistant',
+    content: m.text ?? '',
+    ...(m.edited ? { edited: true } : {}),
+  }));
 
 const MAX_FILES = 4;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
@@ -112,7 +135,13 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     if (allowed.length > 0) setFiles((prev) => [...prev, ...allowed].slice(0, MAX_FILES));
   };
 
-  const send = async (text?: string) => {
+  /**
+   * `resendOf` carries the transcript an EDIT already produced. Without it, re-asking an edited
+   * question would append a second copy of it — the edit rewinds the transcript and keeps the edited
+   * message in place, so send() must build on that instead of on stale state and must not re-add it.
+   * It also preserves the `edited` marker, which a plain re-send would quietly drop.
+   */
+  const send = async (text?: string, resendOf?: Msg[]) => {
     const content = (text ?? input).trim();
     if ((!content && files.length === 0) || loading) return;
     const sendFiles = files;
@@ -121,7 +150,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     const shownContent = sendFiles.length > 0
       ? `${content || '(files attached)'}\n📎 ${sendFiles.map((f) => f.name).join(', ')}`
       : content;
-    const next: Msg[] = [...messages, { role: 'user', content: shownContent }];
+    const next: Msg[] = resendOf ?? [...messages, { role: 'user', content: shownContent }];
     setMessages(next);
     setLoading(true);
     try {
@@ -182,10 +211,31 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           return lastUser ? <AppUpdateChatNotice userText={lastUser.content} /> : null;
         })()}
         {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
-          <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+          <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>
               {m.content}
+              {m.edited && <span className="ml-2 text-[10px] opacity-60 align-middle">{editedLabel()}</span>}
             </div>
+            {/* DELETE + EDIT on a sent message (admin 2026-08-10). Only the user's own, and only while
+                no answer is in flight — rewinding under a running turn is not a state we could honestly
+                represent on screen. Hidden until hover on a pointer device; always present on touch,
+                where there is no hover to reveal them with. */}
+            {m.role === 'user' && !searchActive(chatSearchQuery) && (
+              <MessageEditActions
+                className="mt-0.5 opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
+                text={String(m.content ?? '')}
+                disabled={loading}
+                onDelete={() => setMessages(fromIds(deleteMessage(withIds(messages), msgId(i))))}
+                onEdit={(next) => {
+                  const r = editMessage(withIds(messages), msgId(i), next);
+                  const rewound = fromIds(r.messages);
+                  setMessages(rewound);
+                  // The edited message is ALREADY the last entry of `rewound`; handing it to send()
+                  // keeps it (and its "edited" marker) instead of appending a duplicate.
+                  if (r.resend) void send(r.resend, rewound);
+                }}
+              />
+            )}
           </div>
         ))}
         {loading && (

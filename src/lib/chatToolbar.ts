@@ -117,6 +117,19 @@ export function filterMessages<T extends SearchableMsg>(messages: readonly T[], 
   return list.filter((m) => `${m?.text ?? ''}${m?.content ?? ''}`.toLowerCase().includes(q));
 }
 
+/**
+ * Is a search narrowing the transcript right now?
+ *
+ * Screens use this to hide per-message edit/delete while filtering: those actions are addressed by
+ * POSITION in the real transcript, and a filtered list renumbers everything — so a delete tapped on
+ * the third visible bubble would remove the third message of the WHOLE conversation, which is a
+ * different message entirely. Hiding them is also the honest reading of intent: someone searching is
+ * looking for something, not editing it.
+ */
+export function searchActive(query: string): boolean {
+  return (query ?? '').trim() !== '';
+}
+
 /** "3 of 41" — so a search that finds nothing says so, instead of looking like a broken screen. */
 export function searchResultLabel(found: number, total: number, lang: ChatToolbarLang = 'en'): string {
   if (found === 0) return lang === 'hi' ? 'कुछ नहीं मिला' : 'No matches';

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   assembleMobileProject, detectProjectKind, detectWebDir, normaliseAppId,
-  buildPackageJson, buildCapacitorConfig, parseImageDataUrl,
+  buildPackageJson, buildCapacitorConfig, parseImageDataUrl, capacitorMajorFromFiles,
 } from '../src/server/lib/mobileProjectAssembler';
 
 // This is what stands between "we pushed some files to GitHub" and "GitHub produced a real signed
@@ -99,6 +99,19 @@ describe('buildPackageJson', () => {
     const existing = JSON.stringify({ dependencies: { '@capacitor/core': '^8.4.1' } });
     const pkg = JSON.parse(buildPackageJson(existing, 'X', 'built'));
     expect(pkg.dependencies['@capacitor/core']).toBe('^8.4.1');
+  });
+
+  it('reads the Capacitor major an app is built around, from its package.json (G2)', () => {
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ dependencies: { '@capacitor/core': '^7.1.0' } }) })).toBe(7);
+    // devDependencies count too, and core wins over a lagging plugin
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ devDependencies: { '@capacitor/cli': '^6.2.0' } }) })).toBe(6);
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ dependencies: { '@capacitor/core': '^8.0.0', '@capacitor/haptics': '^7.0.0' } }) })).toBe(8);
+  });
+
+  it('expresses NO preference (null) when the app declares no Capacitor or the file is missing/corrupt', () => {
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ dependencies: { react: '^19' } }) })).toBeNull();
+    expect(capacitorMajorFromFiles({})).toBeNull();
+    expect(capacitorMajorFromFiles({ 'package.json': '{ not json' })).toBeNull();
   });
 
   it('survives a corrupt package.json rather than throwing', () => {

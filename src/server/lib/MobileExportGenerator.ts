@@ -33,6 +33,7 @@ export interface MobileExportResult {
 }
 
 import { resolveAppId } from './appId';
+import { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
 // Re-exported so existing importers keep a stable surface; the canonical impl lives in appId.ts (shared with
 // the desktop generator — rule 4, no drift).
 export { isValidAppId, deriveAppId } from './appId';
@@ -93,10 +94,12 @@ export function generateMobileExport(opts: MobileExportOptions = {}): MobileExpo
 
   return {
     appId,
+    // The three Capacitor packages are one product and MUST share a major; the default comes from the
+    // governed toolchain table so it can never drift from the Java the workflow pins (G2, 2026-08-11).
     dependencies: [
-      { name: '@capacitor/core', version: '^6' },
-      { name: '@capacitor/cli', version: '^6' },
-      { name: '@capacitor/android', version: '^6' },
+      { name: '@capacitor/core', version: `^${DEFAULT_CAPACITOR_MAJOR}` },
+      { name: '@capacitor/cli', version: `^${DEFAULT_CAPACITOR_MAJOR}` },
+      { name: '@capacitor/android', version: `^${DEFAULT_CAPACITOR_MAJOR}` },
     ],
     scripts,
     files: {

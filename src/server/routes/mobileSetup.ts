@@ -21,7 +21,7 @@ import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFil
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
-import { assembleMobileProject } from '../lib/mobileProjectAssembler';
+import { assembleMobileProject, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
 // One repository-write implementation, shared with the self-healing build loop so the two can never
 // drift apart on branch handling, blob encoding or ref updates (rule 4).
 import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
@@ -132,7 +132,10 @@ export function registerMobileSetupRoutes(app: Express): void {
     appFiles = preflight.files;
 
     const includeIos = ios !== false;
-    const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos });
+    // Pin the Android JDK to what THIS app's Capacitor major needs (read from its package.json), so the
+    // workflow's Java and the app's Capacitor can never disagree (G2). Null → the governed default.
+    const capacitorMajor = capacitorMajorFromFiles(appFiles) ?? undefined;
+    const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos, capacitorMajor });
     const project = assembleMobileProject(appFiles, kit.files, {
       appName: name,
       appId: typeof appId === 'string' ? appId : kit.appId,

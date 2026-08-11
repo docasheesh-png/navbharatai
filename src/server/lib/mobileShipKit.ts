@@ -188,6 +188,18 @@ const FAILURE_DIAGNOSTIC = (): string => `
 const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
         run: |
           set -e
+          # G17: Capacitor wraps the built web page. If the build produced no index.html in the folder
+          # named as webDir, there is nothing to wrap and cap sync dies with a confusing path error three
+          # steps later. Detect the ACTUAL configured webDir (reads .ts/.js/.json as text — \\x27/\\x22 are
+          # ' and " so nothing here needs shell-quoting) and fail early with a plain message. This only ever
+          # fires when cap sync would have failed anyway, so a working build can never be false-failed.
+          WEBDIR=$(node -e "const fs=require('fs');const f=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'].find(x=>fs.existsSync(x));let d='';if(f){const t=fs.readFileSync(f,'utf8');const m=t.match(/webDir\\s*[:=]\\s*[\\x27\\x22]([^\\x27\\x22]+)/);if(m)d=m[1];}process.stdout.write(d);" 2>/dev/null || true)
+          if [ -z "$WEBDIR" ]; then WEBDIR=dist; fi
+          if [ ! -f "$WEBDIR/index.html" ]; then
+            echo "NBAI_FAILED_STAGE=webbuild"
+            echo "::error::Your app built, but $WEBDIR/index.html was not produced — there is no page to put inside the Android app. Make sure your web build outputs to the folder named as webDir ($WEBDIR) in capacitor.config."
+            exit 1
+          fi
           if [ ! -d android ]; then
             npx cap add android
           fi
@@ -251,6 +263,45 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
               sed -i 's#@mipmap/ic_launcher_foreground#@drawable/ic_launcher_foreground#g' "$RES"/mipmap-anydpi-v26/ic_launcher*.xml
             fi
           fi
+          # G1: an app name containing a bare ampersand ("Tom & Jerry", "R&D") lands raw in strings.xml and
+          # breaks the XML → resource linking fails. Escape any & that is NOT already part of an entity so
+          # the name renders literally. (perl ships on ubuntu-latest; the negative lookahead leaves
+          # &amp;/&lt;/&#123; etc. untouched, so re-running is a no-op.)
+          SX="$RES/values/strings.xml"
+          if [ -f "$SX" ]; then
+            perl -i -pe "s/&(?!(?:amp|lt|gt|quot|apos|#\\d+|#x[0-9a-fA-F]+);)/&amp;/g" "$SX" || true
+          fi
+          # G4: the adaptive icon's mipmap-anydpi-v26/ic_launcher*.xml references a background
+          # (@mipmap or @color ic_launcher_background), and the manifest may ask for @mipmap/ic_launcher_round.
+          # A partial icon set can omit either → resource linking fails. Heal both deterministically.
+          if [ -d "$RES" ] && ls "$RES"/mipmap-anydpi-v26/ic_launcher*.xml >/dev/null 2>&1; then
+            if grep -qha 'ic_launcher_background' "$RES"/mipmap-anydpi-v26/ic_launcher*.xml &&
+               ! ls "$RES"/drawable*/ic_launcher_background.* "$RES"/mipmap*/ic_launcher_background.* >/dev/null 2>&1 &&
+               ! grep -rqha 'name="ic_launcher_background"' "$RES"/values* 2>/dev/null; then
+              echo "::warning::adaptive icon background missing — defining it so resource linking succeeds"
+              mkdir -p "$RES/values"
+              printf '<?xml version="1.0" encoding="utf-8"?>\\n<resources>\\n  <color name="ic_launcher_background">#FFFFFF</color>\\n</resources>\\n' > "$RES/values/ic_launcher_background.xml"
+              sed -i 's#@mipmap/ic_launcher_background#@color/ic_launcher_background#g' "$RES"/mipmap-anydpi-v26/ic_launcher*.xml
+            fi
+          fi
+          MANIFEST="$RES/../AndroidManifest.xml"
+          if [ -f "$MANIFEST" ] && grep -q 'ic_launcher_round' "$MANIFEST" &&
+             ! ls "$RES"/mipmap*/ic_launcher_round.* >/dev/null 2>&1; then
+            echo "::warning::round launcher icon missing — falling back to the standard icon"
+            sed -i 's#@mipmap/ic_launcher_round#@mipmap/ic_launcher#g' "$MANIFEST"
+          fi
+          # G5: a plugin can declare a higher minSdkVersion than Capacitor's default, and the manifest
+          # merger then fails with "uses-sdk:minSdkVersion X cannot be smaller than version Y". Raise the
+          # project floor to a safe modern minimum (23) so common plugins merge cleanly. Only ever RAISES,
+          # never lowers — a project already at 24+ is left untouched.
+          VG=android/variables.gradle
+          if [ -f "$VG" ]; then
+            CUR=$(sed -n 's/.*minSdkVersion *= *\\([0-9]\\+\\).*/\\1/p' "$VG" | head -1)
+            if [ -n "$CUR" ] && [ "$CUR" -lt 23 ]; then
+              echo "::warning::raising minSdkVersion from $CUR to 23 so plugins merge cleanly"
+              sed -i 's/minSdkVersion *= *[0-9]\\+/minSdkVersion = 23/' "$VG"
+            fi
+          fi
           # Give Gradle's JVM enough heap so a LARGE app does not run out of memory during dexing / R8 /
           # resource compilation — the Node-heap fix does not help the Android build. Force 4g regardless of
           # Capacitor's lower default (idempotent: drop any existing line first, then set ours).
@@ -263,6 +314,37 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             echo "::error::The Android project or its Gradle wrapper is incomplete, so there is nothing to compile."
             exit 1
           fi`;
+
+// G10: transient-network Gradle retry. The Gradle build downloads dependencies at run time, so a network
+// blip (a dropped connection, a slow mirror, a 502) can fail an otherwise-perfect build. Retry ONLY when
+// the log actually shows a network error — a deterministic compile/link failure exits immediately so we
+// never burn the user's Actions minutes retrying a bug. Shared by both the APK and AAB build steps so they
+// can never drift. Emits the body of a `run: |` block (10-space indent).
+const GRADLE_NETWORK_PATTERN =
+  'could not resolve|could not download|could not (get|head)|connection (timed out|reset)|read timed out|network is unreachable|could not connect|timeout waiting for|premature end of|received fatal alert|unable to find valid certification|failed to download|gateway time-?out|service unavailable|502 bad gateway|connect timed out';
+
+const gradleBuildRun = (gradleCmd: string): string => `          cd android
+          chmod +x ./gradlew
+          set +e
+          attempt=1
+          max_attempts=3
+          rc=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if ./gradlew ${gradleCmd} 2>&1 | tee /tmp/nbai-gradle.log; then
+              rc=0; break
+            fi
+            rc=1
+            if [ "$attempt" -ge "$max_attempts" ]; then break; fi
+            if grep -qiE '${GRADLE_NETWORK_PATTERN}' /tmp/nbai-gradle.log; then
+              wait_s=$((attempt * 15))
+              echo "::warning::Gradle hit a transient network error — retrying in $wait_s seconds (attempt $attempt of $((max_attempts - 1)))"
+              sleep "$wait_s"
+              attempt=$((attempt + 1))
+            else
+              break
+            fi
+          done
+          exit "$rc"`;
 
 const ANDROID_APK_WORKFLOW = (appName: string): string => `# Build an INSTALLABLE Android app (.apk) for ${appName} — generated by NavBharatAI.
 #
@@ -334,7 +416,8 @@ ${ENSURE_ANDROID_STEP}
       # assembleDebug signs with Android's universal debug key, so no keystore and no secrets are
       # needed — this is what makes the whole flow one click for a non-technical user.
       - name: Build the installable APK
-        run: cd android && chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon
+        run: |
+${gradleBuildRun('assembleDebug --no-daemon')}
 
       - name: Upload the .apk
         uses: actions/upload-artifact@v4
@@ -486,7 +569,8 @@ ${ENSURE_ANDROID_STEP}
           STORE_PASS: \${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: \${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: \${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: cd android && chmod +x ./gradlew && ./gradlew bundleRelease assembleRelease
+        run: |
+${gradleBuildRun('bundleRelease assembleRelease')}
 
       - name: Upload the .aab (for Google Play)
         uses: actions/upload-artifact@v4

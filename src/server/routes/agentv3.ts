@@ -312,6 +312,7 @@ import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnos
 import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
+import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary';
@@ -351,7 +352,6 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 // importer keeps working AND there is still exactly one actuator per process — two would silently hand a
 // session's second message a cold, empty sandbox.
 import { buildActuator } from './actuatorFactory';
-import { resolveNarrationLanguage } from '../lib/narrationLanguage';
 import { envFlag } from '../lib/envFlag';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
@@ -7536,7 +7536,7 @@ export function registerAgentV3Routes(app: Express): void {
         // Pass the actuator as the session's command runner so the REAL Code Studio terminal can exec
         // bounded commands in this same warm sandbox.
         registerSession(workspaceId, git, userId ?? undefined, actuator);
-        events.emit({ type: 'workspace', workspaceId, ts: Date.now(), lang: resolveNarrationLanguage(prompt) });
+        events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
@@ -7585,7 +7585,6 @@ export function registerAgentV3Routes(app: Express): void {
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({
         client, actuator, workspaceId, state, events, model, onlyOpus,
-        narrationLang: resolveNarrationLanguage(prompt),
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
         // at the tier's effort, same as the top-level runner.
@@ -7719,11 +7718,6 @@ export function registerAgentV3Routes(app: Express): void {
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
-      // ROADMAP item 6 — the PLATFORM speaks the user's language too, not just the AI. `LANGUAGE_RULE`
-      // already makes the model mirror the prompt; this makes the ~157 server-emitted narration lines
-      // (which never pass through a model) mirror the SAME prompt, from the SAME evidence, so the two
-      // halves of one feed can never disagree. English for anything we cannot genuinely write.
-      dispatcher.setNarrationLanguage(resolveNarrationLanguage(prompt));
       // Vault → App pipe (admin 2026-07-17): inject the user's OWN saved keys (Settings → Secrets & API Keys)
       // into the .env of the app they build, so an app that needs an API key runs with the real key the
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
@@ -9859,6 +9853,61 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* self-heal is best-effort — the honest warnings stand */ }
           }
         }
+
+        // PER-PAGE DESIGN COVERAGE (admin report 2026-08-11: "1st page beautiful, andar ke page bas HTML
+        // feel dete hai"). Every other gate asks whether the styling is WIRED and CONSISTENT; none asked
+        // whether a given page is DESIGNED. A page of bare divs typechecks, lints, passes CssConsistency
+        // (it uses nothing, so nothing is undefined) and passes the integrity check (the stylesheet IS
+        // imported — by the good first page). So the whole stack was blind to exactly this defect while
+        // the model's own behaviour produced it: full effort on screen one, bare markup by screen five.
+        //
+        // Deterministic detection → costs nothing on a clean build. Advisory ALWAYS; the repair is
+        // bounded and flag-gated, and neither can fail a build — a working app with a plain page ships.
+        try {
+          const designFiles = Object.fromEntries(writtenFiles);
+          const design = analyzeDesignCoverage(designFiles);
+          if (!design.ok) {
+            for (const finding of design.findings.slice(0, 8)) {
+              buildDiag.record({
+                phase: 'build',
+                severity: 'warning',
+                code: 'DESIGN_PAGE_INCONSISTENT',
+                ...obs(`${finding.file} does not match the app's own design standard (${finding.defects.join(', ')}; ${Math.round(finding.classedRatio * 100)}% of its elements carry a class). ${designCoverageSummary(design)}`),
+              });
+            }
+            if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_DESIGN_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🎨 Bringing ${design.findings.length} page(s) up to the app's design standard…`, ts: Date.now() });
+              try {
+                const designRunner = new AgentRunner({
+                  ...baseRunnerOpts,
+                  client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                  model: resolveModel(powerLevelReqEffective),
+                  persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                });
+                const healed = await designRunner.run(
+                  `The app is built and compiles. ${designRepairInstruction(design)}`,
+                );
+                if (healed.ok) {
+                  // Same honesty rule as the integrity heal: keep the REAL build summary, take only the
+                  // edits. A no-op heal must never replace the user's build result with its own chatter.
+                  result = { ...healed, summary: result.summary };
+                  const after = analyzeDesignCoverage(Object.fromEntries(writtenFiles));
+                  buildDiag.record({
+                    phase: 'build',
+                    severity: after.ok ? 'info' : 'warning',
+                    code: after.ok ? 'DESIGN_HEALED' : 'DESIGN_PARTIALLY_HEALED',
+                    // Honest either way: a heal that only fixed some pages must not report success.
+                    message: after.ok
+                      ? `Every page now uses the app's design system (${design.findings.length} page(s) brought up to standard).`
+                      : `Design repair improved ${design.findings.length - after.findings.length} of ${design.findings.length} page(s); ${after.findings.length} still fall short.`,
+                    autoResolved: after.ok,
+                  });
+                }
+              } catch { /* design repair is best-effort — the honest warnings stand */ }
+            }
+          }
+        } catch { /* design coverage is best-effort — never blocks a build */ }
+
         // The measurement the autopsy asked for (see the note above `integrityStartedAt`): how much of
         // the post-answer tail this whole pass owns, and how much of THAT is just loading the project.
         // Recorded even when nothing was found — a fast pass is the evidence that the time is elsewhere.

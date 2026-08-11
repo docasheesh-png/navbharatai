@@ -73,9 +73,13 @@ describe('describeFile', () => {
     expect(describeFile('package.json')).toBe("the app's package list");
   });
 
-  it('answers in Hindi when the platform is speaking Hindi', () => {
-    expect(describeFile('src/components/LoginForm.tsx', 'hi')).toBe('स्क्रीन का एक हिस्सा');
-    expect(describeFile('pages/api/orders.ts', 'hi')).toBe('एक API एंडपॉइंट');
+  it('🔒 is ENGLISH ONLY — the platform speaks English, only an AI RESPONSE follows the user', () => {
+    // Admin rule 2026-08-11, restating CLAUDE.md's Language standard. An earlier version of this file
+    // shipped Hindi labels; that was the app speaking the wrong language, and it would have needed 22
+    // hand-written translations per label to be fair to every Indian user.
+    for (const p of ['src/components/LoginForm.tsx', 'pages/api/orders.ts', 'package.json']) {
+      expect(/[\u0900-\u097F]/.test(describeFile(p) || ''), p).toBe(false);
+    }
   });
 
   it('returns null for an unknown path, so the UI just shows the filename', () => {
@@ -83,45 +87,26 @@ describe('describeFile', () => {
     expect(describeFile(null)).toBe(null);
   });
 
-  it('falls back to English for a language it does not have, instead of throwing', () => {
-    expect(describeFile('package.json', 'ta' as never)).toBe(describeFile('package.json', 'en'));
-  });
+
 });
 
-describe('every role is answered in every language', () => {
-  const roles = Object.keys(_labels.en) as FileRole[];
+describe('every role has a label', () => {
+  const roles = Object.keys(_labels) as FileRole[];
 
-  it('has a label for every role in every language — no silent hole', () => {
-    for (const lang of Object.keys(_labels) as Array<keyof typeof _labels>) {
-      for (const role of roles) {
-        expect(_labels[lang][role], `${lang}/${role}`).toBeTruthy();
-      }
-    }
-  });
-
-  it('Hindi is a real translation, not a copy of English', () => {
-    for (const role of roles) {
-      expect(_labels.hi[role], role).not.toBe(_labels.en[role]);
-      expect(/[ऀ-ॿ]/.test(_labels.hi[role]), `hi/${role} has no Devanagari`).toBe(true);
-    }
+  it('has a label for every role — no silent hole', () => {
+    for (const role of roles) expect(_labels[role], role).toBeTruthy();
   });
 
   it('every label is short enough to sit on one row', () => {
-    for (const lang of Object.keys(_labels) as Array<keyof typeof _labels>) {
-      for (const role of roles) {
-        expect(_labels[lang][role].length, `${lang}/${role}`).toBeLessThanOrEqual(34);
-      }
-    }
+    for (const role of roles) expect(_labels[role].length, role).toBeLessThanOrEqual(34);
   });
 
   it('🔒 never claims more than the PATH can prove', () => {
-    // The label says what KIND of file it is. A description of behaviour ("handles login with OTP")
-    // would be fabrication — the path cannot know it, and a confident wrong line on a file the user
-    // cannot read is worse than no line at all.
-    for (const lang of Object.keys(_labels) as Array<keyof typeof _labels>) {
-      for (const role of roles) {
-        expect(_labels[lang][role]).not.toMatch(/\b(handles|implements|validates|fetches|calls)\b/i);
-      }
+    // The label says what KIND of file it is. Describing behaviour ("handles login with OTP") would be
+    // fabrication — the path cannot know it, and a confident wrong line on a file the user cannot read
+    // is worse than no line at all.
+    for (const role of roles) {
+      expect(_labels[role]).not.toMatch(/(handles|implements|validates|fetches|calls)/i);
     }
   });
 });

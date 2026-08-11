@@ -31,6 +31,7 @@ import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
 import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
+import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { debitWalletForBuild } from '../lib/walletDebit';
@@ -165,10 +166,21 @@ export function registerMobileShipRoutes(app: Express): void {
     // built .apk/.aab/.ipa — never on a failed build (nothing streams), never twice for one artifact
     // (the debit ref IS the artifact), never for free-list/anon, and never blocking the bytes. See
     // lib/apkCharge.ts for the full contract.
+    //
+    // TELL THE USER (admin 2026-08-10: "har bar user ko bataya jaye"). Until now the debit was fired
+    // and the bytes streamed — so ₹1 left a real person's balance with NO price shown before and NO
+    // confirmation after. Money taken silently is the exact opposite of the billing law's promise
+    // that the bill a user sees is the real one. The response now REPORTS its own charge, so the
+    // client can show the price on the button and confirm the amount once the file arrives.
+    // `applied` is only true when a charge genuinely happened: a free-list account (which is why this
+    // reads "free" for the admin), an anonymous caller, or a price of 0 all report false rather than
+    // printing a number nobody paid.
+    let chargeApplied = false;
     try {
       if (isChargeableApk(got.fileName)) {
         const identity = await verifyFirebaseIdentity(req);
         if (identity?.uid && !isAgentV3FreeUser(identity.uid, identity.email)) {
+          chargeApplied = apkChargeInr() > 0;
           void debitWalletForBuild(getServerDb() as any, identity.uid, {
             billedInr: apkChargeInr(),
             buildRef: apkChargeRef(owner, repo, artifactId),
@@ -177,6 +189,9 @@ export function registerMobileShipRoutes(app: Express): void {
         }
       }
     } catch { /* the charge must never break the download */ }
+    res.setHeader(CHARGE_PRICE_HEADER, String(isChargeableApk(got.fileName) ? apkChargeInr() : 0));
+    res.setHeader(CHARGE_APPLIED_HEADER, chargeApplied ? 'true' : 'false');
+    res.setHeader('Access-Control-Expose-Headers', `${CHARGE_PRICE_HEADER}, ${CHARGE_APPLIED_HEADER}`);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${got.fileName}"`);
     res.send(got.bytes);

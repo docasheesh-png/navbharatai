@@ -29543,6 +29543,9 @@ STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
 
 **Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
 `tsc -p tsconfig.server.json` clean.
+
+---
+
 ## 2026-08-10 — Per-file narration: every file the build writes now says what it IS
 
 **Admin ask:** "jab NavBharatAI koi app banata hai, ek saath bahut sari file bana deta hai — background
@@ -29589,6 +29592,240 @@ exit 0** · `npm run build` ✓.
 
 ---
 
+## 2026-08-10 — GAME BUILDING: v5.0 can now build real games (phases 1–7, PRs #2218, #2219, #2221, #2223, #2226, #2227, #2246)
+
+**Origin.** The admin forwarded an external ChatGPT plan for turning NavBharatAI into a 3D game platform.
+Per the external-suggestion rule it was treated as raw material: I flagged honestly that we cannot ship
+photo-real 3D (no asset library), the admin overruled the scope-down — *"jo jo behatar se behtar kar sakte
+ho karo… note: app tute na, app downgread na ho"* — so the plan was rebuilt around what a CODE generator
+can genuinely make world-class: the engine, the feel, and the craft knowledge, not the art.
+
+**What shipped — seven phases, each a generator + wiring + tests:**
+
+| Phase | Tool | What it removes from the model's plate |
+|---|---|---|
+| 1 | `generate_game_runtime` | Fixed-timestep loop, input (incl. touch), events, pooling, save/load, game feel |
+| 2 | `generate_game_3d` | Colour management, 9 lighting presets, camera rigs, procedural world |
+| 3 | `generate_game_controller` | Coyote time, jump buffering, variable jump, step offset, slope limit |
+| 4 | `generate_game_vfx` | Pooled particles, Web Audio, and the ONE table syncing effect+sound+shake |
+| 5 | `generate_game_shell` | Composition, React mount, HUD, pause/restart, WebGL teardown |
+| 6 | `generate_game_systems` | Combat with i-frames, enemy AI, segment-collision projectiles, waves |
+| 7 | architect prompt + `game` domain | Makes the builder actually REACH for all of the above |
+
+**The design principle throughout:** every rule encoded is a *specific, nameable bug* that a from-scratch
+implementation reliably commits and that is invisible on review — physics in the render callback (the
+character jumps higher on a 144Hz monitor), additive particles writing depth, an AudioContext never
+resumed on a gesture (the #1 reason a web game is silent), damage applied per frame, bullets tunnelling
+through small enemies, enemies converging into one blob, a leaked WebGL context killing the tab.
+
+**Method note that paid off — TEST BY EXECUTION, not by string match.** Phases 1–5 could only assert the
+emitted text *contains* the right thing (it needs three.js + a browser). Phase 6 was deliberately written
+as pure arithmetic so the tests RUN it — and immediately found two real bugs a string match would have
+passed: a bullet through two enemies credited the wrong one (ranked by perpendicular distance; two
+enemies dead ahead are both at distance zero, so array order decided it → now ranked by position ALONG
+the segment), and spawn placement put enemies OUTSIDE the arena when the player stood near its edge
+(clamp-then-push-away walks the point back out → now clamps onto the arena circle and slides along it via
+the law of cosines, with a property sweep over every player position). **Where a generator's output can be
+made pure, make it pure and execute it in the test.**
+
+**Root causes fixed in EARLIER phases, surfaced by later ones (rule 4, not worked around):**
+- `CameraRig.yaw` was private → camera-relative movement was impossible; the controller took `cameraYaw`
+  and nothing could supply it.
+- `CameraRig` had no `setCollidables` → the world is built AFTER the rig exists, so third-person camera
+  collision could never actually be wired.
+- `CharacterController` had no `reset()` → restart could not work. It clears motor state, not just
+  position, or a player who died mid-fall respawns carrying that velocity with `jumping` still true.
+- `handleResize` sized to `window.innerWidth` → correct only fullscreen; embedded, the canvas overflowed
+  its panel, and a window `resize` never fires when a sidebar collapses. Now measures + observes the
+  container, with a zero-size guard so an unopened tab cannot make aspect NaN and blank it permanently.
+- `ParticleSpec.additive` was DEAD DATA — one material fixes the blend mode, so smoke/dust/blood would
+  have glowed like neon. Now two layers, preset-selected; still two draw calls.
+
+**A bug CLASS killed, not its fourth instance.** Every generator holds its output in a TS template
+literal, and a stray backtick in emitted code silently truncates the file — I made that mistake four
+times across these phases. `generatedGameCode.test.ts` now parses every file all SEVEN generators emit as
+real TypeScript, and guards the guard (three cases prove the check detects breakage, so it cannot pass
+vacuously if the internal `parseDiagnostics` property changes).
+
+**A guard found covering only half its subject.** `templatesPromiseWhatWeCanBuild.test.ts` (written
+2026-08-08) extracted only single-quoted prompts, so every backtick template — a growing share of the
+list — sailed past unchecked while the suite reported green. Widened to both forms, plus an assertion
+that the extracted count EQUALS the number of template ids, so a third quoting style fails loudly
+instead of escaping. A guard that silently covers half its subject is worse than none, because it is
+trusted.
+
+**Honesty held (rule 2).** The architect prompt and the knowledge base both state the real limit: games
+are built from CODE and shapes, not a library of ready-made 3D characters. 2D and stylised low-poly come
+out genuinely good; photo-realistic humans do not — and the builder is told to say so and build the
+strong stylised version rather than hand over grey boxes and call them a village. Sound FILES are the
+app's to supply; a missing one warns and plays silently, never a faked sound.
+
+**Discoverability.** Two Project Blueprints added (3D arena survival, 2D endless runner), both fully
+specified as playable — score, sound, pause, restart, phone controls — and a `game` domain in
+`RequirementGapAnalyzer` so a game prompt is proactively given the eight things such prompts always omit.
+Two false positives guarded, because the damage runs the other way (handing a business app a game
+engine): **gamification is not a game**, and **"game plan" is an idiom**.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,378 passed**
+(1,142 files) — up from 13,150 at the start of this arc. Every phase merged green.
+
+**Open / not done (recorded honestly):** no multiplayer/networking; no asset pipeline (models, textures,
+sound files); no physics engine beyond the character controller and projectile collision (no rigid-body
+stacking, ragdolls or vehicles); no level editor. These are real absences, not oversights — each is a
+separate large arc, and none is needed for the games the engine now builds well.
+## 2026-08-10 — "APK download free me ho raha hai" — half true, and the other half was a real defect
+
+**Admin:** "apk download abhi free me ho raha hai, jabki maine kaha tha 1₹ per download! Aur HAR BAR
+USER KO BATAYA JAYE."
+
+**FINDING 1 — it is NOT free, and this is the SECOND report with the same cause.** `/api/mobile-ship/
+download` has charged ₹1 per built file since 2026-08-06. It reads free for the admin because their
+account is on `AGENTV3_FREE_LIST`, which is exempt everywhere by design — exactly why Professionals
+and Doctor AI also looked free in the previous message. **A normal user IS charged.** Worth stating
+plainly: the admin's own account can never be used to check whether a paywall works.
+
+**FINDING 2 — the real defect: the user was never TOLD.** The server fired the debit
+(`void debitWalletForBuild`) and streamed the bytes; the client just saved the file. So ₹1 left a real
+person's balance with **no price shown before and no confirmation after** — money taken silently,
+which is the exact opposite of the billing law's promise that the bill a user sees is the real one.
+
+**FIXED — the response now reports its own charge, and the screen says it, every time.**
+- The download sets `x-navbharatai-charge-inr` and `x-navbharatai-charge-applied` (plus
+  `Access-Control-Expose-Headers`, without which a browser cannot read a custom header at all).
+- `applied` is true ONLY when a charge genuinely happened — a free-list account, an anonymous caller
+  or a price of 0 all report false, so the receipt can never claim a charge nobody paid. Same rule the
+  wallet follows when a provider reports no usage: an unmeasured thing is not a bill.
+- The charge still NEVER blocks the bytes; the debit stays fire-and-forget.
+- BEFORE the click the screen states the price **and the per-BUILD rule** in the same breath —
+  "₹1 for each build; downloading this same file again is free". Without that second half, a user who
+  re-downloads is certain to think they were charged twice (the debit is keyed to the artifact, so
+  they were not), and a bare price would guarantee that support message.
+- AFTER the file arrives, the exact amount is confirmed. Both strings are WRITTEN in Hindi too, not
+  transliterated.
+- A missing/malformed header degrades to "no charge" rather than an invented number, and the client's
+  pre-click price mirrors the server default while the RECEIPT always uses the server's real value —
+  so a price change can never make the receipt lie; only the hint would lag, which is the safe
+  direction to be wrong in.
+
+Tests: 15 in `tests/apkChargeNotice.test.ts` — the price plus the per-build rule, silence when the
+charge is off, Hindi genuinely written, every "no charge" path, malformed headers meaning no charge,
+and wiring assertions that the server exposes the headers, that `applied` is gated on the free list,
+that the debit is still non-blocking, and that the screen shows both the hint and the receipt.
+Gate: tsc clean both projects, full run 13,286/13,286.
+
+---
+
+## 2026-08-10 — "Pass system hata do" — and it was already lying to real users
+
+**Admin:** "pass system hata do!"
+
+**WHAT THE PASS ACTUALLY WAS.** A ₹99/month "Professional Pass" promising unlimited access to every
+professional and every AI-backed tool. It was a **SECOND billing model** competing with the one the
+platform actually adopted: THE ONE-WALLET LAW (2026-08-01) settled that every AI draws on the same
+balance and *"the price of the thing IS the limit"*. A flat monthly promise of "unlimited" sits on
+top of that as a parallel contract the wallet cannot honour, and it forced the customer to reason
+about two systems to answer one question ("what does this cost me?").
+
+**AND IT WAS ALREADY LYING — this is the defect half, not the product half.** The wallet-empty refusal
+in BOTH gates (`passGate.ts`, `toolGate.ts`) ended: *"…or get the Professional Pass for unlimited
+access."* That branch is **LIVE** — `AI_WALLET_SPEND` has been on since 2026-08-08 and the wallet gate
+runs independently of the paywall flag — while the Pass has **never been sellable**:
+`PROFESSIONAL_PAID_ENABLED` defaults off and is not set in Cloud Run (it is not even in CLAUDE.md's
+env registry). So a real user who ran out of credit was pointed at a product that does not exist, at
+exactly the moment they were trying to give us money. Nothing about that was theoretical.
+
+**REMOVED — every user-facing surface, this change:**
+- Both LIVE wallet-empty messages now say the one thing that actually unblocks the user: *"Your
+  balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use."*
+  `passPriceInr`/`passDays` no longer go to the client at all, so a paywall card cannot be rebuilt
+  from the response.
+- The quota-exhausted messages drop the upsell and say when the allowance returns. The tool gate's
+  two variants (pass holder vs everyone else) collapse into one — there is no distinction left to draw.
+- `ProfessionalChat`: the "Get Pass — ₹99/month" checkout, the "Or get the Professional Pass" button
+  under the empty-wallet card, and the crown chip that opened the paywall are gone. The header chip is
+  now a plain COUNTER ("12/50 free today"); the exhausted card states the allowance, says it returns
+  tomorrow, and offers "Add credit".
+- `buyProfessionalPass()` is **deleted, not merely unused** — an exported purchase function is one
+  import away from being live again. `fetchPassStatus` stays; the free-allowance counter is real.
+- Doctor AI's 402 fallback no longer offers the Pass.
+- `AppKnowledgeBase`: the `professional_pass` entry is **replaced, not deleted** (`professionals_cost`).
+  Deleting it was the easy move and the wrong one — 'pass', 'kitne free', 'unlimited', '99' are exactly
+  what a user types when asking what this costs, and an unanswered keyword sends every AI in the app
+  back to guessing, which is how a removed product gets re-invented inside a chat reply. The billing
+  entry's "A Professional Pass covers the assistants and tools" line is gone too.
+
+**NOT removed yet, deliberately (honest sequencing).** The pass STORE, its Cashfree grant path and the
+`hasActivePass` branches in the gates stay for now. These guard money on every professional turn and
+every tool action; the safe order is to remove the grant path first, then delete the branches once
+nothing can set them. They are inert in production today — nothing can grant a pass — and the comments
+now say so instead of describing a live product.
+
+Tests: 9 new in `tests/passRemoved.test.ts`, which read the shipped source so an offer cannot quietly
+reappear the way the old one survived its flag being off: the two live refusals must not say "pass",
+no `passPriceInr:`/`passDays:` may be sent, no component may name or open a checkout for the Pass, the
+purchase helper must not exist, and the cost keywords must still land on an entry. `toolGate.test.ts`'s
+"offers the Pass" assertion is REPLACED in place with the superseding contract (upsell asserted absent,
+the "name what the user tried" intent kept). Gate: tsc clean both projects, full run **13,538/13,538**.
+## 2026-08-11 — I had the language rule BACKWARDS. Reverted, and the real gap fixed instead.
+
+**Admin, stating it in two halves and no third:**
+1. NavBharatAI's own UI = **professional English** — every button, label, and every status line the
+   SERVER emits during a build.
+2. **Only an AI RESPONSE** follows the user's language.
+
+**That is CLAUDE.md's Language standard, written down since long before this session.** I did not
+follow it. `ROADMAP.md` item 6 said the opposite — "~118 hardcoded English strings that OUR SERVER
+emits… do the SERVER NARRATION first" — and I followed the roadmap instead of the constitution. Two
+days of work went the wrong way: a Hindi catalogue for 23 status lines (#2201), Hindi file labels and a
+per-build language threaded onto the wire (#2228, still open).
+
+The mixed feed I was "fixing" was never a defect. **The app speaking English beside an AI speaking
+Hindi is the intended design**, and it is also the only version that scales: being fair to every Indian
+user would have meant 22 hand-written translations per line, forever.
+
+### Reverted (not left half-wired — that state is what rule 2 forbids)
+
+- `narrationCatalogue.ts` → English only. **The catalogue itself STAYS**: one place for the platform's
+  words is still what makes them consistent, greppable, and what lets the white-label guard prove no
+  vendor name reaches a user. Only the translation layer went.
+- `lib/narrationLanguage.ts` — deleted, with its tests.
+- `ToolDispatcher.setNarrationLanguage`, the `SubAgent` threading, both route call sites, the `lang`
+  field on the `workspace` wire event, and the client state + prop — all removed.
+- `LanguageDetect.scriptShare` — the field I added for this — reverted. Nothing read it any more, and
+  shipping dead code a day after a PR that removed 80 dead imports would be its own joke.
+- `fileRole.ts` → English labels, no language parameter.
+
+### The REAL gap, which was on the other half all along
+
+`routes/sda.ts` (Doctor AI) instructed the model: *"LANGUAGE: Primarily English medical terminology.
+Can use Hinglish for brief clarifications if needed."* — the **opposite** of rule 2, on the one surface
+built for junior and rural doctors, i.e. the users most likely to write in Hindi. `LANGUAGE_RULE`
+covers build/plan/chat and `professionals/engine.ts` covers the Professionals; Doctor AI was the hole.
+
+Fixed as *mirror the doctor's language, keep CLINICAL TERMS in English* — drug names, doses, units and
+investigations stay exactly as they appear on a prescription. A translated drug name is a
+patient-safety risk and cannot be looked up. Explain in their language; name the medicine in English.
+
+### On adding a translator (admin asked: Google Translate, or a free dictionary?)
+
+**No — and it would make the product worse.** The models are natively multilingual; that is what
+`LANGUAGE_RULE` uses, and it costs nothing. A translation layer would re-translate an already-correct
+reply (adding errors to a good answer), add latency to every message, mangle code blocks and technical
+terms, and Google Translate is not free at scale (~$20 per million characters after a small tier) while
+the "free" unofficial endpoints breach their terms and break without notice. Recorded in ROADMAP item 6
+so it is not re-proposed.
+
+### ROADMAP item 6 rewritten
+
+The line that contradicted CLAUDE.md is gone, replaced with the two-way rule, an explicit note that
+following the old line cost a session's work, and the remaining scope — which is small and entirely on
+the AI side.
+
+9 new tests (`tests/languageRule.test.ts`) lock BOTH halves, including that the language machinery is
+GONE rather than merely unused, and that no translation package is in `package.json`.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1148 files / 13,462 tests,
+exit 0** · `npm run build` ✓.
 ## 2026-08-11 — 57 tests stop writing scratch files into the real source tree
 
 The open item recorded during the 2026-08-09 audit, now root-caused.

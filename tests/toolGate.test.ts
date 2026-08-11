@@ -74,17 +74,27 @@ describe('free users get a daily allowance', () => {
     }
   });
 
-  it('blocks with 402 once the allowance is used, and offers the Pass', async () => {
+  /**
+   * SUPERSEDED 2026-08-10 — this test used to require the block to OFFER the Professional Pass
+   * (`passPriceInr === 99`, error matching /Professional Pass/). The admin removed the Pass ("pass
+   * system hata do"), so the old assertion now demands the app advertise a product it does not sell.
+   * The intent it was protecting — the refusal must name what the user actually tried, never a bare
+   * "quota exceeded" — is kept, and the upsell is now asserted ABSENT.
+   */
+  it('blocks with 402 once the allowance is used, and sells nothing', async () => {
     state.usedToday = aiToolFreeDailyLimit();
     const r = await gateToolAction(UID, EMAIL, 'ai_tool');
     expect(r.allow).toBe(false);
     if (!r.allow) {
       expect(r.status).toBe(402);
       expect(r.body.code).toBe('tool_paywall');
-      expect(r.body.passPriceInr).toBe(99);
-      expect(String(r.body.error)).toMatch(/Professional Pass/);
-      // The message must name what the user just tried, not "quota exceeded".
+      expect(r.body.passPriceInr).toBeUndefined();
+      expect(r.body.passDays).toBeUndefined();
+      expect(String(r.body.error)).not.toMatch(/pass/i);
+      // The message must name what the user just tried, not "quota exceeded"…
       expect(String(r.body.error)).toMatch(/AI tool actions/);
+      // …and must say the one true thing left: it comes back.
+      expect(String(r.body.error)).toMatch(/reset/i);
     }
   });
 
@@ -126,9 +136,10 @@ describe('the Professional Pass unlocks the tools', () => {
     if (!r.allow) {
       expect(r.status).toBe(402);
       expect(r.body.dailyLimit).toBe(imagePassDailyLimit());
-      // A paying customer must not be told to buy the thing they already have.
+      // Nobody is told to buy anything here any more: the Pass holder already had it, and since
+      // 2026-08-10 there is no Pass to sell to anyone else either. Both cases now share one message.
       expect(r.body.passPriceInr).toBeUndefined();
-      expect(String(r.body.error)).toMatch(/resets tomorrow/i);
+      expect(String(r.body.error)).toMatch(/reset tomorrow/i);
     }
   });
 

@@ -29508,3 +29508,38 @@ FIX:
 
 **Verification:** `npm run build` ✅ · `tsc --noEmit` clean · `dynamicFooter` 5/5 (locks the scoped wiring)
 + `professionalHistory` 4/4 (only-own, welcome-excluded, empty, corrupt-safe).
+
+## 2026-08-11 — APK build audit + pre-solve batch (kill the shivlings, part 1)
+
+Admin: "ek scan/audit wapas karo — apk banane me future me kya kya problem aa sakti hai, sab list banao."
+Ran a full senior-Android-CI audit of the generated APK/AAB pipeline (both workflows, the 3 deterministic
+self-heals, the ~16-class classifier, the AI-repair tier, the compile pre-flight). Key structural fact: the
+user's repo NEVER contains android/ (it's regenerated on CI each build, gitignored), so any android/-resident
+defect is invisible to the AI repair and can be fixed ONLY by a deterministic workflow heal. Enumerated 19
+future failure classes (G1–G19) ranked by likelihood × impact.
+
+PRE-SOLVED NOW (deterministic, always-work, also heal existing repos via the STALE_WORKFLOW/
+ANDROID_RESOURCE_LINKING refresh path) — mobileShipKit.ts ENSURE_ANDROID_STEP + both job defs:
+- **G3 (highest user-impact): the uploaded icon now becomes the REAL app icon.** After cap sync, if an icon
+  source exists, run `npx @capacitor/assets generate --android` to produce the full density + adaptive
+  (foreground/background/round) icon set from the user's icon. Previously CI never generated icons, so a
+  user who uploaded an icon still shipped Capacitor's default (a shipped feature that did nothing — 2nd-rule
+  adjacent). Degrades gracefully: if the tool is unavailable or the icon <1024px it warns and the existing
+  foreground self-heal still guarantees a resolvable icon, so the build never fails.
+- **G7: Gradle JVM heap.** Force `org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g` into
+  android/gradle.properties (idempotent) so a large app doesn't OOM during dex/R8/aapt2 — the existing
+  NODE_OUT_OF_MEMORY fix only covers the web build, not the Android build.
+- **G13: `timeout-minutes: 30`** on both build jobs so a hung download can't idle to GitHub's 6-hour default
+  and burn the user's Actions minutes / stick the progress bar.
+
+STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
+- G1 appName XML-escaping in strings.xml [D], G4 adaptive background + round-icon backstop [D], G5 plugin
+  minSdk merger bump [D], G10 transient-network Gradle retry [D], G8 keyword/case package segment [AI],
+  G9 vite .mjs outDir + Next-SSR detection [AI], G17 index.html presence check [AI]. Needs-user (classify
+  honestly, never fake): G6 google-services.json (push/Firebase), G11 wrong keystore creds, G12 private npm
+  registry. Biggest structural item: **G2 — the Capacitor-major ↔ Java/Gradle/compileSdk version matrix**
+  (default major 6 is stale and not co-validated with the pinned Java 21; repairJavaVersion only bumps up).
+  To be encoded as ONE governed source-of-truth table (rule-4 centralization) — carefully, separately.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
+`tsc -p tsconfig.server.json` clean.

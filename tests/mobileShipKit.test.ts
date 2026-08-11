@@ -184,6 +184,35 @@ describe('generateShipKit — self-heals a missing launcher-icon foreground (aut
   }
 });
 
+describe('generateShipKit — pre-solved future build failures (audit 2026-08-11)', () => {
+  // A forward-looking audit of the Android build surface. These deterministic heals close the
+  // highest-likelihood gaps that live in the GENERATED android/ project (so only a workflow step can fix
+  // them), before a real build ever hits them.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: turns the user's uploaded icon into the REAL app icon set (capacitor-assets), degrading gracefully`, () => {
+      expect(wf).toContain('@capacitor/assets generate --android');
+      // only when an icon source exists …
+      expect(wf).toContain('if ls resources/icon.* assets/icon.*');
+      // … and never fails the build if the generator/icon is unusable (the foreground heal is the fallback).
+      expect(wf).toMatch(/@capacitor\/assets generate[^\n]*\|\| echo "::warning::/);
+    });
+
+    it(`${label}: gives Gradle enough JVM heap so a large app does not OOM during the Android build`, () => {
+      expect(wf).toContain('org.gradle.jvmargs=-Xmx4g');
+      // idempotent — drops any existing lower default first
+      expect(wf).toContain("sed -i '/^org.gradle.jvmargs/d' android/gradle.properties");
+    });
+
+    it(`${label}: bounds the job so a hung download can't idle to GitHub's 6-hour default`, () => {
+      expect(wf).toContain('timeout-minutes: 30');
+    });
+  }
+});
+
 describe('generateShipKit — honesty about what only the user can do', () => {
   const kit = generateShipKit({ appName: 'My Shop' });
 

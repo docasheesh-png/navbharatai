@@ -165,11 +165,45 @@ export function hasReviewableSource(fileTree: string[]): boolean {
  * the user's original request. Returns a structured ReviewResult.
  * Best-effort — resolves to a neutral score-0 result if the spawn fails.
  */
+
+/**
+ * Should the review focus on what THIS TURN changed, instead of surveying the whole project?
+ *
+ * ROOT CAUSE (Shiv Medical Store report, 2026-08-10): a turn that changed 3 files in a 78-file project
+ * sent the reviewer through ~25 read_file calls over the whole app. That is expensive — tokens are the
+ * user's bill — and it is also the wrong review: it re-litigates code the user did not touch and did
+ * not ask about, which is how a clean edit collects "issues" about pre-existing decisions.
+ *
+ * A NEW build changed everything, so everything is in scope — that must not change. Focus only when a
+ * genuinely small edit lands in a project big enough for the distinction to matter.
+ *
+ * Pure + exported for testing.
+ */
+export function reviewScope(changedFiles: readonly string[] | undefined, treeSize: number): {
+  focused: boolean;
+  files: string[];
+} {
+  const changed = (changedFiles ?? []).filter((f) => typeof f === 'string' && f.trim().length > 0);
+  // Nothing recorded → we cannot know what moved; review as before rather than guess a narrow scope
+  // and miss the very thing that broke.
+  if (changed.length === 0) return { focused: false, files: [] };
+  // A small project is cheap to review whole, and "3 of 5 files" is not a focused edit.
+  if (treeSize < 12) return { focused: false, files: changed };
+  // More than a third of the project moved → this is a rebuild in all but name.
+  if (changed.length > Math.max(6, Math.floor(treeSize / 3))) return { focused: false, files: changed };
+  return { focused: true, files: changed };
+}
+
 export async function reviewBuild(opts: {
   userRequest: string;
   fileTree: string[];
   fileSample: { path: string; content: string }[];
   spawn: SubAgentSpawn;
+  /**
+   * The files THIS TURN actually changed. When a small edit lands in a large project, reviewing the
+   * whole app is both expensive and wrong — see reviewScope.
+   */
+  changedFiles?: string[];
 }): Promise<ReviewResult> {
   const { userRequest, fileTree, fileSample } = opts;
 
@@ -185,6 +219,7 @@ export async function reviewBuild(opts: {
     };
   }
 
+  const scope = reviewScope(opts.changedFiles, fileTree.length);
   const fileContext = fileSample
     .slice(0, 5)
     .map(
@@ -201,6 +236,16 @@ export async function reviewBuild(opts: {
     `FILES BUILT (${fileTree.length} total):`,
     fileTree.slice(0, 20).join('\n'),
     '',
+    ...(scope.focused ? [
+      `CHANGED THIS TURN (${scope.files.length} file(s)) — REVIEW THESE:`,
+      scope.files.slice(0, 20).join('\n'),
+      '',
+      'Focus your review on those files and anything they directly affect. Do NOT survey the rest of the',
+      'project: the user asked for this change, not an audit of code they did not touch, and re-reading',
+      'the whole app costs them real money. If a changed file depends on something untouched, read that',
+      'one file — but do not go looking for unrelated issues elsewhere.',
+      '',
+    ] : []),
     'SAMPLE FILE CONTENTS:',
     fileContext,
     '',

@@ -11001,6 +11001,10 @@ export function registerAgentV3Routes(app: Express): void {
               fileTree: rFiles,
               fileSample: rSample,
               spawn: spawnSubAgent,
+              // What THIS turn changed. Without it the reviewer surveys the whole project: the Shiv
+              // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
+              // spent re-reading code they did not touch.
+              changedFiles: [...writtenFiles.keys()],
             }), reviewBudget, 'post-build-review');
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY

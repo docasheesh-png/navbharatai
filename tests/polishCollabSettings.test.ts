@@ -61,10 +61,22 @@ describe('Settings — App Settings hub tiles are real', () => {
     ['auth', 'Authentication'],
     ['storage', 'Storage'],
     ['general', 'General'],
-    ['shell', 'Terminal'],
     ['logs', 'Logs'],
   ])('the %s tile ("%s") exists', (id, label) => {
     expect(settings).toContain(`label: '${label}'`);
+  });
+
+  it('🔒 the Terminal tile is GONE — Code Studio already has that exact terminal', () => {
+    // Removed 2026-08-11 (admin: "ide ke andar already hai"). It mounted the same TerminalPanel on the
+    // same workspace as Code Studio, so it was a second doorway to one room — the same duplication the
+    // 'database' tile was removed from Home for. Asserted as absent so it cannot quietly return.
+    // Comments are stripped first: the code legitimately EXPLAINS the removal, and matching a bare
+    // word against prose is how a test starts failing on its own explanation.
+    const code = settings.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toContain("label: 'Terminal'");
+    expect(code).not.toContain("id: 'shell'");
+    expect(code).not.toContain('TerminalPanel');       // the component is no longer mounted here
+    expect(code).not.toContain("settingsScreen === 'shell'");
   });
   it('Notifications bell is mounted in the top bar', () => {
     expect(topnav).toContain('NotificationBell');

@@ -83,7 +83,7 @@ export type ViewType =
 
 export type SettingsScreen =
   | 'root' | 'general' | 'modules' | 'secrets' | 'database' | 'connections'
-  | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell'
+  | 'github_repos' | 'sharing' | 'deploy' | 'access'
   | 'git' | 'logs' | 'report' | 'metrics' | 'profile'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.
   // ('hosting' info-screen was merged into 'cloudeploy' as a duplicate — admin 2026-07-29.)

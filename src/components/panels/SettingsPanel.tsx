@@ -38,10 +38,6 @@ const MultiCloudDeploy = _lz(() => import('../ide/MultiCloudDeploy'),      'Mult
 // "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
 // App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
 const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
-// The REAL sandbox terminal (same component Code Studio mounts) — runs actual commands in the
-// user's warm v5.0 sandbox via POST /api/agentv3/exec. Rendered by the 'shell' settings screen so
-// users can run a quick command without opening the full Code Studio.
-const TerminalPanel    = _lz(() => import('../ide/TerminalPanel'),         'TerminalPanel');
 // REAL workspace logs — live v5.0 build events + the app's own captured runtime errors.
 const WorkspaceLogs    = _lz(() => import('../ide/WorkspaceLogs'),         'WorkspaceLogs');
 
@@ -454,9 +450,13 @@ export function SettingsPanel({
                       { id: 'storage', label: 'Storage', icon: HardDrive },
                       { id: 'secrets', label: 'Secrets & API Keys', icon: Lock },
                       // Developer tools stay right here in App Settings (admin 2026-07-29:
-                      // "app settings me se terminal aur logs ko hatana mat").
+                      // "app settings me se terminal aur logs ko hatana mat"). TERMINAL was later
+                      // REMOVED from that pair (admin 2026-08-11, "ide ke andar already hai") — it
+                      // mounted the very same TerminalPanel on the very same workspace as Code Studio,
+                      // so it was a second doorway to one room, exactly like the 'database' tile that
+                      // was removed from Home for making users think there were two databases. LOGS
+                      // stays: the 2026-07-29 instruction still holds for it, and it has no IDE twin.
                       { id: 'general', label: 'General', icon: LayoutDashboard },
-                      { id: 'shell', label: 'Terminal', icon: Terminal },
                       { id: 'logs', label: 'Logs', icon: Activity },
                     ],
                   },
@@ -991,43 +991,6 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {/* REAL sandbox terminal (admin 2026-07-20): the same TerminalPanel Code Studio mounts,
-                pointed at the SAME v5.0 workspace (shared agentv3_session_{uid} key) — so commands run
-                in the exact sandbox where NavBharatAI Pro v5.0 builds the user's app, without opening
-                the full Code Studio. Since 2026-08-04 that means REAL persistent shells here too: a
-                genuine TTY where `cd` persists, output streams live and Ctrl+C interrupts, and "+ New"
-                opens as many independent terminals as you need. Settings deliberately mounts the SAME
-                component rather than its own copy — two terminal implementations is exactly how one of
-                them quietly rots into the weaker one. Honest by construction: when the sandbox is cold
-                it says so and explains how to warm it — it never fakes output. */}
-            {settingsScreen === 'shell' && (
-              <motion.div
-                key="shell"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-4"
-              >
-                <div className="px-1 pt-4">
-                  <h2 className="text-2xl font-black text-white tracking-tight">Terminal</h2>
-                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Run real commands in your app&apos;s sandbox</p>
-                </div>
-                {user ? (
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
-                    <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading terminal…</div>}>
-                      <TerminalPanel
-                        workspaceId={getAgentV3WorkspaceId(user.uid)}
-                        userId={user.uid}
-                        email={user.email || ''}
-                        onClose={() => setSettingsScreen('root')}
-                      />
-                    </Suspense>
-                  </div>
-                ) : (
-                  <div className="p-6 text-white text-center">Please log in to use the terminal</div>
-                )}
-              </motion.div>
-            )}
 
             {/* REAL workspace logs (admin 2026-07-20): live build events from the durable v5.0 live
                 channel + runtime errors captured from the app's own preview console. Same shared

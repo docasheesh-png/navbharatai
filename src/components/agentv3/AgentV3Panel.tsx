@@ -9,7 +9,7 @@ import {
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search, Mic, Camera,
+  Star, Search, Mic, Camera, Volume2,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -45,6 +45,7 @@ import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
 import { trackEvent } from '../../lib/analytics';
@@ -3767,6 +3768,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               >
                 <Mic className="w-4 h-4" />
               </button>
+              {/* TALK TO NAVBHARATAI BY VOICE (admin 2026-08-10: "sabhi me laga do"). Distinct from
+                  the dictation mic on its left, which types speech into this box — this opens a live
+                  spoken conversation. PAID: the button opens a consent card stating the per-second
+                  price in the user's own language first, and renders nothing unless voice is enabled
+                  and the user is signed in. */}
+              <ProfessionalVoiceButton
+                title="Talk to NavBharatAI by voice"
+                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-emerald-300"
+                icon={<Volume2 className="w-4 h-4" />}
+                getHistory={() => convo
+                  .filter((m) => (m.text || '').trim())
+                  .slice(-12)
+                  .map((m) => ({
+                    role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+                    content: String(m.text || ''),
+                  }))}
+              />
               {/* Hidden gallery picker — drives the inline "Screenshot → App" flow for BOTH entry points
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { playTapTone } from '../../lib/tapTone';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -12,6 +12,7 @@ import { AgentProgress, BuildStep } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
@@ -1739,6 +1740,24 @@ export const AIChat: React.FC<AIChatProps> = ({
                         {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                       </button>
                     )}
+                    {/* TALK TO NAVBHARATAI BY VOICE (admin 2026-08-10: "sabhi me laga do"). Distinct
+                        from the dictation mic beside it, which only turns speech into text in this box:
+                        this opens a live spoken conversation. It is a PAID feature, so the button opens
+                        a consent card stating the per-second price in the user's own language before
+                        anything is charged, and it renders nothing at all unless voice is enabled on
+                        the server and the user is signed in. */}
+                    <ProfessionalVoiceButton
+                      title="Talk to NavBharatAI by voice"
+                      className="p-2.5 text-gray-500 hover:text-emerald-400 transition-colors flex items-center justify-center"
+                      icon={<Volume2 className="w-4 h-4" />}
+                      getHistory={() => messages
+                        .filter((m: any) => (m?.text || '').trim())
+                        .slice(-12)
+                        .map((m: any) => ({
+                          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+                          content: String(m.text || ''),
+                        }))}
+                    />
                     {isLoading && onStop ? (
                       <button
                         onClick={() => {

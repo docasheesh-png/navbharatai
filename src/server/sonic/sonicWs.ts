@@ -9,6 +9,8 @@
 //                      { type: 'turn_complete' }
 //                      { type: 'interrupted' }               // user barged in — flush playback
 //                      { type: 'error', message }
+//                      { type: 'billing', seconds, inr }     // live meter (see voiceBilling.ts)
+//                      { type: 'ended', reason }             // 'no_balance' | 'max_duration'
 //
 // Isolated + gated: handleSonicUpgrade refuses the upgrade unless isSonicEnabled() (flag +
 // AWS creds). Returns true when it OWNS the upgrade (so the caller stops), false otherwise.
@@ -24,6 +26,14 @@ import { isSonicEnabled } from './featureFlag';
 import { sonicPersonaFor } from './sonicPersona';
 import { verifyIdentityWithReason, adminAppOptions } from '../lib/authMiddleware';
 import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
+import {
+  VOICE_TICK_MS, VOICE_MAX_CALL_SECONDS, unbilledSeconds, voiceSecondsCostInr,
+  shouldEndCallForBalance, mayStartVoiceCall, voiceDebitRef, voiceChargeDescription,
+} from './voiceBilling';
+import { debitWalletForBuild } from '../lib/walletDebit';
+import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { getServerDb } from '../lib/serverDb';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
 export const SONIC_WS_PATH = '/api/sonic/stream';
 
@@ -76,6 +86,71 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
     void voiceMemoryStore.append(uid, professionalId, transcript.slice());
   };
 
+  // ── THE METER (admin 2026-08-10: voice is a paid service) ────────────────────────────────────
+  // Billing starts at `ready` — everything before it is us getting our own session up, and a user who
+  // got nothing is never charged. From there the call settles every VOICE_TICK_MS so the balance moves
+  // while the user can still see it, an abandoned call is cut off instead of running up a bill, and a
+  // dropped socket loses at most one tick. The decisions live in voiceBilling.ts; this is the plumbing.
+  const callId = `${uid || 'anon'}_${Date.now().toString(36)}`;
+  const freeListed = isAgentV3FreeUser(uid, null);
+  let billingStartedAt = 0;
+  let billedSeconds = 0;
+  let ticker: ReturnType<typeof setInterval> | null = null;
+  let ending = false;
+
+  /** Charge everything owed so far. Returns the seconds settled by THIS call. Never throws. */
+  const settle = async (): Promise<number> => {
+    if (!billingStartedAt || !uid || freeListed) return 0;
+    const owed = unbilledSeconds(billingStartedAt, Date.now(), billedSeconds);
+    if (owed <= 0) return 0;
+    const through = billedSeconds + owed;
+    // Counted as billed BEFORE the await: a second tick firing mid-write must not re-charge the same
+    // seconds. A failed write therefore forgives that slice rather than risking a double debit — the
+    // safe direction when the alternative lands on a real person's balance.
+    billedSeconds = through;
+    try {
+      await debitWalletForBuild(getServerDb() as any, uid, {
+        billedInr: voiceSecondsCostInr(owed),
+        buildRef: voiceDebitRef(callId, through),
+        description: voiceChargeDescription(owed),
+      });
+    } catch { /* the call must never break over a money write */ }
+    return owed;
+  };
+
+  /** End the call for a real, nameable reason — and tell the user which, before the socket closes. */
+  const endCall = (reason: 'no_balance' | 'max_duration') => {
+    if (ending) return;
+    ending = true;
+    send(ws, { type: 'ended', reason });
+    void settle().finally(() => { try { ws.close(); } catch { /* already closed */ } });
+  };
+
+  const startMeter = () => {
+    if (billingStartedAt || !uid || freeListed) return;
+    billingStartedAt = Date.now();
+    ticker = setInterval(() => {
+      void (async () => {
+        const seconds = billedSeconds + unbilledSeconds(billingStartedAt, Date.now(), billedSeconds);
+        if (seconds >= VOICE_MAX_CALL_SECONDS) { endCall('max_duration'); return; }
+        await settle();
+        // The live meter the user watches — the same numbers the wallet just moved by, so the screen
+        // and the balance can never tell different stories.
+        send(ws, { type: 'billing', seconds: billedSeconds, inr: voiceSecondsCostInr(billedSeconds) });
+        // Out of money mid-call ⇒ END it. Letting it run into an overdraft would be discovered later
+        // as a number the user cannot explain; ending it now can be explained while they are listening.
+        const balance = await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid)
+          .catch(() => null);
+        if (shouldEndCallForBalance(balance)) endCall('no_balance');
+      })();
+    }, VOICE_TICK_MS);
+  };
+
+  const stopMeter = () => {
+    if (ticker) { clearInterval(ticker); ticker = null; }
+    void settle(); // the final, partial slice — a hang-up must not be a free slice of call
+  };
+
   const startSession = (persona?: string, history?: SonicTurn[]) => {
     if (session) return;
     session = new SonicSession({
@@ -91,7 +166,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
       onClose: () => { persistMemory(); try { ws.close(); } catch { /* already closed */ } },
     }, { voice, persona, history, boli });
     session.start()
-      .then(() => send(ws, { type: 'ready' }))
+      // The meter starts HERE and nowhere else: `ready` is the first moment the user is actually
+      // talking to something. A start that throws bills nothing at all.
+      .then(() => { startMeter(); send(ws, { type: 'ready' }); })
       .catch((e) => send(ws, { type: 'error', message: e instanceof Error ? e.message : String(e) }));
   };
 
@@ -115,8 +192,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
     else if (msg.type === 'stop') session?.close();
   });
 
-  ws.on('close', () => { persistMemory(); session?.close(); });
-  ws.on('error', () => { persistMemory(); session?.close(); });
+  ws.on('close', () => { stopMeter(); persistMemory(); session?.close(); });
+  ws.on('error', () => { stopMeter(); persistMemory(); session?.close(); });
 });
 
 /**
@@ -132,8 +209,18 @@ export function handleSonicUpgrade(req: IncomingMessage, socket: Duplex, head: B
   if (!isSonicEnabled()) { socket.destroy(); return true; }
   const token = new URLSearchParams(query || '').get('token');
   verifySonicUser(token)
-    .then((uid) => {
+    .then(async (uid) => {
       if (!uid) { socket.destroy(); return; } // logged-in users only
+      // EMPTY WALLET ⇒ REFUSED BEFORE THE PROVIDER IS DIALLED (admin 2026-08-10). Same rule the chat
+      // turns follow: unlike a build, a live call has no later pre-flight to catch an overdraft, so
+      // the check has to happen here. An UNREADABLE balance is allowed through — fail-open, exactly
+      // like the build and chat gates, because denying a paying user their call over a Firestore blip
+      // is the worse error and the meter still records the debt honestly.
+      if (!isAgentV3FreeUser(uid, null)) {
+        const balance = await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid)
+          .catch(() => null);
+        if (!mayStartVoiceCall(balance, false)) { socket.destroy(); return; }
+      }
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, uid));
     })
     .catch(() => socket.destroy());

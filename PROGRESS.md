@@ -30135,3 +30135,66 @@ projects, `npm run build` ✓, full run **13,607/13,607**.
 
 **STILL OPEN:** paid voice chat (consent popup + per-second metering + wallet debit must ship
 together — `src/server/sonic/` charges nothing today, so a popup alone would lie).
+
+---
+
+## 2026-08-10 — Voice chat is now a PAID service, on every AI (slice 4 — the last of the three asks)
+
+**Admin:** "ek voice chat ka option hai SDA (doctor ai) me — usko bhi paid service bana kar sabhi me
+laga do. Jab koi user usko use kare to charge karenge. Jo ki user ko dikhega voice chat icon par
+click karne se — user ki language me ek popup aaye … word to word copy nahi kar dena." Rate confirmed
+the same day: **2 paise per second (₹1.20/min)**.
+
+This was deliberately held back from the earlier slices: `src/server/sonic/` charged NOTHING, so a
+consent popup on its own would have been a lie — the screen would say "paid" while the wallet never
+moved. Popup, metering and debit ship together or not at all.
+
+**How the money works, and why each choice:**
+- **Metered as it goes, not billed on hang-up.** A call has no natural length. Billing only at the end
+  means a phone face-down in a pocket runs up an unbounded debt the user learns about when their
+  balance is gone, and an unclean disconnect either loses the whole charge or bills for a call nobody
+  was listening to. Settling every 20s moves the balance while the user can still see it, lets an
+  abandoned call be **cut off** instead of billed, and loses at most one tick if the socket dies.
+- **Billing starts at `ready`, never at connect.** Everything before that is us getting our own
+  provider session up; if it fails the user got nothing. Same standing rule as builds.
+- **Empty wallet ⇒ refused BEFORE the provider is dialled** (in the upgrade path). Unlike a build,
+  a live call has no later pre-flight to catch an overdraft. An UNREADABLE balance is let through —
+  fail-open, like every other gate.
+- **Running out mid-call ENDS the call**, with an on-screen reason. A silent overdraft is discovered
+  later as a number the user cannot explain; ending it can be explained while they are listening.
+- **Whole seconds, remainder carried.** Rounding up per tick would inflate a long call by a partial
+  second each time. A clock that jumps backwards yields 0, never a negative credit.
+- **A retry of one tick collapses onto the same ledger ref; a NEW tick gets a new one** — an
+  idempotent debit keyed to a repeated ref would silently drop every later charge in a long call.
+  Seconds are marked billed BEFORE the await, so a slow write cannot be double-charged.
+- **Hard ceiling of 2 hours.** Beyond any real consultation, so reaching it means something is wedged
+  and the honest response is to end the call, not keep charging.
+- **The on-screen meter shows the SERVER's billed seconds**, never a local stopwatch — a client-side
+  count would drift and end up displaying a different figure from the one actually charged.
+- The ledger line says **"NavBharatAI voice chat · 1m 35s"** — never the vendor (white-label law).
+
+**The popup** is written per language, not translated word-for-word (the admin asked for exactly
+that), and reads the user's own `navbharat_language`; Hindi and Hinglish both get Devanagari, since a
+Hinglish speaker reads it comfortably and showing them English would defeat the point.
+
+**SCOPE SUPERSEDED — recorded, not silently dropped.** The voice button's header said "PROFESSIONAL
+chats ONLY … never NavBharatAI Free, never Pro v5.0 (admin 2026-07-14)". That restriction existed
+because voice cost NavBharatAI money and earned nothing. Now that a call is metered and billed, the
+reason is gone and the admin replaced the instruction ("sabhi me laga do"). Voice is on all four AIs;
+the old note is marked superseded in place, with its date, rather than deleted.
+
+`AppKnowledgeBase` updated in the same change (the sync rule): the entry now says voice is on every
+AI, states the per-second price and that the price is shown before any call, and carries the words a
+user types to ask what it costs ('kitna lagega', 'voice charge', 'per second').
+
+Tests: 26 in `tests/voiceBilling.test.ts` — whole-second billing with the remainder carried, a
+backwards clock, the 2-hour ceiling, the refusal/fail-open matrix, ending a call for an empty balance,
+distinct-vs-retry ledger refs, a vendor-free description, the Hindi/Hinglish language mapping, and
+wiring assertions that the meter starts at `ready`, that the wallet is really debited per tick, that a
+slow write cannot double-charge, that hang-up settles the tail, that the empty-wallet check sits in
+the upgrade path, that the popup is asked BEFORE the call, that the meter uses server seconds, and
+that all four AIs carry the button. Gate: tsc clean both projects, `npm run build` ✓, full run
+**13,666/13,666**.
+
+**All three of the admin's named wants are now delivered end-to-end** (delete + WhatsApp-style edit;
+ON SEND / SEARCH / CLEAR everywhere with Export cut; paid voice everywhere with the price shown first).

@@ -30022,3 +30022,54 @@ sandbox has recycled ("that checkpoint isn't active in this session yet"), even 
 files are durably persisted in `WorkspaceFileStore`. The honest message is good; the underlying
 limitation may be removable by restoring from the durable store rather than requiring live git. Not
 started — it needs its own verification pass first.
+
+---
+
+## 2026-08-11 — Item 2/9: file uploads with ZERO setup, in the user's own account
+
+`generate_storage` already wrote real upload code — but for S3/R2/Cloudinary with **BYO keys**: go
+create a bucket, mint credentials, paste them into `.env`. For the person this product is for, that is
+where the feature ended.
+
+### The check that turned "blocked" into "shippable today"
+
+CLAUDE.md records that the published Supabase OAuth app deliberately does NOT hold the **Storage**
+scope ("Storage can be added when Phase 1.4 needs it") — which reads like an admin action is required
+first, and would have parked this item. It is not. A Supabase Storage bucket is a **row in
+`storage.buckets`**, and `applySchemaToProject` already runs arbitrary SQL through the Management
+API's `database/query` endpoint under the **Database read+write** scope every connected user has
+already granted. So this ships with **no new consent screen and no admin step** — worth the ten
+minutes it took to check.
+
+### What it does
+
+`generate_storage` gains `provider: 'supabase'`, with **no envKeys at all** — that is the point. It
+writes `src/lib/uploads.ts` (upload / getFileUrl / deleteFile) and `migrations/002_storage.sql`, which
+the EXISTING provisioning flow applies to the user's project (`schemaSqlFromFiles` already picks up any
+`.sql` under `migrations/`). No new plumbing was added to the build.
+
+**🔒 Still no service-role key.** `fetchProjectCredentials` deliberately never fetches it — "not
+fetching it means we cannot leak it" — and that is unchanged. The generated app uploads with the ANON
+key; what a user may do is decided by RLS policies inside their own project.
+
+**The access rules are the feature, not a detail.** A bucket with no policy accepts nothing and fails
+at runtime with no explanation — the "looks done, does nothing" state rule 2 forbids. Writes are
+`authenticated` only AND confined to a folder named after the caller's own uid, so one user cannot
+overwrite or delete another's file. Reads are public only when the bucket is public.
+
+### Two defects its own tests caught
+
+1. **The SQL and the app targeted DIFFERENT buckets.** `bucketSetupSql` lowercased the name while
+   `uploadHelperSource` used it as typed — a bucket created as `myuploads` and uploaded to as
+   `MyUploads`. A 404 on every upload, in an app that looked correctly generated. One
+   `normalizeBucketName()` now serves both.
+2. A junk MIME entry was being passed into the SQL array; it is filtered, with a test that a
+   `'; drop table` string cannot survive the builder.
+
+21 tests. `AppKnowledgeBase` updated, including the honest limit: the zero-setup route needs a
+NavBharatAI-provisioned database, the bucket is created when that database is set up, and the files
+count against the **user's own** storage quota (the standing rule — user apps run on the user's
+account).
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files / 13,638 tests,
+exit 0**.

@@ -29712,3 +29712,57 @@ charge is off, Hindi genuinely written, every "no charge" path, malformed header
 and wiring assertions that the server exposes the headers, that `applied` is gated on the free list,
 that the debit is still non-blocking, and that the screen shows both the hint and the receipt.
 Gate: tsc clean both projects, full run 13,286/13,286.
+
+---
+
+## 2026-08-10 — "Pass system hata do" — and it was already lying to real users
+
+**Admin:** "pass system hata do!"
+
+**WHAT THE PASS ACTUALLY WAS.** A ₹99/month "Professional Pass" promising unlimited access to every
+professional and every AI-backed tool. It was a **SECOND billing model** competing with the one the
+platform actually adopted: THE ONE-WALLET LAW (2026-08-01) settled that every AI draws on the same
+balance and *"the price of the thing IS the limit"*. A flat monthly promise of "unlimited" sits on
+top of that as a parallel contract the wallet cannot honour, and it forced the customer to reason
+about two systems to answer one question ("what does this cost me?").
+
+**AND IT WAS ALREADY LYING — this is the defect half, not the product half.** The wallet-empty refusal
+in BOTH gates (`passGate.ts`, `toolGate.ts`) ended: *"…or get the Professional Pass for unlimited
+access."* That branch is **LIVE** — `AI_WALLET_SPEND` has been on since 2026-08-08 and the wallet gate
+runs independently of the paywall flag — while the Pass has **never been sellable**:
+`PROFESSIONAL_PAID_ENABLED` defaults off and is not set in Cloud Run (it is not even in CLAUDE.md's
+env registry). So a real user who ran out of credit was pointed at a product that does not exist, at
+exactly the moment they were trying to give us money. Nothing about that was theoretical.
+
+**REMOVED — every user-facing surface, this change:**
+- Both LIVE wallet-empty messages now say the one thing that actually unblocks the user: *"Your
+  balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use."*
+  `passPriceInr`/`passDays` no longer go to the client at all, so a paywall card cannot be rebuilt
+  from the response.
+- The quota-exhausted messages drop the upsell and say when the allowance returns. The tool gate's
+  two variants (pass holder vs everyone else) collapse into one — there is no distinction left to draw.
+- `ProfessionalChat`: the "Get Pass — ₹99/month" checkout, the "Or get the Professional Pass" button
+  under the empty-wallet card, and the crown chip that opened the paywall are gone. The header chip is
+  now a plain COUNTER ("12/50 free today"); the exhausted card states the allowance, says it returns
+  tomorrow, and offers "Add credit".
+- `buyProfessionalPass()` is **deleted, not merely unused** — an exported purchase function is one
+  import away from being live again. `fetchPassStatus` stays; the free-allowance counter is real.
+- Doctor AI's 402 fallback no longer offers the Pass.
+- `AppKnowledgeBase`: the `professional_pass` entry is **replaced, not deleted** (`professionals_cost`).
+  Deleting it was the easy move and the wrong one — 'pass', 'kitne free', 'unlimited', '99' are exactly
+  what a user types when asking what this costs, and an unanswered keyword sends every AI in the app
+  back to guessing, which is how a removed product gets re-invented inside a chat reply. The billing
+  entry's "A Professional Pass covers the assistants and tools" line is gone too.
+
+**NOT removed yet, deliberately (honest sequencing).** The pass STORE, its Cashfree grant path and the
+`hasActivePass` branches in the gates stay for now. These guard money on every professional turn and
+every tool action; the safe order is to remove the grant path first, then delete the branches once
+nothing can set them. They are inert in production today — nothing can grant a pass — and the comments
+now say so instead of describing a live product.
+
+Tests: 9 new in `tests/passRemoved.test.ts`, which read the shipped source so an offer cannot quietly
+reappear the way the old one survived its flag being off: the two live refusals must not say "pass",
+no `passPriceInr:`/`passDays:` may be sent, no component may name or open a checkout for the Pass, the
+purchase helper must not exist, and the cost keywords must still land on an entry. `toolGate.test.ts`'s
+"offers the Pass" assertion is REPLACED in place with the superseding contract (upsell asserted absent,
+the "name what the user tried" intent kept). Gate: tsc clean both projects, full run **13,538/13,538**.

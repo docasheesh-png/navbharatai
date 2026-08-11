@@ -574,7 +574,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         const errData = await res.json().catch(() => ({} as { error?: string; code?: string }));
         const honest = errData?.error
           || (res.status === 401 ? 'Please sign in to use Doctor AI — new users get free messages every day.'
-            : res.status === 402 ? 'You have used your free messages for today. Get the Professional Pass for unlimited access.'
+            // This is only the FALLBACK wording — the server almost always sends its own `error`, and
+            // that one now names the real cause (an empty balance vs a used-up daily allowance). It no
+            // longer offers the Professional Pass, which was removed on 2026-08-10 and could never be
+            // bought in the first place.
+            : res.status === 402 ? 'You have used your free messages for today, or your balance is empty. Add credit to carry on.'
             : res.status === 429 ? 'Doctor AI is busy right now — please try again in a few seconds.'
             : 'Doctor AI could not respond right now. Please try again in a moment.');
         setMessages(prev => [...prev, {

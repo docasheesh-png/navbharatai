@@ -51,7 +51,9 @@ export interface UseAgentV3Build {
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
-  restore: (sha: string) => Promise<boolean>;
+  /** Restore a checkpoint. `message` is the SERVER's sentence — it is the only side that knows why a
+   *  restore did not happen, and those reasons are not interchangeable. */
+  restore: (sha: string) => Promise<{ ok: boolean; message: string }>;
   /** Phase G1 — load the durable git checkpoint history for a workspace (newest first, cross-session). */
   getCheckpoints: (opts: { workspaceId: string; userId?: string; email?: string }) => Promise<GitCheckpoint[]>;
   /** Phase G2 — real working-tree git status for a workspace (available:false when the sandbox is cold). */
@@ -916,9 +918,15 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
-  const restore = useCallback(async (sha: string): Promise<boolean> => {
+  /**
+   * Restore a checkpoint. Returns the SERVER's own sentence, because the server is the only side that
+   * knows WHY a restore did not happen — "this workspace was rebuilt, its earlier history is gone" and
+   * "not in this session" used to be the same boolean, and only one of them is something the user can
+   * act on. `message` is always present; `ok` says whether anything changed.
+   */
+  const restore = useCallback(async (sha: string): Promise<{ ok: boolean; message: string }> => {
     const workspaceId = workspaceIdRef.current;
-    if (!workspaceId) return false;
+    if (!workspaceId) return { ok: false, message: 'Open the app first, then restore a checkpoint.' };
     try {
       const res = await fetch('/api/agentv3/restore', {
         method: 'POST',
@@ -926,9 +934,15 @@ export function useAgentV3Build(): UseAgentV3Build {
         body: JSON.stringify({ workspaceId, sha, userId: userIdRef.current, email: emailRef.current }),
       });
       const j = await res.json().catch(() => ({}));
-      return res.ok && j?.ok === true;
+      const ok = res.ok && j?.ok === true;
+      return {
+        ok,
+        message: typeof j?.message === 'string' && j.message
+          ? j.message
+          : (ok ? 'Restored your workspace to that checkpoint.' : 'Could not restore that checkpoint. Your current files were not changed.'),
+      };
     } catch {
-      return false;
+      return { ok: false, message: 'Could not reach the server. Your current files were not changed.' };
     }
   }, []);
 

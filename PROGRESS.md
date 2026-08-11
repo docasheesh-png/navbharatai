@@ -30022,6 +30022,273 @@ sandbox has recycled ("that checkpoint isn't active in this session yet"), even 
 files are durably persisted in `WorkspaceFileStore`. The honest message is good; the underlying
 limitation may be removable by restoring from the durable store rather than requiring live git. Not
 started — it needs its own verification pass first.
+## 2026-08-10 — One input box for every AI: slice 2, the row is REAL now
+
+**Admin:** "sabhi AI's ke input ka acche cheezein utha kar best input box banao, aur wahi sabhi jagah
+laga do … NavBharatAI Free me ON SEND, SEARCH, CLEAR option hai (input box ke just upar), yeh sabhi
+jagah hona chahiye (Export wale ko hata sakte hai)." On Export, asked directly: **"han kato!"**
+
+Slice 1 (#2225) shipped only the DECISIONS with nothing user-visible — an honest but unfinished state.
+This slice makes it real: the row now renders above the input on **all four AIs**.
+
+**Why the row was worth centralising rather than copy-pasting.** It already existed — in exactly ONE
+place, hand-written inside a 1,700-line component, with its preference written straight to
+localStorage at the call site. Copying that block into three more screens is precisely how the four
+input boxes drifted apart to begin with. So `lib/chatToolbar.ts` holds the decisions (toggle label and
+tooltip, whether the actions have anything to act on, what Clear asks, how search matches) and
+`components/chat/ChatToolbar.tsx` is a thin shell over them.
+
+**Three real defects found and fixed while wiring it — none of them was the feature asked for:**
+1. **IME composition.** Three of the four composers checked only `e.key === 'Enter'`, so a Hindi or
+   CJK typist choosing a candidate **sent a half-finished word**. In an India-first app that is not an
+   edge case. `enterShouldSend` refuses while `isComposing`.
+2. **v5.0 guessed Enter from the DEVICE** (`!isTouchDevice`) — wrong in both directions: a phone with a
+   Bluetooth keyboard could not send from it, and a laptop user writing a long spec could not get a
+   newline. It is the user's own toggle now.
+3. **Doctor AI had no keyboard send at all** — every message needed a tap, which on a desktop consult
+   is the slowest possible way to work.
+
+**Per-screen care (a shared row is not a uniform one):**
+- **Doctor AI** — Clear routes to `startNewCase()`, not `setMessages([])`. A consult carries a per-case
+  id and a SERVER-side clinical store; blanking the screen while the previous patient's demographics
+  and red flags stayed live would be a clinical-safety bug, not a UI one.
+- **v5.0** — Clear starts a new SESSION. A thread owns a workspace, build lock, preview and report;
+  emptying the bubbles alone is the "+New chat leak" class this panel has been root-caused for twice.
+  It is also withheld while a build runs. Search filters what the TIMELINE is built from, never `convo`
+  itself, so a query with no hits cannot make the cold-start template screen appear.
+- **Professionals** — Clear also drops the SAVED transcript; this chat restores from localStorage on
+  mount, so wiping only the array would resurrect the conversation on the next visit.
+- **IDE/free chat** — the search field moved from the top of the transcript down INTO the toolbar,
+  beside the button that opens it. On a phone the two were a screen apart and read as unrelated.
+- The `leftSlot` prop keeps each screen's own badges (the IDE's "Pinned" chip): unifying the CONTROLS
+  should not erase what makes a screen itself, or the row gets re-forked the first time one is needed.
+
+**EXPORT CUT** ("han kato!") — it downloaded the transcript as a .md file, which nobody does on a
+phone, and it was the only control in the row that acted on the past rather than the message being
+written. Nothing replaces it.
+
+Tests: 23 in `tests/chatToolbar.test.ts` — the preference's single key and safe default (including a
+storage that throws), the send rule in all its directions (inverted toggle, IME, empty, busy), the
+visibility rule, Clear's singular/plural and its "cannot be brought back", search matching inside a
+token (`useState` finds `useState(0)`) and never blanking on an empty query, plus wiring assertions
+that each of the four screens genuinely renders the toolbar, shares the Enter rule, actually FILTERS
+its rendered messages, and wires Clear to something real — and that Export and the hand-rolled toggles
+are gone. Gate: tsc clean both projects, `npm run build` ✓, full run **13,598/13,598**.
+
+**STILL TO COME (honest status):** delete + edit on a sent message (slice 1's `chatMessageActions.ts`
+is written and tested but not yet wired to any screen), and paid voice chat (slice 3 — consent popup,
+per-second metering and the wallet debit must ship together, since `src/server/sonic/` charges nothing
+today and a popup alone would lie).
+
+---
+
+## 2026-08-10 — Delete + edit a sent message, on every AI (slice 3)
+
+**Admin:** "NavBharatAI Pro me send kiye hue text ko delete kar sakte hai — yah sabhi jagah hona
+chahiye, saath me edit bhi kar sake (WhatsApp ke tarah)."
+
+v5.0 already had a real delete (unsend) and edit on the last user message. This slice brings both to
+the other three AIs, applying the rules slice 1 wrote and tested (`lib/chatMessageActions.ts`).
+
+**The design point that makes this different from WhatsApp:** an assistant reply is an ANSWER TO a
+particular question. Delete therefore takes the replies with it (an orphaned answer reads as the AI
+answering something nobody asked), and edit REWINDS to that point so the AI answers the new question
+— the user edits because they want a different answer, not a different transcript.
+
+**Three real defects found while wiring it:**
+
+1. **The free chat's Clear button did NOTHING.** It fired a magic-string sentinel through
+   `onSendSuggestion`, and nothing in the codebase ever passed that prop or handled the sentinel — the
+   optional-call swallowed it. The button rendered, looked alive, and was inert for every real user.
+   It now goes through `onMessagesChange`, which the only host (NBIChatPanel) genuinely owns, and is
+   offered ONLY when a host can honour it.
+2. **The free chat's "edit" was a duplicate, not an edit.** It copied the text into the composer and
+   left the original message AND its answers in the thread, so re-sending produced the same question
+   twice with two different answers under it.
+3. **A re-ask after a rewind would have sent the taken-back turns.** `setMessages` does not update the
+   `messages` a closure already captured, so both Doctor AI and the professionals needed the surviving
+   transcript passed explicitly into their send path. On a clinical surface that is not cosmetic.
+
+**DOCTOR AI NEEDED REAL CARE — and this is the part that would have been a lie if shipped naively.**
+`/api/sda-chat` keeps a per-case clinical store: `patientData` and `redFlags` are ACCUMULATED from
+each reply into one blob and **never re-derived from the transcript**. So deleting a bubble on the
+client would leave the finding it produced still live in the AI's reasoning — the doctor believing
+they had retracted something while the assistant carried on treating it as fact. A clinical-safety
+bug, not a UI one. `rewindCase()` therefore **rotates the case id**: the next turn finds no entry for
+the new id, so the server starts a fresh clinical store and re-seeds from the SURVIVING transcript.
+It errs toward FORGETTING (state rebuilds over a turn or two) and that is deliberate — the doctor is
+present and can restate anything that matters, whereas a silently-retained retracted finding is the
+failure nobody can see. Red flags are cleared for the same reason.
+
+**Other care:** the controls are hidden while a SEARCH is filtering, because they are addressed by
+position and a filtered list renumbers everything (a delete on the third visible bubble would remove
+the third message of the whole conversation). They are hidden while a turn is in flight — a rewind
+under a running answer is not a state we can honestly draw. The professionals use POSITION as the id,
+because adding a real id field would invalidate every conversation already saved on every user's
+device, and their edit keeps the `edited` marker rather than letting a plain re-send drop it.
+
+Tests: 15 in `tests/messageEditWiring.test.ts` — the search guard, that every screen calls the shared
+rules rather than its own, that the dead Clear and the fake edit are gone and the host really honours
+the new prop, that Doctor AI's rewind rotates the case id, clears red flags and persists, and that
+both re-ask paths carry the surviving transcript instead of stale state. Gate: tsc clean both
+projects, `npm run build` ✓, full run **13,607/13,607**.
+
+**STILL OPEN:** paid voice chat (consent popup + per-second metering + wallet debit must ship
+together — `src/server/sonic/` charges nothing today, so a popup alone would lie).
+
+---
+
+## 2026-08-10 — Voice chat is now a PAID service, on every AI (slice 4 — the last of the three asks)
+
+**Admin:** "ek voice chat ka option hai SDA (doctor ai) me — usko bhi paid service bana kar sabhi me
+laga do. Jab koi user usko use kare to charge karenge. Jo ki user ko dikhega voice chat icon par
+click karne se — user ki language me ek popup aaye … word to word copy nahi kar dena." Rate confirmed
+the same day: **2 paise per second (₹1.20/min)**.
+
+This was deliberately held back from the earlier slices: `src/server/sonic/` charged NOTHING, so a
+consent popup on its own would have been a lie — the screen would say "paid" while the wallet never
+moved. Popup, metering and debit ship together or not at all.
+
+**How the money works, and why each choice:**
+- **Metered as it goes, not billed on hang-up.** A call has no natural length. Billing only at the end
+  means a phone face-down in a pocket runs up an unbounded debt the user learns about when their
+  balance is gone, and an unclean disconnect either loses the whole charge or bills for a call nobody
+  was listening to. Settling every 20s moves the balance while the user can still see it, lets an
+  abandoned call be **cut off** instead of billed, and loses at most one tick if the socket dies.
+- **Billing starts at `ready`, never at connect.** Everything before that is us getting our own
+  provider session up; if it fails the user got nothing. Same standing rule as builds.
+- **Empty wallet ⇒ refused BEFORE the provider is dialled** (in the upgrade path). Unlike a build,
+  a live call has no later pre-flight to catch an overdraft. An UNREADABLE balance is let through —
+  fail-open, like every other gate.
+- **Running out mid-call ENDS the call**, with an on-screen reason. A silent overdraft is discovered
+  later as a number the user cannot explain; ending it can be explained while they are listening.
+- **Whole seconds, remainder carried.** Rounding up per tick would inflate a long call by a partial
+  second each time. A clock that jumps backwards yields 0, never a negative credit.
+- **A retry of one tick collapses onto the same ledger ref; a NEW tick gets a new one** — an
+  idempotent debit keyed to a repeated ref would silently drop every later charge in a long call.
+  Seconds are marked billed BEFORE the await, so a slow write cannot be double-charged.
+- **Hard ceiling of 2 hours.** Beyond any real consultation, so reaching it means something is wedged
+  and the honest response is to end the call, not keep charging.
+- **The on-screen meter shows the SERVER's billed seconds**, never a local stopwatch — a client-side
+  count would drift and end up displaying a different figure from the one actually charged.
+- The ledger line says **"NavBharatAI voice chat · 1m 35s"** — never the vendor (white-label law).
+
+**The popup** is written per language, not translated word-for-word (the admin asked for exactly
+that), and reads the user's own `navbharat_language`; Hindi and Hinglish both get Devanagari, since a
+Hinglish speaker reads it comfortably and showing them English would defeat the point.
+
+**SCOPE SUPERSEDED — recorded, not silently dropped.** The voice button's header said "PROFESSIONAL
+chats ONLY … never NavBharatAI Free, never Pro v5.0 (admin 2026-07-14)". That restriction existed
+because voice cost NavBharatAI money and earned nothing. Now that a call is metered and billed, the
+reason is gone and the admin replaced the instruction ("sabhi me laga do"). Voice is on all four AIs;
+the old note is marked superseded in place, with its date, rather than deleted.
+
+`AppKnowledgeBase` updated in the same change (the sync rule): the entry now says voice is on every
+AI, states the per-second price and that the price is shown before any call, and carries the words a
+user types to ask what it costs ('kitna lagega', 'voice charge', 'per second').
+
+Tests: 26 in `tests/voiceBilling.test.ts` — whole-second billing with the remainder carried, a
+backwards clock, the 2-hour ceiling, the refusal/fail-open matrix, ending a call for an empty balance,
+distinct-vs-retry ledger refs, a vendor-free description, the Hindi/Hinglish language mapping, and
+wiring assertions that the meter starts at `ready`, that the wallet is really debited per tick, that a
+slow write cannot double-charge, that hang-up settles the tail, that the empty-wallet check sits in
+the upgrade path, that the popup is asked BEFORE the call, that the meter uses server seconds, and
+that all four AIs carry the button. Gate: tsc clean both projects, `npm run build` ✓, full run
+**13,666/13,666**.
+
+**All three of the admin's named wants are now delivered end-to-end** (delete + WhatsApp-style edit;
+ON SEND / SEARCH / CLEAR everywhere with Export cut; paid voice everywhere with the price shown first).
+
+---
+
+## 2026-08-10 — Pass removal, part 2: the last door it could come through
+
+Part 1 removed every user-facing offer. This closes the one that was left: `/api/payment/create-order`
+still accepted `productType: 'professional_pass'`. The screens were gone, but a crafted request could
+still have created a real Cashfree order — and **money arriving for a WITHDRAWN product is the worst
+outcome there is**: the customer has paid, and we owe them either an entitlement we no longer offer or
+a refund. A pass order is now refused with **410 `pass_withdrawn`**, before anything reaches the
+gateway — no order row, no payment session, no money moved.
+
+**Deliberately NOT silently converted into wallet credit.** Turning someone's ₹99 into something they
+did not ask for is its own dishonesty. They are told plainly what happened, and adding credit — which
+is what the Pass's features now run on anyway — is one tap away.
+
+**The FULFILMENT path is KEPT on purpose.** Deleting it alongside the offer would mean an in-flight
+checkout at deploy time, or a late webhook, pays us and receives nothing. Refusing NEW orders while
+still settling any that already exist is the honest order to withdraw a paid product in; the code
+carries a note saying it can go once no pending `professional_pass` rows remain.
+
+`routesPaymentPreview`'s "refuses an UNDERPAID pass order" case is REWRITTEN in place, not deleted:
+the contract it protected (a pass order must never reach the gateway and take a customer's money) is
+now stronger — no pass order is accepted at ANY price — so the test asserts the wider rule and checks
+all three amounts, including the old ₹1-for-a-hundred-years exploit and the full ₹99.
+
+Tests: 3 new in `tests/passRemoved.test.ts` (12 total) + the rewritten payment case. Gate: tsc clean
+both projects, full run **13,691/13,691**.
+
+**Still dormant, deliberately:** the pass store and the `hasActivePass` branches in the two gates.
+They guard money on every professional turn and every tool action, nothing can set them any more, and
+the comments now say so. They come out once the collection holds no pending pass rows.
+
+**Same PR — a defect found in the voice meter by re-reading it, before it ever ran in production.**
+`endCall()` closed the socket and left the ticker to `ws.on('close')`. But `ws.close()` on a socket
+that is already gone emits **no 'close' event** — so the interval would have kept running on a dead
+call and every later tick would have billed more elapsed seconds. It would have hit precisely the user
+that branch exists for: **the one whose balance just ran out, charged on for a call that had already
+ended.** The ticker is now cleared inside `endCall`, and a tick already in flight bails on `ending`.
+
+One level down, the same class: the seconds between a call ending and 'close' finally arriving were
+billed as talking time. The billing clock now stops when the CALL does (`billingEndedAt`), and a call
+already ended keeps its earlier timestamp so the gap is never billed. Small, but it is the difference
+between a bill a user can explain and one they cannot. 2 more tests (28 in `voiceBilling`).
+
+---
+
+## 2026-08-11 — Item 1/9: restore was instance-affine, and the message blamed the user
+
+First of the nine the admin approved. Verified against live code before building, and the verification
+changed the job twice.
+
+**What was already there** (so it was not rebuilt): `/api/agentv3/restore-files` already brings a
+workspace's LATEST files back from the durable store after a recycle, assets included. The checkpoint
+LIST is already durable too — Firestore, visible across sessions and devices.
+
+**The actual bug, which is worse than "the sandbox recycled".** `restoreSession` read ONLY an
+in-memory `sessions` map and returned `false` when it missed. That map lives on ONE Cloud Run
+instance, and Cloud Run runs several. So a user whose request happened to land on a different instance
+was told *"that checkpoint isn't active in this session yet (the sandbox may have recycled) — continue
+a build to make its history live again"* while their sandbox sat there, alive, one instance over. The
+UI was offering restores it could not perform, and the wording made it read like the user's fault.
+
+The sandbox is addressed by `workspaceId`, not by which instance holds a session object, so any
+instance can serve this. `restoreSessionDetailed` uses the warm session when present (cheapest) and
+otherwise builds a `GitManager` against the same sandbox — exactly what `/restore-files` already does
+for files.
+
+**And it now says WHICH failure it was.** One boolean covered four facts; only some are actionable:
+`no-history` (recycled — genuinely gone, and the message points at "Restore all files", which still
+works), `unknown-sha`, `no-sandbox`, `failed`. One `restoreMessage()` owns the wording so the API and
+the UI cannot drift into telling different stories.
+
+### Two defects the tests caught in my own fix
+
+1. **I introduced a command injection.** The new `git cat-file` probe interpolates the client-supplied
+   sha into a shell command, and it ran BEFORE `GitManager.restore`'s own `/^[0-9a-f]{4,40}$/` check —
+   so validating only there left the hole open in front of it. The test asserting "a malformed sha
+   never reaches the sandbox" caught `rm -rf` getting through. The sha is now validated first, before
+   anything is interpolated.
+2. **`ensureRepo()` cannot answer "does this sandbox have git?"** — it returns `true` unless the runner
+   THROWS, ignoring exit codes. Trusting it reported a git-less sandbox as `unknown-sha`, the opposite
+   message. There is now an explicit `git rev-parse --git-dir` probe.
+
+**Still honestly open:** a recycled sandbox's git history is gone and no instance can bring it back.
+Making checkpoints survive a recycle needs the history stored durably (a `git bundle` blob per
+workspace, or per-checkpoint snapshots) — real recurring storage cost, an admin decision before it is
+code. Recorded, not half-started.
+
+10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files /
+13,627 tests, exit 0**.
 
 ---
 

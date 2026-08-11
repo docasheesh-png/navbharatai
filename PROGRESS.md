@@ -29369,3 +29369,34 @@ FIX:
 
 **Verification:** `tsc -p tsconfig.server.json` clean for touched files; mobileShipKit 41/41 + repair suite
 121/121; emitted YAML inspected (printf carries literal \n, valid shell). PR #2237.
+
+## 2026-08-11 — APK Builder: ONE honest flow — App Information now feeds the real build; useless .txt removed
+
+Admin: "app information wala option, github app builder se connect nahi hai … 'generate config file' ki .txt
+ka kya use? … app information ko niche 'build a real android app' se sync kardo." (And: name/logo easily editable.)
+
+ROOT CAUSE: the APK Builder had TWO parallel flows. A 4-step wizard (App Info → Permissions → Build Method →
+Generate) ended by producing a plain-text `.txt` of Android config files that the REAL build never used and a
+user could do nothing with; below it sat the actual builder (StoreBuildPanel) that compiles a signed
+.apk/.aab on GitHub's runners. So the wizard's settings (permissions, orientation, TWA/Capacitor, targetSdk)
+shaped nothing, the `.txt` was dead output, and the one part that worked looked unrelated to the form. This
+is a second-absolute-rule violation (a surface that looks done but does nothing).
+
+FIX — collapse to a SINGLE flow:
+- `APKBuilder.tsx` rewritten: one "App Information" form (name, package, icon, background colour) that FEEDS
+  the real `StoreBuildPanel` directly below it (with a visible "your app info flows into the build below"
+  bridge). Removed the disconnected wizard, the four dead config-file generators, and the `.txt` download.
+  Kept the real, working publishing guide (self-contained, opened from the build panel).
+- Every field now genuinely reaches the built app: name + package + icon already did; **background colour is
+  newly wired** through `capacitor.config.ts` (`android.backgroundColor` + `SplashScreen.backgroundColor`).
+- `mobileProjectAssembler.ts`: `buildCapacitorConfig(appId, appName, webDir, backgroundColor?)` +
+  `normaliseHexColor()`. 🔒 The colour is VALIDATED to a canonical `#rrggbb` before it is interpolated into
+  the generated TS file — a non-hex value is DROPPED and the config is byte-identical to before (injection
+  guard; the value comes from the client). `AssembleOptions.backgroundColor` threaded from the setup route
+  and `StoreBuildPanel` payload.
+- `AppKnowledgeBase.ts`: `apk_builder` entry + the store-ready-build-kit line updated to the single-flow
+  reality (no more "wizard"/"version"/"permissions"/".txt config file").
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` + `tsc -p tsconfig.server.json` clean ·
+assembler tests 30/30 (4 new: hex inject + 3-digit expand + injection-drop + byte-identical-when-absent),
+mobile suite 132/132, AppKnowledgeBase 6/6.

@@ -30408,3 +30408,47 @@ in Firestore with each chunk as its own object, so a chunk landing on a differen
 still finds its upload. Recording it honestly rather than patching it cosmetically is what let someone
 else close it properly. Another session also made the import end on the PREVIEW with a model-free boot,
 which part 4 sits after rather than duplicating.
+## 2026-08-11 — Item 1/9: restore was instance-affine, and the message blamed the user
+
+First of the nine the admin approved. Verified against live code before building, and the verification
+changed the job twice.
+
+**What was already there** (so it was not rebuilt): `/api/agentv3/restore-files` already brings a
+workspace's LATEST files back from the durable store after a recycle, assets included. The checkpoint
+LIST is already durable too — Firestore, visible across sessions and devices.
+
+**The actual bug, which is worse than "the sandbox recycled".** `restoreSession` read ONLY an
+in-memory `sessions` map and returned `false` when it missed. That map lives on ONE Cloud Run
+instance, and Cloud Run runs several. So a user whose request happened to land on a different instance
+was told *"that checkpoint isn't active in this session yet (the sandbox may have recycled) — continue
+a build to make its history live again"* while their sandbox sat there, alive, one instance over. The
+UI was offering restores it could not perform, and the wording made it read like the user's fault.
+
+The sandbox is addressed by `workspaceId`, not by which instance holds a session object, so any
+instance can serve this. `restoreSessionDetailed` uses the warm session when present (cheapest) and
+otherwise builds a `GitManager` against the same sandbox — exactly what `/restore-files` already does
+for files.
+
+**And it now says WHICH failure it was.** One boolean covered four facts; only some are actionable:
+`no-history` (recycled — genuinely gone, and the message points at "Restore all files", which still
+works), `unknown-sha`, `no-sandbox`, `failed`. One `restoreMessage()` owns the wording so the API and
+the UI cannot drift into telling different stories.
+
+### Two defects the tests caught in my own fix
+
+1. **I introduced a command injection.** The new `git cat-file` probe interpolates the client-supplied
+   sha into a shell command, and it ran BEFORE `GitManager.restore`'s own `/^[0-9a-f]{4,40}$/` check —
+   so validating only there left the hole open in front of it. The test asserting "a malformed sha
+   never reaches the sandbox" caught `rm -rf` getting through. The sha is now validated first, before
+   anything is interpolated.
+2. **`ensureRepo()` cannot answer "does this sandbox have git?"** — it returns `true` unless the runner
+   THROWS, ignoring exit codes. Trusting it reported a git-less sandbox as `unknown-sha`, the opposite
+   message. There is now an explicit `git rev-parse --git-dir` probe.
+
+**Still honestly open:** a recycled sandbox's git history is gone and no instance can bring it back.
+Making checkpoints survive a recycle needs the history stored durably (a `git bundle` blob per
+workspace, or per-checkpoint snapshots) — real recurring storage cost, an admin decision before it is
+code. Recorded, not half-started.
+
+10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files /
+13,627 tests, exit 0**.

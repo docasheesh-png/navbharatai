@@ -73,6 +73,7 @@ import {
   type OwnRepoTarget,
   registerSession,
   restoreSession,
+  restoreSessionDetailed,
   gitStatusForSession,
   execInSession,
   getSession,
@@ -3987,6 +3988,22 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  // ONE place that turns a restore outcome into the sentence the user reads, so the API and the UI
+  // can never drift into telling different stories about the same failure.
+  const restoreMessage = (reason: string): string => {
+    switch (reason) {
+      case 'restored': return 'Restored your workspace to that checkpoint.';
+      case 'forbidden': return 'That workspace does not belong to you.';
+      case 'no-sandbox': return 'This app has no live workspace right now. Open it (or send a message) and try again.';
+      case 'no-history':
+        return 'That checkpoint is no longer restorable — this workspace was rebuilt, so its earlier history is gone. Your latest files are safe: use "Restore all files".';
+      case 'unknown-sha':
+        return 'That checkpoint is not in this workspace\'s history any more.';
+      default:
+        return 'Could not restore that checkpoint. Your current files were not changed.';
+    }
+  };
+
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
   app.post('/api/agentv3/restore', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
@@ -4005,8 +4022,11 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
-    res.json({ ok });
+    // The checkpoint LIST is durable, so the UI can offer a restore the sandbox can no longer perform.
+    // Report WHICH of those situations it is, instead of one boolean for four different facts — the
+    // user can act on "that version's history is gone" and cannot act on "not in this session".
+    const result = await restoreSessionDetailed(workspaceId, sha, userId ?? undefined, () => buildActuator());
+    res.json({ ok: result.ok, reason: result.reason, message: restoreMessage(result.reason) });
   });
 
   // Phase G1 — git as the third organ: return a workspace's DURABLE checkpoint history (newest first).

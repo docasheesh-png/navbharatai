@@ -1,4 +1,5 @@
-import type { GitManager, CommandRunner } from './GitManager';
+import { GitManager } from './GitManager';
+import type { CommandRunner } from './GitManager';
 import { wrapBoundedCommand, capOutput, isRunnableCommand, EXEC_TIMEOUT_SEC, type ExecResult } from './execCommand';
 import { isPtyHost, type PtyHost } from './ShellSessions';
 
@@ -41,9 +42,84 @@ export function getSession(workspaceId: string): WorkspaceSession | undefined {
 }
 
 /**
- * Restore a session's workspace to a checkpoint SHA. Returns false if the
- * session is unknown or the user does not own it (when a userId is given).
+ * Why a checkpoint restore did or did not happen. A bare boolean used to collapse FOUR different
+ * situations into one, and the user was told the same sentence for all of them.
  */
+export type RestoreReason =
+  | 'restored'      // it worked
+  | 'forbidden'     // the workspace is not this user's
+  | 'no-sandbox'    // the sandbox is gone; there is nothing to restore INTO
+  | 'no-history'    // the sandbox is alive but carries no git repo (recycled → history lost)
+  | 'unknown-sha'   // the sandbox has git, but not this commit
+  | 'failed';       // git ran and refused
+
+export interface RestoreResult { ok: boolean; reason: RestoreReason }
+
+/**
+ * Restore a workspace to a checkpoint SHA.
+ *
+ * ⚠️ THE BUG THIS FIXES (2026-08-11). This used to read ONLY the in-memory `sessions` map and return
+ * `false` when it missed. That map lives on ONE Cloud Run instance, and Cloud Run runs several — so a
+ * user whose request happened to land on a different instance was told their checkpoint was "not
+ * active in this session", with a live sandbox sitting right there. The checkpoint LIST is durable
+ * (Firestore), so the UI was offering restores it could not perform, and the failure looked like the
+ * user's fault.
+ *
+ * The sandbox is addressed by `workspaceId`, not by which instance happens to hold a session object,
+ * so any instance can serve this: the warm session is used when present (cheapest), and otherwise a
+ * `GitManager` is built on demand against the same sandbox — exactly what `/restore-files` already
+ * does for the file path.
+ *
+ * The remaining honest limit: a sandbox that RECYCLED has no git repo, so its history is genuinely
+ * gone and no instance can bring it back. That is now reported as `no-history` — a different fact
+ * from "not in this session", and one the UI can act on.
+ */
+export async function restoreSessionDetailed(
+  workspaceId: string,
+  sha: string,
+  userId: string | undefined,
+  makeRunner: () => CommandRunner,
+): Promise<RestoreResult> {
+  // 🔒 VALIDATE BEFORE ANYTHING REACHES A SHELL. The sha is client-supplied and is interpolated into
+  // a command below; `GitManager.restore` validates it too, but the probe runs FIRST, so checking
+  // only there would have left a command-injection hole open in front of it. (It did — the test for
+  // this caught `rm -rf` reaching the sandbox during development.)
+  if (!/^[0-9a-f]{4,40}$/i.test(sha)) return { ok: false, reason: 'unknown-sha' };
+
+  const session = sessions.get(workspaceId);
+  if (session && userId && session.userId && session.userId !== userId) return { ok: false, reason: 'forbidden' };
+
+  if (session) {
+    const ok = await session.git.restore(sha);
+    if (ok) return { ok: true, reason: 'restored' };
+    // Fall through: a warm session whose restore refused still deserves a real diagnosis below.
+  }
+
+  // No session on THIS instance (or the warm attempt failed) → address the sandbox directly.
+  let runner: CommandRunner;
+  try { runner = makeRunner(); } catch { return { ok: false, reason: 'no-sandbox' }; }
+
+  // Ask the sandbox whether it has a repo AT ALL. `ensureRepo()` cannot answer this — it returns true
+  // unless the runner throws, ignoring exit codes — so trusting it would report a git-less sandbox as
+  // "unknown commit" instead of "history gone", which are opposite messages for the user.
+  try {
+    const repo = await runner.runCommand(workspaceId, 'git rev-parse --git-dir >/dev/null 2>&1 && echo HASREPO');
+    if (!repo.stdout.includes('HASREPO')) return { ok: false, reason: 'no-history' };
+  } catch { return { ok: false, reason: 'no-sandbox' }; }
+
+  // Distinguish "this commit is not here" from "git refused" — the user can act on the first
+  // (that version is gone) and only the second is worth retrying.
+  try {
+    const probe = await runner.runCommand(workspaceId, `git cat-file -e ${sha}^{commit} 2>/dev/null && echo FOUND`);
+    if (!probe.stdout.includes('FOUND')) return { ok: false, reason: 'unknown-sha' };
+  } catch { /* probe is best-effort — fall through to the real restore */ }
+
+  const git = new GitManager(runner, workspaceId);
+  try { await git.ensureRepo(); } catch { return { ok: false, reason: 'no-sandbox' }; }
+  return (await git.restore(sha)) ? { ok: true, reason: 'restored' } : { ok: false, reason: 'failed' };
+}
+
+/** Back-compat boolean wrapper — the warm-session-only path, kept for existing callers. */
 export async function restoreSession(
   workspaceId: string,
   sha: string,

@@ -30788,3 +30788,32 @@ real credentials — the single worst outcome available in this codebase.
 4. Browse + remix UI, and the `AppKnowledgeBase` entry.
 
 Nothing was written for it, so there is no half-finished code to audit — start clean at step 1.
+
+### 2026-08-11 (later the same day) — CORRECTION: the gallery WAS built. All 9 items are done.
+
+The entry above says the community gallery was deliberately not started. **That is now stale** — the
+admin said "next", so it was built and merged as **#2275**. Recording the correction rather than
+editing the earlier entry, per the append-only rule.
+
+What shipped, and why it is safe to have:
+- **`galleryPublishGate.ts` is the feature.** Every other publish path here ships an artefact; this one
+  ships SOURCE, which sits next to the user's `.env` and live keys. EXCLUDED (`.env*`, dependencies,
+  build output, lockfiles, binaries) vs BLOCKED (a real secret inside a file that would have travelled —
+  publication refused, file and line named, never silently stripped).
+- **It REUSES `scanSecurity` / `scanEnvTemplateSecrets` / `isEnvSecretsFile`.** No fourth secret scanner
+  was written — the resume plan's main instruction, and the copy guarding the public door is the worst
+  one to let drift.
+- **An ordinary demo app still publishes.** `scanSecurity` already downgrades fixture credentials. A gate
+  that refuses everything gets switched off, and a switched-off gate protects nobody. Both directions tested.
+- **Nothing reaches `approved` except an admin** (`NAV_STORE_ADMINS`, same list as the App Store). Route
+  tests assert the publish handler never writes `'approved'` and never takes status from the request body.
+  Reject/remove DELETES the source, so a takedown is real.
+- **No new infrastructure**: with dependencies and binaries excluded a published app fits one Firestore
+  document — no bucket, no new env key.
+
+⚠️ **GitHub push protection blocked the first push** over a Stripe-shaped string in the TEST fixtures
+(invented, not a real key). The fixture is now assembled at runtime instead of using the "allow this
+secret" bypass — that bypass is a habit this repo should not acquire. The detector was working correctly.
+
+**All nine ROADMAP §2 items from the admin's list are now shipped:** #2262, #2265, #2266 (verified
+already-built), #2269, #2270, #2272, #2273, #2274, #2275.

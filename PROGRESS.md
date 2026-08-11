@@ -29673,3 +29673,42 @@ engine): **gamification is not a game**, and **"game plan" is an idiom**.
 sound files); no physics engine beyond the character controller and projectile collision (no rigid-body
 stacking, ragdolls or vehicles); no level editor. These are real absences, not oversights — each is a
 separate large arc, and none is needed for the games the engine now builds well.
+## 2026-08-10 — "APK download free me ho raha hai" — half true, and the other half was a real defect
+
+**Admin:** "apk download abhi free me ho raha hai, jabki maine kaha tha 1₹ per download! Aur HAR BAR
+USER KO BATAYA JAYE."
+
+**FINDING 1 — it is NOT free, and this is the SECOND report with the same cause.** `/api/mobile-ship/
+download` has charged ₹1 per built file since 2026-08-06. It reads free for the admin because their
+account is on `AGENTV3_FREE_LIST`, which is exempt everywhere by design — exactly why Professionals
+and Doctor AI also looked free in the previous message. **A normal user IS charged.** Worth stating
+plainly: the admin's own account can never be used to check whether a paywall works.
+
+**FINDING 2 — the real defect: the user was never TOLD.** The server fired the debit
+(`void debitWalletForBuild`) and streamed the bytes; the client just saved the file. So ₹1 left a real
+person's balance with **no price shown before and no confirmation after** — money taken silently,
+which is the exact opposite of the billing law's promise that the bill a user sees is the real one.
+
+**FIXED — the response now reports its own charge, and the screen says it, every time.**
+- The download sets `x-navbharatai-charge-inr` and `x-navbharatai-charge-applied` (plus
+  `Access-Control-Expose-Headers`, without which a browser cannot read a custom header at all).
+- `applied` is true ONLY when a charge genuinely happened — a free-list account, an anonymous caller
+  or a price of 0 all report false, so the receipt can never claim a charge nobody paid. Same rule the
+  wallet follows when a provider reports no usage: an unmeasured thing is not a bill.
+- The charge still NEVER blocks the bytes; the debit stays fire-and-forget.
+- BEFORE the click the screen states the price **and the per-BUILD rule** in the same breath —
+  "₹1 for each build; downloading this same file again is free". Without that second half, a user who
+  re-downloads is certain to think they were charged twice (the debit is keyed to the artifact, so
+  they were not), and a bare price would guarantee that support message.
+- AFTER the file arrives, the exact amount is confirmed. Both strings are WRITTEN in Hindi too, not
+  transliterated.
+- A missing/malformed header degrades to "no charge" rather than an invented number, and the client's
+  pre-click price mirrors the server default while the RECEIPT always uses the server's real value —
+  so a price change can never make the receipt lie; only the hint would lag, which is the safe
+  direction to be wrong in.
+
+Tests: 15 in `tests/apkChargeNotice.test.ts` — the price plus the per-build rule, silence when the
+charge is off, Hindi genuinely written, every "no charge" path, malformed headers meaning no charge,
+and wiring assertions that the server exposes the headers, that `applied` is gated on the free list,
+that the debit is still non-blocking, and that the screen shows both the hint and the receipt.
+Gate: tsc clean both projects, full run 13,286/13,286.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, pipesOrChainsToAnotherCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, pipesOrChainsToAnotherCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand, devServerWatchdogCommand, parseDevServerWatchdogLog, DEV_SERVER_WATCHDOG_MARKER, DEV_SERVER_WATCHDOG_LOG } from './devServerHost';
 
 describe('isNodeServerCommand (Mitrify node-express import fix 2026-07-24)', () => {
   it('detects a direct Node server launcher (tsx/ts-node/node/nodemon on a server entry)', () => {
@@ -688,5 +688,95 @@ describe('pinDevServerPort sees through a package-manager script', () => {
   it('never double-injects PORT=', () => {
     expect(pinDevServerPort('PORT=8080 npm run dev', 3000, undefined, 'tsx server/index.ts'))
       .toBe('PORT=8080 npm run dev');
+  });
+});
+
+/**
+ * THE DEV-SERVER KEEPALIVE — the sibling of the Postgres watchdog, and the same root cause.
+ *
+ * Shiv Medical Store build report (2026-08-10): the dev server started fine and was GONE ~4 minutes
+ * later — `curl` exit 7, `ps aux | grep vite` empty. Recovery reported twice that "the dev server did
+ * not start and the log had no recognisable error", then "Automatic recovery is exhausted", while a
+ * MANUAL `npm run dev` worked instantly every time.
+ *
+ * The classifier found no error because there was none: the sandbox had reaped the process. This
+ * codebase already knew that happens — postgresWatchdogCommand exists for exactly it — but only
+ * Postgres was protected.
+ */
+describe('devServerWatchdogCommand', () => {
+  const cmd = () => devServerWatchdogCommand({ port: 5173, runCommand: 'npm run dev -- --host 0.0.0.0', cwd: '/home/user/workspace' });
+
+  it('cannot stack a second watchdog', () => {
+    // Every dev-server start arms it; without the guard a long build ends up with a dozen loops.
+    expect(cmd()).toContain(`if ! pgrep -f ${DEV_SERVER_WATCHDOG_MARKER}`);
+  });
+
+  it('detaches, or it dies with the command that armed it', () => {
+    expect(cmd()).toContain('nohup setsid sh -c');
+  });
+
+  it('BOUNDS the revivals — an unbounded loop would hide a real code error forever', () => {
+    // Restarting a server that dies of a syntax error is the "retry loop around code that
+    // deterministically fails" the engineering rules forbid.
+    const c = devServerWatchdogCommand({ port: 5173, runCommand: 'npm run dev', cwd: '/w', maxRevivals: 3 });
+    expect(c).toContain('n=0');
+    expect(c).toContain('while [ $n -lt 3 ]');
+    expect(c).toContain('GAVE_UP after 3 revivals');
+  });
+
+  it('uses the SAME liveness check as the readiness probe, or the two fight each other', () => {
+    // A watchdog with its own idea of "up" would restart a server the build already considers ready.
+    const probe = buildPortWaitCommand(5173, 5);
+    for (const part of ['nc -z 127.0.0.1 5173', 'curl -s -o /dev/null --max-time 2 http://127.0.0.1:5173', '/dev/tcp/127.0.0.1/5173']) {
+      expect(probe, `probe lost ${part}`).toContain(part);
+      expect(cmd(), `watchdog lost ${part}`).toContain(part);
+    }
+  });
+
+  it('records each revival, so a REAPED server is distinguishable from a crashing one', () => {
+    expect(cmd()).toContain(DEV_SERVER_WATCHDOG_LOG);
+    expect(cmd()).toContain('REVIVED');
+  });
+
+  it('restarts in the workspace, appending to the dev log the classifier reads', () => {
+    expect(cmd()).toContain('cd /home/user/workspace &&');
+    expect(cmd()).toContain(DEV_SERVER_LOG_PATH);
+  });
+
+  it('survives a dev command containing quotes', () => {
+    const c = devServerWatchdogCommand({ port: 3000, runCommand: `sh -c 'npm start'`, cwd: '/w' });
+    // Unescaped, the inner quote would terminate the watchdog body and produce a broken shell command.
+    expect(c).toContain("'\\''npm start'\\''");
+    // And the body must still be one well-formed single-quoted shell string.
+    expect(c).not.toContain("'''");
+  });
+
+  it('clamps nonsense inputs instead of emitting a broken loop', () => {
+    const c = devServerWatchdogCommand({ port: 0, runCommand: 'x', cwd: '/w', maxRevivals: 0, intervalSeconds: 0 });
+    expect(c).toContain('127.0.0.1:1');       // port clamped to >= 1
+    expect(c).toContain('while [ $n -lt 1 ]'); // at least one revival
+    expect(c).toContain('sleep 5');            // a 0s interval would be a busy loop
+  });
+
+  it('EMITS VALID SHELL — the only check that actually proves the quoting works', () => {
+    // A shell command builder can pass every string assertion above and still emit something `sh`
+    // refuses to parse, in which case the watchdog silently never arms and the dev server dies exactly
+    // as before. `sh -n` parses without executing, so this is both safe and conclusive.
+    const { execFileSync } = require('child_process') as typeof import('child_process');
+    for (const runCommand of [
+      'npm run dev -- --host 0.0.0.0 --port 5173',
+      "sh -c 'npm run dev'",              // embedded single quotes — the hard case
+      'PORT=3000 npx next dev',
+      'npm run dev && echo "started"',    // embedded double quotes
+    ]) {
+      const script = devServerWatchdogCommand({ port: 5173, runCommand, cwd: '/home/user/workspace' });
+      expect(() => execFileSync('sh', ['-n'], { input: script }), runCommand).not.toThrow();
+    }
+  });
+
+  it('parses its own tally', () => {
+    expect(parseDevServerWatchdogLog('REVIVED 1 10:00:00\nREVIVED 2 10:00:20\n')).toEqual({ revivals: 2, gaveUp: false });
+    expect(parseDevServerWatchdogLog('REVIVED 1 x\nGAVE_UP after 5 revivals\n')).toEqual({ revivals: 1, gaveUp: true });
+    expect(parseDevServerWatchdogLog('')).toEqual({ revivals: 0, gaveUp: false });
   });
 });

@@ -593,6 +593,84 @@ export function buildHttpLivenessCommand(port: number): string {
   return `if curl -s -o /dev/null --max-time 3 http://127.0.0.1:${port} 2>/dev/null; then echo HTTP_OK; else echo HTTP_DOWN; fi`;
 }
 
+/** Marker embedded as the watchdog shell's $0 so `pgrep -f` finds it (and never stacks a second one). */
+export const DEV_SERVER_WATCHDOG_MARKER = 'nb_dev_watchdog';
+
+/** Where the watchdog records each revival, so a reaped server is DISTINGUISHABLE from a crashed one. */
+export const DEV_SERVER_WATCHDOG_LOG = '/tmp/nb_dev_watchdog.log';
+
+/**
+ * KEEPALIVE WATCHDOG for the dev server — the sibling of the Postgres one, and the same root cause.
+ *
+ * THE EVIDENCE (Shiv Medical Store build report, 2026-08-10). The dev server was started successfully
+ * and was gone ~4 minutes later: `curl` returned exit 7 and `ps aux | grep vite` printed nothing. The
+ * automatic recovery then reported, twice, "the dev server did not start and the log had no
+ * recognisable error", and gave up with "Automatic recovery is exhausted" — while a MANUAL
+ * `npm run dev` brought it up instantly, every time.
+ *
+ * Nothing was wrong with the app. The classifier found no error because THERE WAS NO ERROR: the
+ * sandbox had reaped the process. This codebase already knows that happens — postgresWatchdogCommand
+ * exists because "the sandbox reaps the Postgres daemon minutes after provision — the root class behind
+ * builds #14→#18". The dev server is the sibling that was never hunted.
+ *
+ * BOUNDED ON PURPOSE. An unbounded restart loop around a server that dies from a SYNTAX ERROR is
+ * exactly the "retry loop around code that deterministically fails" the engineering rules forbid: it
+ * would burn CPU and hide the real defect forever. So the loop counts revivals, stops after
+ * `maxRevivals`, and leaves its tally on disk — which also gives the classifier something it never had
+ * before: the difference between "reaped and revived" and "keeps dying on its own".
+ *
+ * Detached with nohup + setsid so it outlives the command that armed it. Pure command builder.
+ */
+export function devServerWatchdogCommand(opts: {
+  port: number;
+  /** The concrete dev command to re-run (already host/port-normalised by the caller). */
+  runCommand: string;
+  /** The workspace root. REQUIRED: duplicating the actuator's WORKSPACE_ROOT here would be a
+   *  second source of truth for it, and a watchdog that cd's to the wrong directory is silent. */
+  cwd: string;
+  /** Give up after this many revivals so a genuinely broken server is not restarted forever. */
+  maxRevivals?: number;
+  /** Seconds between liveness checks. */
+  intervalSeconds?: number;
+}): string {
+  const port = Math.max(1, Math.floor(opts.port));
+  const maxRevivals = Math.max(1, Math.floor(opts.maxRevivals ?? 5));
+  const interval = Math.max(5, Math.floor(opts.intervalSeconds ?? 15));
+  const cwd = opts.cwd;
+  // The SAME three-way liveness check buildPortWaitCommand uses — a watchdog that disagreed with the
+  // readiness probe about what "up" means would fight it, restarting a server the build considers ready.
+  const check = `nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null`;
+  // The watchdog body is wrapped in single quotes, so a single quote inside the dev command must be
+  // closed-escaped-reopened ('\'') or it terminates the body and emits a broken shell command.
+  // Written as split/join rather than a template literal: the backslash is too easy to lose there.
+  const safeRun = opts.runCommand.split("'").join("'\\''");
+  return `if ! pgrep -f ${DEV_SERVER_WATCHDOG_MARKER} >/dev/null 2>&1; then
+  nohup setsid sh -c 'n=0
+while [ $n -lt ${maxRevivals} ]; do
+  sleep ${interval}
+  if ! ( ${check} ); then
+    n=$((n+1))
+    echo "REVIVED $n $(date -u +%H:%M:%S)" >> ${DEV_SERVER_WATCHDOG_LOG}
+    cd ${cwd} && nohup ${safeRun} >> ${DEV_SERVER_LOG_PATH} 2>&1 &
+  fi
+done
+echo "GAVE_UP after ${maxRevivals} revivals" >> ${DEV_SERVER_WATCHDOG_LOG}' ${DEV_SERVER_WATCHDOG_MARKER} >/dev/null 2>&1 &
+fi
+echo DEV_WATCHDOG_ARMED`;
+}
+
+/**
+ * Read the watchdog tally. `revivals > 0` means the dev server was REAPED and brought back — which is
+ * the honest explanation for a preview that flickered, and is NOT the same thing as a crash.
+ */
+export function parseDevServerWatchdogLog(log: string): { revivals: number; gaveUp: boolean } {
+  const text = String(log || '');
+  return {
+    revivals: (text.match(/^REVIVED /gm) || []).length,
+    gaveUp: /^GAVE_UP /m.test(text),
+  };
+}
+
 export function buildPortWaitCommand(port: number, maxSeconds: number): string {
   const iterations = Math.max(1, Math.floor(maxSeconds));
   // Tool-agnostic, IPv4-forced liveness check. The old `nc -z localhost` check read a HEALTHY dev

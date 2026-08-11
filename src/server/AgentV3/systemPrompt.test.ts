@@ -513,8 +513,12 @@ describe('the page contract is honest about which scaffolds actually ship the ki
   it('names WHICH scaffolds ship the kit, so the model never writes classes with no CSS behind them', () => {
     expect(prompt).toContain('WHICH SCAFFOLDS SHIP THE KIT');
     // Must stay in step with designKit.test.ts — a stale list here is a lie to the builder.
-    for (const has of ['Vite+React', 'Vue', 'Svelte', 'Preact', 'Solid', 'Alpine', 'Vanilla']) {
+    for (const has of ['Vite+React', 'Vue', 'Svelte', 'Preact', 'Solid', 'Alpine', 'Vanilla', 'Next', 'Nuxt', 'SvelteKit', 'Angular']) {
       expect(prompt, `${has} should be listed as having the kit`).toContain(has);
+    }
+    // And the ones that genuinely do NOT have it must still be named, or the model writes dead classes.
+    for (const lacks of ['Remix', 'Astro', 'Lit']) {
+      expect(prompt, `${lacks} should be listed as lacking the kit`).toContain(lacks);
     }
   });
 

@@ -29856,10 +29856,135 @@ dropping `here` is what killed the last two.
 holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new hand-rolled path.
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
+
+---
+
+## 2026-08-11 — The PUBLIC status page was naming our AI vendors (White-Label Law)
+
+Found by pulling on the audit's dullest leftover. The "22 unused locals" list included `esc` in
+`lib/HealthReport.ts` — an HTML-escape helper sitting unused NEXT TO an HTML renderer. That is not a
+tidiness smell, it is a question, and the answer was two real defects.
+
+### 1. `/status` and `/api/health` are PUBLIC, and they listed the providers
+
+The health check rendered:
+
+    AI providers — 4 enabled (gemini, anthropic, grok, vertex)
+
+Neither route has a token or a gate (`app.get('/status', …)`; the client fetches `/api/health`
+unauthenticated on load). So **anyone** could open the status page and read exactly which AI vendors
+NavBharatAI runs on. The standing rule is explicit: a user never encounters a vendor name, and
+provider identity is ADMIN-ONLY.
+
+Now it reports `AI engines — 3 of 4 available`. The COUNT is the honest, useful part — it is what tells
+a reader whether the engine can serve requests at all; the names were never something a visitor could
+act on. The admin dashboard still gets the full `providerEnabled` map from `/api/admin/*`, so this
+hides it from visitors, not from ops.
+
+### 2. The page built its rows with `innerHTML` string concatenation
+
+`h.version`, `h.node`, `c.name` and `c.detail` were concatenated into `innerHTML` in the client script,
+from data fetched at RUNTIME. **Not exploitable as shipped** — every value is server-authored today,
+and that is stated plainly rather than dramatised. But a check `detail` is precisely where a failing
+dependency's own error text gets echoed one day, and that is the version that bites.
+
+Rewritten to build DOM nodes with `textContent`. The one value that must become a class name
+(`c.status`) is stripped to `[a-z]`, because `textContent` cannot protect an attribute.
+
+The unused `esc` is deleted rather than wired: it is a SERVER-side helper, and the interpolation
+happens in the CLIENT after the page is served — it could never have escaped this data. Someone wrote
+the right idea in the wrong layer, and leaving it there would keep implying the page was protected.
+
+9 tests: the rendered page carries no vendor token, the code uses `textContent`/`createElement` and no
+`innerHTML`, the class-name value is sanitised, and — so the hardening cannot have quietly emptied the
+page — it still renders its real content.
+
+### On the other 21 "unused locals"
+
+Left alone deliberately, and now with the reason recorded. Most are INTERFACE-REQUIRED parameters
+(`schema` on three `Provider.generate` implementations, `req` on an Express handler, `traceContext`
+sitting BEFORE `systemPrompt` in a positional signature). Deleting them breaks a contract; renaming
+them to `_x` across ~20 sites is churn with no user value and a small risk each. The genuinely dead
+ones that remain (`JOBS_COLLECTION`, `MAX_HISTORY_STEPS`, `modelFlash`, four lazy client singletons in
+`aiClients.ts`) are candidates for a later sweep — with each one read first, which is exactly why they
+were not swept during the dead-import pass.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1153 files / 13,584 tests,
 exit 0**.
 
 ---
 
+## 2026-08-11 — "Andar ke page bas HTML feel dete hai" (PRs #2252, #2254, #2256, #2258)
+
+**Admin report:** *"1st page to theek banta hai, beautiful — par andar ke page bas HTML feel dete hai. koi
+design style nahi, ek dam simple. kya ham designer ko har page par laga sakte hai?"*
+
+**ROOT CAUSE — the whole verification stack was blind to it.** The scaffold already shipped a design kit
+and the architect prompt already told the model to use it, but that was GUIDANCE WITH NO VERIFICATION
+BEHIND IT, and every gate we own asks a different question:
+
+| Gate | Asks | Why a bare page passes |
+|---|---|---|
+| `tsc` | do types check? | class names are strings |
+| ESLint | lint errors? | no rule for "looks unfinished" |
+| `CssConsistency` | class used but UNDEFINED? | a page using *nothing* is spotlessly clean |
+| `ProjectIntegrityChecks` | stylesheet orphaned? | it IS imported — by the good first page |
+| `ReviewerAgent` | does it work? | it does |
+
+So nothing ever objected, and the model's own behaviour supplied the defect: full effort on screen one,
+bare markup by screen five. **Nobody was asking "is this page DESIGNED?" — only "is the styling wired?"**
+
+**BOTH HALVES OF THE 50/50 LAW:**
+- **PREVENT (always on, no flag):** the architect prompt now NAMES the failure rather than adding more
+  praise for good design, states it as *"THE LAST PAGE YOU WRITE MUST LOOK AS DESIGNED AS THE FIRST"*,
+  explains why it is invisible while writing (bare markup compiles and lints), and gives a five-point
+  per-page contract: page shell, real heading, grouped surfaces, styled controls, real empty/loading
+  states.
+- **DETECT + REPAIR:** `DesignCoverage.ts` judges EVERY page file on its own. Deterministic ⇒ **zero LLM
+  cost on a clean build**; warnings are honest whether the flag is on or off; `AGENTV3_DESIGN_GATE=on`
+  adds ONE bounded repair naming the exact offending pages. It can never fail or block a build.
+
+**PRECISION OVER RECALL, deliberately.** A check that nags a good app gets ignored, and an ignored check
+is worse than none — so it skips Tailwind, CSS modules, styled-components/emotion, MUI/Chakra/antd/
+Mantine, inline styles, leaf components and anything under 6 elements. **The false-positive tests
+outnumber the true-positive ones on purpose.**
+
+**STATIC HTML WAS THE SHARPEST CASE (#2254)** and the first analyzer missed it entirely (only read
+`.tsx/.jsx`). A multi-page static site is generated one file at a time and the classic bug is that
+`index.html` links the stylesheet while `about.html` does not — each file is valid HTML alone, so nothing
+notices, and the user clicks from a designed page onto Times New Roman on white. Judged on "has NO CSS
+attached at all", never on class coverage (a static page styled through `body`/`h1` selectors is
+legitimate).
+
+**THE BIGGER FINDING (#2256, #2258).** Auditing my own change: the kit existed in **1 of 24 scaffolds**.
+Vue/Svelte/Preact/Solid/Alpine/Vanilla builds were told to reach for `.card` and `.nb-empty` with nothing
+behind them — they had no design language to be consistent WITH, which is where quality varies most.
+Extracted to ONE `designKit.ts` FIRST (copying into 12 providers is the drifted-copies failure rule 4
+exists to prevent), then rolled out to **12**: Vite+React, Vue, Svelte, Preact, Solid, Alpine, Vanilla,
+Static, Next, Nuxt, SvelteKit, Angular — each through the mechanism that framework really uses.
+
+**THE HALF EVERYONE FORGETS: emitting a stylesheet is not shipping it — something must LOAD it.** An
+unimported `index.css` is dead weight and renders as raw HTML. Tests assert BOTH for every scaffold, and
+this caught a real one: Nuxt's file was emitted while the config edit silently failed to apply.
+
+**Left out honestly:** Remix (needs `?url` + a `links()` export; cannot boot a Remix scaffold here to
+verify, and a wrong guess ships an app that fails to build or flashes unstyled — a test asserts it stays
+out until verified), Astro (needs a layout file it does not emit), Lit (shadow DOM — a global sheet never
+reaches the components).
+
+**Bugs of my own, caught by my own tests:** `NO_STYLESHEET` had no `DEFECT_TEXT` entry, so the repair
+prompt would have contained the literal string `undefined` (a test now walks EVERY member of the defect
+union); an identifier contained a Cyrillic `С` that compiled fine because declaration and use matched;
+and the first page contract named kit classes unconditionally, which on the then-23 kit-less scaffolds
+would have instructed the model to write class names with no CSS behind them.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,614 passed**
+(1,153 files).
+
+**OPEN / NOT VALIDATED (honest):** none of this has been seen on a REAL build yet — it is test-verified
+only. The next step is a real multi-page app: confirm the detector fires on the right pages and tune the
+thresholds from that evidence before `AGENTV3_DESIGN_GATE` is turned on. Remaining scaffolds: Remix,
+Astro, Lit.
 ## 2026-08-11 — ROADMAP §2 verified against live code. Two of ten were already built.
 
 Before starting the next item I grepped every line of "SMALLER, VERIFIED-MISSING" against the actual

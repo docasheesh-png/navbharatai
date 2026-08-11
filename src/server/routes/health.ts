@@ -66,12 +66,22 @@ function collectHealthChecks(): HealthCheck[] {
     detail: backupOk ? 'Configured' : 'Not configured (set FIRESTORE_BACKUP_BUCKET)',
   });
 
+  // 🔒 WHITE-LABEL LAW — `/status` and `/api/health` are PUBLIC (no token, no gate). This line used to
+  // render "4 enabled (gemini, anthropic, grok, vertex)", so anyone who opened the status page learned
+  // exactly which AI vendors NavBharatAI runs on. The standing rule is that a user never encounters a
+  // vendor name and that provider identity is ADMIN-ONLY — the admin dashboard still gets the full
+  // `providerEnabled` map from `/api/admin/*`. The COUNT is the honest, useful part of this check
+  // (it is what tells a reader whether the engine can serve requests at all); the names were never
+  // information a visitor could act on.
   const providers = serverStats.providerEnabled || ({} as Record<string, boolean>);
-  const enabled = Object.entries(providers).filter(([, on]) => on).map(([name]) => name);
+  const entries = Object.entries(providers);
+  const enabled = entries.filter(([, on]) => on);
   checks.push({
-    name: 'AI providers',
+    name: 'AI engines',
     status: enabled.length > 0 ? 'ok' : 'down',
-    detail: enabled.length > 0 ? `${enabled.length} enabled (${enabled.join(', ')})` : 'All providers disabled',
+    detail: enabled.length > 0
+      ? `${enabled.length} of ${entries.length} available`
+      : 'No engines available',
   });
 
   if (serverStats.maintenanceMode) {

@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -126,7 +127,7 @@ export class NextjsProvider implements ITemplateProvider {
       'package.json': PKG,
       'tsconfig.json': TSCONFIG,
       'next.config.js': NEXT_CONFIG,
-      'app/globals.css': GLOBALS,
+      'app/globals.css': DESIGN_KIT_CSS + '\n\n' + GLOBALS,
       'app/layout.tsx': LAYOUT,
       'app/page.tsx': PAGE,
       // App Router special files — a production-shaped scaffold, not just page+layout:

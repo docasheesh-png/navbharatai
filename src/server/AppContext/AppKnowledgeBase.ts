@@ -1978,10 +1978,10 @@ NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
     id: 'project-templates',
     name: 'Project Blueprints & Templates Gallery',
     path: 'Sidebar → Templates  OR  Code Studio → Templates',
-    description: 'A gallery of ready-to-build Project Blueprints (including Bharat-first templates: UPI Payment App, Hindi Language App, GST Invoice Generator, Startup Registration Tracker) plus your own saved templates. Selecting a blueprint loads a detailed starter prompt so you can build it instantly.',
+    description: 'A gallery of ready-to-build Project Blueprints (including Bharat-first templates: UPI Payment App, Hindi Language App, GST Invoice Generator, Startup Registration Tracker, and two GAME blueprints — a 3D arena survival game and a 2D endless-runner arcade game, both fully playable with score, sound, pause and phone controls) plus your own saved templates. Selecting a blueprint loads a detailed starter prompt so you can build it instantly.',
     howToUse: 'Open Templates from the sidebar, browse the blueprint cards, and click one to start building from it. Save your own current project as a reusable template from the same panel.',
     relatedFeatures: ['pro_chat', 'quick-start-gallery', 'engineer_ai'],
-    keywords: ['templates', 'blueprints', 'project templates', 'starter', 'examples', 'upi', 'gst', 'hindi app', 'startup', 'my templates', 'template gallery', 'readymade', 'banaya banaya'],
+    keywords: ['templates', 'blueprints', 'project templates', 'starter', 'examples', 'upi', 'gst', 'hindi app', 'startup', 'my templates', 'template gallery', 'readymade', 'banaya banaya', 'game', 'game banao', '3d game', '2d game', 'arcade', 'khel'],
   },
 
   // ─── PROFESSIONALS HUB ───────────────────────────────────────────────────

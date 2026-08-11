@@ -216,6 +216,22 @@ describe('voice is now on EVERY AI, as asked', () => {
     });
   }
 
+  it('the CALL SURFACE is lazy — typing a message must not download a voice-call engine', () => {
+    /**
+     * CAUGHT BY CI AS A REAL BUDGET BREACH, and fixed rather than budgeted around. Putting the voice
+     * button on every AI (including the free chat) made `SonicChat` — mic capture, PCM resampling,
+     * playback scheduling, the waveform — part of the MAIN chunk. The largest chunk went from
+     * 645.3 KB to 640.9 KB once it was lazy-imported: smaller than before the feature landed.
+     * A static import here would silently undo that for every user on first paint.
+     */
+    const button = read('src/components/sonic/ProfessionalVoiceButton.tsx');
+    expect(button).toContain("lazy(() => import('./SonicChat')");
+    expect(button).toContain('<Suspense');
+    // Only the TYPE may be imported statically — types vanish at build time.
+    expect(button).toContain("import type { SonicTurn } from './SonicChat'");
+    expect(button).not.toMatch(/^import \{[^}]*SonicChat[^}]*\} from '\.\/SonicChat'/m);
+  });
+
   it('the old "professionals only" restriction is recorded as SUPERSEDED, not silently dropped', () => {
     const button = read('src/components/sonic/ProfessionalVoiceButton.tsx');
     expect(button).toMatch(/SUPERSEDED/);

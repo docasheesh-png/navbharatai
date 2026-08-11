@@ -51,6 +51,21 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 
+// NOT A BUMP — A REGRESSION THAT WAS FIXED INSTEAD (2026-08-11). Recorded here because this file is
+// where the next session will look for "why did the bundle move", and the honest answer is that one
+// change made it move the WRONG way and was reverted at the source rather than absorbed by a ceiling.
+//
+// Voice chat became a paid feature and its button went onto EVERY AI including the free chat (admin:
+// "sabhi me laga do"). `ProfessionalVoiceButton` imported `SonicChat` statically, which dragged the
+// whole audio pipeline — mic capture, PCM resampling, playback scheduling, the waveform — into the
+// MAIN chunk: someone who only ever types a message downloaded a voice-call engine to do it. CI caught
+// it as a budget breach. The fix is a `lazy()` import behind `Suspense` (the surface only renders after
+// the user accepts the consent card, so it costs nothing), and the largest chunk went 645.3 → 640.9 KB
+// — SMALLER than before the feature landed. `tests/voiceBilling.test.ts` asserts the import stays lazy.
+//
+// The lesson worth keeping: raising a ceiling to admit a main-chunk regression hides it behind a bigger
+// number. Split first, measure, and only then decide whether the REMAINDER is honest feature growth.
+
 export const BUDGETS = {
   /** Largest single JS chunk, gzipped. Measured 648.5 KB on 2026-08-11 (the main entry). */
   largestChunkGzipKB: 700,

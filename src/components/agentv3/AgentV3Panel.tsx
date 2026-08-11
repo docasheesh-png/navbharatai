@@ -565,10 +565,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [gitStatus, setGitStatus] = useState<import('../../hooks/useAgentV3Build').GitStatus | null>(null);
   const handleRestoreCheckpoint = async (sha: string) => {
     setRestoreNote('Restoring…');
-    const ok = await restore(sha);
-    setRestoreNote(ok
-      ? '✅ Restored your workspace to that checkpoint.'
-      : "⚠️ That checkpoint isn't active in this session yet (the sandbox may have recycled). Continue a build to make its history live again.");
+    // The SERVER decides the wording: it is the only side that knows whether the history is gone, the
+    // workspace is cold, or git simply refused. This used to print one guess for all of them — and the
+    // guess ("continue a build to make its history live again") was wrong for the most common case,
+    // which was the request landing on a different Cloud Run instance.
+    const { ok, message } = await restore(sha);
+    setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
   };
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory + workspace across messages,

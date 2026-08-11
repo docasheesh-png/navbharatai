@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
 import { BOLI_OPTIONS, type SonicBoli } from '../../server/sonic/sonicBoli';
 import { auth } from '../../lib/firebase';
+import { voiceRunningCostLabel, resolveVoiceLang } from '../../lib/voiceChatBilling';
 
 type Status = 'loading' | 'disabled' | 'idle' | 'connecting' | 'live' | 'error';
 interface Line { role: string; text: string }
@@ -29,6 +30,13 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  /**
+   * Seconds the SERVER has actually billed. Voice is charged per second (admin 2026-08-10), and the
+   * meter must show what the wallet really moved by — a locally-counted stopwatch would drift and end
+   * up displaying a different figure from the one charged, which is the kind of small discrepancy
+   * that destroys trust in a bill. `null` = the server has not reported a tick yet, so nothing shows.
+   */
+  const [billedSeconds, setBilledSeconds] = useState<number | null>(null);
   const [speaking, setSpeaking] = useState(false); // assistant is talking (from real playback level)
   const [showTranscript, setShowTranscript] = useState(false);
   const [voice, setVoice] = useState<'male' | 'female'>('female'); // chosen before a call starts
@@ -188,11 +196,26 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       ws.onerror = () => { setError('Connection error.'); setStatus('error'); };
       ws.onclose = () => setStatus((s) => (s === 'error' ? 'error' : 'idle'));
       ws.onmessage = (ev) => {
-        let msg: { type?: string; data?: string; text?: string; role?: string; message?: string };
+        let msg: {
+          type?: string; data?: string; text?: string; role?: string; message?: string;
+          seconds?: number; reason?: string;
+        };
         try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === 'audio' && msg.data) playChunk(msg.data);
         else if (msg.type === 'interrupted') flushPlayback();
         else if (msg.type === 'text' && msg.text) setLines((l) => [...l, { role: msg.role || 'ASSISTANT', text: msg.text! }]);
+        // The meter the user watches. It carries the SERVER's billed seconds, never a number counted
+        // locally: a client-side stopwatch would drift from the wallet and end up showing a different
+        // figure from the one actually charged. If the server has not spoken yet, nothing is shown.
+        else if (msg.type === 'billing' && typeof msg.seconds === 'number') setBilledSeconds(msg.seconds);
+        // The call ended for a real, nameable reason — say which, instead of a bare disconnect that
+        // looks like a bug.
+        else if (msg.type === 'ended') {
+          setError(msg.reason === 'no_balance'
+            ? 'Your balance ran out, so the call ended here. Add credit to carry on.'
+            : 'This call reached its maximum length and ended here.');
+          setStatus('error');
+        }
         else if (msg.type === 'error') { setError(msg.message || 'Voice error.'); setStatus('error'); }
       };
 
@@ -292,6 +315,14 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
             {status === 'live' && (
               <span style={{ marginTop: 4, fontSize: 12, letterSpacing: 1, color: speaking ? '#a78bfa' : '#34d399' }}>
                 ● {speaking ? 'AI speaking' : 'Listening to you'}
+              </span>
+            )}
+            {/* THE LIVE METER (admin 2026-08-10). Shown only once the server has reported a real tick,
+                so it can never display a cost that has not actually been charged. Time AND money
+                together — a number on its own tells the user nothing about whether to keep talking. */}
+            {status === 'live' && billedSeconds !== null && billedSeconds > 0 && (
+              <span style={{ marginTop: 6, fontSize: 11, color: '#8b949e', fontVariantNumeric: 'tabular-nums' }}>
+                {voiceRunningCostLabel(billedSeconds, resolveVoiceLang((k) => localStorage.getItem(k)))}
               </span>
             )}
             {error && <p style={{ color: '#f87171', marginTop: 12, maxWidth: 340, textAlign: 'center', fontSize: 13 }}>⚠️ {error}</p>}

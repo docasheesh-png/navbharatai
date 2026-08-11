@@ -49,7 +49,8 @@ const src = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'ut
  * `buildUsage.add` calls to be removed with it — a change that moves real money in two directions and
  * must not be made blind. Raised with the admin; not shipped on a guess.
  */
-const EXEMPT = ['makeFastTextRunner'];
+// Empty on purpose: the one exemption was closed by the shadow ledger (2026-08-11).
+const EXEMPT: string[] = [];
 
 /** Each `buildTurnRunner(...)` call in the file, with balanced-paren extraction. */
 function runnerCalls(): Array<{ line: number; body: string; context: string }> {
@@ -106,14 +107,63 @@ describe('heal runners are attributed by construction', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the exemption is still exactly ONE, and still the documented one', () => {
-    // If this count grows, someone exempted a runner without recording why.
+  it('there is NO unattributed runner left — the exemption is gone', () => {
+    // It used to be exactly one (makeFastTextRunner, documented). Adding the SHADOW ledger closed it:
+    // every runner now reports its usage somewhere, and the only remaining distinction is WHICH ledger
+    // — the billing one or the observational one. If a runner ever appears here again, its tokens are
+    // invisible to both the bill and the measurement, which is how this whole class started.
     const unattributed = runnerCalls().filter(
       (c) => !c.body.includes('onTurnComplete') && !c.body.includes('healRunnerOpts()'),
     );
-    expect(unattributed).toHaveLength(1);
-    expect(unattributed[0].context).toContain('makeFastTextRunner');
-    // The reason must stay written down next to it.
-    expect(unattributed[0].context).toContain('double-counting');
+    expect(unattributed.map((c) => `line ${c.line}`)).toEqual([]);
+  });
+});
+
+/**
+ * MEASURING THE FAST-LANE QUESTION WITHOUT ANSWERING IT BY ACCIDENT.
+ *
+ * The admin's decision (2026-08-11) was to MEASURE fast-lane attribution before changing it, because
+ * fixing it moves real money in both directions: three call sites over-charge (tokens in the build
+ * total but not the ledger ⇒ priced at Sonnet despite running on the cheap floor) and four charge
+ * nothing at all (tokens in neither ⇒ our loss).
+ *
+ * Measurement was impossible, and that is the point of these cases: the second group is invisible by
+ * construction. A shadow ledger makes it visible while being structurally incapable of changing a bill.
+ */
+describe('the fast-lane shadow ledger is observational, by construction', () => {
+  const agentv3 = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+  const diag = readFileSync(join(__dirname, '../src/server/AgentV3/BuildDiagnostics.ts'), 'utf8');
+
+  it('the fast-lane runner now reports its usage somewhere', () => {
+    // Before this, four of the seven call sites recorded nothing anywhere at all.
+    expect(agentv3).toContain('const shadowFastLaneLedger = createProviderUsageLedger()');
+    expect(agentv3).toContain('onTurnComplete: captureShadowUsage');
+  });
+
+  it('it feeds the SHADOW ledger, never the billing one', () => {
+    // Adding these turns to providerLedger would change the bill — which is the decision being
+    // measured, so it must not be a side effect of measuring it.
+    const at = agentv3.indexOf('const captureShadowUsage =');
+    expect(at).toBeGreaterThan(-1);
+    const fn = agentv3.slice(at, at + 260);
+    expect(fn).toContain('shadowFastLaneLedger.add(');
+    expect(fn).not.toContain('providerLedger.add(');
+  });
+
+  it('the diagnostics setter is SEPARATE from the billing one', () => {
+    // Two setters so nothing observational can reach the cost path by a shared code path.
+    expect(diag).toContain('setShadowFastLaneTokens(');
+    expect(diag).toContain('shadowFastLaneTokens?: Record<string');
+  });
+
+  it('the shadow number reaches the report, or it was never measured', () => {
+    expect(agentv3).toContain('buildDiag.setShadowFastLaneTokens(shadowFastLaneLedger.byProvider())');
+    expect(diag).toContain('shadowFastLaneTokens: this.shadowFastLaneTokens');
+  });
+
+  it('the real ledger is untouched — the bill must be byte-identical to before', () => {
+    // The whole safety claim of this change: measurement only.
+    expect(agentv3).toContain('const providerLedger = createProviderUsageLedger()');
+    expect(agentv3).toContain('providerLedger.add(used, cacheRead > 0');
   });
 });

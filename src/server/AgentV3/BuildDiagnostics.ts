@@ -223,6 +223,20 @@ export interface BuildDiagnosticsReport {
    *  calls). The report-level view of the Billing-Phase-3 ledger. */
   providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /**
+   * OBSERVATIONAL ONLY — fast-lane turns, which today reach the bill through neither the provider
+   * ledger nor (for four of the seven call sites) the build total at all.
+   *
+   * WHY IT EXISTS (2026-08-11). Fixing fast-lane attribution moves real money in BOTH directions:
+   * three call sites put their tokens in the build TOTAL but not the ledger, so they land in the
+   * unattributed remainder and are priced at SONNET rates despite running on the cheap floor
+   * (over-charge); four record nothing anywhere, so they are billed to nobody (our loss). The admin's
+   * decision was to MEASURE BEFORE CHANGING — and measurement was impossible, because the second group
+   * is invisible by construction.
+   *
+   * This makes it visible WITHOUT touching billing: it is never read by the cost path, only reported.
+   */
+  shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /**
    * ADMIN-ONLY infrastructure cost: how long this build held a real E2B VM, and our estimated spend on
    * it. Billed by WALL-CLOCK, so it is a completely different cost shape from token spend — a build
    * that used almost no tokens but sat on a VM for forty minutes still cost real money, and nothing in
@@ -351,6 +365,7 @@ export class BuildDiagnostics {
   private readonly providerDelivery = new Map<string, number>();
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
@@ -906,6 +921,14 @@ export class BuildDiagnostics {
   }
 
   /** Per-provider real token spend (the Billing-Phase-3 ledger, reconciled to the billed total). */
+  /**
+   * Record fast-lane usage for OBSERVATION. Deliberately a separate setter from setProviderTokens:
+   * anything written here must never be able to reach the billing path by accident.
+   */
+  setShadowFastLaneTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
+    if (u && Object.keys(u).length > 0) this.shadowFastLaneTokens = u;
+  }
+
   setProviderTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
     if (u && Object.keys(u).length > 0) this.providerTokens = u;
   }
@@ -1026,6 +1049,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerTokens: this.providerTokens,
+      shadowFastLaneTokens: this.shadowFastLaneTokens,
       sandboxCost: this.sandboxCostRecord,
       cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,

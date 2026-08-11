@@ -213,6 +213,55 @@ describe('generateShipKit — pre-solved future build failures (audit 2026-08-11
   }
 });
 
+describe('generateShipKit — pre-solved future build failures, batch 2 (audit 2026-08-11)', () => {
+  // The second deterministic batch from the same audit: XML-safe app names (G1), a complete adaptive
+  // icon (background + round backstop, G4), a plugin-safe minSdk floor (G5), a transient-network Gradle
+  // retry (G10) and an early honest guard when the web build emitted no page to wrap (G17). All live in
+  // the GENERATED android/ project or the build step, so only a workflow step can pre-solve them.
+  const kit = generateShipKit({ appName: 'Tom & Jerry' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: G1 — escapes a bare ampersand in the app name so strings.xml stays valid XML`, () => {
+      expect(wf).toContain('SX="$RES/values/strings.xml"');
+      // a negative lookahead leaves real entities (&amp; &#123;) untouched, so the heal is a no-op on re-run
+      expect(wf).toContain('(?!(?:amp|lt|gt|quot|apos|#');
+      expect(wf).toMatch(/perl -i -pe [^\n]*\$SX/);
+    });
+
+    it(`${label}: G4 — completes the adaptive icon (defines a missing background, falls the round icon back)`, () => {
+      expect(wf).toContain('adaptive icon background missing');
+      expect(wf).toContain('<color name="ic_launcher_background">#FFFFFF</color>');
+      expect(wf).toContain('s#@mipmap/ic_launcher_background#@color/ic_launcher_background#g');
+      // round-icon backstop points a missing round icon at the standard one
+      expect(wf).toContain('s#@mipmap/ic_launcher_round#@mipmap/ic_launcher#g');
+    });
+
+    it(`${label}: G5 — raises minSdkVersion to a plugin-safe floor, and only ever raises`, () => {
+      expect(wf).toContain('VG=android/variables.gradle');
+      expect(wf).toContain('minSdkVersion = 23');
+      // guarded on the current value being BELOW 23 — a project at 24+ is left untouched
+      expect(wf).toContain('[ "$CUR" -lt 23 ]');
+    });
+
+    it(`${label}: G10 — retries ONLY a transient network failure, never a deterministic build error`, () => {
+      expect(wf).toContain('/tmp/nbai-gradle.log');
+      expect(wf).toContain('max_attempts=3');
+      expect(wf).toContain('could not resolve');
+      // a real compile/link failure exits immediately (the else branch breaks out of the retry loop)
+      expect(wf).toMatch(/grep -qiE '[^\n]*could not resolve[^\n]*' \/tmp\/nbai-gradle\.log/);
+    });
+
+    it(`${label}: G17 — fails early and honestly when the web build produced no index.html to wrap`, () => {
+      expect(wf).toContain('NBAI_FAILED_STAGE=webbuild');
+      // it checks the ACTUAL configured webDir (so a custom output folder is never false-failed)
+      expect(wf).toContain("const fs=require('fs')");
+      expect(wf).toContain('if [ ! -f "$WEBDIR/index.html" ]; then');
+    });
+  }
+});
+
 describe('generateShipKit — honesty about what only the user can do', () => {
   const kit = generateShipKit({ appName: 'My Shop' });
 

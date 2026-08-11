@@ -41,20 +41,30 @@ describe('Payment routes — /api/payment/create-order', () => {
     expect(res.body?.error).toMatch(/sign in/i);
   });
 
-  it('refuses an underpaid Professional Pass order before it reaches the gateway', async () => {
-    // The ₹1-for-a-hundred-years order: the fulfilment path now derives the entitlement from the paid
-    // amount, so an underpaid order would take the customer's money and grant nothing. It is refused
-    // here instead, with the real price stated.
+  /**
+   * SUPERSEDED 2026-08-10 — this used to assert that an UNDERPAID pass order was refused (the
+   * ₹1-for-a-hundred-years order). The admin withdrew the Pass entirely ("pass system hata do"), so
+   * the stronger contract now holds: NO pass order is accepted at any price. The intent the old test
+   * protected — a pass order must never reach the gateway and take a customer's money — is kept and
+   * widened, which is why the case is rewritten here rather than deleted.
+   */
+  it('refuses a Professional Pass order at ANY amount — the product is withdrawn', async () => {
     const register = await importPaymentRoutes();
     const routes = captureRoutes(register, () => {});
     const handler = routes.get('POST /api/payment/create-order')!;
 
-    const req = mockReq({ body: { userId: 'user123', amount: 1, productType: 'professional_pass', passDays: 36500 } });
-    const res = mockRes();
-    await handler(req, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body?.code).toBe('pass_amount_too_low');
-    expect(res.body?.passPriceInr).toBe(99);
+    // The old exploit amount, and the full price: both refused now.
+    for (const amount of [1, 99, 500]) {
+      const req = mockReq({ body: { userId: 'user123', amount, productType: 'professional_pass', passDays: 36500 } });
+      const res = mockRes();
+      await handler(req, res);
+      expect(res.statusCode).toBe(410); // Gone — the product existed and no longer does
+      expect(res.body?.code).toBe('pass_withdrawn');
+      // Money arriving for a withdrawn product is the worst outcome; nothing may reach the gateway.
+      expect(res.body?.paymentSessionId).toBeUndefined();
+      // And the user is pointed at the thing that actually works.
+      expect(String(res.body?.error)).toMatch(/add credit/i);
+    }
   });
 
   it('returns 400 when order amount is invalid (NaN)', async () => {

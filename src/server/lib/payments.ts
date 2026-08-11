@@ -252,6 +252,14 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
       }
 
+      // ⚠️ KEPT ON PURPOSE AFTER THE PASS WAS WITHDRAWN (admin 2026-08-10, "pass system hata do").
+      // New pass orders are refused at creation (`pass_withdrawn` in routes/payment.ts), so nothing can
+      // reach here any more. This settlement path stays anyway: if a PENDING pass order somehow exists
+      // — an in-flight checkout at deploy time, a webhook arriving late — deleting this would mean
+      // taking the money and delivering nothing. Refusing NEW orders while still honouring any that
+      // already exist is the honest order to remove a paid product in. It can be deleted once the
+      // payment_transactions collection holds no pending 'professional_pass' rows.
+      //
       // PROFESSIONAL PASS product: grant a time-based pass — never credit wallet tokens. The atomic
       // PENDING→SUCCESS claim above already guarantees this runs exactly once per paid order (webhook +
       // client poll can't double-grant). Days/plan come from the tx doc, falling back to the server

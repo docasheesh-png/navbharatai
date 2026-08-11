@@ -9,7 +9,7 @@ import {
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search, Mic, Camera,
+  Star, Search, Mic, Camera, Volume2,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -44,6 +44,9 @@ import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
+import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
@@ -263,6 +266,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  // Shared composer toolbar state (admin 2026-08-10). The Enter preference is the ONE key every AI
+  // reads — set it here and Doctor AI, the professionals and the free chat all follow.
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   // INLINE voice dictation (admin 2026-07-22): the mic types speech straight into the composer on this
   // page — no separate Voice-to-App page. Same Web Speech engine the standalone tool uses.
   const [listening, setListening] = useState(false);
@@ -663,8 +671,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Build actions (activity/diffs) decorate ONLY the Build tab; the read-only Plan/Advise pages render a
   // clean conversation. Prior turns' archived activity (activityLog) is included so a finished build's
   // action rows + diff stats stay in the chat forever within the session (admin 2026-07-21 — no vanish).
+  // SEARCH (shared composer toolbar, admin 2026-08-10) filters the messages the timeline is built
+  // from, not `convo` itself — the empty-state below must keep answering "is this conversation
+  // empty?", never "did the search match?", or a query with no hits would show the cold-start
+  // template screen as if the user had never sent anything.
+  const visibleConvo = filterMessages(convo, chatSearchQuery) as ChatMsg[];
   const chatBlocks = buildChatBlocks(
-    convo,
+    visibleConvo,
     chatMode === 'build' ? [...state.activityLog, ...state.activity] : [],
     chatMode === 'build' ? state.diffs : {},
   );
@@ -3757,6 +3770,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               >
                 <Mic className="w-4 h-4" />
               </button>
+              {/* TALK TO NAVBHARATAI BY VOICE (admin 2026-08-10: "sabhi me laga do"). Distinct from
+                  the dictation mic on its left, which types speech into this box — this opens a live
+                  spoken conversation. PAID: the button opens a consent card stating the per-second
+                  price in the user's own language first, and renders nothing unless voice is enabled
+                  and the user is signed in. */}
+              <ProfessionalVoiceButton
+                title="Talk to NavBharatAI by voice"
+                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-emerald-300"
+                icon={<Volume2 className="w-4 h-4" />}
+                getHistory={() => convo
+                  .filter((m) => (m.text || '').trim())
+                  .slice(-12)
+                  .map((m) => ({
+                    role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+                    content: String(m.text || ''),
+                  }))}
+              />
               {/* Hidden gallery picker — drives the inline "Screenshot → App" flow for BOTH entry points
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}
@@ -3774,6 +3804,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <span className="shrink-0 text-indigo-400">Large projects take a few minutes</span>
                 </div>
               )}
+              {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). order-0 so
+                  it sits directly above the input, matching every other AI. Clear starts a NEW SESSION
+                  rather than emptying the message array: a v5.0 thread owns a workspace, a build lock,
+                  a preview and a report, and blanking only the bubbles would leave all of that live
+                  underneath — the exact "+New chat leak" class this panel has been root-caused for twice. */}
+              <div className="order-0 w-full mb-1">
+                <ChatToolbar
+                  messageCount={convo.length}
+                  sendOnEnter={sendOnEnter}
+                  onSendOnEnterChange={setSendOnEnter}
+                  searchQuery={chatSearchQuery}
+                  onSearchQueryChange={setChatSearchQuery}
+                  searchOpen={showChatSearch}
+                  onSearchOpenChange={setShowChatSearch}
+                  searchMatches={visibleConvo.length}
+                  onClear={running ? undefined : newChatFromHistory}
+                  charCount={prompt.length}
+                />
+              </div>
               <div className="relative w-full order-1" data-tour="chat">
                 <textarea
                   ref={composerRef}
@@ -3806,10 +3855,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     // U7: Cmd/Ctrl+Enter ALWAYS sends — even on touch or in the expanded editor — so a
                     // finished multiline message ships without reaching for the button.
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); if (steering) sendSteer(); else if (chatMode === 'build') send(); else sendRole(chatMode); return; }
-                    // Laptop (physical keyboard) → Enter sends. Phone (touch) → Enter inserts a newline
-                    // (send only via the button). In the expanded editor Enter always inserts a newline
-                    // so a long message can be edited freely. Shift+Enter is always a newline.
-                    if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice && !composerExpanded) {
+                    // The Enter behaviour used to be GUESSED from the device: laptop sends, phone
+                    // inserts a newline. That guess is wrong in both directions — a phone user with a
+                    // Bluetooth keyboard could not send from it, and a laptop user writing a long
+                    // multi-line spec could not get a newline. It is now the user's own choice via the
+                    // toolbar toggle above (shared with every other AI), so nobody is stuck with a
+                    // decision the app made for them. The expanded editor still always inserts a
+                    // newline — that is an explicit "I am writing something long" mode.
+                    if (!composerExpanded && enterShouldSend({
+                      key: e.key,
+                      shiftKey: e.shiftKey,
+                      sendOnEnter,
+                      hasContent: !!prompt.trim(),
+                      isBusy: false, // a running build is steerable; the branch below picks the right send
+                      isComposing: (e.nativeEvent as any)?.isComposing,
+                    })) {
                       e.preventDefault();
                       if (steering) sendSteer(); else if (chatMode === 'build') send(); else sendRole(chatMode);
                     }

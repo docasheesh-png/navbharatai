@@ -104,6 +104,10 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           input={input}
           onInputChange={setInput}
           onSend={onSend}
+          // Lets the chat's Clear and its per-message delete/edit act for real (admin 2026-08-10).
+          // Clear previously fired a magic-string sentinel through a prop nothing ever passed, so
+          // the button did nothing at all; this panel owns setMessages, so it can simply honour it.
+          onMessagesChange={(next) => setMessages(next)}
           isLoading={isLoading}
           activeIntent={activeIntent}
           isPinned={currentSession?.isPinned || false}

@@ -30452,3 +30452,32 @@ code. Recorded, not half-started.
 
 10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files /
 13,627 tests, exit 0**.
+
+---
+
+## 2026-08-11 — Item 3/9: edit mode — verified, and the honest answer is DO NOT BUILD
+
+The roadmap line read: *"AP-7 Edit mode | works | 80% of user time is after the first build; make edits
+as smart as builds."* That is an aspiration, not a defect, and I went looking for the defect behind it
+before writing anything. There isn't one.
+
+**The gates already run on edits.** `shouldRunIntegrityHeal`, the design gate, lint, the runtime
+auto-fix loop and the reviewer are NOT `!isEditMode`-guarded. The only build-only paths are the ones
+that make no sense on an edit: palette preset, requirement-gap analysis, the deep-pipeline blueprint,
+and ask-user. Skipping those on an edit is correct, not a hole.
+
+**And the edit path is in places MORE careful than a build.** The boot-killer scan merges the STORED
+workspace with this turn's writes, so a killer sitting in an untouched file is found — precisely the
+common case for an old app. A fresh build skips that read because it cannot apply.
+
+**`editModePrefix` already enforces** locate-first (grep / glob / `architecture_map`),
+read-before-write, surgical `edit_file` over `write_file`, minimum changes, blast-radius via
+`code_graph` before touching a shared file, and prove-it-still-works after.
+
+So building "smarter edits" from this line would have meant inventing a problem and shipping churn
+against a path that is already the most defended in the engine. Recorded in `ROADMAP.md` in place, with
+the same condition already attached to AP-9: **a real improvement here needs a real build report
+showing a specific edit that went wrong.** Until then there is nothing to root-cause.
+
+That is the fourth roadmap line this week whose verification changed the job — twice to "already
+built", once to "half built, build the other half", and now once to "do not build".

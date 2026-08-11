@@ -30230,3 +30230,15 @@ both projects, full run **13,691/13,691**.
 **Still dormant, deliberately:** the pass store and the `hasActivePass` branches in the two gates.
 They guard money on every professional turn and every tool action, nothing can set them any more, and
 the comments now say so. They come out once the collection holds no pending pass rows.
+
+**Same PR — a defect found in the voice meter by re-reading it, before it ever ran in production.**
+`endCall()` closed the socket and left the ticker to `ws.on('close')`. But `ws.close()` on a socket
+that is already gone emits **no 'close' event** — so the interval would have kept running on a dead
+call and every later tick would have billed more elapsed seconds. It would have hit precisely the user
+that branch exists for: **the one whose balance just ran out, charged on for a call that had already
+ended.** The ticker is now cleared inside `endCall`, and a tick already in flight bails on `ending`.
+
+One level down, the same class: the seconds between a call ending and 'close' finally arriving were
+billed as talking time. The billing clock now stops when the CALL does (`billingEndedAt`), and a call
+already ended keeps its earlier timestamp so the gap is never billed. Small, but it is the difference
+between a bill a user can explain and one they cannot. 2 more tests (28 in `voiceBilling`).

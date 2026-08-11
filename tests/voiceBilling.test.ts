@@ -149,6 +149,34 @@ describe('WIRING — the charge is real, and it is asked for first', () => {
     expect(ws).toContain("ws.on('error', () => { stopMeter();");
   });
 
+  /**
+   * FOUND BY RE-READING THE FIRST VERSION OF THIS CODE, before it ever ran in production.
+   *
+   * `endCall()` used to close the socket and leave the ticker to `ws.on('close')`. But `ws.close()`
+   * on a socket that is already gone emits NO 'close' event — so the interval would have kept running
+   * on a dead call, and every later tick would have billed more elapsed seconds. It would have hit
+   * precisely the user the branch exists for: the one whose balance just ran out, charged on for a
+   * call that had already ended.
+   *
+   * The same class, one level down: the seconds between a call ending and 'close' finally arriving
+   * were billed as talking time. The billing clock now stops when the CALL does.
+   */
+  it('ending a call stops the ticker THERE — it is never left to the close event', () => {
+    const at = ws.indexOf('const endCall');
+    expect(at).toBeGreaterThan(-1);
+    const fn = ws.slice(at, at + 900);
+    expect(fn).toContain('clearInterval(ticker)');
+    expect(fn).toContain('billingEndedAt = Date.now()');
+    // …and a tick already in flight when the call ended must not charge past it.
+    expect(ws).toMatch(/if \(ending\) return;[\s\S]{0,400}await settle\(\);\s*\n\s*if \(ending\) return;/);
+  });
+
+  it('the billing clock stops at the END of the call, not when the socket finally closes', () => {
+    expect(ws).toContain('unbilledSeconds(billingStartedAt, billingEndedAt || Date.now(), billedSeconds)');
+    // A normal hang-up sets it; a call already ended keeps its EARLIER timestamp.
+    expect(ws).toContain('if (!billingEndedAt) billingEndedAt = Date.now();');
+  });
+
   it('an empty wallet never reaches the provider at all', () => {
     expect(ws).toContain('mayStartVoiceCall(balance, false)');
     // …and the check sits in the UPGRADE path, before the socket becomes a session.

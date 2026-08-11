@@ -315,6 +315,8 @@ import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBu
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
+import { buildServiceGraph } from '../AgentV3/serviceGraph';
+import { detectMonorepo } from '../AgentV3/monorepoAnalysis';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary';
@@ -10014,6 +10016,31 @@ export function registerAgentV3Routes(app: Express): void {
         // Deterministic detection → costs nothing on a clean build. Advisory ALWAYS; the repair is
         // bounded and flag-gated, and neither can fail a build — a working app with a plain page ships.
         try {
+          // SERVICE GRAPH (multi-service, §32 of the 2026-08-11 directive). Advisory and deterministic:
+          // it only DESCRIBES which processes the project consists of, their ports and their start
+          // order. Nothing is started from it yet — and that is deliberate. Before building a
+          // multi-process runner we need to know how often a real project even has a second service,
+          // which is exactly what this record measures. Building the runner first would be the same
+          // mistake as scoring a benchmark nobody ran.
+          try {
+            const sgFiles = Object.fromEntries(writtenFiles);
+            const sgPaths = Object.keys(sgFiles);
+            const mono = detectMonorepo(sgPaths, sgFiles);
+            const graph = buildServiceGraph({ contents: sgFiles, packageDirs: mono.packageDirs });
+            if (graph.services.length > 0) {
+              buildDiag.record({
+                phase: 'build',
+                severity: 'info',
+                code: graph.multiService ? 'SERVICE_GRAPH_MULTI' : 'SERVICE_GRAPH_SINGLE',
+                message: graph.summary + (graph.multiService
+                  // Say the limitation out loud rather than let a green build imply all of it ran.
+                  ? ' ⚠️ Only the primary service is started today; the others are described, not run.'
+                  : ''),
+                autoResolved: true,
+              });
+            }
+          } catch { /* the service graph is advisory — it can never affect a build */ }
+
           const designFiles = Object.fromEntries(writtenFiles);
           const design = analyzeDesignCoverage(designFiles);
           if (!design.ok) {

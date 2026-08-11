@@ -502,3 +502,20 @@ describe('the prompt demands the LAST page look as designed as the first', () =>
     expect(prompt).toContain('do not invent a second design language');
   });
 });
+
+describe('the page contract is honest about which scaffolds actually ship the kit', () => {
+  // Only 1 of the 24 scaffold providers ships the .nb-* kit (ViteReactProviderContents). Telling a Vue
+  // or Svelte build to use `.card` would produce classes with NO CSS behind them — worse than plain
+  // markup, because it also looks intentional.
+  const prompt = architectSystemPrompt();
+
+  it('says the kit class names are Vite+React only', () => {
+    expect(prompt).toContain('THE KIT CLASS NAMES ABOVE SHIP WITH THE VITE+REACT SCAFFOLD');
+  });
+
+  it('keeps the REQUIREMENT on other scaffolds, and says to define equivalents once', () => {
+    expect(prompt).toContain('the five requirements are exactly');
+    expect(prompt).toContain("project's own global stylesheet");
+    expect(prompt).toContain('The rule is the OUTCOME, never the specific class name');
+  });
+});

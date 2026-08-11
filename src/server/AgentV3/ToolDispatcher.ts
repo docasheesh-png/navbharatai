@@ -1,7 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
-import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
@@ -468,17 +467,6 @@ export class ToolDispatcher {
     this.signatureEnabled = enabled !== false;
   }
 
-  /**
-   * The language THIS BUILD's platform narration speaks (ROADMAP item 6). Defaults to English, and
-   * the composition root sets it from the user's own prompt exactly as `LANGUAGE_RULE` tells the
-   * model to — so the AI and the platform can never disagree inside one feed.
-   */
-  private narrationLang: NarrationLanguage = 'en';
-
-  /** Set by the composition root from `resolveNarrationLanguage(userPrompt)` before the build runs. */
-  setNarrationLanguage(lang: NarrationLanguage): void {
-    this.narrationLang = lang;
-  }
 
   /**
    * Emit one platform narration line. THE choke point: call sites name a message id, never a
@@ -486,7 +474,7 @@ export class ToolDispatcher {
    * language. Best-effort like every other narration — it must never be able to break a build.
    */
   private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
-    this.events?.emit({ type: 'narration', agent, text: narrationText(this.narrationLang, id, params), ts: Date.now() });
+    this.events?.emit({ type: 'narration', agent, text: narrationText(id, params), ts: Date.now() });
   }
 
   /**

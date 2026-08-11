@@ -122,19 +122,31 @@ Ordered by what a user would actually feel.
    anywhere, and no `/api/templates` endpoint. (`savedTemplates` does exist, so the save-as-template
    half is partly there — check it before rebuilding that piece.) Screenshots + categories + "build
    this" kills cold-start and drops weak-tier cost toward zero.
-6. **Regional languages** — ⚠️ **RE-SCOPED 2026-08-08; the old "prompt + UI, 3–4 PR" line was wrong in
-   both directions.** The *prompt* half is **already shipped**: `LANGUAGE_RULE` in
-   `AgentV3/systemPrompt.ts` names Tamil/Bengali/Marathi explicitly, sits at the top of every prompt
-   that produces user-facing text (build, plan and chat), and is test-locked in `systemPrompt.test.ts`.
-   A user who writes in Tamil already gets Tamil replies and Tamil narration *from the model*.
-   **What is actually left is bigger than 3–4 PRs**, because it is not a prompt problem at all:
-   - **~118 hardcoded English strings that OUR SERVER emits** during a build (`ToolDispatcher.ts` +
-     `routes/agentv3.ts` — "🔐 Loaded 3 of your saved keys…", "🗄️ Creating your app's tables…", every
-     honest failure line added this session). No prompt rule can touch these; they never pass through a
-     model. A Tamil user gets Tamil from the AI and English from the platform, in the same feed.
-   - **NavBharatAI's own UI** — every button, label and settings screen. A real i18n pass.
-   Do the SERVER NARRATION first: it is the jarring half (the AI speaks your language, the app does
-   not), it is bounded and countable, and it needs one message catalogue rather than a framework.
+6. **Regional languages** — ⚠️ **RE-SCOPED AGAIN 2026-08-11 by the admin, and the 2026-08-08 line above
+   it was WRONG. It contradicted CLAUDE.md's own Language standard and cost a session's work.**
+
+   THE RULE, from the admin, in two halves and no third:
+   - **NavBharatAI's own text = professional ENGLISH.** Every button, label, settings screen, error
+     toast — AND every status line the SERVER emits during a build ("🗄️ Provisioning a local
+     PostgreSQL…"). Those are the PLATFORM speaking, not the AI, so they stay English.
+   - **Every AI RESPONSE = the user's language.** Chat replies, build narration written BY the model,
+     Doctor AI, every Professional. This is CLAUDE.md's stated single exception, and it is the only one.
+
+   **What the old line got wrong:** it called the server's ~118 status strings "the jarring half" and
+   told the next session to translate them FIRST. Translating them is precisely what CLAUDE.md forbids
+   — they are platform UI. A session followed it (2026-08-09/10), shipped a Hindi catalogue for 23 of
+   them, and the work had to be reverted. The mixed feed it was trying to fix is not a defect: the app
+   speaking English beside an AI speaking Hindi is the intended design.
+
+   **What is actually left is therefore SMALL, and on the AI side only:** make sure every AI surface
+   carries the language rule. `LANGUAGE_RULE` covers build/plan/chat; `professionals/engine.ts` covers
+   the Professionals. The one real gap found on 2026-08-11 was Doctor AI (`routes/sda.ts`), whose
+   prompt said "LANGUAGE: Primarily English medical terminology" — the opposite of the rule, on the
+   surface aimed at rural/junior doctors most likely to write in Hindi.
+
+   **Do NOT install a translation service for this** (Google Translate or otherwise). The models are
+   natively multilingual — that is what LANGUAGE_RULE uses. A translator would re-translate an
+   already-correct reply, add latency to every message, cost per character, and mangle code blocks.
 
 ---
 

@@ -28,20 +28,6 @@ export interface LanguageHint {
    * every existing caller keeps compiling unchanged.
    */
   evidence?: LanguageEvidence;
-  /**
-   * WHAT SHARE of the prompt's counted letters belong to this script, 0–1 (absent for a `romanized`
-   * hint, which counts marker words rather than letters).
-   *
-   * Why it is exposed (ROADMAP item 6): two different consumers key off this ONE measurement at
-   * different bars, and they should never each count letters themselves. The APP's generated-text
-   * language is right to be generous — `DOMINANCE_THRESHOLD` — because a prompt carrying real Hindi
-   * words usually wants a Hindi app. The PLATFORM's own narration has to match something stricter:
-   * the language the model REPLIES in, which `LANGUAGE_RULE` mirrors from the user's own words. A
-   * mostly-English prompt with one Devanagari label gets an English reply, so English status lines.
-   * Exposing the share lets `lib/narrationLanguage` require a higher bar against the SAME count,
-   * instead of maintaining a second script table that would drift away from this one.
-   */
-  scriptShare?: number;
 }
 
 /** A Unicode script range mapped to a language hint. */
@@ -158,10 +144,9 @@ export function detectLanguageHint(text: string): LanguageHint | null {
   if (topCount / totalLetters < DOMINANCE_THRESHOLD) return null;
 
   const script = SCRIPTS[topIdx];
-  const scriptShare = topCount / totalLetters;
   // DEVANAGARI IS NOT ONE LANGUAGE (Phase 6.1). Hindi and Marathi share the block, and this table
   // used to map all of it to Hindi with a comment admitting it — so a Marathi user's app was built
   // in Hindi. Marathi has markers Hindi does not use, so the two separate without guessing.
-  if (script.code === 'hi') return { ...devanagariLanguage(text), scriptShare };
-  return { code: script.code, name: script.name, evidence: 'script', scriptShare };
+  if (script.code === 'hi') return devanagariLanguage(text);
+  return { code: script.code, name: script.name, evidence: 'script' };
 }

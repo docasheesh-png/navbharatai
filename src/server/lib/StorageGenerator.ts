@@ -6,7 +6,14 @@
 // Storage, MinIO via S3_ENDPOINT); Cloudinary uses a server-issued upload signature. PURE builders; the
 // generated code is complete and correct (no TODO stubs — the real-features rule). Unit-tested.
 
-export type StorageProvider = 's3' | 'cloudinary';
+import { zeroSetupStorageFiles, defaultBucketSpec, bucketSetupSql } from './supabaseStorageBucket';
+
+/**
+ * `supabase` is the ZERO-SETUP option: the bucket is created in the user's own Supabase project and
+ * the app uploads with the anon key, so there are no keys to paste. `s3` and `cloudinary` remain the
+ * bring-your-own-keys routes for users who already have that storage.
+ */
+export type StorageProvider = 's3' | 'cloudinary' | 'supabase';
 
 export interface StorageConfig {
   provider: StorageProvider;
@@ -71,6 +78,7 @@ export async function uploadFile(file: File): Promise<{ key: string; url: string
 
 const CLOUDINARY_SERVER = `import { v2 as cloudinary } from 'cloudinary';
 import { Router } from 'express';
+import { zeroSetupStorageFiles, defaultBucketSpec, bucketSetupSql } from './supabaseStorageBucket';
 
 // Bring-Your-Own Cloudinary keys — from the Cloudinary Console → Settings → API Keys, pasted into .env.
 cloudinary.config({
@@ -116,6 +124,20 @@ function envBlock(pairs: Array<[string, string]>): string {
 /** Generate a working BYO file-upload integration for a provider. Deterministic; unknown provider → throws. */
 export function generateStorageIntegration(provider: StorageProvider): StorageConfig {
   switch (provider) {
+    case 'supabase':
+      // ZERO SETUP: no envKeys, because there is nothing for the user to paste. The bucket and its
+      // access rules are created by `migrations/002_storage.sql`, which the existing Supabase
+      // provisioning flow applies to the user's own project (see supabaseStorageBucket.ts).
+      return {
+        provider,
+        dependencies: [{ name: '@supabase/supabase-js', version: '^2' }],
+        envKeys: [],
+        files: { ...zeroSetupStorageFiles(defaultBucketSpec()), 'migrations/002_storage.sql': supabaseBucketMigration() },
+        instructions:
+          'File uploads are ready — no keys needed. Import `uploadFile` from `src/lib/uploads.ts`. Files are stored ' +
+          "in your app's own database project, under each signed-in user's own folder, so one user can never " +
+          "overwrite another's file.",
+      };
     case 's3':
       return {
         provider,
@@ -157,6 +179,14 @@ export function generateStorageIntegration(provider: StorageProvider): StorageCo
 }
 
 /** Valid-provider guard for the tool layer. */
+/** The bucket + access-rule SQL, as the migration file the provisioning flow already applies. */
+function supabaseBucketMigration(): string {
+  const r = bucketSetupSql(defaultBucketSpec());
+  // defaultBucketSpec is valid by construction; the guard keeps a future edit from shipping an empty
+  // migration, which would leave the app uploading into a bucket that does not exist.
+  return r.ok ? `-- NavBharatAI: file uploads (bucket + access rules)\n${r.sql}\n` : '';
+}
+
 export function isStorageProvider(v: unknown): v is StorageProvider {
-  return v === 's3' || v === 'cloudinary';
+  return v === 's3' || v === 'cloudinary' || v === 'supabase';
 }

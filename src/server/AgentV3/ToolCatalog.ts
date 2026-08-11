@@ -875,14 +875,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_storage',
       description:
-        'Add real file uploads to the app (Bring-Your-Own keys): a server route + a client uploadFile() helper ' +
-        'that uploads DIRECTLY to storage (never proxied through the server). "s3" (AWS S3 / Cloudflare R2 / ' +
-        'Supabase Storage / MinIO via a presigned URL) or "cloudinary" (image-focused, signed upload). The user ' +
-        'pastes their keys into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+        'Add real file uploads to the app. PREFER provider "supabase": ZERO SETUP — the bucket and its ' +
+        'access rules are created inside the user\'s own database project and the app uploads with the public ' +
+        'anon key, so there are NO keys for the user to paste. Use it whenever the app has (or will have) a ' +
+        'NavBharatAI-provisioned database. The other two are Bring-Your-Own keys, for a user who already has ' +
+        'that storage: "s3" (AWS S3 / Cloudflare R2 / MinIO via a presigned URL) or "cloudinary" ' +
+        '(image-focused, signed upload) — the user pastes their keys into .env; NavBharatAI never stores them. ' +
+        'All three upload DIRECTLY to storage (never proxied through the app server). Never overwrites an ' +
+        'existing .env.example.',
       input_schema: {
         type: 'object',
         properties: {
-          provider: { type: 'string', enum: ['s3', 'cloudinary'], description: 'The storage provider to wire up.' },
+          provider: { type: 'string', enum: ['supabase', 's3', 'cloudinary'], description: 'The storage provider to wire up.' },
         },
         required: ['provider'],
       },

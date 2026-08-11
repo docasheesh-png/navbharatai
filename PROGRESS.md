@@ -30631,3 +30631,46 @@ Most of the 15.6 minutes traces back to that one absence.
 - Gemini Flash ($0.30/M in) as the free-tier judge — cheaper than today's Kimi AND independent of the
   builder — is proposed but NOT shipped; it needs a canary measurement first because Flash is weaker at
   deep code reasoning.
+
+---
+
+## 2026-08-11 — Typing a message no longer downloads a voice-call engine
+
+**CI caught a REAL main-bundle regression I had shipped, and it was fixed rather than budgeted
+around.** Putting the voice button on every AI (#2255) made `ProfessionalVoiceButton` import
+`SonicChat` statically — so the whole audio pipeline (mic capture, PCM resampling, playback
+scheduling, the waveform) landed in the MAIN chunk, and **someone who only ever types a message
+downloaded a voice-call engine to do it**. It is now a `lazy()` import behind `Suspense`, which costs
+nothing because the surface only renders after the user accepts the consent card. **Largest chunk
+645.3 → 640.9 KB — smaller than before the feature landed.** A regression test asserts the import
+stays lazy (only the TYPE may be static), so this cannot creep back.
+
+No budget was raised for it: a parallel session had already re-set both ceilings from a MEASURED size
+with real headroom (700 / 1450) after the same gate kept going red on innocent PRs, and that headroom
+covers this. The lesson is recorded in `scripts/bundleBudget.mjs` rather than as a number: raising a
+ceiling to admit a main-chunk regression hides it behind a bigger number — split first, measure, and
+only then decide whether the REMAINDER is honest feature growth.
+
+⚠️ **REDUNDANT WORK, caught by the admin and dropped — safeguard #6 failed.** This branch also carried
+a zero-setup Supabase storage implementation. A PARALLEL SESSION had opened **PR #2265** for the same
+feature **thirteen minutes earlier**, reaching the same insight (a bucket is a row in `storage.buckets`,
+so the already-granted `database.write` scope is enough — no new OAuth consent). I checked ROADMAP.md
+before starting and did NOT check open PRs, which is exactly the check safeguard #6 exists for and
+exactly how PRs #1 and #4 were once built blind. **#2265 is the better implementation** and is the one
+to keep: it adds a real `provider: 'supabase'` to `StorageGenerator` (so the app gets an actual
+`uploadFile()`; mine only created the bucket and assumed the model would write the client code), it
+reuses the existing `migrations/*.sql` pipeline instead of adding a new hook to the provisioning flow,
+and its write policy confines each user to a folder named after their own uid — stricter than mine,
+which restricted update/delete to the owner but left the write path wider. My storage commit was
+therefore REMOVED from this branch rather than merged; shipping both would have created two competing
+storage paths, which is the drift the fourth absolute rule exists to prevent.
+
+⚠️ **PROCESS NEAR-MISS, recorded because it nearly destroyed the audit trail.** While rebasing this
+branch I ran an automated loop that resolved PROGRESS.md conflicts by deleting the three marker lines
+found by `grep`. On that rebase the conflict was in `scripts/bundleBudget.mjs`, NOT PROGRESS.md — so
+the loop found no markers, deleted three arbitrary lines anyway, and kept going until **PROGRESS.md
+was empty (30,614 lines gone)**. It was caught by reading the commit's own `--stat` before pushing,
+and restored from the previous commit. The rule this violated is already in CLAUDE.md ("append-only —
+never delete or rewrite existing entries"); what is new is the lesson that a scripted resolver must
+verify it is operating on the file that actually conflicted, and that `git show --stat` before a push
+is the cheap check that catches it.

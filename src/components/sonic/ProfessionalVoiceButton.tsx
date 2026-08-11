@@ -14,11 +14,25 @@
 // agreeing to it is money taken silently, which is exactly the defect just fixed on the ₹1 build-file
 // download. The price is stated in the user's own language before anything starts.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { Mic } from 'lucide-react';
 import { auth } from '../../lib/firebase';
-import { SonicChat, type SonicTurn } from './SonicChat';
+import type { SonicTurn } from './SonicChat';
 import { voiceConsent, resolveVoiceLang } from '../../lib/voiceChatBilling';
+
+/**
+ * The call surface is LOADED ON DEMAND, and that is a correctness point, not a micro-optimisation.
+ *
+ * This button now sits on every AI including the free chat, and `SonicChat` drags in the whole audio
+ * pipeline — mic capture, PCM resampling, playback scheduling, the waveform. Importing it eagerly put
+ * all of that in the main bundle, so someone who only ever types a message downloaded a voice-call
+ * engine to do it. CI caught it as a real budget breach (total JS 1300.1 KB against a 1300 KB budget),
+ * and raising the budget would have hidden the regression rather than fixed it.
+ *
+ * It is only ever rendered after the user accepts the consent card, so a lazy import costs nothing:
+ * by the time the chunk is needed, the user has already tapped twice.
+ */
+const SonicChat = lazy(() => import('./SonicChat').then((m) => ({ default: m.SonicChat })));
 
 /** The user's own language for the consent card — read at render, so a change applies immediately. */
 const voiceLang = () => resolveVoiceLang((k) => localStorage.getItem(k));
@@ -105,7 +119,13 @@ export function ProfessionalVoiceButton({ professionalId, getHistory, className,
         </div>
       )}
 
-      {open && <SonicChat onClose={() => setOpen(false)} professionalId={professionalId} history={history} />}
+      {/* No fallback UI: the chunk arrives in a moment and the user has just tapped "start" on the
+          consent card — a flash of a spinner would read as a second, unexplained loading step. */}
+      {open && (
+        <Suspense fallback={null}>
+          <SonicChat onClose={() => setOpen(false)} professionalId={professionalId} history={history} />
+        </Suspense>
+      )}
     </>
   );
 }

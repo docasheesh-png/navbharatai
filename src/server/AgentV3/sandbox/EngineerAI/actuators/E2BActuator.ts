@@ -5,7 +5,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
@@ -910,7 +910,19 @@ export class E2BActuator implements IEngineerActuator {
         const w = await sandbox.commands.run(buildPortWaitCommand(port, seconds), { timeoutMs: (seconds + 5) * 1000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
         await h.disconnect().catch(() => {});
-        return w.stdout.includes('PORT_UP');
+        const up = w.stdout.includes('PORT_UP');
+        // ARM THE KEEPALIVE the moment the port is genuinely up — the sibling of the Postgres watchdog
+        // above, for the same root cause. The Shiv Medical Store report (2026-08-10) showed a dev server
+        // that started fine and was simply GONE ~4 minutes later, with no error in its log to classify,
+        // twice; the sandbox had reaped it. Bounded (see devServerWatchdogCommand) so a server dying of
+        // a real code error is never restarted forever. Best-effort: if nohup/setsid cannot detach in
+        // this sandbox, every existing reactive net still stands.
+        if (up) {
+          await sandbox.commands
+            .run(devServerWatchdogCommand({ port, runCommand: devCommand, cwd: WORKSPACE_ROOT }), { timeoutMs: 15_000 })
+            .catch(() => null);
+        }
+        return up;
       };
       const readDevLog = async (): Promise<string> =>
         sandbox.commands.run(`cat ${DEV_SERVER_LOG_PATH} 2>/dev/null | tail -80`, { cwd: WORKSPACE_ROOT, timeoutMs: 5000 })

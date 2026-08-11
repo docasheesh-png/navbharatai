@@ -18,6 +18,9 @@
 // PURE: no network, no I/O. The route supplies the log and the current file contents and writes back
 // whatever comes out, which is what makes every branch below unit-testable.
 
+import { toolchainForMajor } from './capacitorToolchain';
+import { capacitorMajorFromFiles } from './mobileProjectAssembler';
+
 /** Every failure class NavBharatAI can name from a build log. */
 export type RepairCode =
   | 'NPM_LOCK_CACHE'
@@ -596,8 +599,12 @@ export function repairFiles(
       return one(workflowPath, repairGradlewPermission(wf), 'NavBharatAI: allow the Android build tool to run') ?? refresh();
     case 'SDK_LICENSE_NOT_ACCEPTED':
       return one(workflowPath, repairSdkLicenses(wf), 'NavBharatAI: accept the Android build tool terms on the build machine');
-    case 'JAVA_VERSION_TOO_OLD':
-      return one(workflowPath, repairJavaVersion(wf), 'NavBharatAI: use the Java version this Android build needs');
+    case 'JAVA_VERSION_TOO_OLD': {
+      // Target the JDK THIS app's Capacitor major actually needs (governed toolchain), not a blind 21 —
+      // a Capacitor 6 app wants Java 17, a 7/8 app wants 21 (G2). repairJavaVersion only ever raises.
+      const targetJava = toolchainForMajor(capacitorMajorFromFiles(current)).java;
+      return one(workflowPath, repairJavaVersion(wf, targetJava), 'NavBharatAI: use the Java version this Android build needs');
+    }
     // The current workflow deterministically writes a placeholder @drawable/splash before compiling, so
     // refreshing our own workflow onto a repo that predates that fix IS the repair.
     case 'ANDROID_RESOURCE_LINKING':

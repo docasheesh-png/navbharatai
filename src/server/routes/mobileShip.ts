@@ -29,7 +29,7 @@ import {
 } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
-import { buildPackageJson, detectProjectKind } from '../lib/mobileProjectAssembler';
+import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
@@ -187,13 +187,14 @@ export function registerMobileShipRoutes(app: Express): void {
    * POST /api/github/push and follows `requiredSecrets` / SHIPPING.md.
    */
   app.post('/api/mobile-ship/kit', (req: Request, res: Response) => {
-    const { appName, appId, webDir, ios } = (req.body || {}) as Record<string, unknown>;
+    const { appName, appId, webDir, ios, capacitorMajor } = (req.body || {}) as Record<string, unknown>;
     try {
       const kit = generateShipKit({
         appName: typeof appName === 'string' ? appName : undefined,
         appId: typeof appId === 'string' ? appId : undefined,
         webDir: typeof webDir === 'string' ? webDir : undefined,
         ios: ios !== false,
+        capacitorMajor: typeof capacitorMajor === 'number' ? capacitorMajor : undefined,
       });
       res.json(kit);
     } catch (e) {
@@ -352,7 +353,9 @@ export function registerMobileShipRoutes(app: Express): void {
       // comments and summary text, so the repository's own name is a perfectly good source.
       const currentPkg = current['package.json'];
       const repair = repairFiles(diag, current, wfPath, {
-        workflow: generateShipKit({ appName: String(repo) }).files[wfPath],
+        // Regenerate the workflow with the Java THIS repo's Capacitor major needs, so a refresh of an old
+        // Capacitor-6 repo pins Java 17 rather than the newer default (G2).
+        workflow: generateShipKit({ appName: String(repo), capacitorMajor: capacitorMajorFromFiles(current) ?? undefined }).files[wfPath],
         packageJson: currentPkg
           ? buildPackageJson(currentPkg, String(repo), detectProjectKind({ 'package.json': currentPkg }))
           : undefined,

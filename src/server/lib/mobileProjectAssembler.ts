@@ -29,6 +29,11 @@
 //
 // Pure and unit-tested: no network, no filesystem.
 
+import { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
+// Re-exported so existing importers keep a stable surface; the canonical value lives in the governed
+// toolchain table (capacitorToolchain.ts) — one source of truth, never a second copy that can drift.
+export { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
+
 /** Ignore anything that cannot be part of a web build — these bloat the repo and break nothing by leaving. */
 const SKIP_PATH = /(^|\/)(node_modules|\.git|dist|build|\.next|\.cache|coverage)(\/|$)/;
 
@@ -174,9 +179,6 @@ export function buildPackageJson(
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 
-/** The Capacitor line NavBharatAI adds when the app expresses no preference of its own. */
-export const DEFAULT_CAPACITOR_MAJOR = 6;
-
 /** First major version number in a semver range, or null when there is nothing readable in it. */
 export function majorOfRange(range: string): number | null {
   const m = /(\d+)\s*\./.exec(String(range || ''));
@@ -199,6 +201,25 @@ export function capacitorMajor(all: Record<string, string>): number | null {
     if (m) return m;
   }
   return null;
+}
+
+/**
+ * The Capacitor major an app repo is built around, read from its package.json — or null when the app
+ * declares no Capacitor of its own (the caller then applies the governed DEFAULT). Threaded into the ship
+ * kit so the Android workflow pins the Java THIS app's Capacitor actually needs (G2, 2026-08-11).
+ */
+export function capacitorMajorFromFiles(files: Record<string, string>): number | null {
+  const raw = files['package.json'];
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null; // an unparseable package.json is a separate failure; here we simply express no preference
+  }
+  const deps = (pkg.dependencies as Record<string, string>) || {};
+  const devDeps = (pkg.devDependencies as Record<string, string>) || {};
+  return capacitorMajor({ ...deps, ...devDeps });
 }
 
 /** Keep what the app already declared when it agrees with the chosen major; otherwise align it. */

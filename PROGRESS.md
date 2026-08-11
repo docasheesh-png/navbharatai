@@ -30817,3 +30817,54 @@ secret" bypass — that bypass is a habit this repo should not acquire. The dete
 
 **All nine ROADMAP §2 items from the admin's list are now shipped:** #2262, #2265, #2266 (verified
 already-built), #2269, #2270, #2272, #2273, #2274, #2275.
+
+---
+
+## 2026-08-11 — Offline AI: you can finally DELETE the downloaded model
+
+**Admin:** "offline ai me beta download ka option to hai, par agar memory full ho jaye to delete ka
+option nahi. Waha ek aur option add karo — delete."
+
+**They were right, and the gap was worse than it looked.** "Turn off" called `resetOfflineLlm()`,
+which only drops an **in-memory reference** — the model weights web-llm cached on first download
+(hundreds of MB) stayed on the device **forever**. The screen even admitted it: *"stays cached on your
+device until you clear the app's browser data"* — honest, but inside an installed Android app that is
+not an instruction anyone can follow. On the low-end phones this feature exists for, a few hundred MB
+that cannot be freed is the difference between an app someone keeps and one they uninstall.
+**Turning a feature off must give back what turning it on took.**
+
+**What shipped:**
+- `deleteOfflineModel()` really removes the weights (`deleteModelAllInfoInCache` — weights AND the
+  wasm/config entries, since deleting only the weights would leave the small files behind and make
+  `hasModelInCache` disagree with what is actually on disk).
+- **It deletes across the WHOLE ladder**, not just the enabled model. The loader falls back from the
+  0.5B to the 360M model on weaker devices, so a phone can be holding weights for a model it never
+  ended up using — exactly the bytes nobody would think to look for.
+- The GPU/engine is unloaded FIRST; deleting the cache underneath a live engine leaves it pointing at
+  files that no longer exist.
+- **Honest by construction:** a browser that refuses (private mode, storage locked, no Cache API)
+  reports the failure — never a cheerful "space freed" over a device where nothing changed. But one
+  missing id does NOT turn a real deletion into a failure: the fallback model usually was never
+  fetched, and reporting failure then would tell the user nothing was freed while space genuinely
+  came back.
+- **The button is where someone hunting for space would actually look.** Beside the "on" state, yes —
+  but also **when the beta is already OFF and a model is still stored**, which is the case the admin
+  described. A Delete button that only appeared next to "on" would be hidden exactly where it is
+  needed. `offlineModelOnDevice()` decides that from a real device probe, so it never appears over
+  nothing; an unreadable cache reads as ABSENT rather than producing a button that then fails.
+- Confirmed before deleting — it is a real download to redo, on a phone that may be paying for data.
+- The probe is LAZY (runs when the panel opens, not on mount): it dynamically imports web-llm, and the
+  whole point of that lazy chunk is that a user who never touches the beta never downloads it.
+- "Turn off" and "Delete" are now explained as the different things they are: off keeps the model so
+  switching back on is instant; delete frees the space.
+
+`AppKnowledgeBase` updated in the same change (sync rule), including the words a user in this
+situation actually types — 'memory full', 'phone bhar gaya', 'jagah khali', 'model hatao'.
+
+Tests: 15 in `tests/offlineModelDelete.test.ts` — whole-ladder deletion, an explicit id list, a
+refusing browser reported honestly, one-missing-id still counting as success, no stale engine after
+delete, the on-device probe (including short-circuit and unreadable-cache), and wiring assertions that
+Delete appears in BOTH states, only over a real model, asks first, reports success only when the
+browser really deleted it, that the old "clear your browser data" dead end is gone, and that the probe
+stays lazy. Gate: tsc clean both projects, `npm run build` ✓, `npm run test:bundle` ✓,
+**14,085/14,085**.

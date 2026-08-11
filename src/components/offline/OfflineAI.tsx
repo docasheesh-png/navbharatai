@@ -15,7 +15,10 @@ import {
 } from '../../lib/offlineMemory';
 import { loadChat, saveChat, clearChat, type PersistedChatMsg } from '../../lib/offlineChatStore';
 import { probeDevice, recommendTier, TIER_INFO, type TierRecommendation } from '../../lib/offlineDeviceTier';
-import { loadOfflineLlm, resetOfflineLlm, STAGE1_MODEL, type OfflineLlm, type LlmProgress } from '../../lib/offlineLlmEngine';
+import {
+  loadOfflineLlm, resetOfflineLlm, deleteOfflineModel, offlineModelOnDevice,
+  STAGE1_MODEL, type OfflineLlm, type LlmProgress,
+} from '../../lib/offlineLlmEngine';
 import { loadBetaState, saveBetaState, shouldUseLlm, buildLlmMessages, type BetaState } from '../../lib/offlineBeta';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
@@ -203,6 +206,10 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   // ── Offline Thinking (beta) — on-device LLM, DEFAULT OFF ──────────────────────────────────────────
   const [beta, setBeta] = useState<BetaState>(() => { try { return loadBetaState(); } catch { return { enabled: false }; } });
   const [betaOpen, setBetaOpen] = useState(false);
+  /** True when model weights really are on this device — drives whether Delete is offered at all. */
+  const [modelOnDevice, setModelOnDevice] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteNote, setDeleteNote] = useState<string | null>(null);
   const [deviceRec, setDeviceRec] = useState<TierRecommendation | null>(null);
   const [dlProgress, setDlProgress] = useState<LlmProgress | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
@@ -278,9 +285,17 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   };
 
   // ── Beta controls ──────────────────────────────────────────────────────────────────────────────
+  /** Ask the device whether any model from the ladder is still stored, so Delete shows only when real. */
+  const refreshOnDevice = React.useCallback(async () => {
+    try { setModelOnDevice(await offlineModelOnDevice()); } catch { setModelOnDevice(false); }
+  }, []);
+
   const openBeta = () => {
     setBetaOpen((v) => !v);
     if (!deviceRec) probeDevice().then((s) => setDeviceRec(recommendTier(s))).catch(() => setDeviceRec(recommendTier({ webgpu: false })));
+    // Checked when the panel opens rather than on mount: it dynamically imports web-llm, and the whole
+    // point of that lazy chunk is that a user who never touches the beta never downloads it.
+    void refreshOnDevice();
   };
   const downloadAndEnable = async () => {
     setDlError(null);
@@ -302,6 +317,39 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
     resetOfflineLlm();
     const st: BetaState = { enabled: false };
     setBeta(st); saveBetaState(st);
+    void refreshOnDevice(); // the weights are still there — the Delete button must now appear
+  };
+
+  /**
+   * DELETE the downloaded model and give the space back (admin 2026-08-11: "agar memory full ho jaye
+   * to delete ka option nahi").
+   *
+   * Confirmed first, because it is a real download to redo — on a phone paying for data, silently
+   * discarding a few hundred MB the user waited for is its own harm. It is NOT reported as freed
+   * unless the browser genuinely removed it.
+   */
+  const deleteModel = async () => {
+    if (!window.confirm('Delete the downloaded AI model from this phone? It frees up the space, and you can download it again whenever you want.')) return;
+    setDeleting(true);
+    setDlError(null);
+    setDeleteNote(null);
+    try {
+      llmRef.current = null;
+      const res = await deleteOfflineModel();
+      if (res.ok) {
+        const st: BetaState = { enabled: false };
+        setBeta(st); saveBetaState(st);
+        setDeleteNote('Deleted. The space is back on your phone — download it again any time.');
+      } else {
+        // Never a cheerful "freed up!" over a device where nothing changed.
+        setDlError(`The model could not be deleted: ${res.error || 'your browser refused'}. Try again, or clear this app's storage from your phone's settings.`);
+      }
+    } catch (e) {
+      setDlError(`The model could not be deleted: ${e instanceof Error ? e.message : 'unknown error'}.`);
+    } finally {
+      setDeleting(false);
+      void refreshOnDevice();
+    }
   };
 
   const forget = (id: string) => persist(removeMemory(memories, id));
@@ -396,21 +444,41 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
                   </div>
                   <p className="text-[10px] text-[#8b949e] truncate">{Math.round((dlProgress.progress || 0) * 100)}% · {dlProgress.text || 'Downloading model…'}</p>
                 </div>
+              ) : deleting ? (
+                <p className="text-[11px] text-[#8b949e] flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting the model and freeing up space…</p>
               ) : beta.enabled ? (
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> On-device AI is ON</span>
-                  <button onClick={disableBeta} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 hover:border-red-400/40 hover:text-red-300 text-[11px] font-bold text-[#c9d1d9] transition-colors">
-                    Turn off
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={disableBeta} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 hover:border-white/20 text-[11px] font-bold text-[#c9d1d9] transition-colors">
+                      Turn off
+                    </button>
+                    <button onClick={deleteModel} title="Delete the downloaded model and free up the space" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/[0.08] border border-red-500/25 hover:bg-red-500/15 text-[11px] font-bold text-red-300 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <button onClick={downloadAndEnable} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white text-[12px] font-black transition-all active:scale-95">
-                  <Download className="w-4 h-4" /> Download &amp; enable (~{TIER_INFO[deviceRec.tier].approxDownloadMB} MB)
-                </button>
+                <div className="space-y-2">
+                  <button onClick={downloadAndEnable} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white text-[12px] font-black transition-all active:scale-95">
+                    <Download className="w-4 h-4" /> Download &amp; enable (~{TIER_INFO[deviceRec.tier].approxDownloadMB} MB)
+                  </button>
+                  {/* THE CASE THE ADMIN DESCRIBED (2026-08-11): the beta is already OFF, so nothing on
+                      screen mentions it — while the downloaded model still occupies hundreds of MB. This
+                      is where someone hunting for space actually looks, so the Delete button has to be
+                      here, not only next to the "on" state. It appears only when a model really is on
+                      the device. */}
+                  {modelOnDevice && (
+                    <button onClick={deleteModel} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-red-500/[0.08] border border-red-500/25 hover:bg-red-500/15 text-red-300 text-[11.5px] font-bold transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" /> Delete downloaded model — free up ~{TIER_INFO[deviceRec.tier].approxDownloadMB} MB
+                    </button>
+                  )}
+                </div>
               )}
 
               {dlError && <p className="flex items-start gap-1.5 text-[10.5px] text-red-300/90 leading-relaxed"><AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {dlError}</p>}
-              {beta.enabled && <p className="text-[10px] text-[#484f58] leading-relaxed">Turning off stops using it; the downloaded model stays cached on your device until you clear the app's browser data.</p>}
+              {deleteNote && <p className="flex items-start gap-1.5 text-[10.5px] text-emerald-300/90 leading-relaxed"><Trash2 className="w-3 h-3 shrink-0 mt-0.5" /> {deleteNote}</p>}
+              {beta.enabled && <p className="text-[10px] text-[#484f58] leading-relaxed">Turn off stops using it but keeps the model, so switching it back on is instant. Delete removes the model from your phone and frees the space — you can download it again any time.</p>}
             </>
           )}
         </div>

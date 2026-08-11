@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -234,6 +234,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
+
+  // UPDATE BROADCAST — "tell the users who are behind that a new build is on Play".
+  //
+  // Two steps on purpose. PREVIEW is safe and shows exactly who would be reached and who is excluded;
+  // SEND hands that same number back to the server, so a stale screen can never fire at a cohort the
+  // admin never actually saw. A notification cannot be un-sent.
+  const [updateCohort, setUpdateCohort] = useState<{
+    latestVersionCode: number | null; targetCount: number; upToDate: number;
+    unknownVersion: number; wrongPlatform: number; truncated: boolean; summary: string;
+  } | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+
+  const fetchUpdateCohort = useCallback(async () => {
+    setUpdateBusy(true);
+    try {
+      const r = await fetch('/api/admin/update-broadcast/preview', { headers });
+      setUpdateCohort(await r.json());
+    } catch { setUpdateCohort(null); }
+    finally { setUpdateBusy(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const sendUpdateBroadcast = useCallback(async () => {
+    if (!updateCohort || updateCohort.targetCount <= 0) return;
+    // The admin confirms a specific number of people, not a button.
+    if (!window.confirm(`Send an update notification to ${updateCohort.targetCount} device(s) on an older build?\n\nThis cannot be undone.`)) return;
+    setUpdateBusy(true);
+    try {
+      const r = await fetch('/api/admin/update-broadcast/send', {
+        method: 'POST', headers,
+        body: JSON.stringify({ confirmCount: updateCohort.targetCount }),
+      });
+      const d = await r.json();
+      // Report what the SERVER did, never what was requested — including a refusal and its reason.
+      toast(d?.blocked ? `Not sent — ${d.reason}` : d?.error ? `Failed — ${d.error}` : `Sent to ${d.sent} device(s).`);
+      await fetchUpdateCohort();
+    } catch { toast('Could not send the update notification.'); }
+    finally { setUpdateBusy(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, updateCohort, fetchUpdateCohort]);
 
   const fetchBuildReports = useCallback(async () => {
     setBuildReportsLoading(true);
@@ -484,7 +524,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { if (activeTab === 'overview') { fetchHealthScore(); fetchInsights(); } }, [activeTab, fetchHealthScore, fetchInsights]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
-  useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
+  useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
   useEffect(() => { if (activeTab === 'reports') fetchBuildReports(); }, [activeTab, fetchBuildReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
@@ -1844,6 +1884,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SETTINGS TAB ── */}
           {activeTab === 'settings' && (
             <div className="space-y-6">
+              {/* App update broadcast — reaches the user who has NOT opened the app, which the in-app
+                  banner by definition cannot. Targets only devices on an older build. */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-emerald-400" /> App Update Notification
+                </h3>
+                {updateCohort?.latestVersionCode == null ? (
+                  <p className="text-xs text-amber-300/90 leading-relaxed">
+                    ANDROID_LATEST_VERSION_CODE is not set in Cloud Run, so there is no release to announce.
+                    Set it to the versionCode of the build you uploaded to Play, then reload.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-[#8b949e] leading-relaxed">
+                      {updateCohort?.summary || 'Checking which devices are behind…'}
+                    </p>
+                    {updateCohort?.truncated && (
+                      <p className="text-[11px] text-amber-300/80">
+                        Device scan hit its cap — the real number of stale devices is higher than shown.
+                      </p>
+                    )}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        onClick={fetchUpdateCohort}
+                        disabled={updateBusy}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-white/5 text-[#c9d1d9] hover:bg-white/10 disabled:opacity-50"
+                      >
+                        Refresh
+                      </button>
+                      <button
+                        onClick={sendUpdateBroadcast}
+                        disabled={updateBusy || !updateCohort || updateCohort.targetCount <= 0}
+                        className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {updateBusy ? 'Working…' : `Send update notification${updateCohort ? ` (${updateCohort.targetCount})` : ''}`}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-[#6e7681] leading-relaxed">
+                      Only devices on an OLDER build are notified — anyone already up to date is skipped, and a
+                      device that has not reported its version is never guessed at. Android only (there is no iOS
+                      release). Tapping the notification opens the Play Store listing.
+                    </p>
+                  </>
+                )}
+              </div>
+
               {/* Maintenance Mode */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">

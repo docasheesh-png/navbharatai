@@ -18,6 +18,16 @@ import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, 
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
+import { selectStaleDevices, canBroadcast, cohortSummary, updateBroadcastPayload } from '../lib/updateBroadcast';
+import { deviceTokenStore } from '../lib/DeviceTokenStore';
+import { sendPushToUser } from '../lib/PushNotificationService';
+
+/**
+ * The last update broadcast, so a second one for the same version is blocked as a misclick.
+ * In-memory on purpose: it only has to survive long enough to stop a double-tap, and an instance
+ * restart making the guard forgiving is far better than a persisted record making it wrong.
+ */
+let lastUpdateBroadcast: { versionCode: number | null; at: number; devices: number } | null = null;
 import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
@@ -491,6 +501,75 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
+    }
+  });
+
+  // UPDATE BROADCAST (admin 2026-08-11) — tell the users who are actually BEHIND that a new build is
+  // on Play. The in-app banner (#2279) only reaches someone who opens the app; this reaches the person
+  // who has not opened it in three weeks, which is exactly the person who needs telling.
+  //
+  // IT IS NOT A BLAST TO EVERYONE, and that is the whole design. Notifying people who already updated
+  // is how a notification channel dies: tell someone on the newest build to "please update" once and
+  // they stop reading the next one. Targeting lives in updateBroadcast.ts and is unit-tested.
+  //
+  // Two routes on purpose: PREVIEW is safe to call and tells the admin exactly who would be reached
+  // and who is excluded; SEND requires that same count back, so a stale dashboard cannot fire at a
+  // cohort the admin never saw.
+  app.get('/api/admin/update-broadcast/preview', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const latest = Number.parseInt(String(process.env.ANDROID_LATEST_VERSION_CODE ?? '').trim(), 10);
+      const latestVersionCode = Number.isFinite(latest) && latest > 0 ? latest : null;
+      const { rows, truncated } = await deviceTokenStore.listAllTokens();
+      const cohort = selectStaleDevices(rows, latestVersionCode);
+      res.json({
+        latestVersionCode,
+        versionName: (process.env.ANDROID_LATEST_VERSION_NAME || '').trim() || null,
+        targetCount: cohort.targets.length,
+        upToDate: cohort.upToDate,
+        unknownVersion: cohort.unknownVersion,
+        wrongPlatform: cohort.wrongPlatform,
+        // An honest reach, not an implied one: say when the device scan hit its cap.
+        truncated,
+        summary: cohortSummary(cohort, latestVersionCode),
+        lastBroadcast: lastUpdateBroadcast,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Could not compute the update cohort.' });
+    }
+  });
+
+  app.post('/api/admin/update-broadcast/send', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const latest = Number.parseInt(String(process.env.ANDROID_LATEST_VERSION_CODE ?? '').trim(), 10);
+      const latestVersionCode = Number.isFinite(latest) && latest > 0 ? latest : null;
+      const confirmRaw = (req.body || {}).confirmCount;
+      const confirmCount = typeof confirmRaw === 'number' && Number.isFinite(confirmRaw) ? confirmRaw : null;
+
+      const { rows } = await deviceTokenStore.listAllTokens();
+      const cohort = selectStaleDevices(rows, latestVersionCode);
+      const gate = canBroadcast({
+        targetCount: cohort.targets.length,
+        confirmCount,
+        latestVersionCode,
+        lastBroadcastVersionCode: lastUpdateBroadcast?.versionCode ?? null,
+        lastBroadcastAt: lastUpdateBroadcast?.at ?? null,
+        now: Date.now(),
+      });
+      if (!gate.allowed) { res.status(409).json({ sent: 0, blocked: true, reason: gate.reason }); return; }
+
+      const payload = updateBroadcastPayload((process.env.ANDROID_LATEST_VERSION_NAME || '').trim() || null);
+      // Grouped by user because sendPushToUser owns the dead-token pruning for that user's tokens.
+      const byUser = new Map<string, number>();
+      for (const t of cohort.targets) byUser.set(t.uid, (byUser.get(t.uid) ?? 0) + 1);
+      let sentUsers = 0;
+      for (const uid of byUser.keys()) {
+        await sendPushToUser(uid, payload);
+        sentUsers += 1;
+      }
+      lastUpdateBroadcast = { versionCode: latestVersionCode, at: Date.now(), devices: cohort.targets.length };
+      res.json({ sent: cohort.targets.length, users: sentUsers, versionCode: latestVersionCode });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Could not send the update broadcast.' });
     }
   });
 

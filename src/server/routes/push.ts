@@ -17,13 +17,17 @@ export function registerPushRoutes(app: Express): void {
   app.post('/api/push/:userId/register-token', requireUserMatch('userId'), trackDevice('userId'), async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
-      const { token, platform } = req.body || {};
+      const { token, platform, appVersionCode } = req.body || {};
       if (typeof token !== 'string' || !token.trim()) {
         res.status(400).json({ error: 'token required' });
         return;
       }
       const plat: DevicePlatform = VALID_PLATFORMS.includes(platform) ? platform : 'web';
-      const ok = await deviceTokenStore.saveToken(userId, token.trim(), plat);
+      // The build this device is running — what makes "notify only the users who are behind"
+      // possible at all. Parsed strictly: junk becomes undefined (unknown), never a number.
+      const parsedVersion = Number.parseInt(String(appVersionCode ?? ''), 10);
+      const version = Number.isFinite(parsedVersion) && parsedVersion > 0 ? parsedVersion : undefined;
+      const ok = await deviceTokenStore.saveToken(userId, token.trim(), plat, version);
       if (!ok) {
         res.status(500).json({ error: 'Could not save the device token. Please try again.' });
         return;

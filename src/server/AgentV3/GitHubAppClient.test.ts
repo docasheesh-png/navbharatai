@@ -165,23 +165,36 @@ describe('repoNameForProject + config', () => {
     expect(a).not.toContain('!');
   });
 
-  describe('readable repo name (admin 2026-07-18: name-time-ddmmyy, not an opaque hash)', () => {
-    // 18 Jul 2026, 05:30 UTC == 11:00 IST → the admin's example "…-11am-180726".
+  describe('readable repo name (admin 2026-08-10: single word + date + time, as simple as possible)', () => {
+    // 18 Jul 2026, 05:30 UTC == 11:00 IST → stamp `18jul26-1100am`.
     const createdAtMs = Date.UTC(2026, 6, 18, 5, 30, 0);
-    it('produces a human-readable <name>-<time>-<ddmmyy>-<uniq> in IST', () => {
+    it('produces a simple <word>-<ddmonyy>-<hhmm><ampm>-<uniq> in IST (single word, not the phrase)', () => {
       const name = repoNameForProject('uid-9', 'sess-abc', { appName: 'Watch store landing page', createdAtMs });
-      expect(name).toMatch(/^watch-store-landing-page-11am-180726-[0-9a-f]{6}$/);
+      expect(name).toMatch(/^watch-18jul26-1100am-[0-9a-f]{4}$/); // ONE word, clear date+time, tiny tail
       expect(name).not.toContain(' ');
+    });
+    it('keeps only the FIRST word of a multi-word app name', () => {
+      const name = repoNameForProject('uid-9', 'sess-abc', { appName: 'Grocery Delivery Pro', createdAtMs });
+      expect(name).toMatch(/^grocery-18jul26-1100am-[0-9a-f]{4}$/);
+    });
+    it('keeps the next token when the first word is too short to mean anything (e-commerce)', () => {
+      const name = repoNameForProject('uid-9', 'sess-abc', { appName: 'E-Commerce Store', createdAtMs });
+      expect(name).toMatch(/^e-commerce-18jul26-1100am-[0-9a-f]{4}$/);
+    });
+    it('shows the time to the MINUTE, not just the hour', () => {
+      const t = Date.UTC(2026, 6, 18, 8, 17, 0); // 13:47 IST
+      const name = repoNameForProject('uid-9', 'sess-abc', { appName: 'Blog', createdAtMs: t });
+      expect(name).toMatch(/^blog-18jul26-0147pm-[0-9a-f]{4}$/);
     });
     it('is STABLE across turns — same identity → same name (so ensureRepo never spawns a new repo)', () => {
       const a = repoNameForProject('uid-9', 'sess-abc', { appName: 'Watch store', createdAtMs });
       const b = repoNameForProject('uid-9', 'sess-abc', { appName: 'Watch store', createdAtMs });
       expect(a).toBe(b);
     });
-    it('the uniq suffix is keyed on projectId — different sessions never collide into one repo', () => {
+    it('the uniq suffix is keyed on projectId — different projects never collide into one repo', () => {
       const a = repoNameForProject('uid-9', 'sess-A', { appName: 'Watch', createdAtMs });
       const b = repoNameForProject('uid-9', 'sess-B', { appName: 'Watch', createdAtMs });
-      expect(a).not.toBe(b); // same name + hour, different project → distinct repos (no data mixing)
+      expect(a).not.toBe(b); // same word + minute, different project → distinct repos (no data mixing)
     });
     it('falls back to the legacy shape when the app name slugs to empty', () => {
       const name = repoNameForProject('uid-9', 'sess-abc', { appName: '!!!', createdAtMs });
@@ -193,10 +206,11 @@ describe('repoNameForProject + config', () => {
     });
   });
 
-  it('readableTimeStamp formats an epoch as <12h><am|pm>-<ddmmyy> in IST', () => {
-    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 5, 30, 0))).toBe('11am-180726'); // 11:00 IST
-    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 18, 30, 0))).toBe('12am-190726'); // 00:00 IST next day
-    expect(readableTimeStamp(Date.UTC(2026, 0, 1, 6, 30, 0))).toBe('12pm-010126'); // 12:00 IST noon
+  it('readableTimeStamp formats an epoch as <ddmonyy>-<hhmm><am|pm> in IST', () => {
+    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 5, 30, 0))).toBe('18jul26-1100am'); // 11:00 IST
+    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 18, 30, 0))).toBe('19jul26-1200am'); // 00:00 IST next day
+    expect(readableTimeStamp(Date.UTC(2026, 0, 1, 6, 30, 0))).toBe('01jan26-1200pm'); // 12:00 IST noon
+    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 8, 17, 0))).toBe('18jul26-0147pm'); // 13:47 IST (to the minute)
   });
 
   it('githubConfigFromEnv returns null unless all 3 vars are set, and normalises \\n', () => {

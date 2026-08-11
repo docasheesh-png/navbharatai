@@ -430,6 +430,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⚠️ **What to watch on the first real builds:** parallel build is the only one that changes HOW a build
   runs — its speedup is unmeasured and needs a real large multi-file build to judge. The other three are
   advisory or deterministic and cannot fail a build. Any of them reverts instantly by unsetting it.
+- **Android update notice (added 2026-08-11, admin sets after each Play upload):**
+  `ANDROID_LATEST_VERSION_CODE` (the versionCode of the build now live on Play — the android-aab
+  workflow stamps each build with the CI run number, so this is that number), `ANDROID_LATEST_VERSION_NAME`
+  (optional, shown in the message), `ANDROID_MIN_VERSION_CODE` (⚠️ FORCES an update for builds below it —
+  deliberately a SEPARATE key from the release number, because blocking someone out of an app they already
+  installed must be a decision, never a side effect of shipping; leave UNSET on a routine release),
+  `ANDROID_STORE_URL` (optional override of the Play listing).
+  **UNSET is safe by construction:** `/api/app-version` then returns a null versionCode and the client
+  treats an unknown as "no update", so a misconfiguration shows NOTHING rather than a false prompt.
+  Automating this needs a Play Developer service account, which this project does not have — until then
+  one number is set by hand after each upload, and that is stated plainly rather than pretended away.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

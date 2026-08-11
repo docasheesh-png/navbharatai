@@ -29482,3 +29482,29 @@ refresh, which now carries this heal too.
 
 **Verification:** emitted YAML inspected (literal \n, valid shell, $RES literal); mobileShipKit + repair
 suites 82/82; `tsc -p tsconfig.server.json` clean.
+## 2026-08-11 — History scoping: Free → only Free; Professionals → only that user's professional chats
+
+Admin: (4) NavBharatAI Free's History must show ONLY Free chats, not the whole app; (5) the Professionals
+History must show ONLY professional conversations — "abhi sabhi (puri) history show kar raha hai, jo galat hai".
+
+ROOT CAUSE (mapped by an Explore agent):
+- Free: the footer already opened History pre-filtered to 'free', but the filter TABS let the user switch to
+  All/Pro/SDA — so it wasn't actually scoped.
+- Professionals: the hub's History opened the generic `HistoryView`, which reads Firestore `chat_sessions`
+  (free/pro/build sessions) with filter 'all'. But professional chats are NOT in `chat_sessions` at all —
+  each professional keeps its own rolling buffer in localStorage `prof_<id>_messages`. So the professional
+  History showed unrelated sessions and ZERO of the professional's real chats.
+
+FIX:
+- `HistoryView.tsx`: new `lockFilter` prop — when set (Free → History), the filter/mode TABS are hidden and
+  the scope is FIXED to `initialFilter`, so Free shows only Free sessions and cannot be switched to the whole
+  app. `App.tsx` passes `lockFilter={historyInitialFilter === 'free'}`.
+- New `ProfessionalHistoryView.tsx` + `readProfessionalHistory()`: reads the RIGHT source — the localStorage
+  `prof_<id>_messages` buffers — and lists one row per professional the user ACTUALLY chatted with (a lone
+  opening greeting is excluded; a user message is required). Each row resumes that professional (`toggleTab`
+  on the professional's id = its ViewType), with a per-conversation delete. The Professionals footer now sets
+  the scope to `'professional'` and `App.tsx` renders `ProfessionalHistoryView` for it — never the generic
+  session list.
+
+**Verification:** `npm run build` ✅ · `tsc --noEmit` clean · `dynamicFooter` 5/5 (locks the scoped wiring)
++ `professionalHistory` 4/4 (only-own, welcome-excluded, empty, corrupt-safe).

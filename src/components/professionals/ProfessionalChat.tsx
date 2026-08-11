@@ -7,6 +7,8 @@ import { auth } from '../../lib/firebase';
 import { fetchPassStatus, type PassStatus } from './professionalPass';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -68,6 +70,11 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   // same wallet as a build). Telling an empty-balance user they "used their free messages" would be
   // simply untrue, and would offer them the wrong action.
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login' | 'wallet'>(null);
+  // Shared composer toolbar state (admin 2026-08-10) — the Enter preference comes from the ONE key
+  // every AI reads, so the setting follows the user between screens instead of resetting per chat.
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
   // snaps back to 1 line when send() clears the input.
@@ -174,7 +181,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           const lastUser = [...messages].reverse().find((m) => m.role === 'user');
           return lastUser ? <AppUpdateChatNotice userText={lastUser.content} /> : null;
         })()}
-        {messages.map((m, i) => (
+        {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>
               {m.content}
@@ -206,6 +213,29 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         </div>
       )}
 
+      {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). The professionals
+          had none of it — no way to change how Enter behaves, no way to find something said earlier,
+          no way to start over without clearing site data. Clear also drops the SAVED transcript, not
+          just the on-screen one: this chat restores itself from localStorage on mount, so wiping only
+          the array would resurrect the whole conversation on the next visit. */}
+      <div className="px-3 pt-2 shrink-0">
+        <ChatToolbar
+          messageCount={messages.length}
+          sendOnEnter={sendOnEnter}
+          onSendOnEnterChange={setSendOnEnter}
+          searchQuery={chatSearchQuery}
+          onSearchQueryChange={setChatSearchQuery}
+          searchOpen={showChatSearch}
+          onSearchOpenChange={setShowChatSearch}
+          searchMatches={filterMessages(messages as any, chatSearchQuery).length}
+          onClear={() => {
+            setMessages([{ role: 'assistant', content: config.welcome }]);
+            try { localStorage.removeItem(storeKey); } catch { /* private mode — the screen is still cleared */ }
+          }}
+          charCount={input.length}
+        />
+      </div>
+
       <div className="p-3 border-t border-white/5 flex items-end gap-2 shrink-0">
         <AttachMenu
           onFiles={(fl) => addFiles(fl)}
@@ -219,7 +249,21 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           ref={composerRef}
           value={input}
           onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 128); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          onKeyDown={(e) => {
+            // Was unconditional: Enter ALWAYS sent, the toggle did not exist here, and it fired mid-IME
+            // composition — so a Hindi or CJK typist sent a half-finished word. One shared rule now.
+            if (enterShouldSend({
+              key: e.key,
+              shiftKey: e.shiftKey,
+              sendOnEnter,
+              hasContent: !!input.trim() || files.length > 0,
+              isBusy: loading,
+              isComposing: (e.nativeEvent as any)?.isComposing,
+            })) {
+              e.preventDefault();
+              void send();
+            }
+          }}
           onPaste={(e) => {
             const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
             const pasted = items.map((it) => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean) as File[];

@@ -10,6 +10,8 @@ import { saveSecret } from '../../lib/secretsApi';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { AgentProgress, BuildStep } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { filterMessages, enterShouldSend } from '../../lib/chatToolbar';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
@@ -1001,22 +1003,9 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
       </AnimatePresence>
 
-      {/* B17: Chat search bar */}
-      {showChatSearch && (
-        <div className="px-3 py-2 border-b border-white/5 bg-black/20 flex items-center gap-2">
-          <Search className="w-3 h-3 text-[#484f58] shrink-0" />
-          <input
-            autoFocus
-            value={chatSearchQuery}
-            onChange={e => setChatSearchQuery(e.target.value)}
-            placeholder="Search messages..."
-            className="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-[#484f58]"
-          />
-          <button onClick={() => { setShowChatSearch(false); setChatSearchQuery(''); }} className="text-[#484f58] hover:text-white">
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
+      {/* The search field used to live HERE, at the top of the transcript, while the button that
+          opened it sat down by the composer — on a phone the two are a screen apart and read as
+          unrelated features. It now renders inside <ChatToolbar/>, next to its own button. */}
 
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
         {/* App-update notice — first message once the user has chatted, in their language (native app,
@@ -1188,9 +1177,8 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
 
         <AnimatePresence>
-          {messages
-            .filter(msg => !chatSearchQuery || (msg.text || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
-            .map((msg, index) => {
+          {filterMessages(messages as any, chatSearchQuery)
+            .map((msg: any, index: number) => {
             if (!msg) return null;
             const cleanedText = msg.text || (msg as any).content || "No Text";
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
@@ -1619,70 +1607,31 @@ export const AIChat: React.FC<AIChatProps> = ({
             )}
             {/* Composer actions — moved ABOVE the input (admin 2026-07-15): a compact chip row so the
                 on-screen keyboard never hides them and they read as real, tappable buttons on the native
-                app. The parent's space-y handles the gap to the input below. */}
-            <div className="flex items-center justify-between px-0.5">
-              <div className="flex items-center gap-2 min-w-0">
-                {isPinned && (
-                  <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
-                    <Zap className="w-2 h-2 fill-current" />
-                    Pinned
-                  </div>
-                )}
-                {input.length > 60 && (
-                  <span className={`text-[9px] font-mono ${input.length > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
-                    {input.length}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {/* Enter sends toggle */}
-                <button
-                  onClick={() => { const v = !sendOnEnter; setSendOnEnter(v); localStorage.setItem('chat_sendOnEnter', String(v)); }}
-                  title={sendOnEnter ? 'Enter sends message (click to toggle)' : 'Shift+Enter sends (click to toggle)'}
-                  className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10 transition-all active:scale-95"
-                >
-                  {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
-                </button>
-                {messages.length > 0 && (
-                  <>
-                    {/* Toggle chat search */}
-                    <button
-                      onClick={() => { setShowChatSearch(v => !v); if (showChatSearch) setChatSearchQuery(''); }}
-                      title="Search messages (Ctrl+F)"
-                      className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all active:scale-95 ${showChatSearch ? 'bg-indigo-600/20 text-indigo-400' : 'bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10'}`}
-                    >
-                      Search
-                    </button>
-                    {/* Export chat as markdown */}
-                    <button
-                      onClick={() => {
-                        const md = messages.map(m => {
-                          const role = m.sender === 'user' ? '**You**' : '**AI**';
-                          return `${role}\n\n${m.text || ''}\n`;
-                        }).join('\n---\n\n');
-                        const blob = new Blob([md], { type: 'text/markdown' });
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = `chat-${new Date().toISOString().slice(0, 10)}.md`;
-                        a.click();
-                        URL.revokeObjectURL(a.href);
-                      }}
-                      title="Export chat as Markdown"
-                      className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10 transition-all active:scale-95"
-                    >
-                      Export
-                    </button>
-                    <button
-                      onClick={() => { if (window.confirm('Clear conversation?')) { onSendSuggestion?.('__CLEAR_CHAT__'); } }}
-                      title="Clear conversation"
-                      className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10 transition-all active:scale-95"
-                    >
-                      Clear
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+                app. The parent's space-y handles the gap to the input below.
+                SHARED SINCE 2026-08-10 (admin: "wahi sabhi jagah laga do") — this row used to be written
+                out here and nowhere else, which is precisely why the four AIs' input boxes drifted. It
+                is now <ChatToolbar/>, identical above every AI. EXPORT IS GONE ("han kato!"): it saved
+                the transcript as a .md file, which nobody does on a phone, and it was the only control
+                in the row that acted on the past rather than the message being written. */}
+            <ChatToolbar
+              className="px-0.5"
+              messageCount={messages.length}
+              sendOnEnter={sendOnEnter}
+              onSendOnEnterChange={setSendOnEnter}
+              searchQuery={chatSearchQuery}
+              onSearchQueryChange={setChatSearchQuery}
+              searchOpen={showChatSearch}
+              onSearchOpenChange={setShowChatSearch}
+              searchMatches={filterMessages(messages as any, chatSearchQuery).length}
+              onClear={() => onSendSuggestion?.('__CLEAR_CHAT__')}
+              charCount={input.length}
+              leftSlot={isPinned ? (
+                <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+                  <Zap className="w-2 h-2 fill-current" />
+                  Pinned
+                </div>
+              ) : null}
+            />
 
             <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
@@ -1696,7 +1645,18 @@ export const AIChat: React.FC<AIChatProps> = ({
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && sendOnEnter && !isLoading && (input.trim() || attachments.length > 0)) {
+                      // Shared rule (lib/chatToolbar): it also honours the toggle being OFF — where
+                      // Shift+Enter becomes the send key — and never fires mid-IME-composition, where
+                      // Enter is committing a candidate rather than sending. The old inline condition
+                      // did neither, so a Hindi or CJK typist sent half a word.
+                      if (enterShouldSend({
+                        key: e.key,
+                        shiftKey: e.shiftKey,
+                        sendOnEnter,
+                        hasContent: !!input.trim() || attachments.length > 0,
+                        isBusy: isLoading,
+                        isComposing: (e.nativeEvent as any)?.isComposing,
+                      })) {
                         e.preventDefault();
                         onSend(attachments);
                         setAttachments([]);

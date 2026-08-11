@@ -30022,3 +30022,60 @@ sandbox has recycled ("that checkpoint isn't active in this session yet"), even 
 files are durably persisted in `WorkspaceFileStore`. The honest message is good; the underlying
 limitation may be removable by restoring from the durable store rather than requiring live git. Not
 started — it needs its own verification pass first.
+## 2026-08-10 — One input box for every AI: slice 2, the row is REAL now
+
+**Admin:** "sabhi AI's ke input ka acche cheezein utha kar best input box banao, aur wahi sabhi jagah
+laga do … NavBharatAI Free me ON SEND, SEARCH, CLEAR option hai (input box ke just upar), yeh sabhi
+jagah hona chahiye (Export wale ko hata sakte hai)." On Export, asked directly: **"han kato!"**
+
+Slice 1 (#2225) shipped only the DECISIONS with nothing user-visible — an honest but unfinished state.
+This slice makes it real: the row now renders above the input on **all four AIs**.
+
+**Why the row was worth centralising rather than copy-pasting.** It already existed — in exactly ONE
+place, hand-written inside a 1,700-line component, with its preference written straight to
+localStorage at the call site. Copying that block into three more screens is precisely how the four
+input boxes drifted apart to begin with. So `lib/chatToolbar.ts` holds the decisions (toggle label and
+tooltip, whether the actions have anything to act on, what Clear asks, how search matches) and
+`components/chat/ChatToolbar.tsx` is a thin shell over them.
+
+**Three real defects found and fixed while wiring it — none of them was the feature asked for:**
+1. **IME composition.** Three of the four composers checked only `e.key === 'Enter'`, so a Hindi or
+   CJK typist choosing a candidate **sent a half-finished word**. In an India-first app that is not an
+   edge case. `enterShouldSend` refuses while `isComposing`.
+2. **v5.0 guessed Enter from the DEVICE** (`!isTouchDevice`) — wrong in both directions: a phone with a
+   Bluetooth keyboard could not send from it, and a laptop user writing a long spec could not get a
+   newline. It is the user's own toggle now.
+3. **Doctor AI had no keyboard send at all** — every message needed a tap, which on a desktop consult
+   is the slowest possible way to work.
+
+**Per-screen care (a shared row is not a uniform one):**
+- **Doctor AI** — Clear routes to `startNewCase()`, not `setMessages([])`. A consult carries a per-case
+  id and a SERVER-side clinical store; blanking the screen while the previous patient's demographics
+  and red flags stayed live would be a clinical-safety bug, not a UI one.
+- **v5.0** — Clear starts a new SESSION. A thread owns a workspace, build lock, preview and report;
+  emptying the bubbles alone is the "+New chat leak" class this panel has been root-caused for twice.
+  It is also withheld while a build runs. Search filters what the TIMELINE is built from, never `convo`
+  itself, so a query with no hits cannot make the cold-start template screen appear.
+- **Professionals** — Clear also drops the SAVED transcript; this chat restores from localStorage on
+  mount, so wiping only the array would resurrect the conversation on the next visit.
+- **IDE/free chat** — the search field moved from the top of the transcript down INTO the toolbar,
+  beside the button that opens it. On a phone the two were a screen apart and read as unrelated.
+- The `leftSlot` prop keeps each screen's own badges (the IDE's "Pinned" chip): unifying the CONTROLS
+  should not erase what makes a screen itself, or the row gets re-forked the first time one is needed.
+
+**EXPORT CUT** ("han kato!") — it downloaded the transcript as a .md file, which nobody does on a
+phone, and it was the only control in the row that acted on the past rather than the message being
+written. Nothing replaces it.
+
+Tests: 23 in `tests/chatToolbar.test.ts` — the preference's single key and safe default (including a
+storage that throws), the send rule in all its directions (inverted toggle, IME, empty, busy), the
+visibility rule, Clear's singular/plural and its "cannot be brought back", search matching inside a
+token (`useState` finds `useState(0)`) and never blanking on an empty query, plus wiring assertions
+that each of the four screens genuinely renders the toolbar, shares the Enter rule, actually FILTERS
+its rendered messages, and wires Clear to something real — and that Export and the hand-rolled toggles
+are gone. Gate: tsc clean both projects, `npm run build` ✓, full run **13,598/13,598**.
+
+**STILL TO COME (honest status):** delete + edit on a sent message (slice 1's `chatMessageActions.ts`
+is written and tested but not yet wired to any screen), and paid voice chat (slice 3 — consent popup,
+per-second metering and the wallet debit must ship together, since `src/server/sonic/` charges nothing
+today and a popup alone would lie).

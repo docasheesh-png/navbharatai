@@ -18,6 +18,8 @@ import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -250,6 +252,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // Shared composer toolbar state (admin 2026-08-10). The Enter preference is read from the ONE key
+  // every AI uses, so changing it on any screen changes it here too — that is the point of unifying.
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   const [teachingMode, setTeachingMode] = useState(false);
   const [showPatientPanel, setShowPatientPanel] = useState(true);
   // Quick Tools: the doctor's hide/show choice is REMEMBERED (it used to reset open on every mount,
@@ -813,7 +820,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             const lastUser = [...messages].reverse().find(m => m.sender === 'doctor');
             return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
           })()}
-          {messages.map(msg => (
+          {filterMessages(messages as any, chatSearchQuery).map((msg: any) => (
             <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
               {msg.sender === 'sda' && (
                 <div className="w-7 h-7 rounded-full bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
@@ -962,6 +969,26 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         {/* Input Area */}
         <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/30 px-4 pb-3 pt-2">
 
+          {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). Doctor AI had
+              none of this — no Enter-to-send preference, no way to find something said earlier in a long
+              consult. Clear routes to startNewCase() rather than emptying the array, because a Doctor AI
+              conversation carries a per-case id and a server-side clinical store: blanking the screen
+              while the previous patient's demographics and red flags stayed live on the server would be
+              a clinical-safety bug, not a UI one. */}
+          <ChatToolbar
+            className="mb-2"
+            messageCount={messages.length}
+            sendOnEnter={sendOnEnter}
+            onSendOnEnterChange={setSendOnEnter}
+            searchQuery={chatSearchQuery}
+            onSearchQueryChange={setChatSearchQuery}
+            searchOpen={showChatSearch}
+            onSearchOpenChange={setShowChatSearch}
+            searchMatches={filterMessages(messages as any, chatSearchQuery).length}
+            onClear={startNewCase}
+            charCount={input.length}
+          />
+
           {/* Attached file preview */}
           {attachedFile && (
             <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-[#111827] border border-emerald-900/40 rounded-xl">
@@ -1020,6 +1047,22 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   ref={inputRef}
                   value={input}
                   onChange={e => { setInput(e.target.value); autoResize(e.target); }}
+                  onKeyDown={(e) => {
+                    // Doctor AI previously had NO keyboard send at all — every message needed a tap on
+                    // the button, which on a desktop consult is the slowest possible way to work. Same
+                    // shared rule as every other AI now, IME-safe and honouring the toggle.
+                    if (enterShouldSend({
+                      key: e.key,
+                      shiftKey: e.shiftKey,
+                      sendOnEnter,
+                      hasContent: !!input.trim() || !!attachedFile,
+                      isBusy: loading,
+                      isComposing: (e.nativeEvent as any)?.isComposing,
+                    })) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
                   placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
                   rows={1}
                   className="flex-1 bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed overflow-y-auto custom-scrollbar"

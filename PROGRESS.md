@@ -27874,6 +27874,120 @@ call site, not one), and main's `nanoid: ^3.3.17` range adopted over my `^3.3.18
 
 Gate: tsc clean both projects, full run 12,540/12,540, audit gate green.
 
+---
+
+## 2026-08-05 — master import handler, part 2: the browser path is now the DEFAULT
+
+Part 1 (#2105) built the browser reader. This wires it in, so a real import actually takes it.
+
+### `src/lib/masterZipImport.ts` (new) — one entry point, two transports
+`importProjectArchive()` ALWAYS tries the browser first, because reading locally is better on every
+axis: the tree is known before any network call, `node_modules`/media/junk cost no bandwidth, the
+server never holds a gigabyte in its memory-backed `/tmp`, and the multi-instance chunk-scatter risk
+disappears along with the chunked upload. The surviving source is POSTed to the EXISTING
+`/api/agentv3/import-files`, chunked through the EXISTING `chunkFilesForSync` — no new endpoint and no
+second chunker (a large monorepo's source can still exceed the per-request cap even after node_modules
+is gone).
+
+### The fallback is deliberate, and deliberately narrow
+`readZipInBrowser` can legitimately fail — a browser without the APIs zip.js needs, a phone that runs
+out of memory, a corrupt central directory. Deleting the server path would turn each into a dead end,
+so it stays. But `shouldFallBackToServer()` refuses to retry a **password-protected** archive: that is a
+real answer, not a transport failure, and uploading 1 GB to reach the same verdict five minutes later
+is strictly worse for the user than saying it now. The degrade is also SPOKEN ("Opening it here did not
+work — uploading the archive instead…") so a sudden multi-minute upload is never unexplained.
+
+### Honesty carried through
+- `partialSaveWarning()` — a part-failed batch send says so explicitly ("do not assume the whole project
+  is in yet"). A partial import must never read as a whole one.
+- An archive whose every entry is filtered out is answered immediately with the reason, instead of
+  uploading first and reaching the same verdict on the server.
+- The browser path hands `files` straight to `onFilesSync`, so Files paints from data this tab already
+  read rather than waiting on a round trip for it.
+
+### Dead code removed rather than left lying around
+`zipImportProgressLabel()` was superseded by the master handler's own labels and survived only in its
+own test. Deleted: two labellers for one flow is how two paths start telling the same user different
+things.
+
+### Verification
+`tsc` (frontend + server) clean; full suite green.
+
+### Note on how part 1 landed
+PR #2105 was merged by the admin after someone resolved a conflict outside this session. Verified
+afterwards rather than assumed: all three part-1 files are present on `main`, and the other session's
+`SKIP_DIR_RE` additions (`.local`, `.claude`, `.cursor`, `.windsurf`, `.continue`, `.codeium`, `.aider`)
+were re-checked BY BEHAVIOUR through the shared module — all seven still skip, and `src/App.tsx` is
+still kept.
+
+### Remaining in the handler
+Part 3 — File System Access "Open Folder" (two-way, no upload at all on desktop Chrome/Edge).
+Part 4 — the connect-time audit.
+
+---
+
+## 2026-08-05 — master import handler, part 3: "Open Folder" — no zip at all
+
+Parts 1-2 stopped shipping a gigabyte by reading the ZIP in the browser. This removes the zip too.
+
+### What it does
+`📎 Attach → Open project folder` (Chrome/Edge desktop). The user points at their project folder and
+the browser reads it where it already is — nothing compressed, nothing staged, and the only bytes that
+leave the machine are the source files.
+
+It removes a failure CLASS rather than mitigating one: no archive to be truncated, no temp file on a
+Cloud Run instance, no chunk that can land on the wrong instance, no 30-minute upload TTL, no memory
+ceiling from holding an archive — because there is no archive. A 50 GB folder opens as cheaply as a
+5 MB one.
+
+### The decision that makes it fast
+**Prune before descending.** `node_modules` in a real project is 50,000-200,000 files. Walking into it
+to reject each entry individually would take minutes for a verdict already known from the folder name,
+so `SKIP_DIR_RE` is tested against the DIRECTORY before recursing. The biggest folder in the project
+costs exactly one check. This is the assertion the test suite cares most about (`visited` must never
+contain `node_modules`, `react` or `.git`), because the pure helpers cannot catch a traversal that
+descends anyway.
+
+### Shared, not duplicated (rule 4, three times over)
+- Every keep/drop verdict comes from `keepVerdict` — the same function the zip path uses, over the same
+  `importRules`. A folder import and a zip import of the same project MUST land identical files, or the
+  two paths quietly disagree and only one of them is right.
+- `readFolderInBrowser` returns the identical `BrowserZipResult` shape, so the master handler and the
+  panel treat a folder and an archive the same way and neither learns a second vocabulary.
+- The panel's two entry points were collapsed into ONE `runProjectImport` runner. The zip and folder
+  paths differ only in where the bytes come from; the precondition, progress line, honest summary,
+  Files hand-off and error surface are identical, and duplicating them is how two ways in start
+  behaving differently for no reason anyone chose.
+
+### Honest by construction
+- The menu item is gated on `isFolderImportSupported()` — real capability, not a browser sniff. Offering
+  a button that throws on Firefox or a phone is worse than not offering it, and the `.zip` option (which
+  now does the same in-browser filtering) stays for everyone.
+- A cancelled picker returns null and is treated as a normal outcome, never surfaced as a failure.
+- A file the OS refuses to hand over (permissions, broken link) is counted and skipped — one bad file
+  never aborts a 4,000-file import.
+- No invented percentage: a folder walk has no known total until it ends, so the progress line shows the
+  real running count instead.
+
+### Verification
+10 tests in `folderImport.test.ts`, including a fake directory tree that exercises the real traversal.
+One test-harness bug found and fixed along the way: `Blob.size` is a read-only getter, so
+`Object.assign`-ing a size onto a Blob throws — the walk then (correctly) counted every file as
+unreadable, and the test would have been measuring its own harness instead of the traversal.
+`tsc` (frontend + server) clean; full suite green. `AppKnowledgeBase.ts` updated in the same change.
+
+### ⚠️ NOT pushed — this session lost GitHub write access
+`git push`, `merge_pull_request` and the MCP `push_files` all return 403 while READS still work; the
+session's git relay changed port (41729 → 41789) and the write credentials went with it. Parts 2 and 3
+are committed locally and were delivered to the admin as patches. Nothing here is unverified — the gate
+was run in full — but it is unmerged until a session with write access applies it.
+
+### Remaining
+Part 4 — the connect-time audit (the "30 seconds after connecting" idea the admin has not yet chosen).
+Also still open from earlier: two-way write-back to the opened folder, which is the genuinely novel half
+of "Open Folder" and deliberately NOT attempted in the same change as the read path — writing to a
+user's real disk is irreversible from our side and deserves its own design.
+---
 ## 2026-08-08 — Pro v5 theme bug: the -950 family never followed the theme (admin report)
 
 Admin: "Pro v5 ke andar theme badalne se background dark hi rahta hai." Root cause was one missing
@@ -30245,6 +30359,55 @@ between a bill a user can explain and one they cannot. 2 more tests (28 in `voic
 
 ---
 
+## 2026-08-10 — master import handler, part 4: the first thirty seconds after a project connects
+
+Parts 1-3 made getting a project IN fast. That is plumbing, and plumbing is not a reason to choose us —
+every builder can list files after an import. This is the part that is.
+
+### The idea
+The moment right after connecting is the product. A user who imports 2,460 files and immediately reads
+"3 imports point at files that do not exist, 14 components are never rendered, 2 front-end files import
+server-only modules" has a reason to have brought their app HERE. And the next thing they say is
+"fix these" — which is the first build.
+
+### Built from what already existed (safeguard 6 + rule 4)
+`analyzeArchitecture` and `findUnwiredFiles` were already in the repo and are deliberately conservative
+(they exclude entries, tests, configs, type declarations, stories and file-based routes so a reported
+item is very likely real). NOT rebuilt. `ConnectAudit.ts` contributes only the part that was missing:
+turning their output into something an owner can act on.
+
+**Zero model calls, zero cost.** That is what makes it safe to show unprompted.
+
+### Three deliberate limits — the reason this can be trusted
+1. **No score, no grade.** No "your app is 40% slower". None of that was measured here, and claiming it
+   would be invented authority.
+2. **A clean project gets a short honest line, never manufactured concern.** An audit that cries wolf
+   destroys trust in one screen — and then the next REAL finding is not believed.
+3. **It never offers to "fix" unused files.** Repairing that finding means deleting someone's files on a
+   guess. Reported, deliberately not offered.
+
+Every finding carries real examples, so a claim can be checked rather than trusted. Example counts are
+bounded at 3 while the COUNT stays true — a 3,000-item finding must not become a wall of text, and must
+not under-report either.
+
+### Wiring
+`POST /api/agentv3/connect-audit` indexes the workspace (bounded at 1,500 files, like every other
+indexing call here) and runs the analyzers. The panel fires it **after** the preview boot is signalled,
+fire-and-forget: a courtesy finding must never delay what the user actually asked for, and a failed
+audit returns 200 with an empty message rather than manufacturing an error over work nobody requested.
+
+### Verification
+9 tests in `ConnectAudit.test.ts` — including that a clean project's message contains no score/grade
+wording, and that the fix offer appears ONLY when something is genuinely repairable. `tsc` (frontend +
+server) clean; full suite green. `AppKnowledgeBase.ts` updated in the same change.
+
+### Note on the surrounding work
+Merging `main` (44 commits) brought in another session's fix for something recorded here as an OPEN root
+cause on 2026-08-04: the chunked upload's cross-instance state. `zipUploadStore.ts` now keeps the record
+in Firestore with each chunk as its own object, so a chunk landing on a different Cloud Run instance
+still finds its upload. Recording it honestly rather than patching it cosmetically is what let someone
+else close it properly. Another session also made the import end on the PREVIEW with a model-free boot,
+which part 4 sits after rather than duplicating.
 ## 2026-08-11 — Item 1/9: restore was instance-affine, and the message blamed the user
 
 First of the nine the admin approved. Verified against live code before building, and the verification
@@ -30292,6 +30455,32 @@ code. Recorded, not half-started.
 
 ---
 
+## 2026-08-11 — Item 3/9: edit mode — verified, and the honest answer is DO NOT BUILD
+
+The roadmap line read: *"AP-7 Edit mode | works | 80% of user time is after the first build; make edits
+as smart as builds."* That is an aspiration, not a defect, and I went looking for the defect behind it
+before writing anything. There isn't one.
+
+**The gates already run on edits.** `shouldRunIntegrityHeal`, the design gate, lint, the runtime
+auto-fix loop and the reviewer are NOT `!isEditMode`-guarded. The only build-only paths are the ones
+that make no sense on an edit: palette preset, requirement-gap analysis, the deep-pipeline blueprint,
+and ask-user. Skipping those on an edit is correct, not a hole.
+
+**And the edit path is in places MORE careful than a build.** The boot-killer scan merges the STORED
+workspace with this turn's writes, so a killer sitting in an untouched file is found — precisely the
+common case for an old app. A fresh build skips that read because it cannot apply.
+
+**`editModePrefix` already enforces** locate-first (grep / glob / `architecture_map`),
+read-before-write, surgical `edit_file` over `write_file`, minimum changes, blast-radius via
+`code_graph` before touching a shared file, and prove-it-still-works after.
+
+So building "smarter edits" from this line would have meant inventing a problem and shipping churn
+against a path that is already the most defended in the engine. Recorded in `ROADMAP.md` in place, with
+the same condition already attached to AP-9: **a real improvement here needs a real build report
+showing a specific edit that went wrong.** Until then there is nothing to root-cause.
+
+That is the fourth roadmap line this week whose verification changed the job — twice to "already
+built", once to "half built, build the other half", and now once to "do not build".
 ## 2026-08-11 — Item 2/9: file uploads with ZERO setup, in the user's own account
 
 `generate_storage` already wrote real upload code — but for S3/R2/Cloudinary with **BYO keys**: go

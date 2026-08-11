@@ -38,6 +38,8 @@ export interface BuildMetricInput {
   inFlight?: boolean;
   buildMs?: number | null;
   billedInr?: number | null;
+  /** How many defects the build FIXED ITSELF. See healPressure — this is a red flag, not a credit. */
+  healCount?: number | null;
 }
 
 /** Builds that can actually be judged: finished, with a real verdict. */
@@ -193,11 +195,60 @@ export function buildSuccess(builds: readonly BuildMetricInput[]): BuildSuccess 
   };
 }
 
+export interface HealPressure {
+  /** Finished builds carrying a heal count — the only ones this can be computed from. */
+  builds: number;
+  /** Builds that had to fix themselves at least once. */
+  buildsNeedingHeal: number;
+  /** Share of builds that needed a heal. THIS is the number the 50/50 law is about. */
+  rate: number;
+  /** Mean heals per build, so a few disastrous builds are distinguishable from a broad drift. */
+  perBuild: number;
+  /** The worst single build in the window — a ceiling worth seeing, not an average. */
+  worst: number;
+}
+
+/**
+ * HOW OFTEN THE BUILDER HAS TO FIX ITS OWN WORK.
+ *
+ * ADMIN's 50/50 law, made countable: *"a self-heal is NOT a success — it is a RED FLAG. Why did the
+ * builder not produce this correctly in the FIRST attempt? The goal is 100% correct in ONE pass, with
+ * ZERO heals needed."*
+ *
+ * Every other number on this scorecard measures whether the app came out working. This one measures
+ * whether it came out working **the first time** — and it is the only one that can get WORSE while
+ * every other number looks fine, because a heal that fires turns a defect into a green tick. Without
+ * it, "success 95%" reads as excellence when it may be 95% of builds quietly repairing themselves.
+ *
+ * A build with no recorded heal count is EXCLUDED rather than counted as zero. Older records predate
+ * the field, and scoring them as "needed no heal" would make the rate improve as the window fills with
+ * old data — an error in the flattering direction, which is the one to guard against.
+ *
+ * PURE.
+ */
+export function healPressure(builds: readonly BuildMetricInput[]): HealPressure {
+  const rows = judgeable(builds).filter((b) => typeof b.healCount === 'number' && (b.healCount as number) >= 0);
+  const n = rows.length;
+  if (n === 0) return { builds: 0, buildsNeedingHeal: 0, rate: 0, perBuild: 0, worst: 0 };
+  const counts = rows.map((b) => Math.floor(b.healCount as number));
+  const needing = counts.filter((c) => c > 0).length;
+  const total = counts.reduce((a, c) => a + c, 0);
+  return {
+    builds: n,
+    buildsNeedingHeal: needing,
+    rate: needing / n,
+    perBuild: Math.round((total / n) * 100) / 100,
+    worst: Math.max(...counts),
+  };
+}
+
 export interface BuilderScorecard {
   success: BuildSuccess;
   survival: EditSurvival;
   time: Distribution;
   cost: Distribution;
+  /** How often the builder had to repair its own output — the 50/50 law as a number. */
+  heal: HealPressure;
 }
 
 export function builderScorecard(builds: readonly BuildMetricInput[]): BuilderScorecard {
@@ -206,6 +257,7 @@ export function builderScorecard(builds: readonly BuildMetricInput[]): BuilderSc
     survival: editSurvival(builds),
     time: timeToWorkingApp(builds),
     cost: costPerWorkingApp(builds),
+    heal: healPressure(builds),
   };
 }
 
@@ -253,6 +305,21 @@ export function scorecardHeadline(card: BuilderScorecard): string {
     ? 'Cost per working app: no successful build with a charge yet.'
     : `Cost per working app: ₹${(card.cost.median as number).toFixed(2)} median, `
       + `₹${(card.cost.worst as number).toFixed(2)} worst (${card.cost.samples} build(s)).`);
+
+  // THE 50/50 LAW, STATED AS A NUMBER. Every line above measures whether the app came out working.
+  // This one measures whether it came out working the FIRST time — the only line here that can get
+  // worse while all the others look fine, because a heal that fires turns a defect into a green tick.
+  if (card.heal.builds === 0) {
+    lines.push('First-pass quality: no build has recorded a heal count yet — unknown.');
+  } else {
+    const note = card.heal.builds < MIN_SAMPLES_FOR_RATE ? ' (too few builds to read a trend into)' : '';
+    lines.push(
+      `First-pass quality: ${pct(1 - card.heal.rate)} of ${card.heal.builds} build(s) needed NO self-repair; `
+      + `${card.heal.buildsNeedingHeal} had to fix themselves (${card.heal.perBuild} repairs per build on `
+      + `average, worst ${card.heal.worst}). A heal is a defect that was generated and then papered over — `
+      + `the target is zero${note}.`,
+    );
+  }
 
   return lines.join('\n');
 }

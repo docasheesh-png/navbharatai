@@ -2545,6 +2545,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'app-component-tree',
+    name: 'What Your App Is Made Of (screen-by-screen structure)',
+    path: 'Home → Other AI → Insights & Webhooks → "What your app is made of" (first card)',
+    description: `Shows your app as SCREENS with the parts each screen uses underneath — not a file list and not a developer's import graph. It answers the question an owner actually asks: "what screens does my app have, and what is on each one?" Each row gives the name plus a plain-language role ("a screen", "a part of a screen", "saved data", "styling"). It also lists files that NO screen uses, under "Not used by any screen" — usually a page a user can never reach, which is a real bug worth seeing rather than hiding. Says out loud when a branch was cut short ("more inside") or when two files import each other ("loops back"), so a shortened tree never implies the app is smaller than it is. Derived from the app's own import statements — no AI call, so it costs nothing, cannot hallucinate a screen that does not exist, and works on a project restored from history.`,
+    howToUse: 'Open Home → Other AI → Insights & Webhooks. The "What your app is made of" card is the first one, already filled in — no button to press. Build or open an app first; with no app it honestly says so.',
+    relatedFeatures: ['insights-integrations-panel', 'code-confidence-check', 'agentv3_builder'],
+    keywords: ['component tree', 'structure', 'screens', 'pages', 'what is my app made of', 'app structure', 'file tree', 'architecture', 'kitne page', 'kaun se screen', 'app ka structure', 'unused file', 'orphan page', 'dead file', 'not used', 'map of my app', 'overview'],
+  },
+  {
     id: 'code-confidence-check',
     name: 'Code Confidence (AI Hallucination Check)',
     path: 'Home → Other AI → Insights & Webhooks → Code Confidence',

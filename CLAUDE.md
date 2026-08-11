@@ -561,6 +561,17 @@ Bedrock test-chat page — neither is in use.)
   just `[CRITICAL]`. Cosmetic/a11y/style warnings are always excluded (`selectAutoFixableWarnings`). Rides the
   SAME single bounded C9 repair pass — no new cost path. Default OFF; flip on after a canary proves it clean.
   (The C9 critical auto-fix itself stays default-ON; kill switch `AGENTV3_REVIEWER_AUTOFIX=off`.)
+- **`AGENTV3_DESIGN_GATE`** (built 2026-08-11, default OFF — admin flips on) — the fix for the admin's
+  report *"1st page beautiful, andar ke page bas HTML feel dete hai"*. `DesignCoverage.ts` judges EVERY
+  page/screen file on its own (not the app as a whole) for four mechanical defects: bare markup, no
+  heading, a raw `<table>`, and a list with no empty state. **Detection is deterministic — zero LLM cost
+  on a clean build**, and the findings are recorded as honest `DESIGN_PAGE_INCONSISTENT` warnings whether
+  the flag is on or off. Flag ON additionally runs ONE bounded repair pass naming the exact offending
+  pages (never touching pages that were fine), and reports `DESIGN_HEALED` or, honestly,
+  `DESIGN_PARTIALLY_HEALED`. It can NEVER fail or block a build — a working app with a plain page still
+  ships. Precision-first: skips Tailwind/CSS-module/styled-components/UI-library pages, leaf components,
+  and anything under 6 elements, so it cannot nag a good app. The upstream half (a five-point per-page
+  contract in the architect prompt, so the FIRST build is right) is always on and needs no flag.
 - **`AGENTV3_LINT_GATE`** — NOW SET to `on` (admin, 2026-07-11) → moved up into the configured "AgentV3
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.

@@ -469,3 +469,53 @@ describe('game guidance points the builder at the engine instead of hand-rolling
     expect(prompt).toMatch(/particles or audio from gameplay/i);
   });
 });
+
+/**
+ * INNER-PAGE DESIGN. The admin's report (2026-08-11): the first page is beautiful and the inner pages
+ * "bas HTML feel dete hai". The deterministic gate (DesignCoverage) catches it after the fact; this
+ * block is the half that stops it being generated in the first place, which is the half that matters.
+ */
+describe('the prompt demands the LAST page look as designed as the first', () => {
+  const prompt = architectSystemPrompt();
+
+  it('names the failure explicitly instead of just praising good design', () => {
+    // Generic "make it beautiful" guidance is already present and did not prevent this. Naming the
+    // specific failure — and WHY it is invisible while writing — is what changes behaviour.
+    expect(prompt).toContain('THE INNER PAGES ARE WHERE THIS FAILS');
+    expect(prompt).toContain('THE LAST PAGE YOU WRITE MUST LOOK AS');
+  });
+
+  it('gives a checkable five-point contract, not a vibe', () => {
+    for (const requirement of ['PAGE SHELL', 'REAL HEADING', 'GROUPED CONTENT', 'STYLED CONTROLS', 'REAL STATES']) {
+      expect(prompt, `${requirement} missing from the page contract`).toContain(requirement);
+    }
+  });
+
+  it('the contract names the SAME kit classes the repair pass will ask for', () => {
+    // If the prompt and the repair instruction disagreed, the heal would fight the builder.
+    for (const cls of ['.container', '.card', '.btn-primary', '.nb-empty', '.field']) {
+      expect(prompt, `${cls} missing`).toContain(cls);
+    }
+  });
+
+  it('forbids inventing a second design language on the inner pages', () => {
+    expect(prompt).toContain('do not invent a second design language');
+  });
+});
+
+describe('the page contract is honest about which scaffolds actually ship the kit', () => {
+  // Only 1 of the 24 scaffold providers ships the .nb-* kit (ViteReactProviderContents). Telling a Vue
+  // or Svelte build to use `.card` would produce classes with NO CSS behind them — worse than plain
+  // markup, because it also looks intentional.
+  const prompt = architectSystemPrompt();
+
+  it('says the kit class names are Vite+React only', () => {
+    expect(prompt).toContain('THE KIT CLASS NAMES ABOVE SHIP WITH THE VITE+REACT SCAFFOLD');
+  });
+
+  it('keeps the REQUIREMENT on other scaffolds, and says to define equivalents once', () => {
+    expect(prompt).toContain('the five requirements are exactly');
+    expect(prompt).toContain("project's own global stylesheet");
+    expect(prompt).toContain('The rule is the OUTCOME, never the specific class name');
+  });
+});

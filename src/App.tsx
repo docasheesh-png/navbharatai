@@ -1,3 +1,4 @@
+import UpdateBanner from './components/UpdateBanner';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
@@ -2639,6 +2640,9 @@ export default function App() {
         // they follow the theme AND respect [data-fixed-dark] subtrees. No inline override here.
       }}
     >
+      {/* "A new version is on Play" — native Android only, and silent everywhere else. All of the
+          decide/never-nag/never-guess logic lives in src/lib/appUpdate.ts; this renders its verdict. */}
+      <UpdateBanner />
       {/* L3: skip to main content for keyboard/screen-reader users */}
       <a
         href="#main-content"

@@ -589,6 +589,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
       const reports = await listAdminBuildReports(limit);
+      // healCount rides along so the scorecard can state the 50/50 law as a number: how often the
+      // builder had to repair its OWN output. It is already on every stored report's meta.
       const card = builderScorecard(reports);
       res.json({ ...card, headline: scorecardHeadline(card), window: limit, reportsRead: reports.length });
     } catch (err: any) {

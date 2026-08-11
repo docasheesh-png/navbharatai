@@ -30956,3 +30956,41 @@ Tests: 15 in `tests/contextBudget.test.ts`. Gate: tsc clean both projects, full 
 
 **Remaining in the cheap set:** a cross-build heal-firing counter (turning the 50/50 law into a
 number), and a build idempotency guard (the "whole build ran twice" class).
+
+---
+
+## 2026-08-11 — First-pass quality: the 50/50 law, stated as a number (upgrade 3 of the cheap set)
+
+**Admin:** safe upgrades, minimum ₹. Read-only analytics over reports we already store — **₹0 to run**,
+and it cannot touch a build.
+
+**The law made countable.** The admin's 50/50 law says *"a self-heal is NOT a success — it is a RED
+FLAG. Why did the builder not produce this correctly in the FIRST attempt? The goal is 100% correct in
+ONE pass, with ZERO heals needed."* Every number on the builder scorecard measured whether the app came
+out **working**. None measured whether it came out working **the first time** — and that is the only
+number that can get WORSE while all the others look fine, **because a heal that fires turns a defect
+into a green tick**. Without it, "build success 95%" reads as excellence when it may be 95% of builds
+quietly repairing themselves.
+
+`healPressure()` reports the share of builds that needed NO self-repair, how many did, the mean repairs
+per build (so a few disastrous builds are distinguishable from a broad drift), and the worst single
+build in the window.
+
+**A build with no recorded heal count is EXCLUDED, not scored as zero.** Older records predate the
+field, and counting them as "needed no heal" would make the rate improve as the window fills with old
+data — an error in the *flattering* direction, which is the one to guard against.
+
+**The framing matters as much as the number,** so the headline says it outright: *"A heal is a defect
+that was generated and then papered over — the target is zero."* A rate printed without that reads as
+a feature working well.
+
+**A test caught me weakening another test.** I had added an `as any` cast at the admin route, which
+broke an existing assertion that the scorecard is computed from `builderScorecard(reports)` — i.e.
+from STORED reports, not a benchmark. The cast was defensive and unnecessary; removing it made both
+pass. The existing test was right to object: that assertion is what stops the scorecard quietly being
+fed something curated.
+
+Tests: 6 added to `tests/builderMetrics.test.ts` (31 total). Gate: tsc clean both projects, full run
+**14,130/14,130**.
+
+**Remaining in the cheap set:** a build idempotency guard (the "whole build ran twice" class).

@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   judgeable, editSurvival, distribution, timeToWorkingApp, costPerWorkingApp,
-  buildSuccess, builderScorecard, scorecardHeadline, MIN_SAMPLES_FOR_RATE,
+  buildSuccess, builderScorecard, scorecardHeadline, healPressure, MIN_SAMPLES_FOR_RATE,
   type BuildMetricInput,
 } from '../src/lib/builderMetrics';
 
@@ -223,5 +223,59 @@ describe('the admin can actually see it', () => {
   it('it returns the honest headline alongside the raw numbers', () => {
     expect(admin).toContain('scorecardHeadline(card)');
     expect(admin).toContain('reportsRead: reports.length');
+  });
+});
+
+describe('first-pass quality — the 50/50 law as a number', () => {
+  /**
+   * ADMIN's law: "a self-heal is NOT a success — it is a RED FLAG. Why did the builder not produce
+   * this correctly in the FIRST attempt? The goal is 100% correct in ONE pass, with ZERO heals."
+   *
+   * Every other number on this scorecard measures whether the app came out working. This one measures
+   * whether it came out working the FIRST time — and it is the only one that can get WORSE while all
+   * the others look fine, because a heal that fires turns a defect into a green tick.
+   */
+  const b = (healCount: number | null | undefined, ok = true) =>
+    ({ workspaceId: 'w', reportedAt: 1, ok, healCount } as any);
+
+  it('counts how many builds had to repair themselves', () => {
+    const h = healPressure([b(0), b(2), b(0), b(5)]);
+    expect(h.builds).toBe(4);
+    expect(h.buildsNeedingHeal).toBe(2);
+    expect(h.rate).toBe(0.5);
+    expect(h.perBuild).toBe(1.75);
+    expect(h.worst).toBe(5);
+  });
+
+  it('a build with NO recorded heal count is excluded, not scored as zero', () => {
+    // Older records predate the field. Counting them as "needed no heal" would make the rate improve
+    // as the window fills with old data — an error in the flattering direction, the one to guard against.
+    const h = healPressure([b(undefined), b(null), b(3)]);
+    expect(h.builds).toBe(1);
+    expect(h.rate).toBe(1);
+  });
+
+  it('unfinished and unjudged builds never count', () => {
+    const inFlight = { workspaceId: 'w', reportedAt: 1, ok: null, inFlight: true, healCount: 9 } as any;
+    expect(healPressure([inFlight]).builds).toBe(0);
+  });
+
+  it('no data reads as zero everywhere rather than throwing', () => {
+    expect(healPressure([])).toEqual({ builds: 0, buildsNeedingHeal: 0, rate: 0, perBuild: 0, worst: 0 });
+    expect(healPressure(undefined as any).builds).toBe(0);
+  });
+
+  it('the headline states the TARGET, so a high heal rate cannot read as success', () => {
+    const card = builderScorecard([b(0), b(4), b(1)]);
+    const text = scorecardHeadline(card);
+    expect(text).toMatch(/First-pass quality/);
+    expect(text).toMatch(/needed NO self-repair/);
+    // The framing matters as much as the number — a heal must never look like a win.
+    expect(text).toMatch(/defect that was generated and then papered over/);
+    expect(text).toMatch(/target is zero/);
+  });
+
+  it('says UNKNOWN rather than inventing a rate when nothing has recorded it', () => {
+    expect(scorecardHeadline(builderScorecard([b(undefined)]))).toMatch(/no build has recorded a heal count yet — unknown/);
   });
 });

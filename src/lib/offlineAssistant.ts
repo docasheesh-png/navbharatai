@@ -573,7 +573,10 @@ const CURATED_NAV: Record<string, NavTarget> = {
   database: { view: 'settings', settingsScreen: 'database' },
   connections: { view: 'settings', settingsScreen: 'connections' },
   secrets: { view: 'settings', settingsScreen: 'secrets' },
-  settings_terminal: { view: 'settings', settingsScreen: 'shell' },
+  // The Settings terminal was removed (admin 2026-08-11) — it was a second doorway to Code
+  // Studio's own terminal. `ide_terminal` now carries the target, so asking "terminal kahan hai"
+  // still lands somewhere real instead of navigating nowhere.
+  ide_terminal: { view: 'studio' },
   settings_logs: { view: 'settings', settingsScreen: 'logs' },
   voice_to_app: { view: 'voice' },
   ai_debugger: { view: 'debugger' },

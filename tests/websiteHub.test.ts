@@ -33,14 +33,23 @@ describe('App Settings — Your Website hub', () => {
     expect(src).not.toContain("settingsScreen === 'hosting'");
   });
 
-  it('Terminal, Logs and General stay INSIDE App Settings (admin: do not remove them)', () => {
+  it('Logs and General stay INSIDE App Settings (admin 2026-07-29: do not remove them)', () => {
     const start = src.indexOf("title: 'App Settings'");
-    const block = src.slice(start, start + 1800);
+    const block = src.slice(start, start + 2400);
     expect(block).toContain("id: 'general'");
-    expect(block).toContain("id: 'shell'"); // Terminal
     expect(block).toContain("id: 'logs'");
     // They were not spun out into a separate group.
     expect(src).not.toContain("title: 'Build & Debug'");
+  });
+
+  it('🔒 Terminal was removed from that pair (admin 2026-08-11) — the IDE already has it', () => {
+    // The 2026-07-29 instruction said "terminal aur logs ko hatana mat". On 2026-08-11 the admin
+    // reversed it for TERMINAL only, confirmed explicitly before the change: the Settings screen
+    // mounted the same TerminalPanel on the same workspace as Code Studio, so it was a second doorway
+    // to one room. LOGS is unchanged and still locked above — it has no IDE twin.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toContain("id: 'shell'");
+    expect(code).not.toContain("settingsScreen === 'shell'");
   });
 
   it('the Domain sub-screen mounts the ONE real ConnectMyWebsitePanel flow', () => {

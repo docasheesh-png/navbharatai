@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { editModePrefix, summarizeFileTree, architectSystemPrompt, planSystemPrompt, dateContextBlock, LANGUAGE_RULE } from './systemPrompt';
 
 describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
@@ -410,5 +412,60 @@ describe('WRITE-IT-RIGHT prevention (build-report 1327b405: hooks crash + hardco
   it('tells the builder never to use Math.random() for a token/OTP/secret', () => {
     expect(prompt).toContain('crypto.randomUUID()');
     expect(prompt).toContain('Math.random()');
+  });
+});
+
+/**
+ * GAME BUILDING. Six generators ship the parts of a game that are hard to get right (phases 1–6). None
+ * of that matters if the builder does not know to reach for them — a tool the model never calls is
+ * dead code, which has happened repeatedly in this codebase.
+ */
+describe('game guidance points the builder at the engine instead of hand-rolling one', () => {
+  const prompt = architectSystemPrompt();
+
+  it('names every game tool, in the order they must be called', () => {
+    const order = [
+      'generate_game_runtime',
+      'generate_game_3d',
+      'generate_game_controller',
+      'generate_game_systems',
+      'generate_game_vfx',
+      'generate_game_shell',
+    ];
+    let at = -1;
+    for (const tool of order) {
+      const next = prompt.indexOf(tool);
+      expect(next, `${tool} is missing from the architect prompt`).toBeGreaterThan(-1);
+      expect(next, `${tool} is out of order`).toBeGreaterThan(at);
+      at = next;
+    }
+  });
+
+  it('every tool it names is REALLY in the catalog — this pairing is what drifts', () => {
+    // A prompt that instructs the model to call a tool which no longer exists produces a build that
+    // burns turns on failed tool calls.
+    const catalog = readFileSync(join(__dirname, 'ToolCatalog.ts'), 'utf8');
+    for (const tool of [...prompt.matchAll(/generate_game_\w+/g)].map((m) => m[0])) {
+      expect(catalog, `${tool} is in the prompt but not the catalog`).toContain(`name: '${tool}'`);
+      expect(catalog, `${tool} is defined but not exposed`).toContain(`  '${tool}',`);
+    }
+  });
+
+  it('tells it NOT to write its own loop, and says why', () => {
+    expect(prompt).toContain('NEVER HAND-ROLL THE ENGINE');
+    expect(prompt).toContain('requestAnimationFrame');
+  });
+
+  it('keeps the asset limit HONEST rather than overpromising', () => {
+    // Rule 2: never claim a capability we do not have. Photo-real 3D characters is the one people ask
+    // for and the one thing a code-only generator genuinely cannot deliver.
+    expect(prompt).toContain('BE HONEST ABOUT ART');
+    expect(prompt).toContain('photo-realistic');
+    expect(prompt).toContain('grey boxes');
+  });
+
+  it('keeps gameplay decoupled from effects', () => {
+    expect(prompt).toContain('never call');
+    expect(prompt).toMatch(/particles or audio from gameplay/i);
   });
 });

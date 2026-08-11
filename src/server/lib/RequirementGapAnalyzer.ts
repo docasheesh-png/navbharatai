@@ -244,6 +244,25 @@ const DOMAINS: DomainDef[] = [
       { label: 'progress / streaks / completion stats', re: /progress|streak|stat|chart|analytic|complet.*rate|dashboard/i },
     ],
   },
+  {
+    key: 'game',
+    // `\bgames?\b` deliberately does NOT match "gamification" or "gamified" — those are engagement
+    // features on an ordinary app, and classifying them as a game would hand the build a game engine.
+    // "game plan" is an idiom, not a game — a sales tool must not be handed a game engine.
+    re: /\bgames?\b(?!\s+plans?\b)|\bgameplay\b|platformer|\bshooter\b|\brpg\b|roguelike|tower\s?defen[cs]e|endless\s?runner|\barcade\b|\bfps\b|racing\s?game|puzzle\s?game|multiplayer/i,
+    features: [
+      // What a game prompt almost never says but every finished game needs. Each of these is the
+      // difference between a tech demo and something someone plays twice.
+      { label: 'win / lose conditions and a reason the run ends', re: /win|lose|lost|game.?over|defeat|victor|objective|goal|survive|complete/i },
+      { label: 'scoring or progression the player can see', re: /score|point|level|progress|rank|xp|coin|star|unlock/i },
+      { label: 'a difficulty curve — it must get harder', re: /difficult|hard|easy|wave|challeng|curve|progressiv|speed.?up/i },
+      { label: 'saving progress between sessions', re: /save|progress|persist|continue|resume|high.?score|checkpoint/i },
+      { label: 'touch controls, so it is playable on a phone', re: /touch|mobile|phone|android|\bios\b|joystick|swipe|tap|responsive/i },
+      { label: 'sound effects and music', re: /sound|audio|music|\bsfx\b|noise|effect/i },
+      { label: 'pause and restart', re: /pause|restart|retry|resume|menu|replay|play.?again/i },
+      { label: 'a tutorial or first-run explanation of the controls', re: /tutorial|how to play|instruction|onboard|explain|guide|help/i },
+    ],
+  },
 ];
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [

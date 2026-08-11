@@ -892,6 +892,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_mcp_server',
+      description:
+        'Give the app an MCP server, so the user can connect it to Claude Desktop, Cursor or any AI ' +
+        'assistant and ask questions about their real data ("how many orders today?"). Generates a ' +
+        'runnable stdio MCP server exposing list/get/search tools for the named tables, plus the exact ' +
+        'config block the user pastes into their AI client. Requires the app to have a Supabase database ' +
+        '(the zero-setup one counts). READ-ONLY unless allowWrites is true — and it NEVER generates a ' +
+        'delete tool at any setting, because an AI drives these calls with no human approving each one. ' +
+        'Uses the public anon key only, so the user\'s row-level security still applies.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tables: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Database tables to expose, e.g. ["orders", "menu_items"]. Plain names only.',
+          },
+          allowWrites: {
+            type: 'boolean',
+            description: 'Also allow the assistant to add/update rows. Default false. Delete is never generated.',
+          },
+          appName: { type: 'string', description: "The app's name, shown in the AI client." },
+        },
+        required: ['tables'],
+      },
+    },
+    {
       name: 'generate_realtime',
       description:
         'Add real realtime pub/sub to the app for live features (chat, notifications, presence, collaborative ' +
@@ -3227,6 +3254,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_payment',
   'generate_email',
   'generate_storage',
+  'generate_mcp_server',
   'generate_realtime',
   'generate_search',
   'generate_otp',

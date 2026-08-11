@@ -288,6 +288,7 @@ import { generateWebhookIntegration } from '../lib/WebhookGenerator';
 import { generateWebhookSenderIntegration } from '../lib/WebhookSenderGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
+import { generateMcpServer, normalizeMcpTables } from '../lib/McpServerGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
 import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
 import { generateMobileExport } from '../lib/MobileExportGenerator';
@@ -5785,6 +5786,29 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('email integration');
         return `Wired ${eProvider} email:\n${emWritten.join('\n')}\nAdd the dependency: ${ecfg.dependency.name}@${ecfg.dependency.version}\n\n${ecfg.instructions}`;
+      }
+
+      case 'generate_mcp_server': {
+        // ROADMAP §2 — the USER's app becomes usable from Claude Desktop / Cursor. Pure generator.
+        const mcpTables = normalizeMcpTables((input as Record<string, unknown>)?.tables);
+        if (!mcpTables.ok) return `generate_mcp_server: ${mcpTables.message}`;
+        const mcpCfg = generateMcpServer({
+          tables: mcpTables.tables,
+          allowWrites: (input as Record<string, unknown>)?.allowWrites === true,
+          appName: optStr(input, 'appName') || undefined,
+        });
+        const mcpWritten: string[] = [];
+        for (const [path, content] of Object.entries(mcpCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mcpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('MCP server');
+        const mcpDeps = mcpCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `${mcpWritten.join('\n')}\nAdd the dependencies: ${mcpDeps}\n\n${mcpCfg.instructions}`;
       }
 
       case 'generate_storage': {

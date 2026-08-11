@@ -2546,6 +2546,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'mcp-server-generator',
+    name: 'Connect Your App to Claude Desktop / Cursor (MCP server)',
+    path: 'Just ask NavBharatAI while building, e.g. "connect my app to Claude Desktop" or "make an MCP server for my orders table"',
+    description: `Gives YOUR app its own MCP server, so you can open Claude Desktop (or Cursor, or any AI assistant that supports MCP) and ask questions about your app's real data in plain language — "how many orders came today?", "find the customer named Sharma", "what are my top 5 selling items?" — and it reads the live answer from your own database. NavBharatAI writes three files into your project: a runnable server (mcp-server/index.js), the exact config block you paste into your AI client (mcp-server/claude_desktop_config.json), and a README with the setup steps. For each table you name it creates three abilities: list rows, get one row by id, and search a column for text. SAFETY, which is deliberate and not adjustable by accident: (1) it is READ-ONLY by default — the assistant can look but cannot change anything; you must explicitly ask for writes, and even then it can add and update rows but there is NEVER a delete, at any setting, because an AI runs these calls without a human approving each one; (2) it connects with your app's PUBLIC anon key, so your existing row-level security rules apply exactly as they do in your app — the assistant can never see more than a signed-out visitor could, and a service-role key (which would bypass all your rules) is never used; (3) every read is capped at 200 rows, so it cannot dump your whole table into the AI and run up your bill. Needs your app to have a database (the zero-setup NavBharatAI one counts). The server runs on YOUR computer against YOUR database.`,
+    howToUse: 'While building, ask NavBharatAI: "make an MCP server for my orders and customers tables" (add "and let it add rows" if you want writes). Then: run npm install for the two listed packages, set SUPABASE_URL and SUPABASE_ANON_KEY, copy mcp-server/claude_desktop_config.json into your AI client\'s config (in Claude Desktop: Settings → Developer → Edit Config) and restart it. Your app\'s tables then appear as tools in the assistant.',
+    relatedFeatures: ['agentv3_builder', 'zero-setup-database', 'scaling-check'],
+    keywords: ['mcp', 'model context protocol', 'claude desktop', 'cursor', 'ai assistant', 'connect to claude', 'ask my data', 'chat with my database', 'apne data se sawal', 'claude se jodo', 'integration', 'ai tools', 'expose data', 'assistant'],
+  },
+  {
     id: 'scaling-check',
     name: 'Will This App Handle Real Traffic? (scaling check)',
     path: 'Home → Other AI → Insights & Webhooks → Will this app handle real traffic?',

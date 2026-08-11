@@ -17,6 +17,7 @@ import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuil
 import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
+import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
 import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
@@ -490,6 +491,29 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
+    }
+  });
+
+  // BUILDER SCORECARD — the numbers that say where the ENGINE actually stands.
+  //
+  // WHY (2026-08-11): an 84-point "Vision 10/10" directive was cross-checked against the codebase and
+  // nearly every capability it asked for already existed — ~280 modules. Measurement was one of the two
+  // things that genuinely did not. Every autopsy this platform runs ends the same way: a fix ships and
+  // nobody can say whether the engine got better. A ₹566.96 build looked normal until someone added up
+  // its tokens.
+  //
+  // Computed from the build reports ALREADY stored — never from a benchmark app. The directive itself
+  // forbids gaming a benchmark (§53), and a curated "500-edit test" is exactly the thing that gets
+  // nursed; grouping real workspaces answers the same question about projects users actually keep.
+  // Admin-only: internal engine quality, never a user-facing surface.
+  app.get('/api/admin/builder-scorecard', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const reports = await listAdminBuildReports(limit);
+      const card = builderScorecard(reports);
+      res.json({ ...card, headline: scorecardHeadline(card), window: limit, reportsRead: reports.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to compute the builder scorecard.' });
     }
   });
 

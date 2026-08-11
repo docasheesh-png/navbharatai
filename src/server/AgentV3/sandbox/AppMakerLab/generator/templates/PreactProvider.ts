@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 // Preact + Vite scaffold. Preact is a ~3KB React-compatible UI library — same JSX + hooks API as React
@@ -102,7 +103,8 @@ export class PreactProvider implements ITemplateProvider {
       'vite.config.ts': VITE_CONFIG,
       'tsconfig.json': TSCONFIG,
       'index.html': INDEX_HTML,
-      'src/main.tsx': MAIN_TSX,
+      'src/index.css': DESIGN_KIT_CSS,
+      'src/main.tsx': `import './index.css';\n` + MAIN_TSX,
       'src/app.tsx': APP_TSX,
     };
   }

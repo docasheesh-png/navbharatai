@@ -504,13 +504,18 @@ describe('the prompt demands the LAST page look as designed as the first', () =>
 });
 
 describe('the page contract is honest about which scaffolds actually ship the kit', () => {
-  // Only 1 of the 24 scaffold providers ships the .nb-* kit (ViteReactProviderContents). Telling a Vue
+  // The kit now ships with 8 scaffolds (designKit.ts), not the 1 it started with — but NOT all 24.
+  // Telling a Next or Angular
   // or Svelte build to use `.card` would produce classes with NO CSS behind them — worse than plain
   // markup, because it also looks intentional.
   const prompt = architectSystemPrompt();
 
-  it('says the kit class names are Vite+React only', () => {
-    expect(prompt).toContain('THE KIT CLASS NAMES ABOVE SHIP WITH THE VITE+REACT SCAFFOLD');
+  it('names WHICH scaffolds ship the kit, so the model never writes classes with no CSS behind them', () => {
+    expect(prompt).toContain('WHICH SCAFFOLDS SHIP THE KIT');
+    // Must stay in step with designKit.test.ts — a stale list here is a lie to the builder.
+    for (const has of ['Vite+React', 'Vue', 'Svelte', 'Preact', 'Solid', 'Alpine', 'Vanilla']) {
+      expect(prompt, `${has} should be listed as having the kit`).toContain(has);
+    }
   });
 
   it('keeps the REQUIREMENT on other scaffolds, and says to define equivalents once', () => {

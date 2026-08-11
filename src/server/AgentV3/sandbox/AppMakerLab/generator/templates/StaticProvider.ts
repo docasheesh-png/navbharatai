@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -95,7 +96,7 @@ export class StaticProvider implements ITemplateProvider {
     return {
       'package.json': PKG,
       'index.html': INDEX_HTML,
-      'style.css': STYLE_CSS,
+      'style.css': DESIGN_KIT_CSS + '\n\n' + STYLE_CSS,
       'script.js': SCRIPT_JS,
     };
   }

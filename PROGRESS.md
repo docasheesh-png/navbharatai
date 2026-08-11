@@ -29456,6 +29456,32 @@ priority-first framing, v5 prompt rule, 7 multilingual phrasings surface the bui
 appKnowledgeBase 6/6 · polish (builder/professionals/white-label/core-chat) + professionals + offline +
 awareness + SDA route suites all green.
 
+## 2026-08-11 — APK self-heals a missing launcher-icon foreground (ic_launcher_foreground) — sibling of the splash bug
+
+Admin sent a real build report: APK build FAILED at resource-linking —
+"resource mipmap/ic_launcher_foreground (aka …:mipmap/ic_launcher_foreground) not found" from
+mipmap-anydpi-v26/ic_launcher.xml + ic_launcher_round.xml → "failed linking file resources", BUILD FAILED.
+
+AUTOPSY (5th rule): the report's annotations showed the EARLIER heals FIRING correctly — "splash drawable
+missing — writing a placeholder" (#2237) and "gradle-wrapper.jar missing — fetching it" (#2234) both ran. So
+the app compiled and those two classes are handled; the NEW failure is a DIFFERENT missing resource in the
+same GENERATED android/ project: the adaptive launcher icon references @mipmap/ic_launcher_foreground, which
+a fresh cap add / a partial icon set can omit.
+
+ROOT CAUSE + rule-3 (hunt the siblings): this is the SAME CLASS as the splash bug — an adaptive/launch
+resource referenced by the generated project's XML but not shipped. The splash fix should have generalised;
+it did not, so the launcher-foreground sibling slipped through. Now covered.
+
+FIX (mobileShipKit.ts ENSURE_ANDROID_STEP, both APK + AAB): after cap sync, if NO ic_launcher_foreground
+exists in any mipmap/drawable bucket, create one — from the user's OWN uploaded icon (resources/icon.png)
+when present (so the real icon is used, rule 2), else a visible placeholder vector — and rewrite the adaptive
+XML's @mipmap/ic_launcher_foreground → @drawable/ic_launcher_foreground so it resolves. Background is left
+untouched (present in the failing case; adding one risks a duplicate-resource error). Existing repos also
+self-heal: the ANDROID_RESOURCE_LINKING classifier (#2237) already routes any "failed linking" to a workflow
+refresh, which now carries this heal too.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell, $RES literal); mobileShipKit + repair
+suites 82/82; `tsc -p tsconfig.server.json` clean.
 ## 2026-08-11 — History scoping: Free → only Free; Professionals → only that user's professional chats
 
 Admin: (4) NavBharatAI Free's History must show ONLY Free chats, not the whole app; (5) the Professionals

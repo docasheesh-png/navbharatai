@@ -214,6 +214,30 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             mkdir -p android/app/src/main/res/drawable
             printf '<?xml version="1.0" encoding="utf-8"?>\\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\\n  <item android:drawable="@android:color/white" />\\n</layer-list>\\n' > android/app/src/main/res/drawable/splash.xml
           fi
+          # SIBLING of the splash case (same class): the adaptive launcher icon's mipmap-anydpi-v26/
+          # ic_launcher*.xml reference @mipmap/ic_launcher_foreground, which a fresh cap add / a partial
+          # icon set can omit → "resource mipmap/ic_launcher_foreground not found" at resource-linking.
+          # Heal it deterministically: if NO ic_launcher_foreground exists anywhere, create one — from the
+          # user's OWN uploaded icon when present, else a visible placeholder — and point the adaptive XML
+          # at it. Background is left untouched (it is present in the failing case; adding one risks a
+          # duplicate-resource error).
+          RES=android/app/src/main/res
+          if [ -d "$RES" ] && ! ls "$RES"/mipmap*/ic_launcher_foreground.* "$RES"/drawable*/ic_launcher_foreground.* >/dev/null 2>&1; then
+            echo "::warning::launcher icon foreground missing — healing it so resource linking succeeds"
+            mkdir -p "$RES/drawable"
+            ICON=""
+            for c in resources/icon.png assets/icon.png resources/icon.jpg resources/icon.jpeg; do
+              if [ -f "$c" ]; then ICON="$c"; break; fi
+            done
+            if [ -n "$ICON" ]; then
+              cp "$ICON" "$RES/drawable/ic_launcher_foreground.png"
+            else
+              printf '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\\n  <path android:fillColor="#6366F1" android:pathData="M0,0h108v108h-108z" />\\n</vector>\\n' > "$RES/drawable/ic_launcher_foreground.xml"
+            fi
+            if ls "$RES"/mipmap-anydpi-v26/ic_launcher*.xml >/dev/null 2>&1; then
+              sed -i 's#@mipmap/ic_launcher_foreground#@drawable/ic_launcher_foreground#g' "$RES"/mipmap-anydpi-v26/ic_launcher*.xml
+            fi
+          fi
           if [ ! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
             echo "NBAI_FAILED_STAGE=capacitor"
             echo "::error::The Android project or its Gradle wrapper is incomplete, so there is nothing to compile."

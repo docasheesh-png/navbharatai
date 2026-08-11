@@ -605,7 +605,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [editError, setEditError] = useState('');
   // Phase 2 (admin 2026-07-29): the element picked in edit mode + its current styles, so the toolbar (font
   // size / color / bold / align) opens showing real values and edits the RIGHT element.
-  type VisualSelection = { file: string; line: number; column: number; tag: string; styles: Record<string, string> };
+  /** One selected element's source position. Multi-select reports several of these. */
+  type VisualTarget = { file: string; line: number; column: number; tag: string };
+  type VisualSelection = {
+    file: string; line: number; column: number; tag: string; styles: Record<string, string>;
+    /** Every element the next style change will touch — the primary plus any ctrl/cmd-clicked extras. */
+    targets?: VisualTarget[];
+  };
   const [selection, setSelection] = useState<VisualSelection | null>(null);
   const postToIframe = useCallback((msg: Record<string, unknown>) => {
     try { inBrowserIframeRef.current?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
@@ -641,17 +647,68 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     })();
   }, [workspaceId, userId, email, onFileEdited]);
   // Toolbar edit: live-apply in the iframe (instant), then persist. No reload → rapid tweaks stay smooth.
+  /**
+   * Save several elements of ONE file in a single request. The server patches them bottom-up in one
+   * read-modify-write; a partial result comes back with the elements that refused, and it is shown
+   * rather than swallowed — telling the user all their elements changed when some did not would be
+   * exactly the "looks done" state the real-features rule forbids.
+   */
+  const persistStyleBatch = useCallback((file: string, edits: Array<{ line: number; column: number; styleUpdates: Record<string, string> }>) => {
+    if (!workspaceId || !file || edits.length === 0) return;
+    setSavingEdit(true); setEditError('');
+    void (async () => {
+      try {
+        const res = await fetch('/api/agentv3/visual-edit', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId, userId, email, file, edits }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+        onFileEdited?.(file, typeof data.content === 'string' ? data.content : '');
+        if (Array.isArray(data.failures) && data.failures.length > 0) {
+          setEditError(`${data.failures.length} of ${edits.length} elements could not be changed (their styling is set in code).`);
+        }
+      } catch (err) {
+        setEditError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingEdit(false);
+      }
+    })();
+  }, [workspaceId, userId, email, onFileEdited]);
+
   const applyStyle = useCallback((sel: VisualSelection, styleUpdates: Record<string, string>) => {
     postToIframe({ __nbaiApplyStyle: styleUpdates });
-    persistStyle(sel, styleUpdates);
-  }, [postToIframe, persistStyle]);
+    // MULTI-SELECT: elements are grouped BY FILE and each file is saved in ONE request. Sending one
+    // request per element would be a lost update whenever two selected elements share a file — which,
+    // for elements the user picked off the same screen, is the normal case.
+    const targets = sel.targets && sel.targets.length > 0
+      ? sel.targets
+      : [{ file: sel.file, line: sel.line, column: sel.column, tag: sel.tag }];
+    if (targets.length === 1) { persistStyle(targets[0], styleUpdates); return; }
+
+    const byFile = new Map<string, VisualTarget[]>();
+    for (const t of targets) {
+      if (!t.file) continue;
+      const list = byFile.get(t.file) ?? [];
+      list.push(t);
+      byFile.set(t.file, list);
+    }
+    for (const [file, list] of byFile) {
+      persistStyleBatch(file, list.map((t) => ({ line: t.line, column: t.column, styleUpdates })));
+    }
+  }, [postToIframe, persistStyle, persistStyleBatch]);
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; __nbaiStyleCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string>; styleUpdates?: Record<string, string> } | null;
+      const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; __nbaiStyleCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string>; styleUpdates?: Record<string, string>; targets?: VisualTarget[] } | null;
       if (!d || typeof d !== 'object') return;
       // The iframe reports which element the user picked (+ its current styles) → show the toolbar.
       if (d.__nbaiSelect === true && typeof d.file === 'string') {
-        setSelection({ file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0, tag: typeof d.tag === 'string' ? d.tag : '', styles: d.styles && typeof d.styles === 'object' ? d.styles : {} });
+        setSelection({
+          file: d.file, line: typeof d.line === 'number' ? d.line : 0, column: typeof d.column === 'number' ? d.column : 0,
+          tag: typeof d.tag === 'string' ? d.tag : '', styles: d.styles && typeof d.styles === 'object' ? d.styles : {},
+          targets: Array.isArray(d.targets) ? (d.targets as VisualTarget[]) : undefined,
+        });
         return;
       }
       // A resize/move drag finished in the iframe → persist the final width/height/transform (no re-apply).
@@ -898,7 +955,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       )}
       {editMode && selection && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
-          <span className="font-mono text-zinc-500">&lt;{selection.tag || 'el'}&gt;</span>
+          {/* With several elements picked, the COUNT is what matters — the user needs to know a change
+              is about to hit more than the one under the cursor. */}
+          {selection.targets && selection.targets.length > 1 ? (
+            <span className="font-semibold text-emerald-400">{selection.targets.length} elements</span>
+          ) : (
+            <span className="font-mono text-zinc-500">&lt;{selection.tag || 'el'}&gt;</span>
+          )}
           <button onClick={() => applyStyle(selection, { fontWeight: veIsBold(selection.styles) ? 'normal' : 'bold' })}
             className={`w-6 h-6 rounded border font-bold ${veIsBold(selection.styles) ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title="Bold">B</button>
           <div className="flex items-center gap-1">

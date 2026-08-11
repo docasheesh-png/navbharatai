@@ -579,7 +579,14 @@ Bedrock test-chat page — neither is in use.)
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 
 **NavBharatAI is now LIVE on the Google Play Store** (Android app package `com.navbharat.ai`,
-a Capacitor wrapper that loads the hosted web app). Because of that, the store build must track
+a Capacitor shell). ⚠️ **BUNDLED MODE, not a remote wrapper** (corrected 2026-08-11 — this line
+previously said "loads the hosted web app", which has been WRONG since the 2026-07-10 switch and would
+mislead any session into thinking frontend fixes reach app users automatically). `capacitor.config.ts`
+sets `webDir: 'dist'` with **no `server.url`**, so the app boots from its own bundled assets.
+**What this means in practice:** a SERVER/backend change reaches installed app users immediately (API
+calls are rewritten to the production origin by `src/lib/apiBase.ts`), but a FRONTEND change does NOT —
+it is baked into `dist/` and needs a fresh signed `.aab`/`.ipa`. Locked by
+`tests/nativeShellInvariants.test.ts`. Because of that, the store build must track
 our progress: **whenever a roadmap phase completes, or any big checkpoint/milestone ships to
 `main`, Claude MUST build a fresh signed Android App Bundle (`.aab`) so a current, uploadable
 release is always ready for Play Console.** This is part of "done" for a phase/checkpoint, the

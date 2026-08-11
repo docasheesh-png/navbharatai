@@ -30674,3 +30674,58 @@ and restored from the previous commit. The rule this violated is already in CLAU
 never delete or rewrite existing entries"); what is new is the lesson that a scripted resolver must
 verify it is operating on the file that actually conflicted, and that `git show --stat` before a push
 is the cheap check that catches it.
+## 2026-08-11 — Native-feel audit (external checklist): mostly already done, and one false finding of my own
+
+**Origin.** A large external "make it feel native" checklist (~60 points) was forwarded. Per the
+external-suggestion rule it was treated as raw material. Its FINAL COMMAND asked for a **read-only audit
+first** — which is the right order, and is what was done. **No native-shell code was changed.**
+
+**FINDING 1 — the checklist's core premise is wrong for this repo.** It assumes the native-feel work has
+not been done. It has: splash (with a documented bricking incident and its fix), keyboard `resize:'native'`
+with ONE `--nb-keyboard-height` source of truth, safe-area via four `--nb-safe-*` vars plus the iOS
+`contentInset:'never'` double-inset fix, `syncStatusBarToTheme`, THROTTLED haptics (`HAPTIC_MIN_GAP_MS`),
+`installBackButtonHandler`, push (`pushNotifications.ts` + tests), OAuth deep-link handling, and 14
+Capacitor plugins.
+
+**FINDING 2 — following it literally would have re-broken the app.** `capacitor.config.ts` carries
+`⚠️ launchAutoHide MUST stay true. This bricked the app once — do not "optimise" it back.` The checklist's
+splash section pushes straight at that setting. (History: `launchAutoHide:false` sat inert for months
+because the plugin was not installed; the day it was installed the splash waited forever for a JS hide()
+behind an awaitable WKWebView call, and the app was dead in TestFlight.)
+
+**FINDING 3 — I raised a P1 that does not exist, and retracted it.** I reported "9 uses of `100vh` vs 6
+of `dvh` — a real WebView giveaway" off a raw grep. Reading the code: `body, #root` declares
+`height: 100vh` **then** `height: 100dvh`, which is the correct fallback-then-override idiom, and
+`App.tsx` uses `supports-[height:100dvh]:` in both places. Every other hit is generated user-app HTML,
+iframe preview markup, or server-rendered pages — nothing to do with our native shell. **There was no
+bug, and "fixing" it would have broken old WebViews.** A grep count is not a finding.
+
+**WHAT SHIPPED — only what is safe (admin: "jo jo safe hai sirf woh karo"):**
+- `tests/nativeShellInvariants.test.ts` — turns the hard-won settings from advisory COMMENTS into
+  enforced GATES: launchAutoHide true, splash background, fade-out, keyboard resize native, single
+  keyboard var, contentInset never, the four safe-area vars, the 100vh→100dvh pair **in that order**
+  (the order IS the mechanism), the 16px tap-zoom guard, the permanent `com.navbharat.ai` bundle id,
+  bundled mode (no `server.url`), and all three sign-in providers (Apple is a store requirement, not a
+  preference). Additive only — asserts existing behaviour, changes nothing.
+  ⚠️ Its own first version failed by matching `launchAutoHide: false` inside the WARNING COMMENT — the
+  same comments-vs-code mistake made earlier the same day. Comments are stripped before asserting.
+- This entry, and the CLAUDE.md correction below.
+
+**DOC CORRECTION.** CLAUDE.md described the store app as "a Capacitor wrapper that loads the hosted web
+app". That has been **wrong since 2026-07-10** (bundled mode). It matters: a SERVER change reaches
+installed users immediately, a FRONTEND change does not and needs a fresh `.aab`/`.ipa`. A session
+believing the old line would ship a UI fix and tell the admin it was live for app users.
+
+**NOT DONE, deliberately — the one real P1 left.** Chat performance/virtualization. The renderers are
+`AgentV3Panel.tsx` (4,935 lines) and `SDAChat.tsx` (1,201); there is no virtualization and no memo. It is
+a genuine issue, but it is the most-used screen of a live app **currently in store review**, there is no
+device here to test on, and a large render refactor with no measurement is the mirror image of a surface
+patch. Deferred to a focused session with a real long-conversation repro.
+
+**NOT DONE, and must not be faked.** The checklist asks for a native-feel score out of 10 across 11 axes.
+Without running the app on a device that would be an invented number, and the checklist itself says "Do
+not fabricate test results". Marked **NOT TESTED** rather than scored.
+
+**Timing note.** The app is in review on both stores. Bundled mode means none of this reaches store users
+without a new binary anyway — so native-shell work should batch into the first post-approval release
+rather than disturb a submission in review.

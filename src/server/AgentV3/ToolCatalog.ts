@@ -892,6 +892,60 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'analyze_service_split',
+      description:
+        'Answer "should this app be split into separate services, and where?" using the app\'s real import ' +
+        'graph. Names the natural modules, counts EXACTLY how many imports would have to become API calls ' +
+        'for each possible split, and says honestly when there is no good split — which is the correct ' +
+        'answer for most apps. Use it when the user asks about splitting, microservices, or app structure. ' +
+        'Read-only analysis: it changes nothing. Do NOT split an app just because the user asked — show ' +
+        'them this first; for a small app, splitting adds deployment and networking work and solves nothing.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'setup_architecture',
+      description:
+        'Set up a named architecture — "clean", "ddd", "mvc" or "hexagonal" — as real folders PLUS an ' +
+        'ESLint config that ENFORCES the layer boundaries (import/no-restricted-paths), so a cross-layer ' +
+        'import fails the lint instead of quietly eroding the structure. Writes ARCHITECTURE.md and a ' +
+        'README per layer. Existing code is never moved or rewritten. Prefer this only for a genuinely ' +
+        'large app or a team — layers add indirection a small app does not need.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          style: { type: 'string', enum: ['clean', 'ddd', 'mvc', 'hexagonal'], description: 'The architecture to set up.' },
+        },
+        required: ['style'],
+      },
+    },
+    {
+      name: 'generate_mcp_server',
+      description:
+        'Give the app an MCP server, so the user can connect it to Claude Desktop, Cursor or any AI ' +
+        'assistant and ask questions about their real data ("how many orders today?"). Generates a ' +
+        'runnable stdio MCP server exposing list/get/search tools for the named tables, plus the exact ' +
+        'config block the user pastes into their AI client. Requires the app to have a Supabase database ' +
+        '(the zero-setup one counts). READ-ONLY unless allowWrites is true — and it NEVER generates a ' +
+        'delete tool at any setting, because an AI drives these calls with no human approving each one. ' +
+        'Uses the public anon key only, so the user\'s row-level security still applies.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tables: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Database tables to expose, e.g. ["orders", "menu_items"]. Plain names only.',
+          },
+          allowWrites: {
+            type: 'boolean',
+            description: 'Also allow the assistant to add/update rows. Default false. Delete is never generated.',
+          },
+          appName: { type: 'string', description: "The app's name, shown in the AI client." },
+        },
+        required: ['tables'],
+      },
+    },
+    {
       name: 'generate_realtime',
       description:
         'Add real realtime pub/sub to the app for live features (chat, notifications, presence, collaborative ' +
@@ -3227,6 +3281,9 @@ export const CATALOG_TOOL_NAMES = [
   'generate_payment',
   'generate_email',
   'generate_storage',
+  'generate_mcp_server',
+  'analyze_service_split',
+  'setup_architecture',
   'generate_realtime',
   'generate_search',
   'generate_otp',

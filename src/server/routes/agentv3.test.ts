@@ -1974,9 +1974,16 @@ describe('T0-9 — abuse ledger + preview-error report slot must use the VERIFIE
 // or delete files by claiming the victim's uid. The other write routes keep the lenient never-break guard.
 describe('T0-9 — destructive write routes require a VERIFIED workspace owner (no claimed-uid fallback)', () => {
   const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+  // Slice to the REAL end of the handler — the next route registration — not a fixed character count.
+  // A magic window fails in both directions: it false-FAILED when a handler legitimately grew past it
+  // (multi-element select, 2026-08-11) and would false-PASS if a neighbouring handler's guard happened
+  // to fall inside the window. Either way the temptation is to bump the number, which quietly weakens a
+  // security test. The handler's own boundary is the honest limit.
   const handlerOf = (path: string): string => {
     const i = SRC.indexOf(`app.post('${path}'`);
-    return i === -1 ? '' : SRC.slice(i, i + 1600);
+    if (i === -1) return '';
+    const next = SRC.slice(i + 1).search(/\n\s{2}app\.(post|get|put|patch|delete)\s*\(/);
+    return next === -1 ? SRC.slice(i) : SRC.slice(i, i + 1 + next);
   };
 
   for (const path of ['/api/agentv3/exec', '/api/agentv3/delete-files', '/api/agentv3/import-files', '/api/agentv3/visual-edit']) {

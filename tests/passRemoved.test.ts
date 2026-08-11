@@ -84,6 +84,43 @@ describe('no user-facing screen offers the Pass', () => {
   });
 });
 
+describe('the LAST door the Pass could come through is shut', () => {
+  const route = read('src/server/routes/payment.ts');
+  const fulfil = read('src/server/lib/payments.ts');
+
+  it('no pass order can be created, at any price', () => {
+    /**
+     * The screens that offered it are gone, but a crafted request could still have created a real
+     * Cashfree order. Money arriving for a WITHDRAWN product is the worst outcome there is: the
+     * customer has paid, and we owe them either an entitlement we no longer offer or a refund.
+     */
+    const at = route.indexOf('if (isProfessionalPass)');
+    expect(at).toBeGreaterThan(-1);
+    const seg = codeOnly(route.slice(at, at + 600));
+    expect(seg).toContain('410');
+    expect(seg).toContain('pass_withdrawn');
+    // Refused BEFORE anything reaches the gateway — no order row, no payment session.
+    expect(route.indexOf('if (isProfessionalPass)')).toBeLessThan(route.indexOf("doc(db, 'payment_transactions'"));
+  });
+
+  it('it is refused, NOT silently turned into wallet credit', () => {
+    // Converting someone's ₹99 into something they did not ask for is its own dishonesty.
+    const at = route.indexOf('if (isProfessionalPass)');
+    const seg = codeOnly(route.slice(at, at + 600));
+    expect(seg).not.toMatch(/creditWallet|balanceAdded/);
+  });
+
+  it('but an order that ALREADY exists is still settled — we never take money and deliver nothing', () => {
+    /**
+     * Deleting the fulfilment path along with the offer would mean an in-flight checkout at deploy
+     * time, or a late webhook, pays us and receives nothing. Refusing NEW orders while still honouring
+     * existing ones is the honest order to withdraw a paid product in.
+     */
+    expect(fulfil).toContain("String(txData.productType || '') === 'professional_pass'");
+    expect(fulfil).toMatch(/KEPT ON PURPOSE/);
+  });
+});
+
 describe('every AI in the app now answers the cost question honestly', () => {
   const kb = read('src/server/AppContext/AppKnowledgeBase.ts');
 

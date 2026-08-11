@@ -75,16 +75,21 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       return res.status(400).json({ error: 'Invalid order amount' });
     }
 
-    // A Professional Pass order must cover at least one full period at the SERVER's price. Without
-    // this, a client could order the pass for ₹1: the fulfilment path now derives the entitlement from
-    // the paid amount and would grant nothing, so the customer would have paid for nothing and needed a
-    // refund. Refusing here means that situation never arises, and the real price is stated up front.
-    if (isProfessionalPass && !isAcceptablePassPayment(orderAmount)) {
-      return res.status(400).json({
-        error: `The Professional Pass costs ₹${professionalPassPriceInr()}. Please start the purchase again from the Professionals screen.`,
-        code: 'pass_amount_too_low',
-        passPriceInr: professionalPassPriceInr(),
-        passDays: professionalPassDays(),
+    // THE PASS IS NO LONGER SOLD (admin 2026-08-10: "pass system hata do"). This is the last door it
+    // could have come through: the screens that offered it are gone, but a crafted request could still
+    // have created a real Cashfree order for it — and money arriving for a withdrawn product is the
+    // worst outcome there is, because the customer has paid and we owe them either an entitlement we
+    // no longer offer or a refund. Refused BEFORE the gateway is involved, so no money moves.
+    //
+    // Deliberately NOT quietly converted into wallet credit: turning someone's ₹99 into something they
+    // did not ask for is its own dishonesty. They are told plainly, and adding credit is one tap away.
+    //
+    // The FULFILMENT path below still honours a pass order — see the note there. Refusing new orders
+    // while still settling any that already exist is the honest order to remove this in.
+    if (isProfessionalPass) {
+      return res.status(410).json({
+        error: 'The Professional Pass is no longer available. Everything it covered now runs on your normal balance — add credit instead, and you only pay for what you actually use.',
+        code: 'pass_withdrawn',
       });
     }
 

@@ -30198,3 +30198,35 @@ that all four AIs carry the button. Gate: tsc clean both projects, `npm run buil
 
 **All three of the admin's named wants are now delivered end-to-end** (delete + WhatsApp-style edit;
 ON SEND / SEARCH / CLEAR everywhere with Export cut; paid voice everywhere with the price shown first).
+
+---
+
+## 2026-08-10 — Pass removal, part 2: the last door it could come through
+
+Part 1 removed every user-facing offer. This closes the one that was left: `/api/payment/create-order`
+still accepted `productType: 'professional_pass'`. The screens were gone, but a crafted request could
+still have created a real Cashfree order — and **money arriving for a WITHDRAWN product is the worst
+outcome there is**: the customer has paid, and we owe them either an entitlement we no longer offer or
+a refund. A pass order is now refused with **410 `pass_withdrawn`**, before anything reaches the
+gateway — no order row, no payment session, no money moved.
+
+**Deliberately NOT silently converted into wallet credit.** Turning someone's ₹99 into something they
+did not ask for is its own dishonesty. They are told plainly what happened, and adding credit — which
+is what the Pass's features now run on anyway — is one tap away.
+
+**The FULFILMENT path is KEPT on purpose.** Deleting it alongside the offer would mean an in-flight
+checkout at deploy time, or a late webhook, pays us and receives nothing. Refusing NEW orders while
+still settling any that already exist is the honest order to withdraw a paid product in; the code
+carries a note saying it can go once no pending `professional_pass` rows remain.
+
+`routesPaymentPreview`'s "refuses an UNDERPAID pass order" case is REWRITTEN in place, not deleted:
+the contract it protected (a pass order must never reach the gateway and take a customer's money) is
+now stronger — no pass order is accepted at ANY price — so the test asserts the wider rule and checks
+all three amounts, including the old ₹1-for-a-hundred-years exploit and the full ₹99.
+
+Tests: 3 new in `tests/passRemoved.test.ts` (12 total) + the rewritten payment case. Gate: tsc clean
+both projects, full run **13,691/13,691**.
+
+**Still dormant, deliberately:** the pass store and the `hasActivePass` branches in the two gates.
+They guard money on every professional turn and every tool action, nothing can set them any more, and
+the comments now say so. They come out once the collection holds no pending pass rows.

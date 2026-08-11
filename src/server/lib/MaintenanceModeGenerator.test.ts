@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateMaintenanceIntegration, MAINTENANCE_LIB_SOURCE } from './MaintenanceModeGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateMaintenanceIntegration, MAINTENANCE_LIB_SOURCE } from './MaintenanceModeGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateMaintenanceIntegration (wiring)', () => {
   it('emits server/lib/maintenance.ts, dependency-free, with the MAINTENANCE_MODE env key', () => {
@@ -22,11 +19,8 @@ describe('generateMaintenanceIntegration (wiring)', () => {
 // Materialize and EXECUTE the exact emitted middleware against mock req/res, proving real behaviour
 // (express is a type-only import, erased at runtime, so no dependency is needed to run it).
 describe('emitted maintenance middleware — behaviour', () => {
-  const artifact = join(here, `._maintenance_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, MAINTENANCE_LIB_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('maintenance', MAINTENANCE_LIB_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Emitted {
     isMaintenance(): boolean;
@@ -34,7 +28,7 @@ describe('emitted maintenance middleware — behaviour', () => {
     maintenanceMiddleware(opts?: Record<string, unknown>): (req: unknown, res: unknown, next: () => void) => void;
   }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   function mockRes() {

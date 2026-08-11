@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateCartIntegration, CART_SERVICE_SOURCE } from './CartGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateCartIntegration, CART_SERVICE_SOURCE } from './CartGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateCartIntegration (wiring)', () => {
   it('emits the cart service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateCartIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the merge + exact-total + non-negative rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted CartService — merge quantities + exact total + non-negative (real logic)', () => {
-  const artifact = join(here, `._cart_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, CART_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('cart', CART_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface CartLine { productId: string; name: string; unitPriceMinor: number; qty: number }
   interface CartView { userId: string; lines: CartLine[]; itemCount: number; totalMinor: number }
@@ -39,7 +33,7 @@ describe('emitted CartService — merge quantities + exact total + non-negative 
   }
   interface Emitted { CartService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('adding the same product MERGES into one line (never a duplicate)', async () => {

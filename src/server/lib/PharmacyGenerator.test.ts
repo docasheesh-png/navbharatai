@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generatePharmacyIntegration, PHARMACY_SERVICE_SOURCE } from './PharmacyGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generatePharmacyIntegration, PHARMACY_SERVICE_SOURCE } from './PharmacyGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generatePharmacyIntegration (wiring)', () => {
   it('emits the service, routes and README + express dep', () => {
@@ -21,9 +18,8 @@ describe('generatePharmacyIntegration (wiring)', () => {
 });
 
 describe('emitted PharmacyService — expiry gate + FEFO + controlled-substance', () => {
-  const artifact = join(here, `._pharmacy_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, PHARMACY_SERVICE_SOURCE);
-  afterAll(() => { try { unlinkSync(artifact); } catch { /* gone */ } });
+  const emitted = emitModule('pharmacy', PHARMACY_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   const DAY = 24 * 60 * 60 * 1000;
   const NOW = Date.UTC(2024, 5, 1);
@@ -39,7 +35,7 @@ describe('emitted PharmacyService — expiry gate + FEFO + controlled-substance'
   }
   interface Emitted { PharmacyService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('availableStock counts only NON-EXPIRED batches', async () => {

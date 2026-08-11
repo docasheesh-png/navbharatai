@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateReferralsIntegration, REFERRAL_SERVICE_SOURCE } from './ReferralsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateReferralsIntegration, REFERRAL_SERVICE_SOURCE } from './ReferralsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateReferralsIntegration (wiring)', () => {
   it('emits the referral service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateReferralsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the attribution + credit-once rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted ReferralService — attribution integrity + credit-once (real logic)', () => {
-  const artifact = join(here, `._referral_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, REFERRAL_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('referral', REFERRAL_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Referral { code: string; referrer: string; referred: string; status: string; completedAt: string | null }
   interface Service {
@@ -40,7 +34,7 @@ describe('emitted ReferralService — attribution integrity + credit-once (real 
   }
   interface Emitted { ReferralService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('gives each user one stable, unique code resolvable back to the owner', async () => {

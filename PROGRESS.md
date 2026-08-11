@@ -29826,3 +29826,34 @@ GONE rather than merely unused, and that no translation package is in `package.j
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1148 files / 13,462 tests,
 exit 0** · `npm run build` ✓.
+## 2026-08-11 — 57 tests stop writing scratch files into the real source tree
+
+The open item recorded during the 2026-08-09 audit, now root-caused.
+
+**The bug.** 57 `*Generator.test.ts` files each materialised the code they generate as a real `.ts`
+file so the test could IMPORT and EXECUTE it — verifying the emitted business logic for real rather
+than string-matching it, which is a good test. But the file was written into the actual
+`src/server/lib/` directory and deleted moments later. For those seconds the source tree contained a
+file that is not source, so any test walking that tree could list it and then fail reading it. Not
+hypothetical: it broke `tests/envFlag.test.ts` mid-audit, and the fix there (skip anything matching
+`/\._/`) treated the symptom.
+
+**Why `/tmp` is NOT the fix, and the obvious change would have broken 57 tests.** The artifacts are
+TypeScript, imported dynamically; vite-node only transforms files inside the project root. An OS-temp
+artifact fails on the first type annotation. So the artifacts stay in the project — they just move to
+`<repo>/.emitted-test-modules/`, one gitignored directory outside `src/` that nothing scans.
+
+**Fixed as the class** (fourth rule, step 2): the four-line write/afterAll/unlink dance was duplicated
+57 times. It is now one helper, `tests/helpers/emitModule.ts`, which owns the location — so the next
+change to WHERE these live is one edit, not 57. The pid suffix (kept) is what makes it safe under
+vitest's parallel workers; the name is sanitised so it cannot escape the directory.
+
+The sweep also removed the imports it orphaned (`writeFileSync`, `unlinkSync`, `pathToFileURL`,
+`fileURLToPath`, `dirname`, `join`, and the `here` constant) across all 57 files — two passes, because
+dropping `here` is what killed the last two.
+
+8 tests, including the invariant: **no test may build its own artifact path**, and `src/server/lib`
+holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new hand-rolled path.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
+exit 0**.

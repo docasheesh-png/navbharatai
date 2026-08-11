@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateRequestIdIntegration, REQUEST_ID_LIB_SOURCE } from './RequestIdGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateRequestIdIntegration, REQUEST_ID_LIB_SOURCE } from './RequestIdGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateRequestIdIntegration (wiring)', () => {
   it('emits server/lib/requestId.ts, dependency-free', () => {
@@ -18,17 +15,14 @@ describe('generateRequestIdIntegration (wiring)', () => {
 });
 
 describe('emitted requestId middleware — behaviour', () => {
-  const artifact = join(here, `._reqid_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, REQUEST_ID_LIB_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('reqid', REQUEST_ID_LIB_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Emitted {
     requestId(opts?: Record<string, unknown>): (req: { headers: Record<string, unknown>; id?: string }, res: unknown, next: () => void) => void;
   }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   function mockRes() {
     return { headers: {} as Record<string, string>, setHeader(k: string, v: string) { this.headers[k] = v; } };

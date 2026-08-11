@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateReviewsIntegration, REVIEW_SERVICE_SOURCE } from './ReviewsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateReviewsIntegration, REVIEW_SERVICE_SOURCE } from './ReviewsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateReviewsIntegration (wiring)', () => {
   it('emits the review service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateReviewsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the rating bounds, one-per-user rule and exact aggregate
 // are real business rules, verified against the actual emitted code.
 describe('emitted ReviewService — rating integrity + exact aggregate (real logic)', () => {
-  const artifact = join(here, `._review_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, REVIEW_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('review', REVIEW_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Review { id: string; itemId: string; userId: string; rating: number }
   interface Agg { itemId: string; count: number; average: number; distribution: Record<string, number> }
@@ -39,7 +33,7 @@ describe('emitted ReviewService — rating integrity + exact aggregate (real log
   }
   interface Emitted { ReviewService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('rejects a rating outside 1..5 (and non-integers)', async () => {

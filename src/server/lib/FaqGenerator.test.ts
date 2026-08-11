@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateFaqIntegration, FAQ_SERVICE_SOURCE } from './FaqGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateFaqIntegration, FAQ_SERVICE_SOURCE } from './FaqGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateFaqIntegration (wiring)', () => {
   it('emits the faq service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateFaqIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the publish-gate + search + vote rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted FaqService — publish gate + search + helpfulness votes (real logic)', () => {
-  const artifact = join(here, `._faq_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, FAQ_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('faq', FAQ_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface FaqEntry { id: string; question: string; answer: string; category: string; published: boolean; position: number; helpful: number; notHelpful: number; createdAt: string; updatedAt: string }
   interface Service {
@@ -43,7 +37,7 @@ describe('emitted FaqService — publish gate + search + helpfulness votes (real
   }
   interface Emitted { FaqService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('THE INVARIANT: a draft entry is NEVER in the public list or search; publishing reveals it', async () => {

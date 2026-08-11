@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateLeaderboardIntegration, LEADERBOARD_SERVICE_SOURCE } from './LeaderboardGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateLeaderboardIntegration, LEADERBOARD_SERVICE_SOURCE } from './LeaderboardGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateLeaderboardIntegration (wiring)', () => {
   it('emits the leaderboard service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateLeaderboardIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the best-kept + deterministic-rank rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted LeaderboardService — best-kept + deterministic rank (real logic)', () => {
-  const artifact = join(here, `._leaderboard_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, LEADERBOARD_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('leaderboard', LEADERBOARD_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Entry { board: string; player: string; score: number }
   interface RankedEntry extends Entry { rank: number }
@@ -40,7 +34,7 @@ describe('emitted LeaderboardService — best-kept + deterministic rank (real lo
   }
   interface Emitted { LeaderboardService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const T = (n: number) => new Date(2_000_000_000_000 + n); // deterministic increasing clock

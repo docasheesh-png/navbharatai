@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateHelpdeskIntegration, HELPDESK_SERVICE_SOURCE } from './HelpdeskGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateHelpdeskIntegration, HELPDESK_SERVICE_SOURCE } from './HelpdeskGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateHelpdeskIntegration (wiring)', () => {
   it('emits the service, routes and README + express dep', () => {
@@ -20,9 +17,8 @@ describe('generateHelpdeskIntegration (wiring)', () => {
 });
 
 describe('emitted HelpdeskService — status state-machine + priority SLA breach', () => {
-  const artifact = join(here, `._helpdesk_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, HELPDESK_SERVICE_SOURCE);
-  afterAll(() => { try { unlinkSync(artifact); } catch { /* gone */ } });
+  const emitted = emitModule('helpdesk', HELPDESK_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   const HOUR = 60 * 60 * 1000;
   const NOW = Date.UTC(2024, 3, 1);
@@ -43,7 +39,7 @@ describe('emitted HelpdeskService — status state-machine + priority SLA breach
   }
   interface Emitted { HelpdeskService: new () => Service; canTransition(a: Status, b: Status): boolean; SLA_HOURS: Record<Priority, number> }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('canTransition encodes the workflow (open→in_progress ok, open→closed ok, resolved→open reopen)', async () => {

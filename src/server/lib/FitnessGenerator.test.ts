@@ -1,10 +1,8 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateFitnessIntegration, FITNESS_SERVICE_SOURCE } from './FitnessGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { join } from 'node:path';
+import { generateFitnessIntegration, FITNESS_SERVICE_SOURCE } from './FitnessGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateFitnessIntegration (wiring)', () => {
   it('emits the service, routes and README + express dep', () => {
@@ -20,9 +18,8 @@ describe('generateFitnessIntegration (wiring)', () => {
 });
 
 describe('emitted FitnessService — deterministic membership date-math + validity gate', () => {
-  const artifact = join(here, `._fitness_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, FITNESS_SERVICE_SOURCE);
-  afterAll(() => { try { unlinkSync(artifact); } catch { /* gone */ } });
+  const emitted = emitModule('fitness', FITNESS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   const DAY = 24 * 60 * 60 * 1000;
   const T0 = Date.UTC(2024, 0, 15); // MIDNIGHT UTC — so same-day check-ins never cross the UTC date boundary
@@ -43,7 +40,7 @@ describe('emitted FitnessService — deterministic membership date-math + validi
   }
   interface Emitted { FitnessService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   async function seed() {
     const { FitnessService } = await load();

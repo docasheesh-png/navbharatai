@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateGiftCardsIntegration, GIFTCARDS_SERVICE_SOURCE } from './GiftCardsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateGiftCardsIntegration, GIFTCARDS_SERVICE_SOURCE } from './GiftCardsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateGiftCardsIntegration (wiring)', () => {
   it('emits the gift-card service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateGiftCardsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the no-overdraw + exact-remainder rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted GiftCardService — balance integrity (no overdraw, exact remainder) (real logic)', () => {
-  const artifact = join(here, `._giftcards_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, GIFTCARDS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('giftcards', GIFTCARDS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Redemption { amountMinor: number; at: string; note: string }
   interface GiftCard { code: string; originalMinor: number; balanceMinor: number; currency: string; active: boolean; expiresAt: string | null; createdAt: string; redemptions: Redemption[] }
@@ -40,7 +34,7 @@ describe('emitted GiftCardService — balance integrity (no overdraw, exact rema
   }
   interface Emitted { GiftCardService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('issues a unique card with the full balance and validates the amount', async () => {

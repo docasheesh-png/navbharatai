@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateTagsIntegration, TAGS_SERVICE_SOURCE } from './TagsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateTagsIntegration, TAGS_SERVICE_SOURCE } from './TagsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateTagsIntegration (wiring)', () => {
   it('emits the tag service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateTagsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the dedup + rename-cascade + count rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted TagService — canonical dedup + rename cascade + exact counts (real logic)', () => {
-  const artifact = join(here, `._tags_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, TAGS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('tags', TAGS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface TagInfo { slug: string; label: string; count: number }
   interface Service {
@@ -39,7 +33,7 @@ describe('emitted TagService — canonical dedup + rename cascade + exact counts
   }
   interface Emitted { TagService: new () => Service; slugifyTag(s: string): string }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('canonicalizes tags and dedups attachments (idempotent)', async () => {

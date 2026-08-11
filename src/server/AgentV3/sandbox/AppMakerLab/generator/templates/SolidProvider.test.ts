@@ -9,7 +9,7 @@ describe('SolidProvider — a real, boot-clean SolidJS + Vite scaffold', () => {
 
   it('emits one Solid entry point (no React files, no second entry)', () => {
     expect(Object.keys(files).sort()).toEqual(
-      ['index.html', 'package.json', 'src/App.tsx', 'src/index.tsx', 'tsconfig.json', 'vite.config.ts'].sort(),
+      ['index.html', 'package.json', 'src/index.css', 'src/App.tsx', 'src/index.tsx', 'tsconfig.json', 'vite.config.ts'].sort(),
     );
     expect(files['src/main.tsx']).toBeUndefined(); // must not collide with the React scaffold's entry
     expect(files['index.html']).toContain('/src/index.tsx');

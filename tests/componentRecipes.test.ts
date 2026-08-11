@@ -12,7 +12,10 @@ import { join } from 'path';
  * knows about is dead CSS, and a prompt naming classes that do not exist ships broken markup.
  */
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
-const css = read('src/server/AgentV3/sandbox/AppMakerLab/generator/templates/ViteReactProviderContents.ts');
+// The kit moved to its own module (2026-08-11) so that EVERY scaffold can ship the same one instead of
+// only Vite+React — see designKit.ts. This reads the single source of truth; Vite+React re-exports it
+// as `indexCss`, which designKit.test.ts asserts is byte-identical.
+const css = read('src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit.ts');
 const prompt = read('src/server/AgentV3/systemPrompt.ts');
 
 /** Every class the prompt tells the model to use. */

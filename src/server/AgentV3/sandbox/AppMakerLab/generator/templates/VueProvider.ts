@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -103,7 +104,8 @@ export class VueProvider implements ITemplateProvider {
       'vite.config.ts': VITE_CONFIG,
       'tsconfig.json': TSCONFIG,
       'index.html': INDEX_HTML,
-      'src/main.ts': MAIN_TS,
+      'src/index.css': DESIGN_KIT_CSS,
+      'src/main.ts': `import './index.css';\n` + MAIN_TS,
       'src/App.vue': APP_VUE,
     };
   }

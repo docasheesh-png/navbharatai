@@ -26,9 +26,30 @@ const UNSUPPORTED_RUNTIMES = [
   'rust', 'cargo', 'ruby on rails', 'laravel',
 ];
 
+/**
+ * Prompts are written BOTH as single-quoted strings and as backtick template literals. The original
+ * extractor here only matched the single-quoted ones, so every backtick template — a growing share of
+ * the list — sailed past this guard unchecked while the suite reported green (found 2026-08-10 when
+ * adding the game templates). A guard that silently covers half its subject is worse than none,
+ * because it is trusted.
+ */
+function templatePrompts(): string[] {
+  const quoted = [...panel.matchAll(/prompt:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+  const templated = [...panel.matchAll(/prompt:\s*`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1]);
+  return [...quoted, ...templated].map((s) => s.toLowerCase());
+}
+
 describe('no template asks the builder for a runtime the sandbox cannot run', () => {
+  it('EVERY template prompt is actually extracted — a missed one is an unguarded template', () => {
+    // Count the templates by their id and demand a prompt for each, so a third quoting style (or a
+    // prompt built by a helper) fails loudly here instead of quietly escaping the check below.
+    const ids = [...panel.matchAll(/^\s*(?:\{\s*)?id:\s*'[\w-]+'/gm)].length;
+    expect(ids).toBeGreaterThan(10);
+    expect(templatePrompts().length).toBe(ids);
+  });
+
   it('the template prompts name none of them', () => {
-    const prompts = [...panel.matchAll(/prompt:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].toLowerCase());
+    const prompts = templatePrompts();
     expect(prompts.length).toBeGreaterThan(5); // the extractor still works
 
     const offenders: string[] = [];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
+import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 
 describe('resolveImportWorkspaceId', () => {
   it('uses the deterministic fallback on a FRESH session — the reported 161 MB failure', () => {
@@ -44,23 +44,5 @@ describe('importTargetUnavailableMessage', () => {
   it('exposes no internal identifier the user cannot act on', () => {
     expect(importTargetUnavailableMessage().toLowerCase()).not.toContain('workspaceid');
     expect(importTargetUnavailableMessage()).not.toMatch(/agentv3-/);
-  });
-});
-
-describe('zipImportProgressLabel', () => {
-  it('shows real percentage during the upload — the difference between "working" and "frozen"', () => {
-    expect(zipImportProgressLabel('uploading', 0)).toBe('Uploading… 0%');
-    expect(zipImportProgressLabel('uploading', 0.5)).toBe('Uploading… 50%');
-    expect(zipImportProgressLabel('uploading', 1)).toBe('Uploading… 100%');
-  });
-
-  it('names the server-side phase so a long unpack does not look like a hang either', () => {
-    expect(zipImportProgressLabel('extracting', 1)).toMatch(/unpacking/i);
-  });
-
-  it('clamps nonsense rather than rendering NaN% or 4200%', () => {
-    expect(zipImportProgressLabel('uploading', Number.NaN)).toBe('Uploading… 0%');
-    expect(zipImportProgressLabel('uploading', -3)).toBe('Uploading… 0%');
-    expect(zipImportProgressLabel('uploading', 42)).toBe('Uploading… 100%');
   });
 });

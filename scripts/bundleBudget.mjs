@@ -46,43 +46,18 @@
 // current size plus real headroom (~7-8%), and the measurements below are dated so a future session can
 // see the drift instead of inferring it. Keep that discipline on the next bump: measure, then leave room.
 
-// THIRD BUMP (2026-08-11, 1300→1350) — and the reason is worth stating, because it is not "one more
-// feature". `main` measured 1299.9 KB against a 1300 KB ceiling: 0.1 KB of headroom. At that margin the
-// gate had stopped being a bloat guard and become a coin flip — the NEXT feature PR was going to fail
-// whatever it contained, and the one that happened to trip it (a zero-setup storage entry) added no
-// client code at all, only a required `AppKnowledgeBase` line.
-//
-// That is a collision between two mandatory rules, not a bug in either: CLAUDE.md requires an
-// AppKnowledgeBase entry for every user-facing feature, and the offline assistant ships that catalogue
-// to the browser. So the budget must carry deliberate headroom or the KB rule cannot be obeyed.
-//
-// 50 KB is chosen to be USEFUL, not generous: it absorbs dozens of KB entries (~0.4 KB each) while a
-// genuinely accidental dependency — the thing this gate exists to catch — is tens to hundreds of KB and
-// still fails. HONEST: this is a deferral, not the fix. The real fix is the one the header above already
-// records — ship only the client-navigation KB entries to the browser and keep the server-only build
-// recipes out — and it stays an open root cause in PROGRESS.md until someone does it with tests.
-
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 
 export const BUDGETS = {
-<<<<<<< HEAD
-  /** Largest single JS chunk, gzipped. Current main ≈ 590 KB. */
-  largestChunkGzipKB: 650,
-  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Current ≈ 1300 KB (feature KB + the lazily
-   *  loaded xterm terminal emulator — see header). */
-  totalJsGzipKB: 1350,
-  /** Sum of all CSS, gzipped. Current ≈ 33 KB. */
-=======
   /** Largest single JS chunk, gzipped. Measured 648.5 KB on 2026-08-11 (the main entry). */
   largestChunkGzipKB: 700,
   /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1347.6 KB on 2026-08-11 (feature KB +
    *  the lazily loaded xterm terminal emulator + the lazily loaded zip reader — see header). */
   totalJsGzipKB: 1450,
   /** Sum of all CSS, gzipped. Measured 39.3 KB on 2026-08-11. */
->>>>>>> origin/main
   totalCssGzipKB: 50,
 };
 

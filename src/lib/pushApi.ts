@@ -19,12 +19,12 @@ async function pushFetch(url: string, init: RequestInit): Promise<Response> {
 
 /** Register (or refresh) this device's FCM token for the signed-in user. Best-effort: returns false
  *  instead of throwing, since registration is a background bootstrap step, never a user-facing action. */
-export async function registerDeviceToken(userId: string, token: string, platform: 'android' | 'ios' | 'web'): Promise<boolean> {
+export async function registerDeviceToken(userId: string, token: string, platform: 'android' | 'ios' | 'web', appVersionCode?: number | null): Promise<boolean> {
   try {
     const res = await pushFetch(`/api/push/${userId}/register-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, platform }),
+      body: JSON.stringify({ token, platform, appVersionCode: appVersionCode ?? null }),
     });
     return res.ok;
   } catch {

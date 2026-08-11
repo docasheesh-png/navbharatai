@@ -32,7 +32,16 @@ describe('pushApi', () => {
     expect(url).toBe('/api/push/user-1/register-token');
     expect(init.method).toBe('POST');
     expect(init.headers.Authorization).toBe('Bearer id-token-abc');
-    expect(JSON.parse(init.body)).toEqual({ token: 'fcm-tok', platform: 'android' });
+    // appVersionCode joins the body (2026-08-11) so the server can notify only the devices that are
+    // genuinely BEHIND. Explicitly null when the caller does not know it — null means UNKNOWN, and the
+    // broadcast never sends to an unknown rather than guessing it is old.
+    expect(JSON.parse(init.body)).toEqual({ token: 'fcm-tok', platform: 'android', appVersionCode: null });
+  });
+
+  it('registerDeviceToken sends the device\'s app version when it knows it', async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ success: true }));
+    await registerDeviceToken('user-1', 'fcm-tok', 'android', 42);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ appVersionCode: 42 });
   });
 
   it('registerDeviceToken returns false (never throws) on a server error', async () => {

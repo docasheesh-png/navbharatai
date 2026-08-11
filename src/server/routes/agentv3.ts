@@ -6312,6 +6312,10 @@ export function registerAgentV3Routes(app: Express): void {
     };
     // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.
     let buildDiagRef: BuildDiagnostics | undefined;
+    // Durable history rows read near the START, summarized at the END — see the note at the read.
+    let sessionHistoryForSummary:
+      | { history: Awaited<ReturnType<typeof listDiagnosticsHistory>>; startedAt: number }
+      | null = null;
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
@@ -6821,8 +6825,16 @@ export function registerAgentV3Routes(app: Express): void {
           // 58-minute session reported as 18 minutes, and three workspace wipes no report mentioned —
           // both because startedAt/endedAt and the data-loss events are PER TURN. Built from the SAME
           // read that already fed priorFailedBuilds, so it costs no extra query.
-          const summary = summarizeSession(h, buildStartedAt, Date.now(), 50);
-          buildDiag.setSession({ ...summary, line: sessionSummaryLine(summary) });
+          // The session summary is DEFERRED to the end of the build (autopsy 2026-08-09). It used to be
+          // computed right here — inside the history read that fires near the START — so `Date.now()` was
+          // milliseconds after `buildStartedAt` and every report said the session had lasted ~100 ms. A
+          // 5m45s build reported `elapsedMs: 157`; a 2.5-minute one reported 92. The irony is that this
+          // field exists precisely to stop session length being under-reported ("a 58-minute session
+          // reported as 18 minutes"), and on the first turn it was under-reporting maximally.
+          //
+          // The history `h` is what the read was for and it is correct — only the clock was wrong — so we
+          // keep the rows and re-summarize at the end against the real end time.
+          sessionHistoryForSummary = { history: h, startedAt: buildStartedAt };
         })
         .catch(() => { /* history read is best-effort */ });
       // PR4 — delivery telemetry: count which provider drove each build turn across the WHOLE
@@ -7005,10 +7017,28 @@ export function registerAgentV3Routes(app: Express): void {
         // only ever resume THIS user's own sandbox. If the sandbox was reaped/expired, ensureWorkspace's
         // Sandbox.connect→create fallback transparently makes a fresh one (today's behaviour), so this
         // is safe even when the resume misses. Enable with AGENTV3_SANDBOX_RESUME=on.
+        // WHERE THE SETUP MINUTES ACTUALLY GO (autopsy 2026-08-09). Two reported builds spent 2.5 minutes
+        // with "Setting up your workspace…" as their only narration — the heartbeats at minute 1 AND minute
+        // 2 both read "last: Setting up your workspace…" — and nothing recorded WHICH part of setup ate it.
+        // Sandbox create, the npm install inside ensureWorkspace, and the GitHub hydrate that follows all
+        // hid behind one sentence, so the largest slice of a short build was the one slice we could not
+        // measure. These stamps cost nothing and turn "setup felt slow" into a number worth acting on.
+        const setupT0 = Date.now();
         const resumeSandboxId = sandboxResumeEnabled()
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
           : undefined;
+        const resumeLookupMs = Date.now() - setupT0;
+        const ensureT0 = Date.now();
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
+        const ensureWorkspaceMs = Date.now() - ensureT0;
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+            message: `Workspace ready in ${Math.round((Date.now() - setupT0) / 1000)}s`,
+            detail: `resume-id lookup ${resumeLookupMs}ms · sandbox create/connect + scaffold + install `
+              + `${ensureWorkspaceMs}ms · resumed=${resumeSandboxId ? 'yes' : 'no (cold)'}`,
+          });
+        } catch { /* timing is observation only — it must never affect a build */ }
         // PREVIEW SYNC FIX (LearnLoop autopsy): the scaffold's root manifests (package.json, index.html,
         // framework configs) are seeded straight into the sandbox by ensureWorkspace and BYPASS the
         // onFileWrite write-tracking — so they only reached the durable store via a flaky end-of-build
@@ -7027,9 +7057,10 @@ export function registerAgentV3Routes(app: Express): void {
         // build on the existing (Firestore) durability path, never blocking it.
         if (githubStorageActive()) {
           const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
-          // READABLE repo name (admin 2026-07-18): derive it from the build's OWN stable identity — its
-          // stored title + createdAt — so the GitHub repo is human-readable ("watch-store-11am-180726-3f9a2c")
-          // instead of the old opaque "app-<uid>-<sessionId>". Crucially this stays STABLE across turns: the
+          // READABLE repo name (admin 2026-07-18; simplified 2026-08-10): derive it from the build's OWN
+          // stable identity — its stored title + createdAt — so the GitHub repo is human-readable and SIMPLE
+          // ("watch-18jul26-1100am-3f9a": single word + date + time) instead of the old opaque
+          // "app-<uid>-<sessionId>". Crucially this stays STABLE across turns: the
           // current-turn prompt changes each turn, but the stored title/createdAt do not, so ensureRepo keeps
           // hitting the SAME repo rather than spawning a new one per turn. On the FIRST turn the record may not
           // exist yet — the current prompt IS the first prompt, so deriveTitle(prompt)+now matches the identity
@@ -11883,6 +11914,14 @@ export function registerAgentV3Routes(app: Express): void {
       // well as by tokens, and until now only the token half was visible — so "why is the E2B bill this
       // size?" had no answer in the product. Never part of the user's charge; omitted by construction
       // from the user-facing report (allow-list). Best-effort, and honestly absent when unmeasurable.
+      // THE SESSION, measured at the END so the number is the real one (see the read near the start).
+      try {
+        if (sessionHistoryForSummary) {
+          const { history, startedAt } = sessionHistoryForSummary;
+          const summary = summarizeSession(history, startedAt, Date.now(), 50);
+          buildDiagRef?.setSession({ ...summary, line: sessionSummaryLine(summary) });
+        }
+      } catch { /* the session line is reporting, never a reason to affect a build */ }
       try {
         const held = typeof (actuator as any).sandboxHeldSeconds === 'function'
           ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null

@@ -118,6 +118,101 @@ describe('generateShipKit — the store-rejection traps this repo learned the ha
   });
 });
 
+describe('generateShipKit — self-heals a broken Gradle wrapper (autopsy 2026-08-04)', () => {
+  // Real user build failed with "Unable to access jarfile …/gradle/wrapper/gradle-wrapper.jar", and no
+  // retry could fix it — the old guard checked only the gradlew SCRIPT, not the binary jar it runs. Both
+  // Android workflows must now GUARANTEE the wrapper jar (fetch it, else re-scaffold) and verify it.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: heals a missing gradle-wrapper.jar instead of failing forever`, () => {
+      // fetches the exact wrapper jar for the pinned Gradle version …
+      expect(wf).toContain('gradle/wrapper/gradle-wrapper.jar');
+      expect(wf).toContain('raw.githubusercontent.com/gradle/gradle/');
+      // … and re-scaffolds the project as a last resort …
+      expect(wf).toMatch(/rm -rf android[\s\S]*npx cap add android/);
+      // … and the final guard verifies BOTH the script AND the jar (not just gradlew).
+      expect(wf).toContain('! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar');
+    });
+  }
+});
+
+describe('generateShipKit — self-heals a missing splash drawable (autopsy 2026-08-10)', () => {
+  // Real user build failed at resource-linking: "resource drawable/splash not found … Android resource
+  // linking failed". Capacitor's launch theme (styles.xml) references @drawable/splash, but a fresh
+  // `cap add android` (Capacitor 8) can omit the splash asset → the reference doesn't resolve. This lives
+  // in the GENERATED android/ project (created on CI, gitignored), so the AI repair — which only edits repo
+  // files — can never see it. Both workflows must deterministically guarantee @drawable/splash exists.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: writes a placeholder @drawable/splash so resource linking never fails`, () => {
+      // detects the missing asset across any density bucket …
+      expect(wf).toContain('android/app/src/main/res/drawable*/splash.*');
+      // … and writes a real, resolvable placeholder drawable at the canonical path.
+      expect(wf).toContain('android/app/src/main/res/drawable/splash.xml');
+      expect(wf).toContain('layer-list');
+    });
+  }
+});
+
+describe('generateShipKit — self-heals a missing launcher-icon foreground (autopsy 2026-08-11)', () => {
+  // Real user build failed at resource-linking: "resource mipmap/ic_launcher_foreground … not found" —
+  // the adaptive launcher icon (mipmap-anydpi-v26/ic_launcher*.xml) references @mipmap/ic_launcher_foreground
+  // which a fresh cap add / partial icon set can omit. SAME CLASS as the splash case, in the GENERATED
+  // android/ project. Both workflows must heal it: create ic_launcher_foreground (from the user's own icon
+  // when present, else a placeholder) and point the adaptive XML at it.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: guarantees a resolvable ic_launcher_foreground so linking never fails`, () => {
+      // detects a missing foreground across mipmap AND drawable buckets …
+      expect(wf).toContain('ic_launcher_foreground.*');
+      // … prefers the user's OWN uploaded icon …
+      expect(wf).toContain('cp "$ICON" "$RES/drawable/ic_launcher_foreground.png"');
+      // … falls back to a placeholder vector …
+      expect(wf).toContain('ic_launcher_foreground.xml');
+      // … and repoints the adaptive XML from @mipmap to the healed @drawable resource.
+      expect(wf).toContain('s#@mipmap/ic_launcher_foreground#@drawable/ic_launcher_foreground#g');
+    });
+  }
+});
+
+describe('generateShipKit — pre-solved future build failures (audit 2026-08-11)', () => {
+  // A forward-looking audit of the Android build surface. These deterministic heals close the
+  // highest-likelihood gaps that live in the GENERATED android/ project (so only a workflow step can fix
+  // them), before a real build ever hits them.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: turns the user's uploaded icon into the REAL app icon set (capacitor-assets), degrading gracefully`, () => {
+      expect(wf).toContain('@capacitor/assets generate --android');
+      // only when an icon source exists …
+      expect(wf).toContain('if ls resources/icon.* assets/icon.*');
+      // … and never fails the build if the generator/icon is unusable (the foreground heal is the fallback).
+      expect(wf).toMatch(/@capacitor\/assets generate[^\n]*\|\| echo "::warning::/);
+    });
+
+    it(`${label}: gives Gradle enough JVM heap so a large app does not OOM during the Android build`, () => {
+      expect(wf).toContain('org.gradle.jvmargs=-Xmx4g');
+      // idempotent — drops any existing lower default first
+      expect(wf).toContain("sed -i '/^org.gradle.jvmargs/d' android/gradle.properties");
+    });
+
+    it(`${label}: bounds the job so a hung download can't idle to GitHub's 6-hour default`, () => {
+      expect(wf).toContain('timeout-minutes: 30');
+    });
+  }
+});
+
 describe('generateShipKit — honesty about what only the user can do', () => {
   const kit = generateShipKit({ appName: 'My Shop' });
 

@@ -38,7 +38,7 @@ export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
               <LayoutGrid className="w-5 h-5 text-fuchsia-400" />
             </div>
             <div>
-              <h1 className="text-lg sm:text-xl font-black text-white tracking-tight leading-none">Other AI</h1>
+              <h1 className="text-lg sm:text-xl font-black text-white tracking-tight leading-none">Other</h1>
               <p className="text-[11px] sm:text-xs text-[#8b949e] mt-0.5">Builder tools &amp; utilities — design, develop, ship &amp; monetize your app</p>
             </div>
           </div>

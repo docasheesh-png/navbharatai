@@ -194,4 +194,30 @@ describe('buildCapacitorConfig', () => {
     expect(cfg).toContain('"Ravi\'s Shop"');
     expect(cfg).toContain("appId: 'com.a.b'");
   });
+
+  it('injects a validated background colour into the android + splash config', () => {
+    const cfg = buildCapacitorConfig('com.a.b', 'Shop', 'dist', '#6366F1');
+    expect(cfg).toContain("android: { backgroundColor: '#6366f1' }"); // canonical lowercase
+    expect(cfg).toContain("SplashScreen: { backgroundColor: '#6366f1' }");
+  });
+
+  it('expands a 3-digit hex and accepts a hash-less colour', () => {
+    expect(buildCapacitorConfig('com.a.b', 'Shop', 'dist', 'f0a')).toContain("backgroundColor: '#ff00aa'");
+    expect(buildCapacitorConfig('com.a.b', 'Shop', 'dist', '00ff88')).toContain("backgroundColor: '#00ff88'");
+  });
+
+  it('DROPS anything that is not a hex colour — never interpolates raw input (injection guard)', () => {
+    for (const bad of ['red', "'; process.exit(1); //", 'rgb(1,2,3)', '#12', '#zzzzzz', '']) {
+      const cfg = buildCapacitorConfig('com.a.b', 'Shop', 'dist', bad);
+      expect(cfg).not.toContain('backgroundColor');
+      // byte-identical to the no-colour config
+      expect(cfg).toBe(buildCapacitorConfig('com.a.b', 'Shop', 'dist'));
+    }
+  });
+
+  it('is byte-identical to before when no colour is supplied', () => {
+    const cfg = buildCapacitorConfig('com.a.b', 'Shop', 'dist');
+    expect(cfg).not.toContain('android:');
+    expect(cfg).toContain("webDir: 'dist'");
+  });
 });

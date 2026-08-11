@@ -170,6 +170,100 @@ const FAILURE_DIAGNOSTIC = (): string => `
           } >> "$GITHUB_STEP_SUMMARY"
 `;
 
+// ENSURE the Android project AND a COMPLETE Gradle wrapper before building — shared by both the debug
+// APK and the signed AAB workflows so they can never drift.
+//
+// AUTOPSY 2026-08-04 (real user build, thesakshamgupta0/navbharatai-app): the APK step died with
+//   "Error: Unable to access jarfile …/android/gradle/wrapper/gradle-wrapper.jar"
+// and no number of retries fixed it (a deterministic failure). ROOT CAUSE: `./gradlew` is only a tiny
+// shell script — it EXECUTES the binary `gradle-wrapper.jar`. The old guard checked only that the
+// `gradlew` SCRIPT existed, not the jar, so an android/ that was present but missing the binary jar
+// (a committed-but-incomplete project, or a scaffold that never fetched the wrapper) sailed past the
+// guard and blew up one step later at Gradle. This is exactly the class of GitHub build problem the
+// engine must self-heal, like a human would. So: after cap add/sync, if the wrapper jar is missing we
+// fetch the EXACT jar for the pinned Gradle version (keeps any android/ customisations), and only if
+// that also fails do we re-scaffold the whole project fresh (android/ is generated — nothing custom is
+// lost). The final guard now verifies BOTH the script and the jar, and fails honestly if either is
+// still absent.
+const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
+        run: |
+          set -e
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+          # ./gradlew executes gradle-wrapper.jar; heal a missing binary jar deterministically.
+          if [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
+            VER=$(sed -n 's/.*gradle-\\([0-9.]*\\)-.*/\\1/p' android/gradle/wrapper/gradle-wrapper.properties 2>/dev/null | head -1)
+            if [ -z "$VER" ]; then VER=8.7; fi
+            echo "::warning::gradle-wrapper.jar missing — fetching it for Gradle $VER"
+            mkdir -p android/gradle/wrapper
+            curl -fsSL -o android/gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/gradle/gradle/v$VER/gradle/wrapper/gradle-wrapper.jar" || true
+          fi
+          if [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "::warning::re-scaffolding the Android project so the Gradle wrapper is complete"
+            rm -rf android
+            npx cap add android
+            npx cap sync android
+          fi
+          # Turn the user's UPLOADED icon into the REAL, full app-icon set (all densities + the adaptive
+          # foreground/background/round layers). Without this the icon upload silently does nothing on CI —
+          # the app would ship with Capacitor's default icon. Runs only when an icon source exists, and
+          # degrades gracefully: if the generator is unavailable or the icon is too small it just warns, and
+          # the foreground self-heal below still guarantees a resolvable icon so the build never fails.
+          if ls resources/icon.* assets/icon.* >/dev/null 2>&1; then
+            mkdir -p assets
+            for s in resources/icon.png assets/icon.png resources/icon.jpg resources/icon.jpeg; do
+              if [ -f "$s" ]; then cp "$s" assets/icon.png; break; fi
+            done
+            echo "Generating the app icon set from your uploaded icon…"
+            npx --yes @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#111111' || echo "::warning::could not generate the full icon set from your icon (it may be under 1024x1024) — using the built-in icon heal instead"
+          fi
+          # Capacitor's launch theme (styles.xml) references @drawable/splash; a fresh cap add (Capacitor 8)
+          # can omit the splash asset when @capacitor/splash-screen ships no image → resource linking fails
+          # with "resource drawable/splash not found". Guarantee a resolvable @drawable/splash exists.
+          if ! ls android/app/src/main/res/drawable*/splash.* >/dev/null 2>&1; then
+            echo "::warning::splash drawable missing — writing a placeholder so resource linking succeeds"
+            mkdir -p android/app/src/main/res/drawable
+            printf '<?xml version="1.0" encoding="utf-8"?>\\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\\n  <item android:drawable="@android:color/white" />\\n</layer-list>\\n' > android/app/src/main/res/drawable/splash.xml
+          fi
+          # SIBLING of the splash case (same class): the adaptive launcher icon's mipmap-anydpi-v26/
+          # ic_launcher*.xml reference @mipmap/ic_launcher_foreground, which a fresh cap add / a partial
+          # icon set can omit → "resource mipmap/ic_launcher_foreground not found" at resource-linking.
+          # Heal it deterministically: if NO ic_launcher_foreground exists anywhere, create one — from the
+          # user's OWN uploaded icon when present, else a visible placeholder — and point the adaptive XML
+          # at it. Background is left untouched (it is present in the failing case; adding one risks a
+          # duplicate-resource error).
+          RES=android/app/src/main/res
+          if [ -d "$RES" ] && ! ls "$RES"/mipmap*/ic_launcher_foreground.* "$RES"/drawable*/ic_launcher_foreground.* >/dev/null 2>&1; then
+            echo "::warning::launcher icon foreground missing — healing it so resource linking succeeds"
+            mkdir -p "$RES/drawable"
+            ICON=""
+            for c in resources/icon.png assets/icon.png resources/icon.jpg resources/icon.jpeg; do
+              if [ -f "$c" ]; then ICON="$c"; break; fi
+            done
+            if [ -n "$ICON" ]; then
+              cp "$ICON" "$RES/drawable/ic_launcher_foreground.png"
+            else
+              printf '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\\n  <path android:fillColor="#6366F1" android:pathData="M0,0h108v108h-108z" />\\n</vector>\\n' > "$RES/drawable/ic_launcher_foreground.xml"
+            fi
+            if ls "$RES"/mipmap-anydpi-v26/ic_launcher*.xml >/dev/null 2>&1; then
+              sed -i 's#@mipmap/ic_launcher_foreground#@drawable/ic_launcher_foreground#g' "$RES"/mipmap-anydpi-v26/ic_launcher*.xml
+            fi
+          fi
+          # Give Gradle's JVM enough heap so a LARGE app does not run out of memory during dexing / R8 /
+          # resource compilation — the Node-heap fix does not help the Android build. Force 4g regardless of
+          # Capacitor's lower default (idempotent: drop any existing line first, then set ours).
+          if [ -f android/gradle.properties ]; then
+            sed -i '/^org.gradle.jvmargs/d' android/gradle.properties
+            printf 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g\\n' >> android/gradle.properties
+          fi
+          if [ ! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The Android project or its Gradle wrapper is incomplete, so there is nothing to compile."
+            exit 1
+          fi`;
+
 const ANDROID_APK_WORKFLOW = (appName: string): string => `# Build an INSTALLABLE Android app (.apk) for ${appName} — generated by NavBharatAI.
 #
 # This one needs NO secrets and NO signing key. It produces an apk you can install on any Android
@@ -185,6 +279,9 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    # A hung download or Gradle daemon must not idle to GitHub's 6-hour default and burn the user's
+    # Actions minutes (and leave the in-app progress bar stuck). 30 min is well above a real build.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -232,18 +329,7 @@ jobs:
       #
       # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
       # project is what actually broke, it is verified before anything downstream depends on it.
-      - name: Generate and sync the Android project
-        run: |
-          set -e
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
-          npx cap sync android
-          if [ ! -f android/gradlew ]; then
-            echo "NBAI_FAILED_STAGE=capacitor"
-            echo "::error::The Android project was not created, so there is nothing to compile."
-            exit 1
-          fi
+${ENSURE_ANDROID_STEP}
 
       # assembleDebug signs with Android's universal debug key, so no keystore and no secrets are
       # needed — this is what makes the whole flow one click for a non-technical user.
@@ -289,6 +375,8 @@ on:
 jobs:
   build-aab:
     runs-on: ubuntu-latest
+    # Never idle to GitHub's 6-hour default on a hung download/daemon (wastes the user's Actions minutes).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -355,18 +443,7 @@ jobs:
       #
       # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
       # project is what actually broke, it is verified before anything downstream depends on it.
-      - name: Generate and sync the Android project
-        run: |
-          set -e
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
-          npx cap sync android
-          if [ ! -f android/gradlew ]; then
-            echo "NBAI_FAILED_STAGE=capacitor"
-            echo "::error::The Android project was not created, so there is nothing to compile."
-            exit 1
-          fi
+${ENSURE_ANDROID_STEP}
 
       # Play REJECTS a re-used versionCode, so stamp it with the always-increasing run number.
       - name: Stamp a unique versionCode

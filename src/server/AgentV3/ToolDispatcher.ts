@@ -181,6 +181,7 @@ import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
+import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -236,6 +237,7 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -4206,6 +4208,25 @@ export class ToolDispatcher {
         return `Wired an Invoicing / billing backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
       }
 
+      case 'generate_helpdesk': {
+        // Breadth recipe (domain vertical) — Helpdesk / ticketing (server/helpdesk/): a real HelpdeskService
+        // with a ticket STATE-MACHINE (invalid jumps → 409), priority-driven SLA breach detection, and an
+        // append-only thread, plus an Express router. Pure gen in HelpdeskGenerator.ts.
+        const hdcfg = generateHelpdeskIntegration();
+        const hdWritten: string[] = [];
+        for (const [path, content] of Object.entries(hdcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          hdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('helpdesk starter');
+        const hdDeps = hdcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
+      }
+
       case 'generate_events': {
         // Breadth recipe (domain vertical) — events/RSVP (server/events/): a real EventService with CAPACITY
         // enforcement + a waitlist (auto-promote on cancel) + an Express router. Pure gen in EventsGenerator.ts.
@@ -5235,6 +5256,28 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_systems': {
+        // PHASE 6. Combat, AI, projectiles and waves — written as PURE arithmetic so the rules that a
+        // hand-written version gets wrong (i-frames, segment collision, separation, de-aggro
+        // hysteresis, single death) are provable rather than approximated.
+        const gsyRec = (input as Record<string, unknown>) || {};
+        const gsyInclude = Array.isArray(gsyRec.include)
+          ? gsyRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gsy = generateGameSystems(gsyInclude);
+        const gsyWritten: string[] = [];
+        for (const [path, content] of Object.entries(gsy.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('gameplay systems');
+        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}`;
       }
 
       case 'generate_game_shell': {
@@ -7252,21 +7295,31 @@ export class ToolDispatcher {
       }
 
       case 'deploy': {
+        // A DEPLOY THAT DID NOT DEPLOY MUST NOT REPORT SUCCESS (autopsy build aed2906d, 2026-08-09).
+        //
+        // Every branch below used to RETURN a sentence. A returned string is a SUCCESSFUL tool result, so
+        // the build timeline recorded `✓ deploy (0s)` twice, no URL was ever emitted, and the agent was
+        // left guessing — it went off running `ls -la dist/` and `pwd && ls -la` trying to work out what
+        // had happened. The user had asked for one thing, a live link, and got neither the link nor an
+        // error. THROWING is how every other tool reports a failure here (it becomes a TOOL_ERROR the
+        // agent can read and act on), so deploy now uses the same convention as the rest of the catalog.
+        // The message text is unchanged — it was already the right explanation, it was just being
+        // delivered as if it were good news.
         if (!this.deploy) {
-          return 'Deployment is not configured in this context.';
+          throw new Error('Deployment is not configured in this context.');
         }
         if (!this.actuator.downloadDistFiles) {
-          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+          throw new Error('Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.');
         }
         let files: Map<string, Buffer>;
         try {
           files = await this.actuator.downloadDistFiles(this.workspaceId);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+          throw new Error(`Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`);
         }
         if (files.size === 0) {
-          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+          throw new Error('No built files found. Run "npm run build" to produce dist/ before deploying.');
         }
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });

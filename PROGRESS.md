@@ -29210,6 +29210,339 @@ exit 0**.
 
 ---
 
+## 2026-08-10 — ONE INPUT BOX FOR EVERY AI (admin ask) — slice 1: the decisions
+
+**Admin:** "NavBharatAI app me jitne bhi AI hai, sabka input box ek jaisa hai. Sabhi AI's ke input ka
+acche-acche cheezein utha kar BEST input box banao, aur wahi sabhi jagah laga do." Three named wants:
+(1) delete a sent message everywhere, PLUS edit, WhatsApp-style; (2) the ON-SEND / SEARCH / CLEAR row
+that only NavBharatAI FREE has; (3) voice chat, today only in the professionals, everywhere — as a
+PAID feature with the price shown in the user's own language.
+**Export is CUT** — the admin confirmed ("han kato!"), so the shared row is ON SEND / SEARCH / CLEAR.
+
+**The four surfaces today:** `ide/AIChat.tsx` (FREE — has the toolbar), `agentv3/AgentV3Panel.tsx`
+(Pro v5 — has delete), `sda/SDAChat.tsx` (Doctor — has voice), `professionals/ProfessionalChat.tsx`.
+Each has its own composer; nobody has all three good things.
+
+**RATE CONFIRMED BY THE ADMIN:** the ask contained two different numbers — "0.2 paisa/sec" for the
+charge and "2 paisa / sec" for the popup, a 10× gap on real user money. Asked rather than assumed;
+answer: **2 paise per second (₹1.20/min)**. One constant drives BOTH the charge and the popup, so they
+can never disagree.
+
+### Shipped in this slice — the decisions, isolated from any screen
+
+**`chatMessageActions.ts` — what delete and edit MEAN in a chat with an AI.** The hard part is not the
+buttons. Unlike WhatsApp, every assistant reply is an ANSWER TO a particular message, so:
+- **DELETE** removes the message *and the replies that belong to it*, up to the user's next message.
+  Leaving an orphan behind reads as the AI answering a question nobody asked — worse than the message
+  the user wanted gone. An assistant message can never be deleted: it is not the user's text, and
+  removing it would silently rewrite what they were told.
+- **EDIT** rewinds to that point and hands the new text back to be re-sent, because a user edits when
+  they want a DIFFERENT ANSWER, not a different transcript. Keeping the later turns would leave
+  answers derived from the old wording sitting under the new one — coherent-looking and quietly wrong.
+  A no-change edit is a no-op (opening the editor must not cost the conversation); an emptied edit is
+  a delete; every edit is MARKED so history never pretends the original wasn't sent.
+- A 15-minute window: unlimited editing would let a user rewind instructions the builder has already
+  acted on, showing a transcript that no longer matches the app on disk.
+
+**`voiceChatBilling.ts` — the money and the consent.** Per-second billing is honest under THE
+ONE-WALLET LAW's own terms: that law forbids INVENTING a cost, and voice's cost genuinely IS time,
+measured by the clock — the same carve-out image generation already has. It never rounds up (whole
+seconds only, exact ₹ from there — the `inrToDebitTokens` remainder-carry lesson), a call that never
+started costs nothing, and the popup is WRITTEN in each language rather than translated word-for-word
+(the admin asked for exactly that). Every version states the rate per second AND per minute, that
+charging starts when the call connects and stops when it ends, and that it comes from the same one
+balance — plus a live meter showing time AND money together. No vendor name anywhere: a consent popup
+is the most user-facing surface there is.
+
+### ⚠️ A CONSTRAINT FOUND WHILE SURVEYING — voice charges NOTHING today
+`src/server/sonic/` contains no wallet, no spend, no charge of any kind; `ProfessionalVoiceButton`
+opens the voice surface directly. The code comment calls it "a paid, logged-in-only feature", but that
+is only a comment — no money has ever moved. **Therefore the consent popup CANNOT ship before the
+metering does**: a popup that says "2 paise per second" while nothing is charged is a lie told to
+every user, which breaks the second and third absolute rules. Voice is now a single indivisible slice:
+popup + per-second metering + wallet debit land together, or none of them do.
+
+**OPEN QUESTION FOR THE ADMIN (recorded, not assumed):** does a Professional Pass holder pay for
+voice? THE ONE-WALLET LAW says a Pass holder is never charged the wallet on top ("the Pass IS the
+payment"), but voice's cost is per-second and was not priced into the Pass. Either answer is
+defensible; it is the admin's money and the admin's promise, so it is not mine to pick.
+
+**HONEST STATUS — nothing is user-visible yet.** These are the shared decisions; the composer
+component and its wiring are slice 2, and voice is slice 3.
+
+Tests: 20 in `tests/chatComposerCore.test.ts` — delete taking its replies and refusing assistant
+messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the exact charge with no
+minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
+written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
+
+## 2026-08-10 — Mobile GitHub login now returns to the APP (in-app popup + deep-link), not the browser
+
+Admin report: in the installed app, GitHub login redirected the whole WebView to the browser and never came
+back — NavBharatAI ended up running on the website in the browser. Admin chose the **custom-scheme in-app
+popup** approach (like Google/Apple).
+
+ROOT CAUSE: `connectGitHub` did a full-page `window.location.href = <github oauth>` and the server callback
+redirected to the https website. In a Capacitor app that navigates away from the native bundle, so the user
+lands on the website in an external browser with no way back into the app.
+
+FIX (native-only; web/desktop OAuth is byte-for-byte unchanged, proven by tests):
+- `useGitHubConnect.ts` — on `Capacitor.isNativePlatform()`, open GitHub in an **in-app browser**
+  (`@capacitor/browser`, Custom Tab / SFSafariViewController) instead of navigating the WebView, and send
+  `state='nbai-native'` so the server knows to return via the app scheme.
+- `githubAuth.ts` — new pure, exported `nativeOauthReturn(state, token)`: for the native sentinel ONLY, it
+  redirects to `com.navbharat.ai://github-callback#gh_token=…`. 🔒 The scheme target is a FIXED server
+  constant, NEVER derived from the caller's `state`, so a crafted state can't open-redirect the token
+  (test-locked). Any other state → null → the normal allow-list-guarded web flow, unchanged.
+- `App.tsx` — a native `appUrlOpen` listener catches the deep link, stores the token, connects, and closes
+  the in-app browser. NO-OP on web.
+- `AndroidManifest.xml` — intent-filter for the `com.navbharat.ai` scheme so the OS routes the deep link
+  back to the (singleTask) MainActivity → `appUrlOpen`.
+- `.github/workflows/ios-ipa.yml` — adds the same `com.navbharat.ai` URL scheme to `Info.plist` via
+  PlistBuddy (next iOS build picks it up automatically — no manual Xcode step).
+- Added `@capacitor/browser` dependency.
+
+**Honest boundary (rule 6):** the native deep-link flow cannot be exercised from the dev sandbox (no device).
+Web is fully unchanged and test-covered; the on-device confirm (install a fresh APK/TestFlight build, tap
+GitHub connect → in-app GitHub page → returns into the app) is the admin's final verification. The Android
+AndroidManifest ships in-repo; the iOS scheme lands on the next `.ipa` build via the workflow above.
+
+**Verification:** frontend `npm run build` ✅ · `tsc`/`tsc -p tsconfig.server.json` clean for touched files ·
+`npx vitest run` ✅ **13352/13352**; new tests lock the native-return + the open-redirect-safety invariant.
+## 2026-08-10 — APK build-repair now follows the user's selected Pro tier (weak/normal/strong/…)
+
+Admin (2026-08-10): "apk builder me jo llm/provider call hogi, woh navbharatai pro (jo user se select kiya
+hai) vaise hi hogi weak/normal/strong etc." The self-healing APK/AAB build already had an AI repair tier
+(`mobileBuildAiRepair.ts` + `tryAiRepair`), but it was HARDCODED to the weak-safe cheap coders (GLM→Kimi)
+because "this route cannot see the user's tier". This wires the tier through so the repair uses the SAME
+Model Routing Policy the main build does.
+
+- `mobileBuildAiRepair.ts`: `AiRepairModel` gains `provider:'CLAUDE'` + `kind:'openai'|'anthropic'`;
+  new `RepairTier` + `normalizeRepairTier(powerLevel)` (unknown ⇒ `weak`, the safe default). Rewrote
+  `aiRepairModelChain(env, tier)`: weak = GLM→Kimi; normal = GLM→Kimi→Sonnet; strong = Sonnet→GLM→Kimi;
+  powerful/max = Opus→Sonnet→GLM→Kimi. 🔒 **The free-tier no-Claude absolute rule is enforced TWICE** —
+  Claude rungs are only appended for paid tiers AND a final filter strips any Claude rung when tier==='weak',
+  so a future edit can't leak Sonnet/Opus onto a free build. Missing paid keys fall through to the cheap
+  coders (never break).
+- `mobileBuildAiRepairClient.ts`: `callRepairModel` now speaks BOTH protocols — OpenAI chat-completions
+  (GLM/Kimi) and the Anthropic messages API (Claude), selected by the rung's `kind`.
+- Routes `mobileShip.ts` (`/autofix`) + `mobileSetup.ts` (`/setup` preflight): read `powerLevel` from the
+  request and pass the resolved tier into the chain.
+- Client: `AgentV3Panel` persists the selected tier to `localStorage['nbai_power_level']`; `APKBuilder`
+  reads it and threads it → `StoreBuildPanel` → both requests. Absent ⇒ server defaults to weak-safe.
+
+Also note (already present, reported to admin): the deterministic repair tier (`mobileBuildRepair.ts`,
+~14 named classes) + the AI tier together already "self-heal GitHub build problems"; the gradle-wrapper.jar
+self-heal shipped separately (#2234).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for the touched files (pre-existing missing-dep errors
+in pg/exceljs/attachmentText are unrelated, present on clean main); mobile tests 113/113; new tier tests
+lock weak-never-Claude + each tier's chain + Anthropic rung shape.
+
+## 2026-08-10 — APK/AAB self-heals a missing @drawable/splash (resource-linking failure), + named class
+
+Admin report (screenshots): a fresh APK build failed at aapt2 — "resource drawable/splash (aka
+…:drawable/splash) not found. error: failed linking references → Android resource linking failed" — and
+the admin asked why the "LLM self-heal" didn't fix it.
+
+ROOT CAUSE: Capacitor's launch theme (`android/app/src/main/res/values/styles.xml`) references
+`@drawable/splash`, but when `@capacitor/splash-screen` ships no splash image, a fresh `npx cap add android`
+(Capacitor 8) omits the splash asset → the reference doesn't resolve and `processDebugResources` fails.
+
+WHY THE LLM REPAIR COULDN'T TOUCH IT (honest boundary, rule 6): the broken file is in the GENERATED
+`android/` project — created on CI, gitignored, absent from the user's repo. The AI repair only edits repo
+files (workflow, package.json, capacitor.config, app source), so it literally cannot see a file that doesn't
+exist until CI scaffolds it. The correct fix is a DETERMINISTIC self-heal in the build workflow, exactly
+like the gradle-wrapper heal.
+
+FIX:
+- `mobileShipKit.ts` `ENSURE_ANDROID_STEP` (shared by both APK + AAB workflows): after `npx cap sync
+  android`, if no `res/drawable*/splash.*` exists, write a minimal placeholder layer-list drawable at
+  `res/drawable/splash.xml` so `@drawable/splash` always resolves. Regression test locks it into both
+  generated workflows.
+- `mobileBuildRepair.ts`: added a named classifier class `ANDROID_RESOURCE_LINKING` (aapt2 "resource … not
+  found"/"failed linking references"), checked before the app-code extractor. It maps to a workflow refresh
+  — which now carries the splash heal — so an EXISTING repo that predates the fix self-heals: resource-link
+  fail → refresh our workflow → re-run → splash heal fires → success. Previously this swept into the generic
+  android-stage `STALE_WORKFLOW` fallback; naming it fixes the system's honesty (rule 5) and telemetry. The
+  loop-guard holds: an already-current workflow yields null (no empty commit, no loop). User-facing summary
+  carries no vendor/aapt/drawable words (White-Label Law).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for touched files; mobileShipKit 41/41 + repair suite
+121/121; emitted YAML inspected (printf carries literal \n, valid shell). PR #2237.
+
+## 2026-08-11 — APK Builder: ONE honest flow — App Information now feeds the real build; useless .txt removed
+
+Admin: "app information wala option, github app builder se connect nahi hai … 'generate config file' ki .txt
+ka kya use? … app information ko niche 'build a real android app' se sync kardo." (And: name/logo easily editable.)
+
+ROOT CAUSE: the APK Builder had TWO parallel flows. A 4-step wizard (App Info → Permissions → Build Method →
+Generate) ended by producing a plain-text `.txt` of Android config files that the REAL build never used and a
+user could do nothing with; below it sat the actual builder (StoreBuildPanel) that compiles a signed
+.apk/.aab on GitHub's runners. So the wizard's settings (permissions, orientation, TWA/Capacitor, targetSdk)
+shaped nothing, the `.txt` was dead output, and the one part that worked looked unrelated to the form. This
+is a second-absolute-rule violation (a surface that looks done but does nothing).
+
+FIX — collapse to a SINGLE flow:
+- `APKBuilder.tsx` rewritten: one "App Information" form (name, package, icon, background colour) that FEEDS
+  the real `StoreBuildPanel` directly below it (with a visible "your app info flows into the build below"
+  bridge). Removed the disconnected wizard, the four dead config-file generators, and the `.txt` download.
+  Kept the real, working publishing guide (self-contained, opened from the build panel).
+- Every field now genuinely reaches the built app: name + package + icon already did; **background colour is
+  newly wired** through `capacitor.config.ts` (`android.backgroundColor` + `SplashScreen.backgroundColor`).
+- `mobileProjectAssembler.ts`: `buildCapacitorConfig(appId, appName, webDir, backgroundColor?)` +
+  `normaliseHexColor()`. 🔒 The colour is VALIDATED to a canonical `#rrggbb` before it is interpolated into
+  the generated TS file — a non-hex value is DROPPED and the config is byte-identical to before (injection
+  guard; the value comes from the client). `AssembleOptions.backgroundColor` threaded from the setup route
+  and `StoreBuildPanel` payload.
+- `AppKnowledgeBase.ts`: `apk_builder` entry + the store-ready-build-kit line updated to the single-flow
+  reality (no more "wizard"/"version"/"permissions"/".txt config file").
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` + `tsc -p tsconfig.server.json` clean ·
+assembler tests 30/30 (4 new: hex inject + 3-digit expand + injection-drop + byte-identical-when-absent),
+mobile suite 132/132, AppKnowledgeBase 6/6.
+
+## 2026-08-11 — Nav cleanup: "Other AI" → "Other" label, and Preview/Files/History removed from the sidebar
+
+Admin: (1) rename the "Other AI" section to just "Other"; (3) remove the Preview/Files/History buttons from
+the sidebar — "inko need nahi hai, yeh sab AI ke andar already hai".
+
+- Rename (task 1): the user-facing label only — Home card title, the Other page `<h1>`, and the TopNav tab
+  label all now read "Other". The internal view id `other_ai` is unchanged (no routing risk). The KB still
+  calls the section "Other AI" in its navigation text — cosmetic (the card is findable as "Other"); a full
+  KB wording sweep is a separate follow-up.
+- Sidebar (task 3): Preview / Files / History are hidden from the rail + drawer via the SAME mechanism Git
+  already uses — a `SIDEBAR_HIDDEN` set filtered out of `visibleItems`. They stay in `menuItems`, so their
+  header tab + view still open from the places that already have them (Preview: Pro v5.0 + bottom footer;
+  Files: Pro v5.0 footer; History: the per-AI footer). No view is orphaned.
+
+NOTE (admin tasks 2, 4, 5 still to do): task 2 ("cut App Settings from Settings into Other") is a larger
+cross-cutting change — ~40 files reference "Settings → App Settings → X" as the canonical nav path (engine
+messages, errors, the centralized `settingsLabels.ts`), and some `Settings → Domain`/etc. strings belong to
+EXTERNAL providers (e.g. Auth0), so a blanket sweep is unsafe. It will be done as a dedicated PR that routes
+those paths through the centralized label module. Tasks 4/5 (Free/Professional history scoping) are next.
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` clean · nav/routing/settings tests green.
+## 2026-08-11 — Every AI knows NavBharatAI builds APKs itself, and suggests our own APK Builder FIRST (GitHub second)
+
+Admin: "navbharatai pro ko pata hi nahi hai ki ham APK bana sakte hai — fix karo. Sabhi AI ko exact pata
+hona chahiye ki Other AI → APK Builder me app banti hai, kaise, kya chahiye. Aur jab koi (kisi bhi language
+me) APK banana pooche, to GitHub ka rasta 1st nahi — 1st NavBharatAI ka apna Other AI suggest ho, GitHub 2nd."
+
+INVESTIGATION (Explore agent mapped every AI's knowledge path):
+- `apk_builder` KB entry + the v5 builder prompt were already NavBharatAI-first — good.
+- BUT three capability bullets in the `agentv3_builder` KB description (MOBILE APP EXPORT / STORE-READY BUILD
+  KIT / HOW TO PUBLISH) framed **Capacitor / Android-SDK / GitHub-Actions FIRST** — the source of any
+  GitHub-first answer.
+- **Professionals** (`professionals/engine.ts`) called only `getSupportOffer`, NEVER `getRelevantContext`, so
+  they had NO app knowledge at all — a professional asked "apk kaise banau" knew nothing about the builder.
+- `AppContextInjector.formatBlock` emits only the FIRST line of a `description`; `apk_builder`'s description
+  is a single line (fully surfaced), so strengthening it propagates to every injector-fed AI.
+
+FIX:
+- `AppKnowledgeBase.ts` — `apk_builder` description now opens with an explicit PRIORITY statement: this
+  built-in builder is the FIRST answer to any "make an APK / put app on phone / publish to Play" question in
+  ANY language; the user never needs Android Studio / a computer / the Capacitor CLI / to set up GitHub
+  Actions; GitHub is only the under-the-hood build machine. Enriched keywords with many multilingual /
+  any-phrasing forms (hinglish + english). Reworded the three GitHub-first capability bullets to lead with
+  NavBharatAI's own builder and demote GitHub/Capacitor to "under the hood, not a route you offer".
+- `AgentV3/systemPrompt.ts` — added a firm PRIORITY line to the v5 build prompt: own APK Builder is the first
+  and only route; NEVER tell a user to install Android Studio / use the Capacitor CLI / set up GitHub Actions.
+- `professionals/engine.ts` — every professional now also injects `getRelevantContext(message,'professional')`
+  (mirrors chat.ts / sda.ts), so a professional surfaces the APK Builder for an app-capability question. The
+  injector returns empty for a normal domain question, so nothing else changes.
+
+**Verification:** frontend `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · apkGuidance 24/24 (10 new:
+priority-first framing, v5 prompt rule, 7 multilingual phrasings surface the builder, professional surface) ·
+appKnowledgeBase 6/6 · polish (builder/professionals/white-label/core-chat) + professionals + offline +
+awareness + SDA route suites all green.
+
+## 2026-08-11 — APK self-heals a missing launcher-icon foreground (ic_launcher_foreground) — sibling of the splash bug
+
+Admin sent a real build report: APK build FAILED at resource-linking —
+"resource mipmap/ic_launcher_foreground (aka …:mipmap/ic_launcher_foreground) not found" from
+mipmap-anydpi-v26/ic_launcher.xml + ic_launcher_round.xml → "failed linking file resources", BUILD FAILED.
+
+AUTOPSY (5th rule): the report's annotations showed the EARLIER heals FIRING correctly — "splash drawable
+missing — writing a placeholder" (#2237) and "gradle-wrapper.jar missing — fetching it" (#2234) both ran. So
+the app compiled and those two classes are handled; the NEW failure is a DIFFERENT missing resource in the
+same GENERATED android/ project: the adaptive launcher icon references @mipmap/ic_launcher_foreground, which
+a fresh cap add / a partial icon set can omit.
+
+ROOT CAUSE + rule-3 (hunt the siblings): this is the SAME CLASS as the splash bug — an adaptive/launch
+resource referenced by the generated project's XML but not shipped. The splash fix should have generalised;
+it did not, so the launcher-foreground sibling slipped through. Now covered.
+
+FIX (mobileShipKit.ts ENSURE_ANDROID_STEP, both APK + AAB): after cap sync, if NO ic_launcher_foreground
+exists in any mipmap/drawable bucket, create one — from the user's OWN uploaded icon (resources/icon.png)
+when present (so the real icon is used, rule 2), else a visible placeholder vector — and rewrite the adaptive
+XML's @mipmap/ic_launcher_foreground → @drawable/ic_launcher_foreground so it resolves. Background is left
+untouched (present in the failing case; adding one risks a duplicate-resource error). Existing repos also
+self-heal: the ANDROID_RESOURCE_LINKING classifier (#2237) already routes any "failed linking" to a workflow
+refresh, which now carries this heal too.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell, $RES literal); mobileShipKit + repair
+suites 82/82; `tsc -p tsconfig.server.json` clean.
+## 2026-08-11 — History scoping: Free → only Free; Professionals → only that user's professional chats
+
+Admin: (4) NavBharatAI Free's History must show ONLY Free chats, not the whole app; (5) the Professionals
+History must show ONLY professional conversations — "abhi sabhi (puri) history show kar raha hai, jo galat hai".
+
+ROOT CAUSE (mapped by an Explore agent):
+- Free: the footer already opened History pre-filtered to 'free', but the filter TABS let the user switch to
+  All/Pro/SDA — so it wasn't actually scoped.
+- Professionals: the hub's History opened the generic `HistoryView`, which reads Firestore `chat_sessions`
+  (free/pro/build sessions) with filter 'all'. But professional chats are NOT in `chat_sessions` at all —
+  each professional keeps its own rolling buffer in localStorage `prof_<id>_messages`. So the professional
+  History showed unrelated sessions and ZERO of the professional's real chats.
+
+FIX:
+- `HistoryView.tsx`: new `lockFilter` prop — when set (Free → History), the filter/mode TABS are hidden and
+  the scope is FIXED to `initialFilter`, so Free shows only Free sessions and cannot be switched to the whole
+  app. `App.tsx` passes `lockFilter={historyInitialFilter === 'free'}`.
+- New `ProfessionalHistoryView.tsx` + `readProfessionalHistory()`: reads the RIGHT source — the localStorage
+  `prof_<id>_messages` buffers — and lists one row per professional the user ACTUALLY chatted with (a lone
+  opening greeting is excluded; a user message is required). Each row resumes that professional (`toggleTab`
+  on the professional's id = its ViewType), with a per-conversation delete. The Professionals footer now sets
+  the scope to `'professional'` and `App.tsx` renders `ProfessionalHistoryView` for it — never the generic
+  session list.
+
+**Verification:** `npm run build` ✅ · `tsc --noEmit` clean · `dynamicFooter` 5/5 (locks the scoped wiring)
++ `professionalHistory` 4/4 (only-own, welcome-excluded, empty, corrupt-safe).
+
+## 2026-08-11 — APK build audit + pre-solve batch (kill the shivlings, part 1)
+
+Admin: "ek scan/audit wapas karo — apk banane me future me kya kya problem aa sakti hai, sab list banao."
+Ran a full senior-Android-CI audit of the generated APK/AAB pipeline (both workflows, the 3 deterministic
+self-heals, the ~16-class classifier, the AI-repair tier, the compile pre-flight). Key structural fact: the
+user's repo NEVER contains android/ (it's regenerated on CI each build, gitignored), so any android/-resident
+defect is invisible to the AI repair and can be fixed ONLY by a deterministic workflow heal. Enumerated 19
+future failure classes (G1–G19) ranked by likelihood × impact.
+
+PRE-SOLVED NOW (deterministic, always-work, also heal existing repos via the STALE_WORKFLOW/
+ANDROID_RESOURCE_LINKING refresh path) — mobileShipKit.ts ENSURE_ANDROID_STEP + both job defs:
+- **G3 (highest user-impact): the uploaded icon now becomes the REAL app icon.** After cap sync, if an icon
+  source exists, run `npx @capacitor/assets generate --android` to produce the full density + adaptive
+  (foreground/background/round) icon set from the user's icon. Previously CI never generated icons, so a
+  user who uploaded an icon still shipped Capacitor's default (a shipped feature that did nothing — 2nd-rule
+  adjacent). Degrades gracefully: if the tool is unavailable or the icon <1024px it warns and the existing
+  foreground self-heal still guarantees a resolvable icon, so the build never fails.
+- **G7: Gradle JVM heap.** Force `org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g` into
+  android/gradle.properties (idempotent) so a large app doesn't OOM during dex/R8/aapt2 — the existing
+  NODE_OUT_OF_MEMORY fix only covers the web build, not the Android build.
+- **G13: `timeout-minutes: 30`** on both build jobs so a hung download can't idle to GitHub's 6-hour default
+  and burn the user's Actions minutes / stick the progress bar.
+
+STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
+- G1 appName XML-escaping in strings.xml [D], G4 adaptive background + round-icon backstop [D], G5 plugin
+  minSdk merger bump [D], G10 transient-network Gradle retry [D], G8 keyword/case package segment [AI],
+  G9 vite .mjs outDir + Next-SSR detection [AI], G17 index.html presence check [AI]. Needs-user (classify
+  honestly, never fake): G6 google-services.json (push/Firebase), G11 wrong keystore creds, G12 private npm
+  registry. Biggest structural item: **G2 — the Capacitor-major ↔ Java/Gradle/compileSdk version matrix**
+  (default major 6 is stale and not co-validated with the pinned Java 21; repairJavaVersion only bumps up).
+  To be encoded as ONE governed source-of-truth table (rule-4 centralization) — carefully, separately.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
+`tsc -p tsconfig.server.json` clean.
 ## 2026-08-10 — Per-file narration: every file the build writes now says what it IS
 
 **Admin ask:** "jab NavBharatAI koi app banata hai, ek saath bahut sari file bana deta hai — background

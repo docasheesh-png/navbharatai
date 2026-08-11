@@ -71,11 +71,18 @@ export interface StoreBuildPanelProps {
   appId: string;
   /** Data URL of the chosen icon, if any. */
   iconDataUrl?: string;
+  /** The app's background colour (`#rrggbb`) from the App Information form; wired into the real build. */
+  backgroundColor?: string;
   /** The connected GitHub token; without one the panel explains what to do instead of failing. */
   githubToken?: string;
   onConnectGitHub?: () => void;
   /** Open the step-by-step publishing guide. */
   onOpenGuide?: () => void;
+  /**
+   * The user's selected NavBharatAI Pro tier (weak/off/mini/medium/max). It routes the AI build-repair
+   * to the SAME models the main build uses — weak stays on the cheap coders, paid tiers get Sonnet/Opus.
+   */
+  powerLevel?: string;
 }
 
 // TWO Android paths (admin 2026-08-02). The APK one needs NO secrets — Gradle signs a debug build
@@ -110,7 +117,7 @@ function fmtSize(bytes: number): string {
 }
 
 export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
-  sessionId, appName, appId, iconDataUrl, githubToken, onConnectGitHub, onOpenGuide,
+  sessionId, appName, appId, iconDataUrl, backgroundColor, githubToken, onConnectGitHub, onOpenGuide, powerLevel,
 }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [setup, setSetup] = useState<SetupResult | null>(null);
@@ -149,7 +156,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       const res = await fetch('/api/mobile-ship/setup', {
         method: 'POST',
         headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ sessionId, appName, appId, iconDataUrl, ios: true }),
+        body: JSON.stringify({ sessionId, appName, appId, iconDataUrl, backgroundColor, ios: true, powerLevel }),
       });
       const data = await res.json().catch(() => null);
       if (!liveRef.current) return;
@@ -165,7 +172,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     } finally {
       if (liveRef.current) setBusyNote('');
     }
-  }, [sessionId, appName, appId, iconDataUrl, ghHeaders]);
+  }, [sessionId, appName, appId, iconDataUrl, backgroundColor, ghHeaders]);
 
   /**
    * Start the workflow on GitHub. Returns false when GitHub refused, so the caller can stop the whole
@@ -286,7 +293,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
           headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id }),
+          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id, powerLevel }),
         });
         fix = await fRes.json().catch(() => null);
       } catch { /* handled as "could not fix" below */ }

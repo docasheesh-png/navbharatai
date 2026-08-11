@@ -4,6 +4,26 @@ import { sendSafeError } from '../lib/httpError';
 
 // Production redirect URI is hardcoded per the original code's explicit directive.
 const GITHUB_REDIRECT_URI = 'https://navbharatai.com/api/github/callback';
+
+// NATIVE (Capacitor) OAuth return. The app starts the handshake with state === NATIVE_OAUTH_STATE and
+// opens GitHub in an in-app browser; on success the token is redirected back INTO the app via its own
+// fixed custom URL scheme (server-owned constant — NEVER derived from `state`, so it can't become an
+// open redirect). The app's appUrlOpen listener catches it, stores the token, and closes the browser.
+// GitHub OAuth only allows https redirect URIs, so the https callback above stays the registered one and
+// this scheme hop happens entirely on our own callback page.
+const NATIVE_OAUTH_STATE = 'nbai-native';
+const NATIVE_OAUTH_REDIRECT = 'com.navbharat.ai://github-callback';
+
+/**
+ * The native-app OAuth return URL, or null when this is NOT a native flow. Pure + exported so the
+ * open-redirect-safety invariant is unit-tested: the scheme target is a FIXED server-owned constant
+ * (`NATIVE_OAUTH_REDIRECT`), NEVER derived from the caller-controlled `state`, so a crafted state can
+ * never redirect the token anywhere but the app's own scheme.
+ */
+export function nativeOauthReturn(state: string | undefined | null, accessToken: string): string | null {
+  if (state !== NATIVE_OAUTH_STATE) return null;
+  return `${NATIVE_OAUTH_REDIRECT}#gh_token=${encodeURIComponent(accessToken)}`;
+}
 const GITHUB_SCOPE = 'repo workflow read:user user:email';
 
 // Origins the OAuth flow may hand the (repo+workflow scope) token back to. The token must
@@ -125,6 +145,11 @@ export function registerGithubAuthRoutes(app: Express): void {
 
       const { access_token, error, error_description } = response.data;
       if (error) throw new Error(error_description || error);
+
+      // NATIVE app: hand the token back through the app's own custom scheme so the user returns to the
+      // installed app instead of being stranded on the website in a browser.
+      const nativeReturn = nativeOauthReturn(state as string, access_token);
+      if (nativeReturn) return res.redirect(nativeReturn);
 
       // Only honour an allow-listed return URL — a crafted `state=https://evil.com` must not
       // be able to exfiltrate the token via redirect.

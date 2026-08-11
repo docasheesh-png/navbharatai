@@ -85,3 +85,39 @@ describe('every OTHER AI gives the SAME answer (one knowledge base, no drift)', 
     expect(ctx).not.toMatch(/APK Builder/);
   });
 });
+
+describe('NavBharatAI\'s own APK Builder is suggested FIRST, GitHub second (admin 2026-08-11)', () => {
+  const apk = APP_KNOWLEDGE_BASE.find((f) => f.id === 'apk_builder')!;
+
+  it('the APK entry states it is the FIRST answer and that no external tools / manual GitHub are needed', () => {
+    expect(apk.description).toMatch(/FIRST answer/i);
+    expect(apk.description).toMatch(/never need Android Studio|NEVER need Android Studio/i);
+    expect(apk.description).toMatch(/set up GitHub Actions themselves/i);
+    // GitHub is framed as under-the-hood, not a route the user sets up.
+    expect(apk.description).toMatch(/under the hood/i);
+  });
+
+  it('the v5 builder prompt carries the same PRIORITY rule — own builder first, never external tools', () => {
+    const prompt = architectSystemPrompt();
+    expect(prompt).toMatch(/PRIORITY: NavBharatAI's own APK Builder is the FIRST/);
+    expect(prompt).toMatch(/NEVER tell them to install Android Studio/i);
+  });
+
+  it.each([
+    'apk kaise banau',
+    'mujhe apk chahiye',
+    'how to make apk',
+    'android app kaise banaye',
+    'app ko apk me convert karo',
+    'app ko phone me kaise laun',
+    'playstore par kaise daale',
+  ])('a real "make an APK" question (any phrasing) surfaces the APK Builder: %s', (q) => {
+    const ctx = AppContextInjector.getRelevantContext(q, 'pro_chat');
+    expect(ctx).toMatch(/APK Builder/);
+  });
+
+  it('Professionals also surface the APK Builder now (they got no app knowledge before)', () => {
+    const ctx = AppContextInjector.getRelevantContext('apk kaise banau', 'professional');
+    expect(ctx).toMatch(/APK Builder/);
+  });
+});

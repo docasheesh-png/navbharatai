@@ -1277,6 +1277,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_helpdesk',
+      description:
+        'Add a real Helpdesk / ticketing backend to the app (server/helpdesk/) — a packaged domain vertical for ' +
+        'customer support and IT desks. THREE real guarantees: (1) TICKET STATE-MACHINE — open → in_progress → ' +
+        'resolved → closed along allowed transitions only (+ reopen from resolved/closed), an invalid jump ' +
+        'rejected (409); (2) PRIORITY-DRIVEN SLA + BREACH — each priority has an SLA target (urgent 4h/high ' +
+        '12h/medium 24h/low 72h) and a still-unresolved ticket past its due time is SLA-breached, derived from ' +
+        'the dates (reopen restarts the clock); (3) APPEND-ONLY thread — every status change + comment is an ' +
+        'immutable ordered entry. Emits a dependency-free HelpdeskService (createTicket, setStatus, assign, ' +
+        'addComment, slaDueAt, isSlaBreached, thread, list) + an Express router (GET/POST /tickets, GET ' +
+        '/tickets/:id with slaBreached, PATCH /tickets/:id/status, /assign, POST /tickets/:id/comments, GET ' +
+        '/tickets/:id/thread) + a README. In-memory by default — swap the Maps for your DB. Pairs with the ' +
+        'auth/notification/email recipes. Use for helpdesk / support / ticketing / IT-desk prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2020,6 +2036,34 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           },
         },
         required: ['secrets'],
+      },
+    },
+    {
+      name: 'generate_game_systems',
+      description:
+        'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
+        + 'damage, death), enemy AI, projectiles and enemy waves. Call generate_game_runtime first. '
+        + 'Emits src/game/systems as PURE arithmetic, so the rules hold rather than being approximated. '
+        + 'IT ENCODES THE RULES A HAND-WRITTEN VERSION GETS WRONG — do not reimplement them: damage '
+        + 'needs BOTH an attack cooldown and invulnerability frames (i-frames), because without them an '
+        + 'adjacent enemy deals its damage 60 times a second and the player dies in half a second, and '
+        + 'lowering the damage number is not a fix; projectiles test the SEGMENT they travelled rather '
+        + 'than their new position, because a fast bullet would otherwise tunnel straight through a '
+        + 'small enemy; enemies use separation steering, or a group converges to one point and reads as '
+        + 'a single enemy; the de-aggro radius is larger than the detect radius so they cannot flicker '
+        + 'at the boundary; death fires exactly once; and a wave clears when every enemy is dead OR has '
+        + 'fallen out of the world, so one enemy through the floor cannot hang the level forever. '
+        + 'The AI only REQUESTS an attack — a Cooldown decides. Everything emits events, so pair it with '
+        + 'generate_game_vfx for impact.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: combat, ai, projectile, spawner. Default = all.',
+          },
+        },
       },
     },
     {
@@ -3102,6 +3146,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_pharmacy',
   'generate_recruitment',
   'generate_invoicing',
+  'generate_helpdesk',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',
@@ -3152,6 +3197,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_systems',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_game_controller',

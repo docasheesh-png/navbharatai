@@ -321,7 +321,7 @@ import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary'
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
-import { applyVisualTextEdit, applyVisualStyleEdit } from '../AgentV3/VisualEditPatcher';
+import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -4743,8 +4743,18 @@ export function registerAgentV3Routes(app: Express): void {
     const styleUpdates = styleUpdatesRaw && typeof styleUpdatesRaw === 'object' && !Array.isArray(styleUpdatesRaw)
       ? (styleUpdatesRaw as Record<string, string>) : null;
     const isStyleEdit = styleUpdates != null && Object.keys(styleUpdates).length > 0;
-    if (!workspaceId || !filePath || (newText === null && !isStyleEdit)) {
-      res.status(400).json({ error: 'workspaceId, file and either newText or styleUpdates are required.' });
+    // MULTI-ELEMENT SELECT: several elements in the SAME file arrive as one request and are patched in a
+    // single read-modify-write. One request per element would be a lost update — see applyVisualStyleEdits.
+    const editsRaw = Array.isArray(req.body?.edits) ? req.body.edits : null;
+    const edits = editsRaw
+      ? (editsRaw as any[])
+          .filter((e) => e && typeof e === 'object' && Number.isFinite(Number(e.line))
+            && e.styleUpdates && typeof e.styleUpdates === 'object' && !Array.isArray(e.styleUpdates))
+          .map((e) => ({ line: Number(e.line), column: Number(e.column) || 1, styleUpdates: e.styleUpdates as Record<string, string> }))
+      : [];
+    const isBatchEdit = edits.length > 0;
+    if (!workspaceId || !filePath || (newText === null && !isStyleEdit && !isBatchEdit)) {
+      res.status(400).json({ error: 'workspaceId, file and either newText, styleUpdates or edits are required.' });
       return;
     }
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { // T0-9: strict — visual-edit writes files
@@ -4759,23 +4769,35 @@ export function registerAgentV3Routes(app: Express): void {
         res.status(404).json({ error: `${filePath} was not found in this workspace's current files.` });
         return;
       }
-      const result = isStyleEdit
-        ? await applyVisualStyleEdit({ filePath, source, line, column, styleUpdates: styleUpdates as Record<string, string> })
-        : await applyVisualTextEdit({ filePath, source, line, column, newText: newText as string });
+      const result = isBatchEdit
+        ? await applyVisualStyleEdits({ filePath, source, edits })
+        : isStyleEdit
+          ? await applyVisualStyleEdit({ filePath, source, line, column, styleUpdates: styleUpdates as Record<string, string> })
+          : await applyVisualTextEdit({ filePath, source, line, column, newText: newText as string });
       if (!result.ok) {
         res.status(422).json({ error: result.error });
         return;
       }
+      // An `ok` result with no source is not a state any patcher should produce, but writing `undefined`
+      // into the workspace would EMPTY the user's file — so it is refused here rather than trusted.
+      const newSource = result.newSource;
+      if (typeof newSource !== 'string') {
+        res.status(500).json({ error: 'The edit produced no file content.' });
+        return;
+      }
+      // A batch that partially applied MUST say so — the elements that refused are named, so the user is
+      // never told all their selected elements changed when some did not.
+      const partial = isBatchEdit ? (result as { failures?: Array<{ line: number; error: string }> }).failures ?? [] : [];
       // Write through BOTH the live actuator (so a still-warm sandbox reflects it immediately) and the
       // durable store (so it survives an instance recycle / is what the next preview build reads) —
       // matching how every other v5.0 file write persists. Actuator write is best-effort: a VFS-tier
       // or cold sandbox has no live copy to write into, and the durable save below is authoritative.
-      try { await actuator.writeFile(workspaceId, filePath, result.newSource); } catch { /* best-effort */ }
+      try { await actuator.writeFile(workspaceId, filePath, newSource); } catch { /* best-effort */ }
       // MERGE, never replace: a single-file edit must UPSERT into the durable index — the old
       // saveWorkspaceFiles call REPLACED the whole path index with this ONE file (the "sab gayab" wipe
       // class; the store's shrink-guard now also blocks it, this is the correct semantics at the source).
-      await mergeWorkspaceFiles(workspaceId, { [filePath]: result.newSource });
-      res.json({ ok: true, file: filePath, content: result.newSource });
+      await mergeWorkspaceFiles(workspaceId, { [filePath]: newSource });
+      res.json({ ok: true, file: filePath, content: newSource, ...(partial.length > 0 ? { failures: partial } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to apply the visual edit.' });
     }

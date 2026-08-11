@@ -246,3 +246,90 @@ function getJsxChildren(node: any): any[] {
 function escapeJsxText(text: string): string {
   return text.replace(/[{<]/g, (c) => `{'${c}'}`);
 }
+
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// MULTI-ELEMENT SELECT (ROADMAP §2) — several elements restyled in ONE pass.
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** One element's worth of style change, inside a batch. */
+export interface VisualStyleEditItem {
+  line: number;
+  column: number;
+  styleUpdates: Record<string, string>;
+}
+
+export interface VisualBatchEditResult {
+  /** True when at least one edit applied — the caller must then save `newSource`. */
+  ok: boolean;
+  newSource?: string;
+  applied: number;
+  /** Edits that could not be applied, each with the honest reason. Never silently dropped. */
+  failures: Array<{ line: number; column: number; error: string }>;
+  error?: string;
+}
+
+/**
+ * Apply several style edits to ONE file in a single read-modify-write.
+ *
+ * 🔒 WHY THIS EXISTS AT ALL, RATHER THAN THE CLIENT CALLING THE SINGLE-EDIT ROUTE N TIMES. That was the
+ * obvious implementation of multi-select and it is silently destructive. The single-edit route reads the
+ * file, patches it, and saves it; two of those in flight for the same file is a textbook LOST UPDATE —
+ * whichever saves last wins and the other user-visible change vanishes, with both requests returning 200.
+ * Selecting two elements in one component is the NORMAL case for this feature, not an edge case.
+ *
+ * 🔒 AND WHY BOTTOM-UP. Adding `style={{ … }}` to an element rewrites that region of the file, which can
+ * move every position after it. Applying edits in DESCENDING source order means each remaining edit's
+ * (line, column) still points at the same element when its turn comes: an edit low in the file cannot
+ * disturb one above it. Top-down would corrupt or silently mis-target every edit after the first.
+ *
+ * Partial success is reported honestly rather than hidden: an element whose style is dynamic still
+ * refuses (as it does for a single edit), the others still apply, and the caller learns exactly which
+ * ones did not — a batch that quietly dropped an element would be the "looks done" state rule 2 forbids.
+ */
+export async function applyVisualStyleEdits(req: {
+  filePath: string;
+  source: string;
+  edits: VisualStyleEditItem[];
+}): Promise<VisualBatchEditResult> {
+  const { filePath, source, edits } = req;
+  if (!Array.isArray(edits) || edits.length === 0) {
+    return { ok: false, applied: 0, failures: [], error: 'No edits provided.' };
+  }
+
+  // De-duplicate by position: the same element selected twice must be patched once, not twice.
+  const seen = new Set<string>();
+  const unique = edits.filter((e) => {
+    const key = `${e.line}:${e.column}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // DESCENDING source order — see the bottom-up note above. This ordering is the correctness property.
+  const ordered = [...unique].sort((a, b) => (b.line - a.line) || (b.column - a.column));
+
+  let current = source;
+  let applied = 0;
+  const failures: VisualBatchEditResult['failures'] = [];
+
+  for (const edit of ordered) {
+    const result = await applyVisualStyleEdit({
+      filePath,
+      source: current,
+      line: edit.line,
+      column: edit.column,
+      styleUpdates: edit.styleUpdates,
+    });
+    if (result.ok) {
+      current = result.newSource;
+      applied += 1;
+    } else {
+      failures.push({ line: edit.line, column: edit.column, error: result.error || 'Could not apply this change.' });
+    }
+  }
+
+  if (applied === 0) {
+    return { ok: false, applied: 0, failures, error: failures[0]?.error || 'None of the changes could be applied.' };
+  }
+  return { ok: true, newSource: current, applied, failures };
+}

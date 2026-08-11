@@ -206,6 +206,19 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             npx cap add android
             npx cap sync android
           fi
+          # Turn the user's UPLOADED icon into the REAL, full app-icon set (all densities + the adaptive
+          # foreground/background/round layers). Without this the icon upload silently does nothing on CI —
+          # the app would ship with Capacitor's default icon. Runs only when an icon source exists, and
+          # degrades gracefully: if the generator is unavailable or the icon is too small it just warns, and
+          # the foreground self-heal below still guarantees a resolvable icon so the build never fails.
+          if ls resources/icon.* assets/icon.* >/dev/null 2>&1; then
+            mkdir -p assets
+            for s in resources/icon.png assets/icon.png resources/icon.jpg resources/icon.jpeg; do
+              if [ -f "$s" ]; then cp "$s" assets/icon.png; break; fi
+            done
+            echo "Generating the app icon set from your uploaded icon…"
+            npx --yes @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#111111' || echo "::warning::could not generate the full icon set from your icon (it may be under 1024x1024) — using the built-in icon heal instead"
+          fi
           # Capacitor's launch theme (styles.xml) references @drawable/splash; a fresh cap add (Capacitor 8)
           # can omit the splash asset when @capacitor/splash-screen ships no image → resource linking fails
           # with "resource drawable/splash not found". Guarantee a resolvable @drawable/splash exists.
@@ -238,6 +251,13 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
               sed -i 's#@mipmap/ic_launcher_foreground#@drawable/ic_launcher_foreground#g' "$RES"/mipmap-anydpi-v26/ic_launcher*.xml
             fi
           fi
+          # Give Gradle's JVM enough heap so a LARGE app does not run out of memory during dexing / R8 /
+          # resource compilation — the Node-heap fix does not help the Android build. Force 4g regardless of
+          # Capacitor's lower default (idempotent: drop any existing line first, then set ours).
+          if [ -f android/gradle.properties ]; then
+            sed -i '/^org.gradle.jvmargs/d' android/gradle.properties
+            printf 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g\\n' >> android/gradle.properties
+          fi
           if [ ! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
             echo "NBAI_FAILED_STAGE=capacitor"
             echo "::error::The Android project or its Gradle wrapper is incomplete, so there is nothing to compile."
@@ -259,6 +279,9 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    # A hung download or Gradle daemon must not idle to GitHub's 6-hour default and burn the user's
+    # Actions minutes (and leave the in-app progress bar stuck). 30 min is well above a real build.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -352,6 +375,8 @@ on:
 jobs:
   build-aab:
     runs-on: ubuntu-latest
+    # Never idle to GitHub's 6-hour default on a hung download/daemon (wastes the user's Actions minutes).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

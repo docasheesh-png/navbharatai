@@ -32,6 +32,7 @@ import { registerHallucinationRoutes } from './src/server/routes/hallucination';
 import { registerHooksCheckRoutes } from './src/server/routes/hooksCheck';
 import { registerImportCheckRoutes } from './src/server/routes/importCheck';
 import { registerJsxCheckRoutes } from './src/server/routes/jsxCheck';
+import { registerScaleCheckRoutes } from './src/server/routes/scaleCheck';
 import { registerWorkspaceHealthRoutes } from './src/server/routes/healthCheck';
 import { registerUndefinedHookCheckRoutes } from './src/server/routes/undefinedHookCheck';
 import { registerDepConstraintCheckRoutes } from './src/server/routes/depConstraintCheck';
@@ -605,6 +606,7 @@ setInterval(() => {
   registerHooksCheckRoutes(app); // AgentV3 — React Rules-of-Hooks check (POST /api/workspace/hooks-check)
   registerImportCheckRoutes(app); // AgentV3 — import/export consistency check (POST /api/workspace/import-check)
   registerJsxCheckRoutes(app); // AgentV3 — JSX undefined-component check (POST /api/workspace/jsx-check)
+  registerScaleCheckRoutes(app); // AgentV3 — scaling check (POST /api/workspace/scale-check)
   registerWorkspaceHealthRoutes(app); // AgentV3 — one-call build-health aggregate (POST /api/workspace/health-check)
   // (registerSonicRoutes is registered earlier, before the SPA catch-all — see above.)
   registerUndefinedHookCheckRoutes(app); // AgentV3 — undefined-hook-call check (POST /api/workspace/hook-resolution-check)

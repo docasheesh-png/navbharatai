@@ -2545,6 +2545,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'scaling-check',
+    name: 'Will This App Handle Real Traffic? (scaling check)',
+    path: 'Home → Other AI → Insights & Webhooks → Will this app handle real traffic?',
+    description: `Finds the three things that actually slow an app down as its data grows, and says how bad each one gets: (1) UNBOUNDED QUERIES — code that reads every row of a table with no limit or paging, the usual reason an app that was fast in testing times out months later; (2) QUERIES INSIDE A LOOP (the "N+1") — one database call per item instead of one for the whole list, reported differently for sequential loops (latency multiplies) and parallel Promise.all fan-outs (connection-pool exhaustion), because they fail differently; (3) MISSING INDEXES — a filter or sort on a column your migrations never indexed, which makes the database read the whole table every time. Each finding gives the file and line, how the cost grows with your data in real numbers, and the exact one-line fix (including the ready-to-paste "create index" statement). Deterministic static analysis — no AI call, so it costs nothing and cannot invent a problem that is not in your code. HONEST LIMIT: it deliberately does NOT print a "your app handles N users" figure — real capacity depends on your database plan and hosting, which the code cannot see, and it will not guess about indexes for a table whose schema it never saw. Backed by POST /api/workspace/scale-check.`,
+    howToUse: 'Open Home → Other AI → Insights & Webhooks → "Will this app handle real traffic?" → Check Scaling. Green means queries are bounded, none run in a loop, and the columns you filter on are indexed; otherwise each finding shows the file:line, what happens as you grow, and the fix.',
+    relatedFeatures: ['insights-integrations-panel', 'code-confidence-check', 'app-component-tree', 'agentv3_builder'],
+    keywords: ['scaling', 'scale', 'slow', 'performance', 'traffic', 'load', 'n+1', 'index', 'missing index', 'database slow', 'timeout', 'too many users', 'app slow ho raha hai', 'kitne users', 'dheema', 'query slow', 'pagination', 'limit', 'optimize', 'will it scale', 'launch ready'],
+  },
+  {
     id: 'code-confidence-check',
     name: 'Code Confidence (AI Hallucination Check)',
     path: 'Home → Other AI → Insights & Webhooks → Code Confidence',

@@ -6964,6 +6964,38 @@ export function registerAgentV3Routes(app: Express): void {
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
       });
+
+      /**
+       * EVERY heal/repair runner, built ONE way — so its tokens are always attributed.
+       *
+       * ROOT CAUSE (real build report, Shiv Medical Store 2026-08-10, ₹566.96 on a FREE build): the 12
+       * heal/repair runners were each written as
+       *   buildTurnRunner(healRunnerOpts())
+       * with no `onTurnComplete`. Their usage therefore reached the build total but was attributed to
+       * NO provider, so it landed in the "unattributed remainder" — which realProviderCostUsd prices at
+       * SONNET rates as a deliberately conservative upper bound.
+       *
+       * The result was exactly backwards. healRunnerRoutingOpts routes a free build's heals to the
+       * CHEAP coders (~$0.6/M) and the user was billed for them at $3/M — a 5× overcharge on the
+       * majority of that build's tokens (507k of 776k). And because heals only fire when a build
+       * STRUGGLES, the worse a build went, the more of it was billed at the highest rate in the stack.
+       *
+       * It is the same shape as the bug `enforceNoClaude` exists to prevent: a guarantee that depended
+       * on every heal-gate author remembering to thread one option. Threading `onTurnComplete` through
+       * 12 call sites by hand would just re-arm it for the 13th, so the obligation lives here instead —
+       * a new heal runner is attributed by construction, and `healRunnerAttributionGuard` in the tests
+       * fails the build if anyone reintroduces the raw form.
+       *
+       * A second benefit beyond the money: attribution is what makes `noClaude: true` PROVABLE. An
+       * unattributed token has no provider, so a Claude call hidden in that bucket would be invisible
+       * to the honesty detector on exactly the tier where Claude is forbidden.
+       */
+      const healRunnerOpts = () => ({
+        ...healRunnerRoutingOpts(freeTierBuildActive),
+        noClaude: noClaudeBuild,
+        onProviderUsed: captureProvider,
+        onTurnComplete: captureTurnUsage,
+      });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
       billingCtx.buildStartedAt = buildStartedAt; // Fix 67 — the finalizer debits with this exact ref
@@ -9314,7 +9346,7 @@ export function registerAgentV3Routes(app: Express): void {
         // build from ever burning the most-expensive model (the "$26 failed todo" driver).
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
-          client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+          client: buildTurnRunner(healRunnerOpts()),
           model: resolveModel(powerLevelReqEffective), // the tier's pinned model (Strong → Sonnet; Powerful/FT → Opus; Normal → Sonnet)
           effort: powerSpecResolved.effort,
           persistence: {
@@ -9866,7 +9898,7 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                client: buildTurnRunner(healRunnerOpts()),
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -9913,7 +9945,7 @@ export function registerAgentV3Routes(app: Express): void {
               try {
                 const designRunner = new AgentRunner({
                   ...baseRunnerOpts,
-                  client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                  client: buildTurnRunner(healRunnerOpts()),
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
@@ -10006,7 +10038,7 @@ export function registerAgentV3Routes(app: Express): void {
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a preview compile issue so the live preview renders…', ts: Date.now() });
               const compileHealRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                client: buildTurnRunner(healRunnerOpts()),
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -10059,7 +10091,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing a React hooks issue so the app runs without crashing…', ts: Date.now() });
             const hooksHealRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+              client: buildTurnRunner(healRunnerOpts()),
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -10128,7 +10160,7 @@ export function registerAgentV3Routes(app: Express): void {
               events.emit({ type: 'narration', agent: 'architect', text: '🔧 Making sure a missing key freezes just that one feature instead of stopping the whole app…', ts: Date.now() });
               const guardHealRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                client: buildTurnRunner(healRunnerOpts()),
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -10267,7 +10299,7 @@ export function registerAgentV3Routes(app: Express): void {
                 try {
                   const featureRunner = new AgentRunner({
                     ...baseRunnerOpts,
-                    client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                    client: buildTurnRunner(healRunnerOpts()),
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
@@ -10314,7 +10346,7 @@ export function registerAgentV3Routes(app: Express): void {
           try {
             const healRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+              client: buildTurnRunner(healRunnerOpts()),
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -10547,7 +10579,7 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const vaxRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                client: buildTurnRunner(healRunnerOpts()),
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -10609,7 +10641,7 @@ export function registerAgentV3Routes(app: Express): void {
               try {
                 const rtRunner = new AgentRunner({
                   ...baseRunnerOpts,
-                  client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                  client: buildTurnRunner(healRunnerOpts()),
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
@@ -10648,7 +10680,7 @@ export function registerAgentV3Routes(app: Express): void {
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
             ...baseRunnerOpts,
-            client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+            client: buildTurnRunner(healRunnerOpts()),
             model: resolveModel(powerLevelReqEffective),
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
@@ -10954,7 +10986,7 @@ export function registerAgentV3Routes(app: Express): void {
               // A FRESH runner per attempt — never re-run a runner whose previous run was abandoned.
               const critFixRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
+                client: buildTurnRunner(healRunnerOpts()),
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });

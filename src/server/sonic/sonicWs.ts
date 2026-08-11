@@ -94,14 +94,23 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
   const callId = `${uid || 'anon'}_${Date.now().toString(36)}`;
   const freeListed = isAgentV3FreeUser(uid, null);
   let billingStartedAt = 0;
+  /** When the call stopped being billable. 0 = still live. See settle() for why this exists. */
+  let billingEndedAt = 0;
   let billedSeconds = 0;
   let ticker: ReturnType<typeof setInterval> | null = null;
   let ending = false;
 
-  /** Charge everything owed so far. Returns the seconds settled by THIS call. Never throws. */
+  /**
+   * Charge everything owed so far. Returns the seconds settled by THIS call. Never throws.
+   *
+   * The billing clock STOPS at `billingEndedAt`. Without it, the seconds between a call ending and
+   * the socket's 'close' event finally arriving would be billed as talking time — the user charged
+   * for a call that was already over. Small, but it is the difference between a bill you can explain
+   * and one you cannot.
+   */
   const settle = async (): Promise<number> => {
     if (!billingStartedAt || !uid || freeListed) return 0;
-    const owed = unbilledSeconds(billingStartedAt, Date.now(), billedSeconds);
+    const owed = unbilledSeconds(billingStartedAt, billingEndedAt || Date.now(), billedSeconds);
     if (owed <= 0) return 0;
     const through = billedSeconds + owed;
     // Counted as billed BEFORE the await: a second tick firing mid-write must not re-charge the same
@@ -122,6 +131,13 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
   const endCall = (reason: 'no_balance' | 'max_duration') => {
     if (ending) return;
     ending = true;
+    billingEndedAt = Date.now(); // the clock stops the moment the call does, not when 'close' lands
+    // THE TICKER IS STOPPED HERE, NOT LEFT TO ws.on('close') — this is the bug that made the fix
+    // worth writing. `ws.close()` on a socket that is already gone emits no 'close' event, so the
+    // interval would have kept running on a dead call and every later tick would have billed more
+    // elapsed seconds. Worst of all it would have hit the exact user this branch exists for: the one
+    // whose balance just ran out, charged on for a call that had already ended.
+    if (ticker) { clearInterval(ticker); ticker = null; }
     send(ws, { type: 'ended', reason });
     void settle().finally(() => { try { ws.close(); } catch { /* already closed */ } });
   };
@@ -131,9 +147,13 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
     billingStartedAt = Date.now();
     ticker = setInterval(() => {
       void (async () => {
+        // A tick that was already in flight when the call ended must not charge past it — the awaits
+        // below mean one can still be mid-run after endCall() cleared the interval.
+        if (ending) return;
         const seconds = billedSeconds + unbilledSeconds(billingStartedAt, Date.now(), billedSeconds);
         if (seconds >= VOICE_MAX_CALL_SECONDS) { endCall('max_duration'); return; }
         await settle();
+        if (ending) return;
         // The live meter the user watches — the same numbers the wallet just moved by, so the screen
         // and the balance can never tell different stories.
         send(ws, { type: 'billing', seconds: billedSeconds, inr: voiceSecondsCostInr(billedSeconds) });
@@ -148,6 +168,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
 
   const stopMeter = () => {
     if (ticker) { clearInterval(ticker); ticker = null; }
+    // A normal hang-up stops the clock here; a call ended by endCall() already stopped it, and that
+    // earlier timestamp wins so the gap before 'close' arrives is never billed.
+    if (!billingEndedAt) billingEndedAt = Date.now();
     void settle(); // the final, partial slice — a hang-up must not be a free slice of call
   };
 

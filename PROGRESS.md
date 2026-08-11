@@ -30315,6 +30315,50 @@ ON SEND / SEARCH / CLEAR everywhere with Export cut; paid voice everywhere with 
 
 ---
 
+## 2026-08-10 — Pass removal, part 2: the last door it could come through
+
+Part 1 removed every user-facing offer. This closes the one that was left: `/api/payment/create-order`
+still accepted `productType: 'professional_pass'`. The screens were gone, but a crafted request could
+still have created a real Cashfree order — and **money arriving for a WITHDRAWN product is the worst
+outcome there is**: the customer has paid, and we owe them either an entitlement we no longer offer or
+a refund. A pass order is now refused with **410 `pass_withdrawn`**, before anything reaches the
+gateway — no order row, no payment session, no money moved.
+
+**Deliberately NOT silently converted into wallet credit.** Turning someone's ₹99 into something they
+did not ask for is its own dishonesty. They are told plainly what happened, and adding credit — which
+is what the Pass's features now run on anyway — is one tap away.
+
+**The FULFILMENT path is KEPT on purpose.** Deleting it alongside the offer would mean an in-flight
+checkout at deploy time, or a late webhook, pays us and receives nothing. Refusing NEW orders while
+still settling any that already exist is the honest order to withdraw a paid product in; the code
+carries a note saying it can go once no pending `professional_pass` rows remain.
+
+`routesPaymentPreview`'s "refuses an UNDERPAID pass order" case is REWRITTEN in place, not deleted:
+the contract it protected (a pass order must never reach the gateway and take a customer's money) is
+now stronger — no pass order is accepted at ANY price — so the test asserts the wider rule and checks
+all three amounts, including the old ₹1-for-a-hundred-years exploit and the full ₹99.
+
+Tests: 3 new in `tests/passRemoved.test.ts` (12 total) + the rewritten payment case. Gate: tsc clean
+both projects, full run **13,691/13,691**.
+
+**Still dormant, deliberately:** the pass store and the `hasActivePass` branches in the two gates.
+They guard money on every professional turn and every tool action, nothing can set them any more, and
+the comments now say so. They come out once the collection holds no pending pass rows.
+
+**Same PR — a defect found in the voice meter by re-reading it, before it ever ran in production.**
+`endCall()` closed the socket and left the ticker to `ws.on('close')`. But `ws.close()` on a socket
+that is already gone emits **no 'close' event** — so the interval would have kept running on a dead
+call and every later tick would have billed more elapsed seconds. It would have hit precisely the user
+that branch exists for: **the one whose balance just ran out, charged on for a call that had already
+ended.** The ticker is now cleared inside `endCall`, and a tick already in flight bails on `ending`.
+
+One level down, the same class: the seconds between a call ending and 'close' finally arriving were
+billed as talking time. The billing clock now stops when the CALL does (`billingEndedAt`), and a call
+already ended keeps its earlier timestamp so the gap is never billed. Small, but it is the difference
+between a bill a user can explain and one they cannot. 2 more tests (28 in `voiceBilling`).
+
+---
+
 ## 2026-08-10 — master import handler, part 4: the first thirty seconds after a project connects
 
 Parts 1-3 made getting a project IN fast. That is plumbing, and plumbing is not a reason to choose us —

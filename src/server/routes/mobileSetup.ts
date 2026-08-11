@@ -72,7 +72,7 @@ export function registerMobileSetupRoutes(app: Express): void {
       });
     }
 
-    const { sessionId, appName, appId, repo, iconDataUrl, ios, powerLevel } = (req.body || {}) as Record<string, unknown>;
+    const { sessionId, appName, appId, repo, iconDataUrl, ios, powerLevel, backgroundColor } = (req.body || {}) as Record<string, unknown>;
     const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
     const workspaceId = sessionWorkspaceId(uid, String(sessionId || ''));
     if (!workspaceId) return res.status(400).json({ error: 'Which app should be prepared?' });
@@ -137,6 +137,7 @@ export function registerMobileSetupRoutes(app: Express): void {
       appName: name,
       appId: typeof appId === 'string' ? appId : kit.appId,
       iconDataUrl: typeof iconDataUrl === 'string' ? iconDataUrl : undefined,
+      backgroundColor: typeof backgroundColor === 'string' ? backgroundColor : undefined,
       ios: includeIos,
     });
 

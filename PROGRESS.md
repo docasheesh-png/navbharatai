@@ -29856,6 +29856,60 @@ dropping `here` is what killed the last two.
 holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new hand-rolled path.
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
+
+---
+
+## 2026-08-11 — The PUBLIC status page was naming our AI vendors (White-Label Law)
+
+Found by pulling on the audit's dullest leftover. The "22 unused locals" list included `esc` in
+`lib/HealthReport.ts` — an HTML-escape helper sitting unused NEXT TO an HTML renderer. That is not a
+tidiness smell, it is a question, and the answer was two real defects.
+
+### 1. `/status` and `/api/health` are PUBLIC, and they listed the providers
+
+The health check rendered:
+
+    AI providers — 4 enabled (gemini, anthropic, grok, vertex)
+
+Neither route has a token or a gate (`app.get('/status', …)`; the client fetches `/api/health`
+unauthenticated on load). So **anyone** could open the status page and read exactly which AI vendors
+NavBharatAI runs on. The standing rule is explicit: a user never encounters a vendor name, and
+provider identity is ADMIN-ONLY.
+
+Now it reports `AI engines — 3 of 4 available`. The COUNT is the honest, useful part — it is what tells
+a reader whether the engine can serve requests at all; the names were never something a visitor could
+act on. The admin dashboard still gets the full `providerEnabled` map from `/api/admin/*`, so this
+hides it from visitors, not from ops.
+
+### 2. The page built its rows with `innerHTML` string concatenation
+
+`h.version`, `h.node`, `c.name` and `c.detail` were concatenated into `innerHTML` in the client script,
+from data fetched at RUNTIME. **Not exploitable as shipped** — every value is server-authored today,
+and that is stated plainly rather than dramatised. But a check `detail` is precisely where a failing
+dependency's own error text gets echoed one day, and that is the version that bites.
+
+Rewritten to build DOM nodes with `textContent`. The one value that must become a class name
+(`c.status`) is stripped to `[a-z]`, because `textContent` cannot protect an attribute.
+
+The unused `esc` is deleted rather than wired: it is a SERVER-side helper, and the interpolation
+happens in the CLIENT after the page is served — it could never have escaped this data. Someone wrote
+the right idea in the wrong layer, and leaving it there would keep implying the page was protected.
+
+9 tests: the rendered page carries no vendor token, the code uses `textContent`/`createElement` and no
+`innerHTML`, the class-name value is sanitised, and — so the hardening cannot have quietly emptied the
+page — it still renders its real content.
+
+### On the other 21 "unused locals"
+
+Left alone deliberately, and now with the reason recorded. Most are INTERFACE-REQUIRED parameters
+(`schema` on three `Provider.generate` implementations, `req` on an Express handler, `traceContext`
+sitting BEFORE `systemPrompt` in a positional signature). Deleting them breaks a contract; renaming
+them to `_x` across ~20 sites is churn with no user value and a small risk each. The genuinely dead
+ones that remain (`JOBS_COLLECTION`, `MAX_HISTORY_STEPS`, `modelFlash`, four lazy client singletons in
+`aiClients.ts`) are candidates for a later sweep — with each one read first, which is exactly why they
+were not swept during the dead-import pass.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1153 files / 13,584 tests,
 exit 0**.
 
 ---

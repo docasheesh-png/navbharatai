@@ -2076,7 +2076,7 @@ export default function App() {
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
     // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
     // header window. Same LayoutGrid icon as its Home card, for consistency.
-    { id: 'other_ai',     label: 'Other AI',           icon: LayoutGrid },
+    { id: 'other_ai',     label: 'Other',              icon: LayoutGrid },
     { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },

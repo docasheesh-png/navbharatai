@@ -29586,3 +29586,66 @@ limits (no note when the path is unclear; Hindi only when the request was in Hin
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1139 files / 13,183 tests,
 exit 0** · `npm run build` ✓.
+
+---
+
+## 2026-08-11 — I had the language rule BACKWARDS. Reverted, and the real gap fixed instead.
+
+**Admin, stating it in two halves and no third:**
+1. NavBharatAI's own UI = **professional English** — every button, label, and every status line the
+   SERVER emits during a build.
+2. **Only an AI RESPONSE** follows the user's language.
+
+**That is CLAUDE.md's Language standard, written down since long before this session.** I did not
+follow it. `ROADMAP.md` item 6 said the opposite — "~118 hardcoded English strings that OUR SERVER
+emits… do the SERVER NARRATION first" — and I followed the roadmap instead of the constitution. Two
+days of work went the wrong way: a Hindi catalogue for 23 status lines (#2201), Hindi file labels and a
+per-build language threaded onto the wire (#2228, still open).
+
+The mixed feed I was "fixing" was never a defect. **The app speaking English beside an AI speaking
+Hindi is the intended design**, and it is also the only version that scales: being fair to every Indian
+user would have meant 22 hand-written translations per line, forever.
+
+### Reverted (not left half-wired — that state is what rule 2 forbids)
+
+- `narrationCatalogue.ts` → English only. **The catalogue itself STAYS**: one place for the platform's
+  words is still what makes them consistent, greppable, and what lets the white-label guard prove no
+  vendor name reaches a user. Only the translation layer went.
+- `lib/narrationLanguage.ts` — deleted, with its tests.
+- `ToolDispatcher.setNarrationLanguage`, the `SubAgent` threading, both route call sites, the `lang`
+  field on the `workspace` wire event, and the client state + prop — all removed.
+- `LanguageDetect.scriptShare` — the field I added for this — reverted. Nothing read it any more, and
+  shipping dead code a day after a PR that removed 80 dead imports would be its own joke.
+- `fileRole.ts` → English labels, no language parameter.
+
+### The REAL gap, which was on the other half all along
+
+`routes/sda.ts` (Doctor AI) instructed the model: *"LANGUAGE: Primarily English medical terminology.
+Can use Hinglish for brief clarifications if needed."* — the **opposite** of rule 2, on the one surface
+built for junior and rural doctors, i.e. the users most likely to write in Hindi. `LANGUAGE_RULE`
+covers build/plan/chat and `professionals/engine.ts` covers the Professionals; Doctor AI was the hole.
+
+Fixed as *mirror the doctor's language, keep CLINICAL TERMS in English* — drug names, doses, units and
+investigations stay exactly as they appear on a prescription. A translated drug name is a
+patient-safety risk and cannot be looked up. Explain in their language; name the medicine in English.
+
+### On adding a translator (admin asked: Google Translate, or a free dictionary?)
+
+**No — and it would make the product worse.** The models are natively multilingual; that is what
+`LANGUAGE_RULE` uses, and it costs nothing. A translation layer would re-translate an already-correct
+reply (adding errors to a good answer), add latency to every message, mangle code blocks and technical
+terms, and Google Translate is not free at scale (~$20 per million characters after a small tier) while
+the "free" unofficial endpoints breach their terms and break without notice. Recorded in ROADMAP item 6
+so it is not re-proposed.
+
+### ROADMAP item 6 rewritten
+
+The line that contradicted CLAUDE.md is gone, replaced with the two-way rule, an explicit note that
+following the old line cost a session's work, and the remaining scope — which is small and entirely on
+the AI side.
+
+9 new tests (`tests/languageRule.test.ts`) lock BOTH halves, including that the language machinery is
+GONE rather than merely unused, and that no translation package is in `package.json`.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1148 files / 13,462 tests,
+exit 0** · `npm run build` ✓.

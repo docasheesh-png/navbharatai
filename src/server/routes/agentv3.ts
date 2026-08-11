@@ -351,7 +351,6 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 // importer keeps working AND there is still exactly one actuator per process — two would silently hand a
 // session's second message a cold, empty sandbox.
 import { buildActuator } from './actuatorFactory';
-import { resolveNarrationLanguage } from '../lib/narrationLanguage';
 import { envFlag } from '../lib/envFlag';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
@@ -7536,7 +7535,7 @@ export function registerAgentV3Routes(app: Express): void {
         // Pass the actuator as the session's command runner so the REAL Code Studio terminal can exec
         // bounded commands in this same warm sandbox.
         registerSession(workspaceId, git, userId ?? undefined, actuator);
-        events.emit({ type: 'workspace', workspaceId, ts: Date.now(), lang: resolveNarrationLanguage(prompt) });
+        events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
@@ -7585,7 +7584,6 @@ export function registerAgentV3Routes(app: Express): void {
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({
         client, actuator, workspaceId, state, events, model, onlyOpus,
-        narrationLang: resolveNarrationLanguage(prompt),
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
         // at the tier's effort, same as the top-level runner.
@@ -7719,11 +7717,6 @@ export function registerAgentV3Routes(app: Express): void {
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
-      // ROADMAP item 6 — the PLATFORM speaks the user's language too, not just the AI. `LANGUAGE_RULE`
-      // already makes the model mirror the prompt; this makes the ~157 server-emitted narration lines
-      // (which never pass through a model) mirror the SAME prompt, from the SAME evidence, so the two
-      // halves of one feed can never disagree. English for anything we cannot genuinely write.
-      dispatcher.setNarrationLanguage(resolveNarrationLanguage(prompt));
       // Vault → App pipe (admin 2026-07-17): inject the user's OWN saved keys (Settings → Secrets & API Keys)
       // into the .env of the app they build, so an app that needs an API key runs with the real key the
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only

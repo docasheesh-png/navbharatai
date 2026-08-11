@@ -93,77 +93,47 @@ export function fileRole(path: string | null | undefined): FileRole | null {
   return null; // honest: this path does not tell us what it is
 }
 
-/** The two languages the platform itself can speak (mirrors `server/lib/narrationLanguage`). */
-export type FileRoleLanguage = 'en' | 'hi';
-
 /**
- * Short, plain-language labels. Written for a NON-technical reader — the person this feature exists
- * for — so they say what the file DOES for the app, not what a framework calls it.
+ * Short, plain-language labels — in PROFESSIONAL ENGLISH, like every other piece of NavBharatAI's own
+ * text (CLAUDE.md's Language standard; admin re-stated 2026-08-11).
  *
- * Hindi keeps the words a user actually sees on screen or searches for (API, config, package.json) in
- * English; translating those would make the label harder to act on, not friendlier.
+ * ⚠️ THESE ARE DELIBERATELY NOT TRANSLATED, and an earlier version of this file got that wrong. The
+ * platform speaks English; only an AI RESPONSE follows the user's language. A file label is the app
+ * talking, not the AI, so a Hindi label here would be the app speaking the wrong language — and it
+ * would have needed 22 hand-written translations per label to be fair to every Indian user, which is
+ * exactly the unmaintainable path the rule avoids.
+ *
+ * Written for a NON-technical reader — what the file DOES for the app, not what a framework calls it.
  */
-const LABELS: Record<FileRoleLanguage, Record<FileRole, string>> = {
-  en: {
-    deps: 'the app\'s package list',
-    config: 'setup / configuration',
-    env: 'environment settings',
-    schema: 'database structure',
-    migration: 'database update step',
-    seed: 'starter data',
-    entry: 'where the app starts',
-    page: 'a screen',
-    route: 'a server route',
-    layout: 'the page frame',
-    component: 'a part of a screen',
-    hook: 'shared screen logic',
-    store: 'app data store',
-    context: 'shared app state',
-    api: 'an API endpoint',
-    server: 'server code',
-    service: 'business logic',
-    model: 'a data model',
-    middleware: 'request checks',
-    auth: 'login & accounts',
-    style: 'look & styling',
-    asset: 'image / font',
-    type: 'type definitions',
-    util: 'helper code',
-    test: 'a test',
-    doc: 'documentation',
-    ci: 'build automation',
-    container: 'deployment setup',
-  },
-  hi: {
-    deps: 'ऐप की पैकेज सूची',
-    config: 'सेटअप / configuration',
-    env: 'environment सेटिंग्स',
-    schema: 'database का ढाँचा',
-    migration: 'database अपडेट स्टेप',
-    seed: 'शुरुआती डेटा',
-    entry: 'यहीं से ऐप शुरू होता है',
-    page: 'एक स्क्रीन',
-    route: 'सर्वर का एक route',
-    layout: 'पेज का ढाँचा',
-    component: 'स्क्रीन का एक हिस्सा',
-    hook: 'साझा स्क्रीन लॉजिक',
-    store: 'ऐप का डेटा स्टोर',
-    context: 'साझा ऐप state',
-    api: 'एक API एंडपॉइंट',
-    server: 'सर्वर का कोड',
-    service: 'कामकाज का लॉजिक',
-    model: 'एक data model',
-    middleware: 'request की जाँच',
-    auth: 'लॉगिन और अकाउंट',
-    style: 'रंग-रूप और styling',
-    asset: 'इमेज / फ़ॉन्ट',
-    type: 'type की परिभाषाएँ',
-    util: 'मददगार कोड',
-    test: 'एक test',
-    doc: 'डॉक्युमेंटेशन',
-    ci: 'बिल्ड ऑटोमेशन',
-    container: 'डिप्लॉय सेटअप',
-  },
+const LABELS: Record<FileRole, string> = {
+  deps: 'the app\'s package list',
+  config: 'setup / configuration',
+  env: 'environment settings',
+  schema: 'database structure',
+  migration: 'database update step',
+  seed: 'starter data',
+  entry: 'where the app starts',
+  page: 'a screen',
+  route: 'a server route',
+  layout: 'the page frame',
+  component: 'a part of a screen',
+  hook: 'shared screen logic',
+  store: 'app data store',
+  context: 'shared app state',
+  api: 'an API endpoint',
+  server: 'server code',
+  service: 'business logic',
+  model: 'a data model',
+  middleware: 'request checks',
+  auth: 'login & accounts',
+  style: 'look & styling',
+  asset: 'image / font',
+  type: 'type definitions',
+  util: 'helper code',
+  test: 'a test',
+  doc: 'documentation',
+  ci: 'build automation',
+  container: 'deployment setup',
 };
 
 /**
@@ -172,11 +142,10 @@ const LABELS: Record<FileRoleLanguage, Record<FileRole, string>> = {
  * `null` is a first-class answer, not a failure: the UI keeps showing the filename exactly as it does
  * today. A guessed label on a file the user cannot read would be worse than none.
  */
-export function describeFile(path: string | null | undefined, lang: FileRoleLanguage = 'en'): string | null {
+export function describeFile(path: string | null | undefined): string | null {
   const role = fileRole(path);
-  if (!role) return null;
-  return (LABELS[lang] ?? LABELS.en)[role] ?? LABELS.en[role] ?? null;
+  return role ? LABELS[role] : null;
 }
 
-/** Exposed so a test can prove every role is answered in every language. */
+/** Exposed so a test can prove every role has a label. */
 export const _labels = LABELS;

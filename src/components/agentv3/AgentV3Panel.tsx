@@ -3109,7 +3109,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
             {chatBlocks.map((b) => {
-              if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} lang={state.lang} />;
+              if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} />;
               const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
               return <Bubble key={b.key} msg={b.msg}
                 onUnsend={isLastUser ? () => { void handleUnsend(b.msg.ts); } : undefined}

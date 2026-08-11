@@ -73,7 +73,7 @@ function entryIcon(e: ActivityEntry) {
 
 const MAX_DETAIL_ROWS = 80;
 
-export function ActionGroupRow<M extends TimelineMsgLike>({ block, lang = 'en' }: { block: Extract<ChatBlock<M>, { kind: 'actions' }>; lang?: 'en' | 'hi' }) {
+export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Extract<ChatBlock<M>, { kind: 'actions' }> }) {
   // Untouched (null) → auto: EXPANDED while the build is active so each file streams live in the feed
   // (admin 2026-07-12), collapsed to the summary once done. A tap overrides and sticks.
   const [userOverride, setUserOverride] = useState<boolean | null>(null);
@@ -131,7 +131,7 @@ export function ActionGroupRow<M extends TimelineMsgLike>({ block, lang = 'en' }
                     when this feed is replayed from history. Absent when the path does not confidently
                     say what it is: a missing label is honest, a guessed one is not. */}
                 {(() => {
-                  const label = describeFile(entryFilePath(e), lang);
+                  const label = describeFile(entryFilePath(e));
                   return label ? <span className="shrink-0 text-zinc-600 hidden sm:inline">· {label}</span> : null;
                 })()}
                 {e.active

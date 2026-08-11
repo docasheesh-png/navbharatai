@@ -43,9 +43,7 @@ function applyFileChange(files: FileChange[], change: FileChange): FileChange[] 
 export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEvent): AgentV3ClientState {
   switch (event.type) {
     case 'workspace':
-      // `lang` is the language the SERVER resolved for this build. Stored (not re-derived) so the
-      // client never ships a second script detector that could disagree with the server's.
-      return { ...state, workspaceId: event.workspaceId, ...(event.lang ? { lang: event.lang } : {}) };
+      return { ...state, workspaceId: event.workspaceId };
 
     // P0 — capture THIS build's unique identity so the report export can be validated against it.
     case 'build_meta':

@@ -6965,6 +6965,22 @@ export function registerAgentV3Routes(app: Express): void {
       // (they share this client) + the escalation runner. Observational: it never changes billing
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
+      /**
+       * SHADOW ledger — fast-lane turns, recorded for OBSERVATION and never for billing.
+       *
+       * The admin chose to measure before changing fast-lane attribution (2026-08-11), and measurement
+       * was impossible: four of the seven fast-lane call sites record their tokens in NEITHER the
+       * provider ledger nor the build total, so they are invisible. Three others land in the
+       * unattributed remainder and are priced at Sonnet despite running on the cheap floor.
+       *
+       * This ledger is deliberately separate from providerLedger. Adding these turns to the real one
+       * would CHANGE THE BILL — which is the decision being measured, so it cannot be a side effect of
+       * measuring it.
+       */
+      const shadowFastLaneLedger = createProviderUsageLedger();
+      const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
+        shadowFastLaneLedger.add(used, usage, model);
+      };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number): void => {
         // Fix 66 — the cache-hit share rides the ledger entry so the REAL-cost settle prices it at the
@@ -7026,6 +7042,9 @@ export function registerAgentV3Routes(app: Express): void {
         free: freeTierBuildActive,
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
+        // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
+        // what makes the fast-lane billing question answerable without answering it by accident.
+        onTurnComplete: captureShadowUsage,
         onProviderError: recordProviderFallback,
       });
       const client = buildTurnRunner({
@@ -11755,6 +11774,9 @@ export function registerAgentV3Routes(app: Express): void {
           // still DELIVERED a turn (a genuine chain leak), report noClaude:false + a loud NO_CLAUDE_VIOLATION.
           // Provider tokens must be set FIRST so the detector can see the corroborating cost signal.
           buildDiag.setProviderTokens(reconciledProviderUsage);
+          // Observation only — see shadowFastLaneLedger. Never read by the cost path; it exists so the
+          // fast-lane attribution decision can be made on a measured number instead of an estimate.
+          try { buildDiag.setShadowFastLaneTokens(shadowFastLaneLedger.byProvider()); } catch { /* best-effort */ }
           buildDiag.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
           const leakedClaudeProvider = noClaudeBuild ? buildDiag.claudeProviderDelivered() : null;
           if (leakedClaudeProvider) {

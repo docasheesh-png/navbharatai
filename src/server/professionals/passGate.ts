@@ -7,8 +7,7 @@
 
 import { decideProfessionalAccess } from './access';
 import {
-  professionalPaidEnabled, professionalFreeDailyLimit, professionalPassPriceInr,
-  professionalPassDays, isProfessionalFreeUser,
+  professionalPaidEnabled, professionalFreeDailyLimit, isProfessionalFreeUser,
 } from './professionalPaid';
 import { professionalPassStore } from './ProfessionalPassStore';
 import { professionalUsageStore } from './ProfessionalUsageStore';
@@ -66,12 +65,16 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
         allow: false,
         status: 402,
         body: {
-          error: 'Your balance is empty. Add credit to keep using NavBharatAI, or get the Professional Pass for unlimited access to every professional.',
+          // ADMIN 2026-08-10 ("pass system hata do"): this used to end "…or get the Professional Pass
+          // for unlimited access to every professional." That sentence was a LIVE LIE — this branch is
+          // reachable today (AI_WALLET_SPEND has been on since 2026-08-08) while the Pass has never
+          // been sellable (PROFESSIONAL_PAID_ENABLED defaults off, and it is not set in Cloud Run), so
+          // a user with an empty balance was pointed at a product that cannot be bought. One honest
+          // instruction is worth more than two, and adding credit is the only thing that actually works.
+          error: 'Your balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use.',
           code: 'wallet_empty',
           reason: 'wallet-empty',
           balanceInr: balanceInr ?? 0,
-          passPriceInr: professionalPassPriceInr(),
-          passDays: professionalPassDays(),
         },
       };
     }
@@ -102,13 +105,13 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
     body: {
       error: login
         ? 'Please sign in to use the Professionals. New users get free messages every day.'
-        : `You've used your ${freeDailyLimit} free messages for today. Get the Professional Pass for unlimited access to every professional.`,
+        // No upsell here any more (admin 2026-08-10). The only thing that ever unblocked this was the
+        // Pass, and the Pass is gone — so the message says the one true thing left: when it comes back.
+        : `You've used your ${freeDailyLimit} free messages for today. They reset tomorrow.`,
       code: login ? 'login_required' : 'professional_paywall',
       reason: decision.reason,
       remainingFree: 0,
       freeDailyLimit,
-      passPriceInr: professionalPassPriceInr(),
-      passDays: professionalPassDays(),
     },
   };
 }

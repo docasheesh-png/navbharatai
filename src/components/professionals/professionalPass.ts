@@ -1,9 +1,18 @@
-// Professional Pass — client helpers (admin 2026-07-15). Fetches the current user's pass/quota state
-// and starts the ₹99/month Pass purchase, reusing the SAME Cashfree checkout the wallet recharge uses.
+// The professionals' daily free-allowance state — client helper.
+//
+// ADMIN 2026-08-10: "pass system hata do." This file used to ALSO start a ₹99/month "Professional
+// Pass" purchase through Cashfree. That product is gone, and the purchase function with it — a screen
+// that can open a checkout for something we do not sell is a promise the app cannot keep.
+//
+// WHY THE PASS WENT, in one line: it was a SECOND billing model competing with the one the platform
+// actually adopted. THE ONE-WALLET LAW (2026-08-01) says every AI draws on the same balance and "the
+// price of the thing IS the limit" — a flat monthly pass sits on top of that as a parallel promise of
+// "unlimited", which the wallet cannot honour and the user should not have to reason about.
+//
+// What survives is the free-allowance COUNTER, which is real: it tells a signed-in user how many free
+// messages they have left today. The response still carries `hasPass`/`priceInr`/`passDays` because
+// the server endpoint is unchanged for now; nothing reads them any more.
 
-import axios from 'axios';
-import { triggerCashfreeCheckout } from '../../services/paymentService';
-import { auth } from '../../lib/firebase';
 import { authedHeaders } from '../../App';
 
 export interface PassStatus {
@@ -21,7 +30,7 @@ export interface PassStatus {
   passDays: number;
 }
 
-/** The current user's Professional Pass + free-quota state, or null if the endpoint is unreachable. */
+/** The current user's free-allowance state, or null if the endpoint is unreachable. */
 export async function fetchPassStatus(): Promise<PassStatus | null> {
   try {
     const res = await fetch('/api/professional/pass/status', { headers: await authedHeaders() });
@@ -30,32 +39,4 @@ export async function fetchPassStatus(): Promise<PassStatus | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Start the Professional Pass purchase. Creates a Cashfree order tagged as a professional_pass product
- * (server grants the pass on payment) and opens the same secure checkout the wallet recharge uses. In
- * the dev simulator (no real gateway) it verifies inline so the pass is granted for local testing.
- * Returns 'redirecting' (real gateway opened) or 'granted' (simulator). Throws if not signed in.
- */
-export async function buyProfessionalPass(priceInr: number, passDays: number): Promise<'redirecting' | 'granted'> {
-  const user = auth.currentUser;
-  if (!user) throw new Error('Please sign in to buy the Professional Pass.');
-  // The server derives BOTH the owner (from this token) and the number of days (from the amount it
-  // verifies with the gateway) — `passDays` is sent only as a record of what the screen offered.
-  const res = await axios.post('/api/payment/create-order', {
-    amount: priceInr,
-    userEmail: user.email || '',
-    userName: user.displayName || 'NavBharat Client',
-    productType: 'professional_pass',
-    passPlan: 'monthly',
-    passDays,
-  }, { headers: await authedHeaders() });
-  if (res.data?.isSimulator) {
-    // Dev only: no real gateway — verify directly so the pass is granted for testing.
-    await axios.post('/api/payment/verify-payment', { orderId: res.data.orderId });
-    return 'granted';
-  }
-  triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
-  return 'redirecting';
 }

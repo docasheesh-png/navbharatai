@@ -137,7 +137,13 @@ export interface GitCheckpoint {
  * every surface stays in sync from one stream (§3.2).
  */
 export type AgentEvent =
-  | { type: 'workspace'; workspaceId: string; ts: number }
+  /**
+   * `lang` carries the language the PLATFORM resolved for this build (ROADMAP item 6), so the CLIENT
+   * can label files in the same language without shipping a second script detector — the duplicate
+   * that would drift from `LanguageDetect` and make the two halves of one feed disagree. Optional, so
+   * an older client and a replayed history are unaffected.
+   */
+  | { type: 'workspace'; workspaceId: string; ts: number; lang?: 'en' | 'hi' }
   | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }

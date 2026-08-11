@@ -29543,3 +29543,46 @@ STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
 
 **Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
 `tsc -p tsconfig.server.json` clean.
+## 2026-08-10 — Per-file narration: every file the build writes now says what it IS
+
+**Admin ask:** "jab NavBharatAI koi app banata hai, ek saath bahut sari file bana deta hai — background
+me sab aise hi chale, frontend par user ko ek ek file dikhe narration ke sath, aur UX abhi jaisa rahe,
+user file code dekh sake."
+
+**Half of it was already built, and checking first is why only the other half got written** (safeguard
+#6). `revealPacer` (admin 2026-07-21) already drips the REAL file events into the feed one at a time —
+a 44-file burst reads as 44 arrivals, background speed untouched. What was missing was the narration:
+a row saying `LoginForm.tsx · new` tells a non-technical user nothing about what was just built.
+
+**`lib/fileRole.ts` — derived from the PATH, never generated.** That is the whole design decision:
+- A per-file LLM description would cost a call PER FILE — 44 extra calls on a normal build, on the one
+  path where the user is already waiting.
+- A generated description can be WRONG, and a confident wrong label on a file the user cannot read is
+  worse than no label (second absolute rule).
+- It must work identically when the feed is replayed from HISTORY, where no model is running.
+
+It describes the ROLE, not the content: the row already shows the NAME, so the label adds the one thing
+the name does not carry. `LoginForm.tsx` → "a part of a screen"; `pages/api/orders.ts` → "an API
+endpoint". Claiming behaviour the path cannot prove ("handles login with OTP") would be fabrication, and
+a test asserts no label contains such a verb.
+
+**Precedence is the whole correctness problem**, and two ordering bugs were caught by the tests before
+merge: `pages/api/orders.ts` read as a "page" until API won over the `pages/` rule, and
+`components/Login.test.tsx` read as a "component" until the test rule moved ABOVE the directory rules
+(generated apps put a test next to the file it tests). `null` is a first-class answer — an unrecognised
+path shows no label rather than a guess.
+
+**The language comes from the SERVER, not a second detector.** The `workspace` event now carries the
+`lang` the server already resolved (optional field; an older stream or a replayed history is
+unaffected), the reducer stores it, and the row renders the label in it. Re-deriving the language on the
+client would have been the duplicate-detector mistake from this session's first slice, one layer up —
+the two halves of one feed would eventually disagree.
+
+UX unchanged as asked: the label is an additional dim span (hidden on narrow screens), the filename is
+untouched, and tapping still opens the real code/diff. Test-locked.
+
+19 new tests. `AppKnowledgeBase` updated so every AI can explain the feature — including its honest
+limits (no note when the path is unclear; Hindi only when the request was in Hindi).
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1139 files / 13,183 tests,
+exit 0** · `npm run build` ✓.

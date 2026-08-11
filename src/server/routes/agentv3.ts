@@ -7536,7 +7536,7 @@ export function registerAgentV3Routes(app: Express): void {
         // Pass the actuator as the session's command runner so the REAL Code Studio terminal can exec
         // bounded commands in this same warm sandbox.
         registerSession(workspaceId, git, userId ?? undefined, actuator);
-        events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
+        events.emit({ type: 'workspace', workspaceId, ts: Date.now(), lang: resolveNarrationLanguage(prompt) });
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;

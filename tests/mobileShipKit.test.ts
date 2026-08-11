@@ -160,6 +160,30 @@ describe('generateShipKit — self-heals a missing splash drawable (autopsy 2026
   }
 });
 
+describe('generateShipKit — self-heals a missing launcher-icon foreground (autopsy 2026-08-11)', () => {
+  // Real user build failed at resource-linking: "resource mipmap/ic_launcher_foreground … not found" —
+  // the adaptive launcher icon (mipmap-anydpi-v26/ic_launcher*.xml) references @mipmap/ic_launcher_foreground
+  // which a fresh cap add / partial icon set can omit. SAME CLASS as the splash case, in the GENERATED
+  // android/ project. Both workflows must heal it: create ic_launcher_foreground (from the user's own icon
+  // when present, else a placeholder) and point the adaptive XML at it.
+  const kit = generateShipKit({ appName: 'My Shop' });
+  const apk = kit.files['.github/workflows/android-apk.yml'];
+  const aab = kit.files['.github/workflows/android-aab.yml'];
+
+  for (const [label, wf] of [['apk', apk], ['aab', aab]] as const) {
+    it(`${label}: guarantees a resolvable ic_launcher_foreground so linking never fails`, () => {
+      // detects a missing foreground across mipmap AND drawable buckets …
+      expect(wf).toContain('ic_launcher_foreground.*');
+      // … prefers the user's OWN uploaded icon …
+      expect(wf).toContain('cp "$ICON" "$RES/drawable/ic_launcher_foreground.png"');
+      // … falls back to a placeholder vector …
+      expect(wf).toContain('ic_launcher_foreground.xml');
+      // … and repoints the adaptive XML from @mipmap to the healed @drawable resource.
+      expect(wf).toContain('s#@mipmap/ic_launcher_foreground#@drawable/ic_launcher_foreground#g');
+    });
+  }
+});
+
 describe('generateShipKit — honesty about what only the user can do', () => {
   const kit = generateShipKit({ appName: 'My Shop' });
 

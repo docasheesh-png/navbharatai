@@ -30340,3 +30340,24 @@ account).
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files / 13,638 tests,
 exit 0**.
+
+### Item 2's CI failure was not item 2 — the bundle gate had 0.1 KB of headroom left
+
+`main` measured **1299.9 KB against a 1300 KB ceiling**. At that margin the gate had stopped being a
+bloat guard and become a coin flip: the NEXT feature PR was going to fail whatever it contained. The one
+that happened to trip it added **no client code at all** — a required `AppKnowledgeBase` line (~0.4 KB
+gzipped), which the offline assistant ships to the browser by design.
+
+That is a collision between two MANDATORY rules, not a bug in either: CLAUDE.md requires a KB entry for
+every user-facing feature, and the offline assistant needs that catalogue client-side to answer "where
+is X?" without a server.
+
+Budget raised 1300 → **1350**, deliberately and in line with this file's own documented practice (it was
+raised for the same reason at 1050→1200, and for xterm at 1200→1300). 50 KB is chosen to be USEFUL, not
+generous: it absorbs dozens of KB entries while a genuinely accidental dependency — the thing the gate
+exists to catch — is tens to hundreds of KB and still fails.
+
+**HONEST: this is a deferral, not the fix.** The real fix is the one the script's own header already
+records — ship only the client-navigation KB entries to the browser and keep the server-only build
+recipes out — and it remains an OPEN ROOT CAUSE. It needs its own change with tests, because getting it
+wrong makes the offline assistant answer "I don't know" about a feature that exists.

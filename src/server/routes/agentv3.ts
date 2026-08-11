@@ -810,6 +810,42 @@ export function zeroBillForFailedBuild(resultOk: boolean): boolean {
  * `expectsArtifacts` (= a real new_build/edit turn, never an import/survey turn) so a "do not change" turn
  * only RECORDS the integrity warnings (advisory) and never mutates files. Pure + tested.
  */
+/**
+ * Is a build that wrote ZERO files actually a FAILURE worth re-running from scratch?
+ *
+ * WHY THIS EXISTS AT ALL (deep-test App #7): a build that EXPECTED artifacts produced no files because
+ * the sandbox could not be set up, and still reported "✓ Done" over an empty preview. Retrying on a
+ * stronger model is the right answer to THAT.
+ *
+ * WHY IT NEEDED NARROWING (Shiv Medical Store report, 2026-08-10): the user asked to "continue from
+ * where you left off and finish/fix the build so the app works end-to-end". The agent diagnosed it,
+ * started the dev server, published a working preview and finished — writing no files, because NO FILE
+ * NEEDED TO CHANGE. That is the CORRECT outcome, and it was classified as an empty build: the entire
+ * build re-ran on a second model, roughly doubling a 15.6-minute, ₹567 build for nothing.
+ *
+ * The distinction is not "did files change" but "is there an app". A NEW build that produced nothing
+ * has nothing to show, and an edit on an EMPTY workspace had nothing to edit — both are real failures.
+ * An edit on a project that already has files can legitimately finish without touching one: fixing the
+ * server, answering a question, diagnosing a problem. Judging that by file count punishes the engine
+ * for doing exactly what was asked.
+ *
+ * Pure + exported for testing.
+ */
+export function shouldRetryEmptyBuild(opts: {
+  expectsArtifacts: boolean;
+  filesWritten: number;
+  isEditMode: boolean;
+  /** Files the project already had when the turn started. */
+  existingProjectFiles: number;
+  aborted: boolean;
+  withinCostCap: boolean;
+}): boolean {
+  if (!opts.expectsArtifacts || opts.filesWritten > 0 || opts.aborted || !opts.withinCostCap) return false;
+  // An edit on a project that already exists may legitimately change nothing.
+  if (opts.isEditMode && opts.existingProjectFiles > 0) return false;
+  return true;
+}
+
 export function shouldRunIntegrityHeal(opts: {
   gateEnabled: boolean;
   resultOk: boolean;
@@ -9352,7 +9388,14 @@ export function registerAgentV3Routes(app: Express): void {
           ts: Date.now(),
         });
       }
-      if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted && costAfterFirstAttempt <= capUsd) {
+      if (shouldRetryEmptyBuild({
+        expectsArtifacts,
+        filesWritten: writtenFiles.size,
+        isEditMode,
+        existingProjectFiles: editFileTree?.length ?? 0,
+        aborted: abort.signal.aborted,
+        withinCostCap: costAfterFirstAttempt <= capUsd,
+      })) {
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
           message: 'First attempt produced no files — retried the whole build on a stronger model (Sonnet in normal mode; Opus only in power mode).',
@@ -10274,6 +10317,10 @@ export function registerAgentV3Routes(app: Express): void {
       }
 
       let previewVerifiedFailed = false;
+      // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
+      // session" for a build whose preview had just been opened and confirmed rendering — the
+      // self-contradicting report from the Shiv Medical Store autopsy (2026-08-10).
+      let previewVerifiedRendered = false;
       if (
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && !renderRescued && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
@@ -10346,6 +10393,7 @@ export function registerAgentV3Routes(app: Express): void {
                 });
               }
             } catch { /* feature-presence is best-effort — never blocks a verified build */ }
+            previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
             break;
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
@@ -10590,6 +10638,19 @@ export function registerAgentV3Routes(app: Express): void {
               if (attempt > 0) events.emit({ type: 'narration', agent: 'architect', text: `✅ Test suite green after fix — ${outcome.summary}.`, ts: Date.now() });
               break;
             }
+            // A suite that could not EXECUTE is UNVERIFIED, not failed — and repairing the app cannot
+            // help it. The Shiv Medical Store report (2026-08-10) recorded `playwright: FAIL (exit=1)`
+            // as an unresolved defect of the user's app when the real cause was our own sandbox missing
+            // the Playwright browser binaries. Report it honestly and stop: spending the repair budget
+            // rewriting working tests because WE could not launch a browser is the worst of both.
+            if (!outcome.ran) {
+              buildDiag.record({
+                phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
+                message: outcome.summary,
+                autoResolved: true, // not an app defect — nothing for the build to resolve
+              });
+              break;
+            }
             // Out of repair budget OR near the wall-clock cap → record the honest failure and stop.
             if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
               buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
@@ -10732,7 +10793,7 @@ export function registerAgentV3Routes(app: Express): void {
             if (apiHint) events.emit({ type: 'narration', agent: 'architect', text: apiHint, ts: Date.now() });
             buildDiag.record(runtimeErrorsRemainRecord(remaining));
           } else if (!captureAvailable) {
-            buildDiag.record(runtimeUncheckedRecord());
+            buildDiag.record(runtimeUncheckedRecord({ previewRendered: previewVerifiedRendered }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }

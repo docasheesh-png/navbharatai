@@ -30729,3 +30729,62 @@ not fabricate test results". Marked **NOT TESTED** rather than scored.
 **Timing note.** The app is in review on both stores. Bundled mode means none of this reaches store users
 without a new binary anyway — so native-shell work should batch into the first post-approval release
 rather than disturb a submission in review.
+
+---
+
+## 2026-08-11 — ROADMAP §2 batch: 8 of 9 admin-approved items shipped
+
+The admin took the 7 admin-only items (Apple tax form, Play upload, mitrify.in, Cloud Run switches,
+VirusTotal licence, spend quota) and asked Claude to complete the rest, one at a time.
+
+**Shipped and merged this session:**
+
+| PR | Item | Note |
+|---|---|---|
+| #2265 | Object storage zero-setup | Bucket created via the Management API's `database/query` under the **Database** scope — so it needed **no new OAuth consent and no admin step**, which is what turned a "blocked" roadmap line into a shippable one. Still no service-role key. |
+| #2262 | Restore after recycle | — |
+| #2266 | Edit mode | **Verified ALREADY BUILT — do not build from that line.** |
+| #2269 | Component tree | Screens + parts, from imports; no model call. |
+| #2270 | Scaling estimates | Three detectors with real growth numbers. Deliberately prints **no capacity figure** — a test asserts it. |
+| #2272 | Multi-element select | See the lost-update note below. |
+| #2273 | MCP server · service-split · named architectures | See below. |
+
+**Two places the obvious implementation was silently destructive, and was rejected:**
+
+1. **Multi-select (#2272).** Calling the single-edit route once per selected element is a **lost update**
+   whenever two selected elements share a file — last write wins, the other change vanishes, both
+   requests return 200. Two elements picked off one screen is the NORMAL case. Now grouped by file, one
+   read-modify-write each, applied **bottom-up** (adding `style={{…}}` moves every position after it).
+2. **Service split (#2273).** A button that rewrites a working app into microservices would break the one
+   absolute rule and, for almost every app this product builds, produce a worse app. It now **prices**
+   the seams from the import graph and frequently answers "keep it as one app".
+
+**Root-cause fixes made along the way (rule 4), each test-locked:**
+- A merge-conflict marker reached CI as a rollup parse error naming the TEST, not the broken script.
+  `tests/noConflictMarkers.test.ts` now fails with the exact `file:line`. Verified against a planted marker.
+- T0-9's `handlerOf` sliced a fixed 1600 chars — false-FAILS on legitimate growth, false-PASSES if a
+  neighbour's guard falls in the window. Now slices to the real handler boundary; this made it STRONGER
+  (`/exec` is 9,328 chars, so the old window checked 17% of it).
+- `ServiceSplitAnalysis.splittable` contradicted its own verdict on small apps (flag said yes, text said
+  "keep it as one app"). Both now share one condition.
+- `ScaleAnalysis`: parens and braces were balanced in ONE counter, so every N+1 went undetected while the
+  detector looked correct; `findUnique` was not counted as a DB call; `create table` needed the closing
+  paren on its own line.
+
+### ⛔ OPEN — the 9th item: community gallery / remix. NOT started, deliberately.
+
+**Do not ship this partially.** It publishes the user's SOURCE publicly, so a half-built version leaks
+real credentials — the single worst outcome available in this codebase.
+
+**Exact resume point — what a fresh session should build, in this order:**
+1. **The publish safety gate first.** REUSE the existing detectors — `SecurityAnalysis.ts`,
+   `SecretRedactor.ts`, `EnvSecretValueAnalysis.ts`. **Do NOT write a fourth secret scanner** (that is the
+   duplication rule 4 exists to prevent). Publication must be REFUSED, naming the file and line, when a
+   real secret is found; `.env*` is never published at all.
+2. **Moderation matching the Nav App Store's model:** nothing reaches `approved` except an explicit admin
+   action (`NAV_STORE_ADMINS`). Published apps land `pending`.
+3. Store + routes: publish / list-approved / get / remix (clone files into a new workspace) / admin
+   approve-reject.
+4. Browse + remix UI, and the `AppKnowledgeBase` entry.
+
+Nothing was written for it, so there is no half-finished code to audit — start clean at step 1.

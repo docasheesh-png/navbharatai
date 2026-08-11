@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateRealEstateIntegration, REAL_ESTATE_SERVICE_SOURCE } from './RealEstateGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateRealEstateIntegration, REAL_ESTATE_SERVICE_SOURCE } from './RealEstateGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateRealEstateIntegration (wiring)', () => {
   it('emits the service, routes and README + express dep', () => {
@@ -20,9 +17,8 @@ describe('generateRealEstateIntegration (wiring)', () => {
 });
 
 describe('emitted RealEstateService — real domain invariants', () => {
-  const artifact = join(here, `._realestate_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, REAL_ESTATE_SERVICE_SOURCE);
-  afterAll(() => { try { unlinkSync(artifact); } catch { /* gone */ } });
+  const emitted = emitModule('realestate', REAL_ESTATE_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Status = 'draft' | 'available' | 'under_offer' | 'sold' | 'rented' | 'withdrawn';
   interface Listing { id: string; status: Status; price: number; priceHistory: unknown[] }
@@ -37,7 +33,7 @@ describe('emitted RealEstateService — real domain invariants', () => {
   }
   interface Emitted { RealEstateService: new () => Service; canTransition(a: Status, b: Status): boolean }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   async function seed() {
     const { RealEstateService } = await load();

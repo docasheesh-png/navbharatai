@@ -78,11 +78,12 @@ describe('per-file narration', () => {
     expect(html).toContain('a part of a screen');
   });
 
-  it('speaks the language the SERVER resolved for the build', () => {
-    const html = renderToStaticMarkup(
-      <ActionGroupRow block={liveFile('f2', 'pages/api/orders.ts')} lang="hi" />,
-    );
-    expect(html).toContain('एक API एंडपॉइंट');
+  it('is in ENGLISH, like every other piece of NavBharatAI\'s own text', () => {
+    // Admin rule (2026-08-11, restating CLAUDE.md): the PLATFORM speaks professional English; only an
+    // AI RESPONSE follows the user's language. A file label is the app talking, not the AI.
+    const html = renderToStaticMarkup(<ActionGroupRow block={liveFile('f2', 'pages/api/orders.ts')} />);
+    expect(html).toContain('an API endpoint');
+    expect(/[\u0900-\u097F]/.test(html)).toBe(false);
   });
 
   it('shows no label when the path does not confidently say what it is', () => {

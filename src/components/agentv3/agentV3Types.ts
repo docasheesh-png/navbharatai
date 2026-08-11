@@ -54,7 +54,7 @@ export interface GitCheckpoint {
 
 /** One NDJSON line from /api/agentv3/chat: an engine AgentEvent or the final result. */
 export type AgentV3WireEvent =
-  | { type: 'workspace'; workspaceId: string; ts: number; lang?: 'en' | 'hi' }
+  | { type: 'workspace'; workspaceId: string; ts: number }
   // P0 (2026-07-12) — the ACTIVE build's unique identity, emitted at build start (and echoed on `result`),
   // so the "Build report" export can be validated to belong to THIS build (never a previous, different app).
   | { type: 'build_meta'; buildId: string; promptHash: string; workspaceId?: string; ts?: number }
@@ -174,10 +174,6 @@ export interface AgentV3ClientState {
   pendingSecrets?: { callId: string; prompt: string; secrets: Array<{ name: string; why: string }> };
   /** The sandbox workspace id for this build (enables History → restore). */
   workspaceId?: string;
-  /** The language the SERVER resolved for this build's platform text, so the file labels match the
-   *  narration. Absent (⇒ English) for an older stream or a replayed history — never re-derived here,
-   *  because a second detector would drift from the server's. */
-  lang?: 'en' | 'hi';
   /** P0 — the ACTIVE build's unique id + prompt hash (from `build_meta`/`result`). Echoed on the report
    *  export so the server can validate the returned report belongs to THIS build, never a different app's. */
   buildId?: string;

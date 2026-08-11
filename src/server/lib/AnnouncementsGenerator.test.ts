@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateAnnouncementsIntegration, ANNOUNCEMENTS_SERVICE_SOURCE } from './AnnouncementsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateAnnouncementsIntegration, ANNOUNCEMENTS_SERVICE_SOURCE } from './AnnouncementsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateAnnouncementsIntegration (wiring)', () => {
   it('emits the announcement service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateAnnouncementsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the scheduling + dismiss-once rules are real business rules,
 // verified against the actual emitted code.
 describe('emitted AnnouncementService — scheduled visibility + dismiss-once (real logic)', () => {
-  const artifact = join(here, `._announcements_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, ANNOUNCEMENTS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('announcements', ANNOUNCEMENTS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Level = 'info' | 'success' | 'warning' | 'critical';
   interface Announcement { id: string; message: string; level: Level; dismissible: boolean; published: boolean; startsAt: string | null; endsAt: string | null; createdAt: string }
@@ -40,7 +34,7 @@ describe('emitted AnnouncementService — scheduled visibility + dismiss-once (r
   }
   interface Emitted { AnnouncementService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('a draft banner is never active; publishing makes it active', async () => {

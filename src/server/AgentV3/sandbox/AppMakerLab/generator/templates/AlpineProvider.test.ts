@@ -9,7 +9,7 @@ describe('AlpineProvider — a real, boot-clean Alpine.js + Vite scaffold', () =
 
   it('emits the expected files with Alpine directives in index.html', () => {
     expect(Object.keys(files).sort()).toEqual(
-      ['index.html', 'package.json', 'src/main.ts', 'tsconfig.json', 'vite.config.ts'].sort(),
+      ['index.html', 'package.json', 'src/index.css', 'src/main.ts', 'tsconfig.json', 'vite.config.ts'].sort(),
     );
     expect(files['index.html']).toContain('x-data="{ count: 0 }"');
     expect(files['index.html']).toContain('x-text="count"');

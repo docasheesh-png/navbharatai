@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 // Alpine.js + Vite scaffold. Alpine is a tiny (~15KB) library for sprinkling reactive behaviour directly
@@ -87,7 +88,8 @@ export class AlpineProvider implements ITemplateProvider {
       'vite.config.ts': VITE_CONFIG,
       'tsconfig.json': TSCONFIG,
       'index.html': INDEX_HTML,
-      'src/main.ts': MAIN_TS,
+      'src/index.css': DESIGN_KIT_CSS,
+      'src/main.ts': `import './index.css';\n` + MAIN_TS,
     };
   }
 }

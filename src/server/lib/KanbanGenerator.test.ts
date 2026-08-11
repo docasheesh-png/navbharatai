@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateKanbanIntegration, KANBAN_SERVICE_SOURCE } from './KanbanGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateKanbanIntegration, KANBAN_SERVICE_SOURCE } from './KanbanGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateKanbanIntegration (wiring)', () => {
   it('emits the kanban service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateKanbanIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the contiguous-ordering + WIP-limit rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted KanbanService — ordering + WIP limit (real logic)', () => {
-  const artifact = join(here, `._kanban_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, KANBAN_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('kanban', KANBAN_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Column { id: string; boardId: string; name: string; wipLimit: number | null; order: number }
   interface Card { id: string; columnId: string; title: string; position: number }
@@ -42,7 +36,7 @@ describe('emitted KanbanService — ordering + WIP limit (real logic)', () => {
   }
   interface Emitted { KanbanService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('cards get contiguous positions 0,1,2 in add order', async () => {

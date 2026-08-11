@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateSurveyIntegration, SURVEY_SERVICE_SOURCE } from './SurveyGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateSurveyIntegration, SURVEY_SERVICE_SOURCE } from './SurveyGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateSurveyIntegration (wiring)', () => {
   it('emits the survey service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateSurveyIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the response-validation + aggregation rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted SurveyService — schema-validated responses + exact aggregation (real logic)', () => {
-  const artifact = join(here, `._survey_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, SURVEY_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('survey', SURVEY_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type QuestionType = 'single_choice' | 'multi_choice' | 'rating' | 'text';
   type AnswerValue = string | string[] | number;
@@ -43,7 +37,7 @@ describe('emitted SurveyService — schema-validated responses + exact aggregati
   }
   interface Emitted { SurveyService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   function sample(svc: Service): Survey {

@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateMessagingIntegration, MESSAGING_SERVICE_SOURCE } from './MessagingGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateMessagingIntegration, MESSAGING_SERVICE_SOURCE } from './MessagingGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateMessagingIntegration (wiring)', () => {
   it('emits the messaging service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateMessagingIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the canonical-pairing, unread and monotonic-read-cursor
 // rules are real business rules, verified against the actual emitted code.
 describe('emitted MessagingService — conversation integrity + unread + monotonic read (real logic)', () => {
-  const artifact = join(here, `._messaging_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, MESSAGING_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('messaging', MESSAGING_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Message { id: string; sender: string; body: string }
   interface Convo { id: string; participants: [string, string]; unread?: number }
@@ -39,7 +33,7 @@ describe('emitted MessagingService — conversation integrity + unread + monoton
   }
   interface Emitted { MessagingService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('(a,b) and (b,a) resolve to the SAME conversation — never a duplicate', async () => {

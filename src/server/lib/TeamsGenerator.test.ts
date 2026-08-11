@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateTeamsIntegration, TEAMS_SERVICE_SOURCE } from './TeamsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateTeamsIntegration, TEAMS_SERVICE_SOURCE } from './TeamsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateTeamsIntegration (wiring)', () => {
   it('emits the team service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateTeamsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the last-owner + single-use-invite rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted TeamService — multi-workspace membership + last-owner + single-use invites (real logic)', () => {
-  const artifact = join(here, `._teams_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, TEAMS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('teams', TEAMS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Role = 'owner' | 'admin' | 'member';
   interface Workspace { id: string; name: string; createdAt: string }
@@ -45,7 +39,7 @@ describe('emitted TeamService — multi-workspace membership + last-owner + sing
   }
   interface Emitted { TeamService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('creator is the owner; a user can belong to many workspaces with different roles', async () => {

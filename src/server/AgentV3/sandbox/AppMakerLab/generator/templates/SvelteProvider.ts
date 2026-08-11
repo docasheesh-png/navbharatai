@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -64,7 +65,8 @@ export class SvelteProvider implements ITemplateProvider {
       'package.json': PKG,
       'vite.config.js': VITE_CONFIG,
       'index.html': INDEX_HTML,
-      'src/main.js': MAIN_JS,
+      'src/index.css': DESIGN_KIT_CSS,
+      'src/main.js': `import './index.css';\n` + MAIN_JS,
       'src/App.svelte': APP_SVELTE,
     };
   }

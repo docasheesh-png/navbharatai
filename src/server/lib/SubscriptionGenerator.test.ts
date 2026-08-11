@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateSubscriptionIntegration, SUBSCRIPTION_SERVICE_SOURCE } from './SubscriptionGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateSubscriptionIntegration, SUBSCRIPTION_SERVICE_SOURCE } from './SubscriptionGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateSubscriptionIntegration (wiring)', () => {
   it('emits the subscription service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateSubscriptionIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the lifecycle state-machine + renewal math are real
 // business rules, verified against the actual emitted code.
 describe('emitted SubscriptionService — lifecycle + renewal (real logic)', () => {
-  const artifact = join(here, `._subscription_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, SUBSCRIPTION_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('subscription', SUBSCRIPTION_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Status = 'active' | 'paused' | 'past_due' | 'cancelled';
   interface Plan { id: string }
@@ -42,7 +36,7 @@ describe('emitted SubscriptionService — lifecycle + renewal (real logic)', () 
   }
   interface Emitted { SubscriptionService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const T0 = new Date('2026-01-01T00:00:00.000Z');

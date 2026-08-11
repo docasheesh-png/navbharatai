@@ -59,7 +59,7 @@ describe('A connected database is never replaced by the sandbox one', () => {
     // The sentence moved into the narration catalogue (ROADMAP item 6) so it can be spoken in the
     // user's own language; the branch must still SAY it, and the words must still mean it.
     expect(branch).toContain("this.narrate('db.usingConnected'");
-    expect(narrationText('en', 'db.usingConnected', {})).toContain('Using the database you connected in Settings');
+    expect(narrationText('db.usingConnected', {})).toContain('Using the database you connected in Settings');
     expect(branch).toContain('return;');
     // The provisioning call must come AFTER this branch, never before it.
     expect(dispatcher.indexOf('sandbox-postgres-provision')).toBeGreaterThan(at);

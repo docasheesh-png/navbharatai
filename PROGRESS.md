@@ -29766,6 +29766,96 @@ no `passPriceInr:`/`passDays:` may be sent, no component may name or open a chec
 purchase helper must not exist, and the cost keywords must still land on an entry. `toolGate.test.ts`'s
 "offers the Pass" assertion is REPLACED in place with the superseding contract (upsell asserted absent,
 the "name what the user tried" intent kept). Gate: tsc clean both projects, full run **13,538/13,538**.
+## 2026-08-11 — I had the language rule BACKWARDS. Reverted, and the real gap fixed instead.
+
+**Admin, stating it in two halves and no third:**
+1. NavBharatAI's own UI = **professional English** — every button, label, and every status line the
+   SERVER emits during a build.
+2. **Only an AI RESPONSE** follows the user's language.
+
+**That is CLAUDE.md's Language standard, written down since long before this session.** I did not
+follow it. `ROADMAP.md` item 6 said the opposite — "~118 hardcoded English strings that OUR SERVER
+emits… do the SERVER NARRATION first" — and I followed the roadmap instead of the constitution. Two
+days of work went the wrong way: a Hindi catalogue for 23 status lines (#2201), Hindi file labels and a
+per-build language threaded onto the wire (#2228, still open).
+
+The mixed feed I was "fixing" was never a defect. **The app speaking English beside an AI speaking
+Hindi is the intended design**, and it is also the only version that scales: being fair to every Indian
+user would have meant 22 hand-written translations per line, forever.
+
+### Reverted (not left half-wired — that state is what rule 2 forbids)
+
+- `narrationCatalogue.ts` → English only. **The catalogue itself STAYS**: one place for the platform's
+  words is still what makes them consistent, greppable, and what lets the white-label guard prove no
+  vendor name reaches a user. Only the translation layer went.
+- `lib/narrationLanguage.ts` — deleted, with its tests.
+- `ToolDispatcher.setNarrationLanguage`, the `SubAgent` threading, both route call sites, the `lang`
+  field on the `workspace` wire event, and the client state + prop — all removed.
+- `LanguageDetect.scriptShare` — the field I added for this — reverted. Nothing read it any more, and
+  shipping dead code a day after a PR that removed 80 dead imports would be its own joke.
+- `fileRole.ts` → English labels, no language parameter.
+
+### The REAL gap, which was on the other half all along
+
+`routes/sda.ts` (Doctor AI) instructed the model: *"LANGUAGE: Primarily English medical terminology.
+Can use Hinglish for brief clarifications if needed."* — the **opposite** of rule 2, on the one surface
+built for junior and rural doctors, i.e. the users most likely to write in Hindi. `LANGUAGE_RULE`
+covers build/plan/chat and `professionals/engine.ts` covers the Professionals; Doctor AI was the hole.
+
+Fixed as *mirror the doctor's language, keep CLINICAL TERMS in English* — drug names, doses, units and
+investigations stay exactly as they appear on a prescription. A translated drug name is a
+patient-safety risk and cannot be looked up. Explain in their language; name the medicine in English.
+
+### On adding a translator (admin asked: Google Translate, or a free dictionary?)
+
+**No — and it would make the product worse.** The models are natively multilingual; that is what
+`LANGUAGE_RULE` uses, and it costs nothing. A translation layer would re-translate an already-correct
+reply (adding errors to a good answer), add latency to every message, mangle code blocks and technical
+terms, and Google Translate is not free at scale (~$20 per million characters after a small tier) while
+the "free" unofficial endpoints breach their terms and break without notice. Recorded in ROADMAP item 6
+so it is not re-proposed.
+
+### ROADMAP item 6 rewritten
+
+The line that contradicted CLAUDE.md is gone, replaced with the two-way rule, an explicit note that
+following the old line cost a session's work, and the remaining scope — which is small and entirely on
+the AI side.
+
+9 new tests (`tests/languageRule.test.ts`) lock BOTH halves, including that the language machinery is
+GONE rather than merely unused, and that no translation package is in `package.json`.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1148 files / 13,462 tests,
+exit 0** · `npm run build` ✓.
+## 2026-08-11 — 57 tests stop writing scratch files into the real source tree
+
+The open item recorded during the 2026-08-09 audit, now root-caused.
+
+**The bug.** 57 `*Generator.test.ts` files each materialised the code they generate as a real `.ts`
+file so the test could IMPORT and EXECUTE it — verifying the emitted business logic for real rather
+than string-matching it, which is a good test. But the file was written into the actual
+`src/server/lib/` directory and deleted moments later. For those seconds the source tree contained a
+file that is not source, so any test walking that tree could list it and then fail reading it. Not
+hypothetical: it broke `tests/envFlag.test.ts` mid-audit, and the fix there (skip anything matching
+`/\._/`) treated the symptom.
+
+**Why `/tmp` is NOT the fix, and the obvious change would have broken 57 tests.** The artifacts are
+TypeScript, imported dynamically; vite-node only transforms files inside the project root. An OS-temp
+artifact fails on the first type annotation. So the artifacts stay in the project — they just move to
+`<repo>/.emitted-test-modules/`, one gitignored directory outside `src/` that nothing scans.
+
+**Fixed as the class** (fourth rule, step 2): the four-line write/afterAll/unlink dance was duplicated
+57 times. It is now one helper, `tests/helpers/emitModule.ts`, which owns the location — so the next
+change to WHERE these live is one edit, not 57. The pid suffix (kept) is what makes it safe under
+vitest's parallel workers; the name is sanitised so it cannot escape the directory.
+
+The sweep also removed the imports it orphaned (`writeFileSync`, `unlinkSync`, `pathToFileURL`,
+`fileURLToPath`, `dirname`, `join`, and the `here` constant) across all 57 files — two passes, because
+dropping `here` is what killed the last two.
+
+8 tests, including the invariant: **no test may build its own artifact path**, and `src/server/lib`
+holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new hand-rolled path.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
 
 ---
 

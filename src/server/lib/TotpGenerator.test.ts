@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateTotpIntegration, TOTP_LIB_SOURCE } from './TotpGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateTotpIntegration, TOTP_LIB_SOURCE } from './TotpGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateTotpIntegration (wiring)', () => {
   it('emits server/lib/totp.ts, dependency-free', () => {
@@ -27,11 +24,8 @@ describe('generateTotpIntegration (wiring)', () => {
 // Materialize and EXECUTE the exact emitted code, so we verify real cryptographic correctness against the
 // official RFC 6238 test vectors — not just that the string looks right.
 describe('emitted TOTP code — correctness (RFC 6238 vectors)', () => {
-  const artifact = join(here, `._totp_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, TOTP_LIB_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('totp', TOTP_LIB_SOURCE);
+  afterAll(emitted.cleanup);
 
   // ASCII secret "12345678901234567890" (the RFC 6238 SHA-1 seed) in base32.
   const RFC_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
@@ -46,7 +40,7 @@ describe('emitted TOTP code — correctness (RFC 6238 vectors)', () => {
   }
 
   async function load(): Promise<EmittedTotp> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as EmittedTotp;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as EmittedTotp;
   }
 
   it('base32 round-trips and decodes the RFC seed to ASCII digits', async () => {

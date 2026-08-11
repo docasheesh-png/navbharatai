@@ -9,7 +9,7 @@ describe('PreactProvider — a real, boot-clean Preact + Vite scaffold', () => {
 
   it('emits the expected files with one entry point', () => {
     expect(Object.keys(files).sort()).toEqual(
-      ['index.html', 'package.json', 'src/app.tsx', 'src/main.tsx', 'tsconfig.json', 'vite.config.ts'].sort(),
+      ['index.html', 'package.json', 'src/index.css', 'src/app.tsx', 'src/main.tsx', 'tsconfig.json', 'vite.config.ts'].sort(),
     );
     expect(files['index.html']).toContain('/src/main.tsx');
     expect(files['index.html']).toContain('id="app"');

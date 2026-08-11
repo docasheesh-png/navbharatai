@@ -35,7 +35,7 @@ describe('The preflight runs at the moment the keys reach the app', () => {
     // The sentence moved into the narration catalogue (ROADMAP item 6) so it can be spoken in the
     // user's own language. The degradation still narrates the SAME fact, with the same count.
     expect(fn).toContain("this.narrate('secrets.loaded', { count: names.length })");
-    expect(narrationText('en', 'secrets.loaded', { count: 3 })).toContain('Loaded 3 of your saved key');
+    expect(narrationText('secrets.loaded', { count: 3 })).toContain('Loaded 3 of your saved key');
   });
 
   it('every problem it finds is actually emitted, not just computed', () => {

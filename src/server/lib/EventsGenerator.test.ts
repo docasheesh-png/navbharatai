@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateEventsIntegration, EVENT_SERVICE_SOURCE } from './EventsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateEventsIntegration, EVENT_SERVICE_SOURCE } from './EventsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateEventsIntegration (wiring)', () => {
   it('emits the event service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateEventsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — capacity enforcement + waitlist promotion are real
 // business rules, verified against the actual emitted code.
 describe('emitted EventService — capacity + waitlist (real logic)', () => {
-  const artifact = join(here, `._events_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, EVENT_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('events', EVENT_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface EventItem { id: string; capacity: number }
   interface Rsvp { id: string; attendee: string; status: string }
@@ -39,7 +33,7 @@ describe('emitted EventService — capacity + waitlist (real logic)', () => {
   }
   interface Emitted { EventService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('confirms up to capacity, then WAITLISTS overflow (never overbooks)', async () => {

@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generatePollsIntegration, POLL_SERVICE_SOURCE } from './PollsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generatePollsIntegration, POLL_SERVICE_SOURCE } from './PollsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generatePollsIntegration (wiring)', () => {
   it('emits the poll service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generatePollsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — vote integrity (one vote per voter) + tally are real
 // business rules, verified against the actual emitted code.
 describe('emitted PollService — vote integrity + tally (real logic)', () => {
-  const artifact = join(here, `._polls_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, POLL_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('polls', POLL_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Poll { id: string; options: Array<{ id: string; label: string }> }
   interface Results { total: number; tally: Array<{ optionId: string; votes: number }>; open: boolean }
@@ -39,7 +33,7 @@ describe('emitted PollService — vote integrity + tally (real logic)', () => {
   }
   interface Emitted { PollService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('tallies votes and REJECTS a second vote from the same voter', async () => {

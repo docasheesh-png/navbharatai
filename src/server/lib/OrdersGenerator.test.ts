@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateOrdersIntegration, ORDERS_SERVICE_SOURCE } from './OrdersGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateOrdersIntegration, ORDERS_SERVICE_SOURCE } from './OrdersGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateOrdersIntegration (wiring)', () => {
   it('emits the order service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateOrdersIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the immutable-snapshot + exact-total + state-machine rules
 // are real business rules, verified against the actual emitted code.
 describe('emitted OrderService — immutable snapshot + exact total + status machine (real logic)', () => {
-  const artifact = join(here, `._orders_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, ORDERS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('orders', ORDERS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type OrderStatus = 'placed' | 'paid' | 'shipped' | 'delivered' | 'cancelled';
   interface OrderItem { productId: string; name: string; unitPriceMinor: number; qty: number; subtotalMinor: number }
@@ -40,7 +34,7 @@ describe('emitted OrderService — immutable snapshot + exact total + status mac
   }
   interface Emitted { OrderService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('places an order with an EXACT total = sum of frozen subtotals', async () => {

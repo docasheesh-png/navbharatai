@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateCollectionsIntegration, COLLECTIONS_SERVICE_SOURCE } from './CollectionsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateCollectionsIntegration, COLLECTIONS_SERVICE_SOURCE } from './CollectionsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateCollectionsIntegration (wiring)', () => {
   it('emits the collection service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateCollectionsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the multi-membership + idempotency rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted CollectionService — multi-collection membership + idempotency (real logic)', () => {
-  const artifact = join(here, `._collections_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, COLLECTIONS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('collections', COLLECTIONS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Collection { id: string; ownerId: string; name: string; createdAt: string }
   interface CollectionView extends Collection { itemCount: number; itemIds: string[] }
@@ -43,7 +37,7 @@ describe('emitted CollectionService — multi-collection membership + idempotenc
   }
   interface Emitted { CollectionService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('saving the same item twice is idempotent (exact count, no duplicate)', async () => {

@@ -29543,6 +29543,9 @@ STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
 
 **Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
 `tsc -p tsconfig.server.json` clean.
+
+---
+
 ## 2026-08-10 — Per-file narration: every file the build writes now says what it IS
 
 **Admin ask:** "jab NavBharatAI koi app banata hai, ek saath bahut sari file bana deta hai — background
@@ -29586,3 +29589,87 @@ limits (no note when the path is unclear; Hindi only when the request was in Hin
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1139 files / 13,183 tests,
 exit 0** · `npm run build` ✓.
+
+---
+
+## 2026-08-10 — GAME BUILDING: v5.0 can now build real games (phases 1–7, PRs #2218, #2219, #2221, #2223, #2226, #2227, #2246)
+
+**Origin.** The admin forwarded an external ChatGPT plan for turning NavBharatAI into a 3D game platform.
+Per the external-suggestion rule it was treated as raw material: I flagged honestly that we cannot ship
+photo-real 3D (no asset library), the admin overruled the scope-down — *"jo jo behatar se behtar kar sakte
+ho karo… note: app tute na, app downgread na ho"* — so the plan was rebuilt around what a CODE generator
+can genuinely make world-class: the engine, the feel, and the craft knowledge, not the art.
+
+**What shipped — seven phases, each a generator + wiring + tests:**
+
+| Phase | Tool | What it removes from the model's plate |
+|---|---|---|
+| 1 | `generate_game_runtime` | Fixed-timestep loop, input (incl. touch), events, pooling, save/load, game feel |
+| 2 | `generate_game_3d` | Colour management, 9 lighting presets, camera rigs, procedural world |
+| 3 | `generate_game_controller` | Coyote time, jump buffering, variable jump, step offset, slope limit |
+| 4 | `generate_game_vfx` | Pooled particles, Web Audio, and the ONE table syncing effect+sound+shake |
+| 5 | `generate_game_shell` | Composition, React mount, HUD, pause/restart, WebGL teardown |
+| 6 | `generate_game_systems` | Combat with i-frames, enemy AI, segment-collision projectiles, waves |
+| 7 | architect prompt + `game` domain | Makes the builder actually REACH for all of the above |
+
+**The design principle throughout:** every rule encoded is a *specific, nameable bug* that a from-scratch
+implementation reliably commits and that is invisible on review — physics in the render callback (the
+character jumps higher on a 144Hz monitor), additive particles writing depth, an AudioContext never
+resumed on a gesture (the #1 reason a web game is silent), damage applied per frame, bullets tunnelling
+through small enemies, enemies converging into one blob, a leaked WebGL context killing the tab.
+
+**Method note that paid off — TEST BY EXECUTION, not by string match.** Phases 1–5 could only assert the
+emitted text *contains* the right thing (it needs three.js + a browser). Phase 6 was deliberately written
+as pure arithmetic so the tests RUN it — and immediately found two real bugs a string match would have
+passed: a bullet through two enemies credited the wrong one (ranked by perpendicular distance; two
+enemies dead ahead are both at distance zero, so array order decided it → now ranked by position ALONG
+the segment), and spawn placement put enemies OUTSIDE the arena when the player stood near its edge
+(clamp-then-push-away walks the point back out → now clamps onto the arena circle and slides along it via
+the law of cosines, with a property sweep over every player position). **Where a generator's output can be
+made pure, make it pure and execute it in the test.**
+
+**Root causes fixed in EARLIER phases, surfaced by later ones (rule 4, not worked around):**
+- `CameraRig.yaw` was private → camera-relative movement was impossible; the controller took `cameraYaw`
+  and nothing could supply it.
+- `CameraRig` had no `setCollidables` → the world is built AFTER the rig exists, so third-person camera
+  collision could never actually be wired.
+- `CharacterController` had no `reset()` → restart could not work. It clears motor state, not just
+  position, or a player who died mid-fall respawns carrying that velocity with `jumping` still true.
+- `handleResize` sized to `window.innerWidth` → correct only fullscreen; embedded, the canvas overflowed
+  its panel, and a window `resize` never fires when a sidebar collapses. Now measures + observes the
+  container, with a zero-size guard so an unopened tab cannot make aspect NaN and blank it permanently.
+- `ParticleSpec.additive` was DEAD DATA — one material fixes the blend mode, so smoke/dust/blood would
+  have glowed like neon. Now two layers, preset-selected; still two draw calls.
+
+**A bug CLASS killed, not its fourth instance.** Every generator holds its output in a TS template
+literal, and a stray backtick in emitted code silently truncates the file — I made that mistake four
+times across these phases. `generatedGameCode.test.ts` now parses every file all SEVEN generators emit as
+real TypeScript, and guards the guard (three cases prove the check detects breakage, so it cannot pass
+vacuously if the internal `parseDiagnostics` property changes).
+
+**A guard found covering only half its subject.** `templatesPromiseWhatWeCanBuild.test.ts` (written
+2026-08-08) extracted only single-quoted prompts, so every backtick template — a growing share of the
+list — sailed past unchecked while the suite reported green. Widened to both forms, plus an assertion
+that the extracted count EQUALS the number of template ids, so a third quoting style fails loudly
+instead of escaping. A guard that silently covers half its subject is worse than none, because it is
+trusted.
+
+**Honesty held (rule 2).** The architect prompt and the knowledge base both state the real limit: games
+are built from CODE and shapes, not a library of ready-made 3D characters. 2D and stylised low-poly come
+out genuinely good; photo-realistic humans do not — and the builder is told to say so and build the
+strong stylised version rather than hand over grey boxes and call them a village. Sound FILES are the
+app's to supply; a missing one warns and plays silently, never a faked sound.
+
+**Discoverability.** Two Project Blueprints added (3D arena survival, 2D endless runner), both fully
+specified as playable — score, sound, pause, restart, phone controls — and a `game` domain in
+`RequirementGapAnalyzer` so a game prompt is proactively given the eight things such prompts always omit.
+Two false positives guarded, because the damage runs the other way (handing a business app a game
+engine): **gamification is not a game**, and **"game plan" is an idiom**.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,378 passed**
+(1,142 files) — up from 13,150 at the start of this arc. Every phase merged green.
+
+**Open / not done (recorded honestly):** no multiplayer/networking; no asset pipeline (models, textures,
+sound files); no physics engine beyond the character controller and projectile collision (no rigid-body
+stacking, ragdolls or vehicles); no level editor. These are real absences, not oversights — each is a
+separate large arc, and none is needed for the games the engine now builds well.

@@ -310,6 +310,7 @@ import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
+import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
@@ -7102,9 +7103,27 @@ export function registerAgentV3Routes(app: Express): void {
       // and additive — a failure just skips the ETA; chat turns already returned above.
       if (intent === 'new_build' || intent === 'edit_existing') {
         try {
-          const est = estimateBuildTime(complexityFromPrompt(prompt));
+          // ETA NOW LEARNS FROM REAL BUILDS (admin 2026-08-11). This call used to pass NO history, so
+          // every user saw the cold heuristic at confidence 0.4 on every build, forever — which is the
+          // measured "ETA said ~3 min, took 15.6" defect. `estimateBuildTime` could always blend past
+          // durations; it was simply never given any on the path that matters. History comes from the
+          // build records we ALREADY store durably, so this adds no storage and costs no provider spend.
+          // Best-effort by construction: a history read that fails yields [], i.e. exactly today's
+          // behaviour, and can never delay or fail a build.
+          const etaComplexity = complexityFromPrompt(prompt);
+          const past = await recentBuildHistoryFor(
+            workspaceId, etaComplexity,
+            (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
+          );
+          const est = estimateBuildTime(etaComplexity, past);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
+          buildDiag.record({
+            phase: 'plan', severity: 'info', code: 'ETA_BASIS',
+            message: `ETA ${est.etaText} · basis ${est.basis} · confidence ${est.confidence}`,
+            detail: etaBasisNote(past),
+            autoResolved: true,
+          });
           events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ${est.etaText} — I'll keep you posted as I go.`, ts: Date.now() });
         } catch { /* ETA is best-effort — never affects the build */ }
       }

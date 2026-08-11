@@ -30868,3 +30868,51 @@ Delete appears in BOTH states, only over a real model, asks first, reports succe
 browser really deleted it, that the old "clear your browser data" dead end is gone, and that the probe
 stays lazy. Gate: tsc clean both projects, `npm run build` ✓, `npm run test:bundle` ✓,
 **14,085/14,085**.
+
+---
+
+## 2026-08-11 — The ETA finally learns from real builds (upgrade 1 of the cheap set)
+
+**Admin:** "tum jo jo safe ho app ko sach me upgrade kare sab banao — mere admin ki kam se kam ₹ kharch ho."
+
+Picked first because it is the cheapest real upgrade available: **zero provider spend** (pure arithmetic
+over records already written) against a defect measured in our own autopsies — *"ETA said ~3 min and it
+took 15.6 (4× 'bigger than expected')"*.
+
+**THE DEFECT WAS NOT A MISSING FEATURE, which is why it survived so long.**
+`estimateBuildTime(complexity, history)` has ALWAYS been able to learn — `historicalEstimateMs` blends
+past durations and raises confidence as history grows. But the LIVE build path called it as
+`estimateBuildTime(complexityFromPrompt(prompt))` with **no history at all**, so every real user has
+seen the cold heuristic at confidence 0.4, on every build, forever. The one place history WAS accepted
+is `POST /api/build-estimate`, which takes it from the request body — i.e. only from a caller who
+already knew the answer. **The learning machinery was wired to everything except the path that matters.**
+This is the same "already built, just not connected" class the ROADMAP has flagged three times.
+
+**No new storage.** Every settled build is already recorded durably per workspace
+(`listDiagnosticsHistory`) with `startedAt`/`endedAt`/`ok`. **Deliberately NOT the admin report store**,
+which was the obvious-looking source and is the wrong one: it holds only builds a user pressed "Report"
+on — a sample biased toward builds that went badly, which would teach the ETA to expect the worst.
+
+**Judgements worth keeping:**
+- **Failed builds never teach.** A build killed at the watchdog cap took 30 minutes; one that failed in
+  40 seconds took 40 seconds. Both corrupt "how long does a build take", and the fast failure is the
+  more dangerous — it makes the ETA optimistic, which is the complaint we started from.
+- **Absurd durations are rejected at both ends** (<5s, >45min): one bad row moves the blended estimate
+  for every later build.
+- **No success signal at all ⇒ does not teach.** Silence is not consent.
+- **Every entry carries the CURRENT complexity.** The stored history is per-WORKSPACE — past builds of
+  THIS app — and carries no file count. Guessing one would be fabrication; using the current complexity
+  states the true thing ("how long builds on this app have taken") and gives that history full weight,
+  which is right: the same project and the same user's habits predict the next build far better than a
+  stranger's app with a similar file count.
+- **Every failure path ends at `[]`**, which is byte-for-byte today's behaviour — an ETA is never worth
+  delaying or failing a build for. A test asserts `estimateBuildTime(C, []) === estimateBuildTime(C)`.
+- The basis is recorded (`ETA_BASIS`), so a wrong ETA can be diagnosed instead of argued about.
+
+Tests: 17 in `tests/etaHistory.test.ts`, including the one that matters most — that history genuinely
+MOVES the estimate toward reality and raises confidence, so this is not decoration. Gate: tsc clean
+both projects, full run **14,102/14,102**.
+
+**Remaining in the cheap set (each still to build, each ₹0 to run):** a token/context budget with
+provenance (the 776k-tokens-for-3-files class), a cross-build heal-firing counter (turning the 50/50
+law into a number), and a build idempotency guard (the "whole build ran twice" class).

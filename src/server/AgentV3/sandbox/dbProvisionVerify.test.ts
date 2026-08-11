@@ -120,7 +120,7 @@ describe('every surface that claimed success now consumes the verification', () 
     // The sentence now lives in the narration catalogue (ROADMAP item 6) so it can be spoken in the
     // user's own language — so the lock is two-part: the branch narrates, and the words still say it.
     expect(src).toContain("this.narrate('db.connectionTestFailed'");
-    expect(narrationText('en', 'db.connectionTestFailed', {})).toContain('did not pass its connection test');
+    expect(narrationText('db.connectionTestFailed', {})).toContain('did not pass its connection test');
   });
 
   it('the watchdog arms only for a database that actually answered', () => {

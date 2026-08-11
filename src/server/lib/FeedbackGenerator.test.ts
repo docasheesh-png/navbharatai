@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateFeedbackIntegration, FEEDBACK_SERVICE_SOURCE } from './FeedbackGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateFeedbackIntegration, FEEDBACK_SERVICE_SOURCE } from './FeedbackGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateFeedbackIntegration (wiring)', () => {
   it('emits the feedback service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateFeedbackIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the vote-once + status-machine rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted FeedbackService — upvote-once + status lifecycle (real logic)', () => {
-  const artifact = join(here, `._feedback_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, FEEDBACK_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('feedback', FEEDBACK_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type PostStatus = 'open' | 'planned' | 'in_progress' | 'done' | 'declined';
   interface Post { id: string; title: string; author: string; status: PostStatus; votes: number }
@@ -41,7 +35,7 @@ describe('emitted FeedbackService — upvote-once + status lifecycle (real logic
   }
   interface Emitted { FeedbackService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('a new post starts open with the author auto-voted (votes=1)', async () => {

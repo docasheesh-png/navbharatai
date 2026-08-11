@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateSchoolErpIntegration, SCHOOL_SERVICE_SOURCE } from './SchoolErpGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateSchoolErpIntegration, SCHOOL_SERVICE_SOURCE } from './SchoolErpGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateSchoolErpIntegration (wiring)', () => {
   it('emits the school service, routes and README + express dep', () => {
@@ -22,11 +19,8 @@ describe('generateSchoolErpIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the three guarantees (idempotent attendance, grade
 // validity, fee-ledger integrity) are real invariants, verified against the actual emitted code.
 describe('emitted SchoolService — real domain invariants', () => {
-  const artifact = join(here, `._school_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, SCHOOL_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('school', SCHOOL_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Cls { id: string }
   interface Student { id: string; classId: string }
@@ -47,7 +41,7 @@ describe('emitted SchoolService — real domain invariants', () => {
   }
   interface Emitted { SchoolService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   async function seed() {
     const { SchoolService } = await load();

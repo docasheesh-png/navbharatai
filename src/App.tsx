@@ -109,6 +109,7 @@ const SecretManager    = _lz(() => import('./components/SecretManager'),        
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
+const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
@@ -426,7 +427,7 @@ export default function App() {
   );
   // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
   // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.
-  const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free'>('all');
+  const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free' | 'professional'>('all');
   useEffect(() => { if (activeView !== 'history') setHistoryInitialFilter('all'); }, [activeView]);
   // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
@@ -2076,7 +2077,7 @@ export default function App() {
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
     // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
     // header window. Same LayoutGrid icon as its Home card, for consistency.
-    { id: 'other_ai',     label: 'Other AI',           icon: LayoutGrid },
+    { id: 'other_ai',     label: 'Other',              icon: LayoutGrid },
     { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
@@ -2338,6 +2339,33 @@ export default function App() {
     };
     window.addEventListener('storage', handleStorageChange);
 
+    // NATIVE (Capacitor) GitHub OAuth return. The in-app browser redirects to
+    // com.navbharat.ai://github-callback#gh_token=…, which fires the App plugin's `appUrlOpen`. Extract
+    // the token, connect, and close the in-app browser so the user lands back in the app. NO-OP on web
+    // (isNativePlatform() is false), so every browser/desktop flow above is untouched.
+    let removeGithubUrlOpen: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        if (Capacitor.isNativePlatform?.() !== true) return;
+        const { App: CapApp } = await import('@capacitor/app');
+        const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
+          const url = data?.url || '';
+          if (!/gh_token=/.test(url)) return; // not our GitHub deep link — ignore
+          const frag = url.split('#')[1] || url.split('?')[1] || '';
+          const token = new URLSearchParams(frag).get('gh_token');
+          if (!token) return;
+          setGithubToken(token);
+          localStorage.setItem('gh_token', token);
+          rememberGithubOwner(auth.currentUser?.uid);
+          addLog('GitHub connected successfully.', 'success');
+          fetchGitHubUser(token);
+          void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+        });
+        removeGithubUrlOpen = () => { try { handle.remove(); } catch { /* already removed */ } };
+      } catch { /* not native / plugin absent — the web flows above handle the token */ }
+    })();
+
     // Check for fragment token (supporting full redirect flow)
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const fragmentToken = hashParams.get('gh_token');
@@ -2371,6 +2399,7 @@ export default function App() {
     return () => {
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);
+      removeGithubUrlOpen?.();
     };
   }, []);
 
@@ -3536,7 +3565,9 @@ export default function App() {
 
 
           {activeView === 'report' && <ReportsListView user={user} />}
-          {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} />}
+          {activeView === 'history' && (historyInitialFilter === 'professional'
+            ? <ProfessionalHistoryView onOpen={(id) => toggleTab(id as ViewType)} onBack={() => toggleTab('professionals')} />
+            : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'} />)}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel
@@ -3774,8 +3805,10 @@ export default function App() {
                   disabled={comingSoon}
                   onClick={() => {
                     if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; }
-                    // History from the NavBharatAI Free footer shows ONLY Free sessions (not the whole app).
-                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : 'all');
+                    // History is SCOPED to where it was opened from (admin 2026-08-11): NavBharatAI Free
+                    // shows ONLY Free sessions; Professionals shows ONLY professional conversations — never
+                    // the whole app's history.
+                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : activeView === 'professionals' ? 'professional' : 'all');
                     if (id) toggleTab(id);
                   }}
                   aria-label={label}

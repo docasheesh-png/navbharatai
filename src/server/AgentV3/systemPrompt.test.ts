@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { editModePrefix, summarizeFileTree, architectSystemPrompt, planSystemPrompt, dateContextBlock, LANGUAGE_RULE } from './systemPrompt';
 
 describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
@@ -410,5 +412,119 @@ describe('WRITE-IT-RIGHT prevention (build-report 1327b405: hooks crash + hardco
   it('tells the builder never to use Math.random() for a token/OTP/secret', () => {
     expect(prompt).toContain('crypto.randomUUID()');
     expect(prompt).toContain('Math.random()');
+  });
+});
+
+/**
+ * GAME BUILDING. Six generators ship the parts of a game that are hard to get right (phases 1–6). None
+ * of that matters if the builder does not know to reach for them — a tool the model never calls is
+ * dead code, which has happened repeatedly in this codebase.
+ */
+describe('game guidance points the builder at the engine instead of hand-rolling one', () => {
+  const prompt = architectSystemPrompt();
+
+  it('names every game tool, in the order they must be called', () => {
+    const order = [
+      'generate_game_runtime',
+      'generate_game_3d',
+      'generate_game_controller',
+      'generate_game_systems',
+      'generate_game_vfx',
+      'generate_game_shell',
+    ];
+    let at = -1;
+    for (const tool of order) {
+      const next = prompt.indexOf(tool);
+      expect(next, `${tool} is missing from the architect prompt`).toBeGreaterThan(-1);
+      expect(next, `${tool} is out of order`).toBeGreaterThan(at);
+      at = next;
+    }
+  });
+
+  it('every tool it names is REALLY in the catalog — this pairing is what drifts', () => {
+    // A prompt that instructs the model to call a tool which no longer exists produces a build that
+    // burns turns on failed tool calls.
+    const catalog = readFileSync(join(__dirname, 'ToolCatalog.ts'), 'utf8');
+    for (const tool of [...prompt.matchAll(/generate_game_\w+/g)].map((m) => m[0])) {
+      expect(catalog, `${tool} is in the prompt but not the catalog`).toContain(`name: '${tool}'`);
+      expect(catalog, `${tool} is defined but not exposed`).toContain(`  '${tool}',`);
+    }
+  });
+
+  it('tells it NOT to write its own loop, and says why', () => {
+    expect(prompt).toContain('NEVER HAND-ROLL THE ENGINE');
+    expect(prompt).toContain('requestAnimationFrame');
+  });
+
+  it('keeps the asset limit HONEST rather than overpromising', () => {
+    // Rule 2: never claim a capability we do not have. Photo-real 3D characters is the one people ask
+    // for and the one thing a code-only generator genuinely cannot deliver.
+    expect(prompt).toContain('BE HONEST ABOUT ART');
+    expect(prompt).toContain('photo-realistic');
+    expect(prompt).toContain('grey boxes');
+  });
+
+  it('keeps gameplay decoupled from effects', () => {
+    expect(prompt).toContain('never call');
+    expect(prompt).toMatch(/particles or audio from gameplay/i);
+  });
+});
+
+/**
+ * INNER-PAGE DESIGN. The admin's report (2026-08-11): the first page is beautiful and the inner pages
+ * "bas HTML feel dete hai". The deterministic gate (DesignCoverage) catches it after the fact; this
+ * block is the half that stops it being generated in the first place, which is the half that matters.
+ */
+describe('the prompt demands the LAST page look as designed as the first', () => {
+  const prompt = architectSystemPrompt();
+
+  it('names the failure explicitly instead of just praising good design', () => {
+    // Generic "make it beautiful" guidance is already present and did not prevent this. Naming the
+    // specific failure — and WHY it is invisible while writing — is what changes behaviour.
+    expect(prompt).toContain('THE INNER PAGES ARE WHERE THIS FAILS');
+    expect(prompt).toContain('THE LAST PAGE YOU WRITE MUST LOOK AS');
+  });
+
+  it('gives a checkable five-point contract, not a vibe', () => {
+    for (const requirement of ['PAGE SHELL', 'REAL HEADING', 'GROUPED CONTENT', 'STYLED CONTROLS', 'REAL STATES']) {
+      expect(prompt, `${requirement} missing from the page contract`).toContain(requirement);
+    }
+  });
+
+  it('the contract names the SAME kit classes the repair pass will ask for', () => {
+    // If the prompt and the repair instruction disagreed, the heal would fight the builder.
+    for (const cls of ['.container', '.card', '.btn-primary', '.nb-empty', '.field']) {
+      expect(prompt, `${cls} missing`).toContain(cls);
+    }
+  });
+
+  it('forbids inventing a second design language on the inner pages', () => {
+    expect(prompt).toContain('do not invent a second design language');
+  });
+});
+
+describe('the page contract is honest about which scaffolds actually ship the kit', () => {
+  // The kit now ships with 8 scaffolds (designKit.ts), not the 1 it started with — but NOT all 24.
+  // Telling a Next or Angular
+  // or Svelte build to use `.card` would produce classes with NO CSS behind them — worse than plain
+  // markup, because it also looks intentional.
+  const prompt = architectSystemPrompt();
+
+  it('names WHICH scaffolds ship the kit, so the model never writes classes with no CSS behind them', () => {
+    expect(prompt).toContain('WHICH SCAFFOLDS SHIP THE KIT');
+    // Must stay in step with designKit.test.ts — a stale list here is a lie to the builder.
+    for (const has of ['Vite+React', 'Vue', 'Svelte', 'Preact', 'Solid', 'Alpine', 'Vanilla', 'Next', 'Nuxt', 'SvelteKit', 'Angular']) {
+      expect(prompt, `${has} should be listed as having the kit`).toContain(has);
+    }
+    // And the ones that genuinely do NOT have it must still be named, or the model writes dead classes.
+    for (const lacks of ['Remix', 'Astro', 'Lit']) {
+      expect(prompt, `${lacks} should be listed as lacking the kit`).toContain(lacks);
+    }
+  });
+
+  it('keeps the REQUIREMENT on other scaffolds, and says to define equivalents once', () => {
+    expect(prompt).toContain('the five requirements are exactly');
+    expect(prompt).toContain("project's own global stylesheet");
+    expect(prompt).toContain('The rule is the OUTCOME, never the specific class name');
   });
 });

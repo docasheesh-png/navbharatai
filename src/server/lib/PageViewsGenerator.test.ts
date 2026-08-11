@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generatePageViewsIntegration, PAGEVIEWS_SERVICE_SOURCE } from './PageViewsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generatePageViewsIntegration, PAGEVIEWS_SERVICE_SOURCE } from './PageViewsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generatePageViewsIntegration (wiring)', () => {
   it('emits the page-view service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generatePageViewsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the total-vs-unique + per-day dedup rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted PageViewService — total views + unique-visitor-per-day dedup (real logic)', () => {
-  const artifact = join(here, `._pageviews_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, PAGEVIEWS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('pageviews', PAGEVIEWS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface PageStats { path: string; totalViews: number; uniqueViews: number }
   interface Service {
@@ -37,7 +31,7 @@ describe('emitted PageViewService — total views + unique-visitor-per-day dedup
   }
   interface Emitted { PageViewService: new (salt?: string) => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('THE INVARIANT: total counts every hit; a visitor counts unique only ONCE PER DAY', async () => {

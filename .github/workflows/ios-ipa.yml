@@ -213,6 +213,15 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n:CFBundleURLSchemes:0 string $RID" "$PLIST"
           echo "Firebase iOS config in place; Google Sign-In URL scheme = $RID"
 
+          # 3) Add the GitHub-OAuth-return custom scheme (com.navbharat.ai) so the in-app browser can
+          #    deep-link the token back INTO the app (matches the Android intent-filter + the server's
+          #    NATIVE_OAUTH_REDIRECT). Without this, iOS GitHub login would strand the user in the browser.
+          m=0; while /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:$m" "$PLIST" >/dev/null 2>&1; do m=$((m+1)); done
+          /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$m dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$m:CFBundleURLSchemes array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$m:CFBundleURLSchemes:0 string com.navbharat.ai" "$PLIST"
+          echo "GitHub OAuth return URL scheme = com.navbharat.ai"
+
       # ROOT-CAUSE FIX for "Google login succeeds → redirect back → INFINITE LOADING" (admin iPhone
       # report 2026-07-17): the GoogleSignIn iOS SDK REQUIRES the app to forward the auth-redirect URL to
       # GIDSignIn.sharedInstance.handle(url) from application(_:open:options:) — that call is what

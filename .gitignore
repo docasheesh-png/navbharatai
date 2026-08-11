@@ -15,3 +15,4 @@ __pycache__/
 project_memory.json
 test_environment_debug.json
 public/monaco/
+.emitted-test-modules/

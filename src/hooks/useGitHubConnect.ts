@@ -36,12 +36,19 @@ export function useGitHubConnect(deps: GitHubConnectDeps) {
     // Save the specific IDE panel to activate on mount
     localStorage.setItem('github_oauth_return_active_screen', 'git');
 
-    const width = 600, height = 700;
-    const communitiesLeft = window.innerWidth / 2 - width / 2;
-    const communitiesTop = window.innerHeight / 2 - height / 2;
-    
-    // Pass the current URL as state so the server knows where to return the user
-    const state = window.location.href.split('#')[0];
+    // NATIVE (Capacitor) app: OAuth must open in an IN-APP browser and return via the app's custom URL
+    // scheme, or the user is stranded on the website in an external browser (the reported bug). On the
+    // web everything below is byte-for-byte unchanged.
+    let isNative = false;
+    try {
+      const { Capacitor } = await import('@capacitor/core');
+      isNative = Capacitor.isNativePlatform?.() === true;
+    } catch { /* web — not native */ }
+
+    // Pass the current URL as state so the server knows where to return the user. On native we send a
+    // fixed sentinel instead, which tells the server callback to redirect the token back into the app
+    // via its own custom scheme (see githubAuth.ts NATIVE_OAUTH_STATE).
+    const state = isNative ? 'nbai-native' : window.location.href.split('#')[0];
     
     // ALWAYS HARDCODE THE SECURE PRODUCTION REDIRECT URI PER USER DIRECTIVE
     const redirectUri = "https://navbharatai.com/api/github/callback";
@@ -84,7 +91,23 @@ export function useGitHubConnect(deps: GitHubConnectDeps) {
       });
 
       addLog('Redirecting to GitHub for secure authentication...', 'info');
-      setGithubRedirectingMessage('Redirecting to GitHub... Please wait.');
+      setGithubRedirectingMessage('Opening GitHub… Please wait.');
+
+      if (isNative) {
+        // In-app browser (Custom Tab / SFSafariViewController). The app stays underneath; on success the
+        // callback deep-links back via com.navbharat.ai://github-callback, which App.tsx's appUrlOpen
+        // listener catches (it stores the token and closes this browser). No page navigation, so the app
+        // is never replaced by the website.
+        try {
+          const { Browser } = await import('@capacitor/browser');
+          await Browser.open({ url: finalOAuthUrl, presentationStyle: 'popover' });
+        } catch (e: any) {
+          addLog(`Could not open the in-app browser: ${e?.message || e}`, 'error');
+          setGithubRedirectingMessage('Could not open GitHub. Please try again.');
+        }
+        return;
+      }
+
       setTimeout(() => {
         try {
           if (window.self !== window.top) {

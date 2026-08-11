@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { chargeReceipt, chargeHint, readChargeHeaders, APK_PRICE_INR } from '../../lib/apkChargeNotice';
 import { PublishToNavStore } from './PublishToNavStore';
 import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
@@ -71,11 +72,18 @@ export interface StoreBuildPanelProps {
   appId: string;
   /** Data URL of the chosen icon, if any. */
   iconDataUrl?: string;
+  /** The app's background colour (`#rrggbb`) from the App Information form; wired into the real build. */
+  backgroundColor?: string;
   /** The connected GitHub token; without one the panel explains what to do instead of failing. */
   githubToken?: string;
   onConnectGitHub?: () => void;
   /** Open the step-by-step publishing guide. */
   onOpenGuide?: () => void;
+  /**
+   * The user's selected NavBharatAI Pro tier (weak/off/mini/medium/max). It routes the AI build-repair
+   * to the SAME models the main build uses — weak stays on the cheap coders, paid tiers get Sonnet/Opus.
+   */
+  powerLevel?: string;
 }
 
 // TWO Android paths (admin 2026-08-02). The APK one needs NO secrets — Gradle signs a debug build
@@ -110,7 +118,7 @@ function fmtSize(bytes: number): string {
 }
 
 export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
-  sessionId, appName, appId, iconDataUrl, githubToken, onConnectGitHub, onOpenGuide,
+  sessionId, appName, appId, iconDataUrl, backgroundColor, githubToken, onConnectGitHub, onOpenGuide, powerLevel,
 }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [setup, setSetup] = useState<SetupResult | null>(null);
@@ -126,6 +134,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
+  /** What the last download cost — shown in plain words so a charge is never silent. */
+  const [chargeNote, setChargeNote] = useState('');
 
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
@@ -149,7 +159,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       const res = await fetch('/api/mobile-ship/setup', {
         method: 'POST',
         headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ sessionId, appName, appId, iconDataUrl, ios: true }),
+        body: JSON.stringify({ sessionId, appName, appId, iconDataUrl, backgroundColor, ios: true, powerLevel }),
       });
       const data = await res.json().catch(() => null);
       if (!liveRef.current) return;
@@ -165,7 +175,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     } finally {
       if (liveRef.current) setBusyNote('');
     }
-  }, [sessionId, appName, appId, iconDataUrl, ghHeaders]);
+  }, [sessionId, appName, appId, iconDataUrl, backgroundColor, ghHeaders]);
 
   /**
    * Start the workflow on GitHub. Returns false when GitHub refused, so the caller can stop the whole
@@ -286,7 +296,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
           headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id }),
+          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id, powerLevel }),
         });
         fix = await fRes.json().catch(() => null);
       } catch { /* handled as "could not fix" below */ }
@@ -338,6 +348,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         setError(data?.error || 'Could not download that file.');
         return;
       }
+      // TELL THE USER, EVERY TIME (admin 2026-08-10). The server reports what it charged; we say it
+      // in plain words. `applied` is false for a free-list account or a zero price, so this can never
+      // claim a charge nobody paid — and it names the per-BUILD rule, because "it charged me twice!"
+      // is the guaranteed support message if a bare price is shown for a file people re-download.
+      const charge = readChargeHeaders((n) => res.headers.get(n));
       const blob = await res.blob();
       const name = /apk/i.test(artifact.name)
         ? (buildKind === 'apk' ? 'app-debug.apk' : 'app-release.apk')
@@ -348,6 +363,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       a.download = name;
       a.click();
       URL.revokeObjectURL(url);
+      setChargeNote(chargeReceipt({ priceInr: charge.priceInr, applied: charge.applied }));
     } catch {
       setError('Could not download that file.');
     } finally {
@@ -557,6 +573,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   <span className="text-xs font-normal opacity-70">{fmtSize(a.sizeBytes)}</span>
                 </button>
               ))}
+              {/* THE PRICE, BEFORE THE CLICK (admin 2026-08-10: "har bar user ko bataya jaye"). A
+                  charge the user only discovers afterwards is a charge taken behind their back — and
+                  the per-BUILD rule is stated here because a bare price on a re-downloadable file
+                  guarantees the "it charged me twice!" message. */}
+              {APK_PRICE_INR > 0 && (
+                <p className="text-[11px] text-[#8b949e] text-center">{chargeHint(APK_PRICE_INR)}</p>
+              )}
+              {/* …and what it actually cost, once the file is in their hands. */}
+              {chargeNote && (
+                <p className="text-[11px] text-emerald-300 text-center font-semibold">{chargeNote}</p>
+              )}
               {/* Publish straight from this build (admin 2026-08-04). Offered ONLY for the .apk: the
                   Nav App Store installs apps, and a .aab is a Play Store bundle no phone can install —
                   showing it here would promise something that cannot work. */}

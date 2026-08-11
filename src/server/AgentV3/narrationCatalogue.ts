@@ -1,27 +1,24 @@
 /**
- * THE PLATFORM'S OWN WORDS, IN THE USER'S LANGUAGE (ROADMAP item 6, half 1).
+ * THE PLATFORM'S OWN WORDS — one place, in professional English.
  *
- * ROOT CAUSE THIS CLOSES: `LANGUAGE_RULE` makes the MODEL mirror the user's language, but the build
- * feed also carries lines OUR SERVER writes — "🗄️ Provisioning a local PostgreSQL…", "🔧 Added 2
- * missing import(s)…". Those never pass through a model, so no prompt rule can translate them, and a
- * Hindi user reads Hindi from the AI and English from the platform in one scrolling feed.
+ * Every status line the SERVER emits during a build ("🗄️ Provisioning a local PostgreSQL…", "🔧 Added
+ * 2 missing import(s)…") is an ID here, with typed parameters, instead of a sentence typed at the call
+ * site. That keeps the platform's voice consistent, makes every line greppable and testable, and is
+ * what lets the white-label guard prove no vendor name can reach a user.
  *
- * THE FIX IS A CLASS FIX, NOT A STRING FIX (fourth absolute rule, step 2): every such line becomes an
- * ID with typed parameters, and each language supplies the whole set. Call sites stop holding English
- * sentences at all — they hold an id — so a NEW narration line cannot be born untranslatable.
+ * 🔒 ENGLISH ONLY, DELIBERATELY (CLAUDE.md's Language standard; admin re-stated 2026-08-11).
+ * NavBharatAI's own text — buttons, labels, errors, and these status lines — is professional English.
+ * The SINGLE exception is an AI RESPONSE, which follows the user's language via `LANGUAGE_RULE`.
  *
- * 🔒 COMPLETENESS IS ENFORCED BY THE COMPILER, NOT BY DISCIPLINE. `Catalogue` is a mapped type over
- * every `NarrationId`, so a language table missing one line fails `tsc` — it is impossible to ship a
- * half-translated language, and impossible to add an id without translating it everywhere. This is
- * what keeps the two honest states ("fully working" / "not built yet") true per-language: a language
- * either speaks every line or it is not in the list at all.
+ * ⚠️ An earlier version of this file carried a Hindi table and a per-build language. That was wrong:
+ * a status line is the PLATFORM speaking, not the AI, so translating it made the app speak a language
+ * the rule reserves for the model. It was also unmaintainable — being fair to every Indian user would
+ * have meant 22 hand-written translations per line. Do not re-introduce it.
  *
- * WHAT STAYS IN ENGLISH ON PURPOSE: code identifiers, file paths, package names, command output and
- * error text are interpolated verbatim in every language. Translating `package.json` or a Prisma
- * relation name would make the message wrong, not friendlier.
+ * WHAT STAYS ENGLISH INSIDE THE SENTENCE TOO: code identifiers, file paths, package names, command
+ * output and error text are interpolated verbatim. Translating `package.json` or a Prisma relation
+ * name would make the message wrong, not friendlier.
  */
-
-import type { NarrationLanguage } from '../lib/narrationLanguage';
 
 /**
  * Every server-emitted narration line, with the exact data it needs. The key is the contract: adding
@@ -129,71 +126,14 @@ const EN: Catalogue = {
 };
 
 /**
- * Hindi. Written to be read by a NON-TECHNICAL user, which is who this is for — the sentence explains
- * what happened and why it is fine, in the same tone the English line uses. Technical nouns that name
- * a real thing on screen or on disk (PostgreSQL, SQLite, package.json, DATABASE_URL, Settings paths)
- * stay in English: translating them would break the user's ability to find or search for them.
- */
-const HI: Catalogue = {
-  'secrets.loaded': ({ count }) =>
-    `🔐 आपकी सेव की हुई ${count} key (Settings → Secrets & API Keys) ऐप में लगा दी गई हैं — कोई भी key कभी चैट में नहीं डाली जाती।`,
-  'db.usingConnected': () =>
-    '🗄️ जो database आपने Settings में जोड़ा है वही इस्तेमाल हो रहा है — आपका ऐप आपका अपना डेटा पढ़ेगा और लिखेगा, इसलिए कोई अस्थायी sandbox database बनाने की ज़रूरत नहीं है।',
-  'db.provisioning': () =>
-    '🗄️ sandbox में एक local PostgreSQL तैयार किया जा रहा है ताकि आपका database बन सके और migration चल सके…',
-  'db.connectionTestFailed': () =>
-    '⚠️ sandbox का database अपना connection test पास नहीं कर पाया — DATABASE_URL लिख दिया गया है और काम आगे बढ़ रहा है; अगला database स्टेप इसे दोबारा आज़माएगा।',
-  'db.ready': () => '✅ Local database तैयार है — अब आपके migration इसी पर चलाए जा रहे हैं।',
-  'db.postgresLocked': () =>
-    '🔒 आपका database PostgreSQL पर ही रखा गया है — वह तैयार है। Migration फेल होने का मतलब schema ठीक करना है (कोई relation या field), SQLite पर जाना नहीं। इसलिए schema ही ठीक किया जा रहा है।',
-  'db.asleepRestarting': () => '🗄️ database सो गया था — आपके database स्टेप से पहले PostgreSQL दोबारा चालू किया जा रहा है…',
-  'db.wentAwayRestarting': () => '🗄️ database बंद हो गया था — sandbox में PostgreSQL दोबारा चालू किया जा रहा है…',
-  'db.backOnline': () => '✅ database वापस आ गया — वह स्टेप PostgreSQL पर दोबारा चला दिया गया।',
-  'db.fellBackToSqlite': () =>
-    '⚠️ NavBharatAI preview sandbox में PostgreSQL को चालू नहीं रख पाया, इसलिए live preview SQLite पर चलेगा। जब आप अपने खुद के database पर deploy करेंगे, तब आपकी PostgreSQL सेटिंग ही लागू होगी।',
-  'fix.prismaRelation': () =>
-    '🔧 Prisma schema में एक relation अधूरा था — उसे `prisma format` से पूरा करके command दोबारा सफलतापूर्वक चला दी गई।',
-  'fix.toolkitInstalled': () => '🔧 database toolkit अभी install नहीं था — उसे install करके स्टेप दोबारा सफलतापूर्वक चला दिया गया।',
-  'fix.clientGenerated': () => '🔧 database client अभी generate नहीं हुआ था — उसे generate करके स्टेप दोबारा सफलतापूर्वक चला दिया गया।',
-  'fix.enumOnSqlite': ({ enums }) =>
-    `🔧 एक database enum SQLite पर उपलब्ध नहीं था — उसे इस्तेमाल करने वाले कोड (${enums}) को सीधे string values पर बदलकर स्टेप दोबारा सफलतापूर्वक चला दिया गया।`,
-  'fix.importKind': ({ count }) =>
-    `🔧 ${count} import अपने आप ठीक किए गए (named↔default का मेल नहीं बैठ रहा था) ताकि गलत import की वजह से build न रुके।`,
-  'fix.missingImports': ({ count }) =>
-    `🔧 ${count} छूटे हुए import जोड़े गए (एक साझा symbol इस्तेमाल हो रहा था पर import नहीं था) ताकि ऐप चलते-चलते क्रैश न हो।`,
-  'fix.repointedImports': ({ count }) =>
-    `🔧 ${count} import सही module पर लगा दिए गए (वह symbol बगल की फ़ाइल में था) ताकि build न रुके।`,
-  'fix.duplicateImport': ({ file }) =>
-    `🔧 \`${file}\` में एक दोहरा import हटा दिया गया, जो preview को तोड़ देता ("Duplicate declaration")।`,
-  'fix.duplicateImports': ({ count, file }) =>
-    `🔧 \`${file}\` में ${count} दोहरे import हटा दिए गए, जो preview को तोड़ देते ("Duplicate declaration")।`,
-  'fix.missingDeps': ({ count, packages }) =>
-    `🔧 package.json में ${count} छूटी हुई dependency जोड़ी गईं (${packages}) ताकि ऐप install होकर चल सके।`,
-  'fix.pinnedDeps': ({ changed }) =>
-    `🔧 package.json में जिन dependencies के नए version build तोड़ने के लिए जाने जाते हैं, उन्हें स्थिर version पर pin कर दिया गया (${changed}) ताकि install कोई ऐसा version न उठा ले।`,
-  'fix.coreDeps': ({ added }) =>
-    `🔧 package.json में framework की अपनी ज़रूरी dependencies बनी रहीं (${added}) ताकि dev server अपना ही runtime न खो दे।`,
-  'fix.nextMiddlewareMoved': ({ from, to }) =>
-    `🔧 \`${from}\` को \`${to}\` पर ले जाया गया — Next.js middleware सिर्फ़ project root से चलाता है, इसलिए जहाँ वह लिखा था वहाँ route guards चुपचाप बंद पड़े थे।`,
-};
-
-const CATALOGUES: Record<NarrationLanguage, Catalogue> = { en: EN, hi: HI };
-
-/**
  * THE ONE CHOKE POINT. Every server-emitted narration line goes through here, so a language is applied
  * by construction rather than remembered at 157 call sites (the same discipline as `enforceNoClaude`
  * and the provider anonymiser). An unknown language degrades to English rather than throwing — a
  * missing translation must never be able to fail a build.
  */
-export function narrationText<K extends NarrationId>(lang: NarrationLanguage, id: K, params: NarrationParams[K]): string {
-  const catalogue = CATALOGUES[lang] ?? EN;
-  const render = (catalogue[id] ?? EN[id]) as (p: NarrationParams[K]) => string;
-  try {
-    return render(params);
-  } catch {
-    return EN[id](params); // a broken translation falls back to the source, never to nothing
-  }
+export function narrationText<K extends NarrationId>(id: K, params: NarrationParams[K]): string {
+  return EN[id](params);
 }
 
-/** Exposed for the tests that prove every language answers every id. */
-export const _catalogues = CATALOGUES;
+/** Exposed for the tests that prove every id has a line. */
+export const _catalogue = EN;

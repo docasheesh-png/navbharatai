@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateRestaurantPosIntegration, RESTAURANT_SERVICE_SOURCE } from './RestaurantPosGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateRestaurantPosIntegration, RESTAURANT_SERVICE_SOURCE } from './RestaurantPosGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateRestaurantPosIntegration (wiring)', () => {
   it('emits the restaurant service, routes and README + express dep', () => {
@@ -22,11 +19,8 @@ describe('generateRestaurantPosIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the table/order state-machines and exact GST bill are
 // real invariants, verified against the actual emitted code.
 describe('emitted RestaurantService — real domain invariants', () => {
-  const artifact = join(here, `._restaurant_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, RESTAURANT_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('restaurant', RESTAURANT_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Item { id: string }
   interface Table { id: string; status: string }
@@ -46,7 +40,7 @@ describe('emitted RestaurantService — real domain invariants', () => {
   }
   interface Emitted { RestaurantService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('TABLE state-machine: seating an already-occupied table is rejected (409-class)', async () => {

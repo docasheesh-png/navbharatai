@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateStatusPageIntegration, STATUSPAGE_SERVICE_SOURCE } from './StatusPageGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateStatusPageIntegration, STATUSPAGE_SERVICE_SOURCE } from './StatusPageGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateStatusPageIntegration (wiring)', () => {
   it('emits the status-page service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateStatusPageIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the worst-of derivation + append-only timeline rules are
 // real business rules, verified against the actual emitted code.
 describe('emitted StatusPageService — derived overall status + append-only incidents (real logic)', () => {
-  const artifact = join(here, `._statuspage_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, STATUSPAGE_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('statuspage', STATUSPAGE_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type ComponentStatus = 'operational' | 'degraded' | 'partial_outage' | 'major_outage';
   type IncidentStatus = 'investigating' | 'identified' | 'monitoring' | 'resolved';
@@ -47,7 +41,7 @@ describe('emitted StatusPageService — derived overall status + append-only inc
   }
   interface Emitted { StatusPageService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('THE INVARIANT: overall status is the WORST component status', async () => {

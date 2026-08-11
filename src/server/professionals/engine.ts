@@ -159,6 +159,15 @@ export async function runProfessionalChatWithUsage(
   const supportOffer = AppContextInjector.getSupportOffer(message, 'professional');
   if (supportOffer) systemPrompt = `${systemPrompt}\n\n${supportOffer}`;
 
+  // Every professional ALSO knows NavBharatAI's own features (admin 2026-08-11: "sabhi AI ko pata hona
+  // chahiye ki NavBharatAI khud APK banata hai"). Professionals used to get only their domain knowledge,
+  // so a user who asked a professional "how do I make an APK?" got nothing about the built-in APK Builder.
+  // The injector returns empty unless the message genuinely matches an app feature, so a normal domain
+  // question is unaffected — only an app-capability question (in any language) surfaces the right screen,
+  // and NavBharatAI's own builder is offered first, never an external/GitHub route.
+  const appKnowledge = AppContextInjector.getRelevantContext(message, 'professional');
+  if (appKnowledge) systemPrompt = `${systemPrompt}\n\n${appKnowledge}`;
+
   // Remember more of the conversation (admin 2026-07-15: grow memory) and DE-DUPLICATE it so the same
   // question/answer can never appear twice in one session (admin: "ek question ek session me double na
   // ho") — a resend, retry, or restore can otherwise repeat a turn and make the professional re-ask.

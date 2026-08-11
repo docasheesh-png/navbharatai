@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateLoyaltyIntegration, LOYALTY_SERVICE_SOURCE } from './LoyaltyGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateLoyaltyIntegration, LOYALTY_SERVICE_SOURCE } from './LoyaltyGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateLoyaltyIntegration (wiring)', () => {
   it('emits the loyalty service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateLoyaltyIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the ledger-integrity + no-overdraft + expiry rules are
 // real business rules, verified against the actual emitted code.
 describe('emitted LoyaltyService — ledger integrity + no overdraft (real logic)', () => {
-  const artifact = join(here, `._loyalty_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, LOYALTY_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('loyalty', LOYALTY_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Entry { id: string; kind: string; points: number }
   interface Service {
@@ -38,7 +32,7 @@ describe('emitted LoyaltyService — ledger integrity + no overdraft (real logic
   }
   interface Emitted { LoyaltyService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('balance is exactly sum(earned) − sum(redeemed)', async () => {

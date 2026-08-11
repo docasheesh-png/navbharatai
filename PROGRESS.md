@@ -29389,6 +29389,930 @@ messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the 
 minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
 written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
 
+## 2026-08-10 — Mobile GitHub login now returns to the APP (in-app popup + deep-link), not the browser
+
+Admin report: in the installed app, GitHub login redirected the whole WebView to the browser and never came
+back — NavBharatAI ended up running on the website in the browser. Admin chose the **custom-scheme in-app
+popup** approach (like Google/Apple).
+
+ROOT CAUSE: `connectGitHub` did a full-page `window.location.href = <github oauth>` and the server callback
+redirected to the https website. In a Capacitor app that navigates away from the native bundle, so the user
+lands on the website in an external browser with no way back into the app.
+
+FIX (native-only; web/desktop OAuth is byte-for-byte unchanged, proven by tests):
+- `useGitHubConnect.ts` — on `Capacitor.isNativePlatform()`, open GitHub in an **in-app browser**
+  (`@capacitor/browser`, Custom Tab / SFSafariViewController) instead of navigating the WebView, and send
+  `state='nbai-native'` so the server knows to return via the app scheme.
+- `githubAuth.ts` — new pure, exported `nativeOauthReturn(state, token)`: for the native sentinel ONLY, it
+  redirects to `com.navbharat.ai://github-callback#gh_token=…`. 🔒 The scheme target is a FIXED server
+  constant, NEVER derived from the caller's `state`, so a crafted state can't open-redirect the token
+  (test-locked). Any other state → null → the normal allow-list-guarded web flow, unchanged.
+- `App.tsx` — a native `appUrlOpen` listener catches the deep link, stores the token, connects, and closes
+  the in-app browser. NO-OP on web.
+- `AndroidManifest.xml` — intent-filter for the `com.navbharat.ai` scheme so the OS routes the deep link
+  back to the (singleTask) MainActivity → `appUrlOpen`.
+- `.github/workflows/ios-ipa.yml` — adds the same `com.navbharat.ai` URL scheme to `Info.plist` via
+  PlistBuddy (next iOS build picks it up automatically — no manual Xcode step).
+- Added `@capacitor/browser` dependency.
+
+**Honest boundary (rule 6):** the native deep-link flow cannot be exercised from the dev sandbox (no device).
+Web is fully unchanged and test-covered; the on-device confirm (install a fresh APK/TestFlight build, tap
+GitHub connect → in-app GitHub page → returns into the app) is the admin's final verification. The Android
+AndroidManifest ships in-repo; the iOS scheme lands on the next `.ipa` build via the workflow above.
+
+**Verification:** frontend `npm run build` ✅ · `tsc`/`tsc -p tsconfig.server.json` clean for touched files ·
+`npx vitest run` ✅ **13352/13352**; new tests lock the native-return + the open-redirect-safety invariant.
+## 2026-08-10 — APK build-repair now follows the user's selected Pro tier (weak/normal/strong/…)
+
+Admin (2026-08-10): "apk builder me jo llm/provider call hogi, woh navbharatai pro (jo user se select kiya
+hai) vaise hi hogi weak/normal/strong etc." The self-healing APK/AAB build already had an AI repair tier
+(`mobileBuildAiRepair.ts` + `tryAiRepair`), but it was HARDCODED to the weak-safe cheap coders (GLM→Kimi)
+because "this route cannot see the user's tier". This wires the tier through so the repair uses the SAME
+Model Routing Policy the main build does.
+
+- `mobileBuildAiRepair.ts`: `AiRepairModel` gains `provider:'CLAUDE'` + `kind:'openai'|'anthropic'`;
+  new `RepairTier` + `normalizeRepairTier(powerLevel)` (unknown ⇒ `weak`, the safe default). Rewrote
+  `aiRepairModelChain(env, tier)`: weak = GLM→Kimi; normal = GLM→Kimi→Sonnet; strong = Sonnet→GLM→Kimi;
+  powerful/max = Opus→Sonnet→GLM→Kimi. 🔒 **The free-tier no-Claude absolute rule is enforced TWICE** —
+  Claude rungs are only appended for paid tiers AND a final filter strips any Claude rung when tier==='weak',
+  so a future edit can't leak Sonnet/Opus onto a free build. Missing paid keys fall through to the cheap
+  coders (never break).
+- `mobileBuildAiRepairClient.ts`: `callRepairModel` now speaks BOTH protocols — OpenAI chat-completions
+  (GLM/Kimi) and the Anthropic messages API (Claude), selected by the rung's `kind`.
+- Routes `mobileShip.ts` (`/autofix`) + `mobileSetup.ts` (`/setup` preflight): read `powerLevel` from the
+  request and pass the resolved tier into the chain.
+- Client: `AgentV3Panel` persists the selected tier to `localStorage['nbai_power_level']`; `APKBuilder`
+  reads it and threads it → `StoreBuildPanel` → both requests. Absent ⇒ server defaults to weak-safe.
+
+Also note (already present, reported to admin): the deterministic repair tier (`mobileBuildRepair.ts`,
+~14 named classes) + the AI tier together already "self-heal GitHub build problems"; the gradle-wrapper.jar
+self-heal shipped separately (#2234).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for the touched files (pre-existing missing-dep errors
+in pg/exceljs/attachmentText are unrelated, present on clean main); mobile tests 113/113; new tier tests
+lock weak-never-Claude + each tier's chain + Anthropic rung shape.
+
+## 2026-08-10 — APK/AAB self-heals a missing @drawable/splash (resource-linking failure), + named class
+
+Admin report (screenshots): a fresh APK build failed at aapt2 — "resource drawable/splash (aka
+…:drawable/splash) not found. error: failed linking references → Android resource linking failed" — and
+the admin asked why the "LLM self-heal" didn't fix it.
+
+ROOT CAUSE: Capacitor's launch theme (`android/app/src/main/res/values/styles.xml`) references
+`@drawable/splash`, but when `@capacitor/splash-screen` ships no splash image, a fresh `npx cap add android`
+(Capacitor 8) omits the splash asset → the reference doesn't resolve and `processDebugResources` fails.
+
+WHY THE LLM REPAIR COULDN'T TOUCH IT (honest boundary, rule 6): the broken file is in the GENERATED
+`android/` project — created on CI, gitignored, absent from the user's repo. The AI repair only edits repo
+files (workflow, package.json, capacitor.config, app source), so it literally cannot see a file that doesn't
+exist until CI scaffolds it. The correct fix is a DETERMINISTIC self-heal in the build workflow, exactly
+like the gradle-wrapper heal.
+
+FIX:
+- `mobileShipKit.ts` `ENSURE_ANDROID_STEP` (shared by both APK + AAB workflows): after `npx cap sync
+  android`, if no `res/drawable*/splash.*` exists, write a minimal placeholder layer-list drawable at
+  `res/drawable/splash.xml` so `@drawable/splash` always resolves. Regression test locks it into both
+  generated workflows.
+- `mobileBuildRepair.ts`: added a named classifier class `ANDROID_RESOURCE_LINKING` (aapt2 "resource … not
+  found"/"failed linking references"), checked before the app-code extractor. It maps to a workflow refresh
+  — which now carries the splash heal — so an EXISTING repo that predates the fix self-heals: resource-link
+  fail → refresh our workflow → re-run → splash heal fires → success. Previously this swept into the generic
+  android-stage `STALE_WORKFLOW` fallback; naming it fixes the system's honesty (rule 5) and telemetry. The
+  loop-guard holds: an already-current workflow yields null (no empty commit, no loop). User-facing summary
+  carries no vendor/aapt/drawable words (White-Label Law).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for touched files; mobileShipKit 41/41 + repair suite
+121/121; emitted YAML inspected (printf carries literal \n, valid shell). PR #2237.
+
+## 2026-08-11 — APK Builder: ONE honest flow — App Information now feeds the real build; useless .txt removed
+
+Admin: "app information wala option, github app builder se connect nahi hai … 'generate config file' ki .txt
+ka kya use? … app information ko niche 'build a real android app' se sync kardo." (And: name/logo easily editable.)
+
+ROOT CAUSE: the APK Builder had TWO parallel flows. A 4-step wizard (App Info → Permissions → Build Method →
+Generate) ended by producing a plain-text `.txt` of Android config files that the REAL build never used and a
+user could do nothing with; below it sat the actual builder (StoreBuildPanel) that compiles a signed
+.apk/.aab on GitHub's runners. So the wizard's settings (permissions, orientation, TWA/Capacitor, targetSdk)
+shaped nothing, the `.txt` was dead output, and the one part that worked looked unrelated to the form. This
+is a second-absolute-rule violation (a surface that looks done but does nothing).
+
+FIX — collapse to a SINGLE flow:
+- `APKBuilder.tsx` rewritten: one "App Information" form (name, package, icon, background colour) that FEEDS
+  the real `StoreBuildPanel` directly below it (with a visible "your app info flows into the build below"
+  bridge). Removed the disconnected wizard, the four dead config-file generators, and the `.txt` download.
+  Kept the real, working publishing guide (self-contained, opened from the build panel).
+- Every field now genuinely reaches the built app: name + package + icon already did; **background colour is
+  newly wired** through `capacitor.config.ts` (`android.backgroundColor` + `SplashScreen.backgroundColor`).
+- `mobileProjectAssembler.ts`: `buildCapacitorConfig(appId, appName, webDir, backgroundColor?)` +
+  `normaliseHexColor()`. 🔒 The colour is VALIDATED to a canonical `#rrggbb` before it is interpolated into
+  the generated TS file — a non-hex value is DROPPED and the config is byte-identical to before (injection
+  guard; the value comes from the client). `AssembleOptions.backgroundColor` threaded from the setup route
+  and `StoreBuildPanel` payload.
+- `AppKnowledgeBase.ts`: `apk_builder` entry + the store-ready-build-kit line updated to the single-flow
+  reality (no more "wizard"/"version"/"permissions"/".txt config file").
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` + `tsc -p tsconfig.server.json` clean ·
+assembler tests 30/30 (4 new: hex inject + 3-digit expand + injection-drop + byte-identical-when-absent),
+mobile suite 132/132, AppKnowledgeBase 6/6.
+
+## 2026-08-11 — Nav cleanup: "Other AI" → "Other" label, and Preview/Files/History removed from the sidebar
+
+Admin: (1) rename the "Other AI" section to just "Other"; (3) remove the Preview/Files/History buttons from
+the sidebar — "inko need nahi hai, yeh sab AI ke andar already hai".
+
+- Rename (task 1): the user-facing label only — Home card title, the Other page `<h1>`, and the TopNav tab
+  label all now read "Other". The internal view id `other_ai` is unchanged (no routing risk). The KB still
+  calls the section "Other AI" in its navigation text — cosmetic (the card is findable as "Other"); a full
+  KB wording sweep is a separate follow-up.
+- Sidebar (task 3): Preview / Files / History are hidden from the rail + drawer via the SAME mechanism Git
+  already uses — a `SIDEBAR_HIDDEN` set filtered out of `visibleItems`. They stay in `menuItems`, so their
+  header tab + view still open from the places that already have them (Preview: Pro v5.0 + bottom footer;
+  Files: Pro v5.0 footer; History: the per-AI footer). No view is orphaned.
+
+NOTE (admin tasks 2, 4, 5 still to do): task 2 ("cut App Settings from Settings into Other") is a larger
+cross-cutting change — ~40 files reference "Settings → App Settings → X" as the canonical nav path (engine
+messages, errors, the centralized `settingsLabels.ts`), and some `Settings → Domain`/etc. strings belong to
+EXTERNAL providers (e.g. Auth0), so a blanket sweep is unsafe. It will be done as a dedicated PR that routes
+those paths through the centralized label module. Tasks 4/5 (Free/Professional history scoping) are next.
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` clean · nav/routing/settings tests green.
+## 2026-08-11 — Every AI knows NavBharatAI builds APKs itself, and suggests our own APK Builder FIRST (GitHub second)
+
+Admin: "navbharatai pro ko pata hi nahi hai ki ham APK bana sakte hai — fix karo. Sabhi AI ko exact pata
+hona chahiye ki Other AI → APK Builder me app banti hai, kaise, kya chahiye. Aur jab koi (kisi bhi language
+me) APK banana pooche, to GitHub ka rasta 1st nahi — 1st NavBharatAI ka apna Other AI suggest ho, GitHub 2nd."
+
+INVESTIGATION (Explore agent mapped every AI's knowledge path):
+- `apk_builder` KB entry + the v5 builder prompt were already NavBharatAI-first — good.
+- BUT three capability bullets in the `agentv3_builder` KB description (MOBILE APP EXPORT / STORE-READY BUILD
+  KIT / HOW TO PUBLISH) framed **Capacitor / Android-SDK / GitHub-Actions FIRST** — the source of any
+  GitHub-first answer.
+- **Professionals** (`professionals/engine.ts`) called only `getSupportOffer`, NEVER `getRelevantContext`, so
+  they had NO app knowledge at all — a professional asked "apk kaise banau" knew nothing about the builder.
+- `AppContextInjector.formatBlock` emits only the FIRST line of a `description`; `apk_builder`'s description
+  is a single line (fully surfaced), so strengthening it propagates to every injector-fed AI.
+
+FIX:
+- `AppKnowledgeBase.ts` — `apk_builder` description now opens with an explicit PRIORITY statement: this
+  built-in builder is the FIRST answer to any "make an APK / put app on phone / publish to Play" question in
+  ANY language; the user never needs Android Studio / a computer / the Capacitor CLI / to set up GitHub
+  Actions; GitHub is only the under-the-hood build machine. Enriched keywords with many multilingual /
+  any-phrasing forms (hinglish + english). Reworded the three GitHub-first capability bullets to lead with
+  NavBharatAI's own builder and demote GitHub/Capacitor to "under the hood, not a route you offer".
+- `AgentV3/systemPrompt.ts` — added a firm PRIORITY line to the v5 build prompt: own APK Builder is the first
+  and only route; NEVER tell a user to install Android Studio / use the Capacitor CLI / set up GitHub Actions.
+- `professionals/engine.ts` — every professional now also injects `getRelevantContext(message,'professional')`
+  (mirrors chat.ts / sda.ts), so a professional surfaces the APK Builder for an app-capability question. The
+  injector returns empty for a normal domain question, so nothing else changes.
+
+**Verification:** frontend `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · apkGuidance 24/24 (10 new:
+priority-first framing, v5 prompt rule, 7 multilingual phrasings surface the builder, professional surface) ·
+appKnowledgeBase 6/6 · polish (builder/professionals/white-label/core-chat) + professionals + offline +
+awareness + SDA route suites all green.
+
+## 2026-08-11 — APK self-heals a missing launcher-icon foreground (ic_launcher_foreground) — sibling of the splash bug
+
+Admin sent a real build report: APK build FAILED at resource-linking —
+"resource mipmap/ic_launcher_foreground (aka …:mipmap/ic_launcher_foreground) not found" from
+mipmap-anydpi-v26/ic_launcher.xml + ic_launcher_round.xml → "failed linking file resources", BUILD FAILED.
+
+AUTOPSY (5th rule): the report's annotations showed the EARLIER heals FIRING correctly — "splash drawable
+missing — writing a placeholder" (#2237) and "gradle-wrapper.jar missing — fetching it" (#2234) both ran. So
+the app compiled and those two classes are handled; the NEW failure is a DIFFERENT missing resource in the
+same GENERATED android/ project: the adaptive launcher icon references @mipmap/ic_launcher_foreground, which
+a fresh cap add / a partial icon set can omit.
+
+ROOT CAUSE + rule-3 (hunt the siblings): this is the SAME CLASS as the splash bug — an adaptive/launch
+resource referenced by the generated project's XML but not shipped. The splash fix should have generalised;
+it did not, so the launcher-foreground sibling slipped through. Now covered.
+
+FIX (mobileShipKit.ts ENSURE_ANDROID_STEP, both APK + AAB): after cap sync, if NO ic_launcher_foreground
+exists in any mipmap/drawable bucket, create one — from the user's OWN uploaded icon (resources/icon.png)
+when present (so the real icon is used, rule 2), else a visible placeholder vector — and rewrite the adaptive
+XML's @mipmap/ic_launcher_foreground → @drawable/ic_launcher_foreground so it resolves. Background is left
+untouched (present in the failing case; adding one risks a duplicate-resource error). Existing repos also
+self-heal: the ANDROID_RESOURCE_LINKING classifier (#2237) already routes any "failed linking" to a workflow
+refresh, which now carries this heal too.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell, $RES literal); mobileShipKit + repair
+suites 82/82; `tsc -p tsconfig.server.json` clean.
+## 2026-08-11 — History scoping: Free → only Free; Professionals → only that user's professional chats
+
+Admin: (4) NavBharatAI Free's History must show ONLY Free chats, not the whole app; (5) the Professionals
+History must show ONLY professional conversations — "abhi sabhi (puri) history show kar raha hai, jo galat hai".
+
+ROOT CAUSE (mapped by an Explore agent):
+- Free: the footer already opened History pre-filtered to 'free', but the filter TABS let the user switch to
+  All/Pro/SDA — so it wasn't actually scoped.
+- Professionals: the hub's History opened the generic `HistoryView`, which reads Firestore `chat_sessions`
+  (free/pro/build sessions) with filter 'all'. But professional chats are NOT in `chat_sessions` at all —
+  each professional keeps its own rolling buffer in localStorage `prof_<id>_messages`. So the professional
+  History showed unrelated sessions and ZERO of the professional's real chats.
+
+FIX:
+- `HistoryView.tsx`: new `lockFilter` prop — when set (Free → History), the filter/mode TABS are hidden and
+  the scope is FIXED to `initialFilter`, so Free shows only Free sessions and cannot be switched to the whole
+  app. `App.tsx` passes `lockFilter={historyInitialFilter === 'free'}`.
+- New `ProfessionalHistoryView.tsx` + `readProfessionalHistory()`: reads the RIGHT source — the localStorage
+  `prof_<id>_messages` buffers — and lists one row per professional the user ACTUALLY chatted with (a lone
+  opening greeting is excluded; a user message is required). Each row resumes that professional (`toggleTab`
+  on the professional's id = its ViewType), with a per-conversation delete. The Professionals footer now sets
+  the scope to `'professional'` and `App.tsx` renders `ProfessionalHistoryView` for it — never the generic
+  session list.
+
+**Verification:** `npm run build` ✅ · `tsc --noEmit` clean · `dynamicFooter` 5/5 (locks the scoped wiring)
++ `professionalHistory` 4/4 (only-own, welcome-excluded, empty, corrupt-safe).
+
+## 2026-08-11 — APK build audit + pre-solve batch (kill the shivlings, part 1)
+
+Admin: "ek scan/audit wapas karo — apk banane me future me kya kya problem aa sakti hai, sab list banao."
+Ran a full senior-Android-CI audit of the generated APK/AAB pipeline (both workflows, the 3 deterministic
+self-heals, the ~16-class classifier, the AI-repair tier, the compile pre-flight). Key structural fact: the
+user's repo NEVER contains android/ (it's regenerated on CI each build, gitignored), so any android/-resident
+defect is invisible to the AI repair and can be fixed ONLY by a deterministic workflow heal. Enumerated 19
+future failure classes (G1–G19) ranked by likelihood × impact.
+
+PRE-SOLVED NOW (deterministic, always-work, also heal existing repos via the STALE_WORKFLOW/
+ANDROID_RESOURCE_LINKING refresh path) — mobileShipKit.ts ENSURE_ANDROID_STEP + both job defs:
+- **G3 (highest user-impact): the uploaded icon now becomes the REAL app icon.** After cap sync, if an icon
+  source exists, run `npx @capacitor/assets generate --android` to produce the full density + adaptive
+  (foreground/background/round) icon set from the user's icon. Previously CI never generated icons, so a
+  user who uploaded an icon still shipped Capacitor's default (a shipped feature that did nothing — 2nd-rule
+  adjacent). Degrades gracefully: if the tool is unavailable or the icon <1024px it warns and the existing
+  foreground self-heal still guarantees a resolvable icon, so the build never fails.
+- **G7: Gradle JVM heap.** Force `org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g` into
+  android/gradle.properties (idempotent) so a large app doesn't OOM during dex/R8/aapt2 — the existing
+  NODE_OUT_OF_MEMORY fix only covers the web build, not the Android build.
+- **G13: `timeout-minutes: 30`** on both build jobs so a hung download can't idle to GitHub's 6-hour default
+  and burn the user's Actions minutes / stick the progress bar.
+
+STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
+- G1 appName XML-escaping in strings.xml [D], G4 adaptive background + round-icon backstop [D], G5 plugin
+  minSdk merger bump [D], G10 transient-network Gradle retry [D], G8 keyword/case package segment [AI],
+  G9 vite .mjs outDir + Next-SSR detection [AI], G17 index.html presence check [AI]. Needs-user (classify
+  honestly, never fake): G6 google-services.json (push/Firebase), G11 wrong keystore creds, G12 private npm
+  registry. Biggest structural item: **G2 — the Capacitor-major ↔ Java/Gradle/compileSdk version matrix**
+  (default major 6 is stale and not co-validated with the pinned Java 21; repairJavaVersion only bumps up).
+  To be encoded as ONE governed source-of-truth table (rule-4 centralization) — carefully, separately.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
+`tsc -p tsconfig.server.json` clean.
+
+---
+
+## 2026-08-10 — Per-file narration: every file the build writes now says what it IS
+
+**Admin ask:** "jab NavBharatAI koi app banata hai, ek saath bahut sari file bana deta hai — background
+me sab aise hi chale, frontend par user ko ek ek file dikhe narration ke sath, aur UX abhi jaisa rahe,
+user file code dekh sake."
+
+**Half of it was already built, and checking first is why only the other half got written** (safeguard
+#6). `revealPacer` (admin 2026-07-21) already drips the REAL file events into the feed one at a time —
+a 44-file burst reads as 44 arrivals, background speed untouched. What was missing was the narration:
+a row saying `LoginForm.tsx · new` tells a non-technical user nothing about what was just built.
+
+**`lib/fileRole.ts` — derived from the PATH, never generated.** That is the whole design decision:
+- A per-file LLM description would cost a call PER FILE — 44 extra calls on a normal build, on the one
+  path where the user is already waiting.
+- A generated description can be WRONG, and a confident wrong label on a file the user cannot read is
+  worse than no label (second absolute rule).
+- It must work identically when the feed is replayed from HISTORY, where no model is running.
+
+It describes the ROLE, not the content: the row already shows the NAME, so the label adds the one thing
+the name does not carry. `LoginForm.tsx` → "a part of a screen"; `pages/api/orders.ts` → "an API
+endpoint". Claiming behaviour the path cannot prove ("handles login with OTP") would be fabrication, and
+a test asserts no label contains such a verb.
+
+**Precedence is the whole correctness problem**, and two ordering bugs were caught by the tests before
+merge: `pages/api/orders.ts` read as a "page" until API won over the `pages/` rule, and
+`components/Login.test.tsx` read as a "component" until the test rule moved ABOVE the directory rules
+(generated apps put a test next to the file it tests). `null` is a first-class answer — an unrecognised
+path shows no label rather than a guess.
+
+**The language comes from the SERVER, not a second detector.** The `workspace` event now carries the
+`lang` the server already resolved (optional field; an older stream or a replayed history is
+unaffected), the reducer stores it, and the row renders the label in it. Re-deriving the language on the
+client would have been the duplicate-detector mistake from this session's first slice, one layer up —
+the two halves of one feed would eventually disagree.
+
+UX unchanged as asked: the label is an additional dim span (hidden on narrow screens), the filename is
+untouched, and tapping still opens the real code/diff. Test-locked.
+
+19 new tests. `AppKnowledgeBase` updated so every AI can explain the feature — including its honest
+limits (no note when the path is unclear; Hindi only when the request was in Hindi).
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1139 files / 13,183 tests,
+exit 0** · `npm run build` ✓.
+
+---
+
+## 2026-08-10 — GAME BUILDING: v5.0 can now build real games (phases 1–7, PRs #2218, #2219, #2221, #2223, #2226, #2227, #2246)
+
+**Origin.** The admin forwarded an external ChatGPT plan for turning NavBharatAI into a 3D game platform.
+Per the external-suggestion rule it was treated as raw material: I flagged honestly that we cannot ship
+photo-real 3D (no asset library), the admin overruled the scope-down — *"jo jo behatar se behtar kar sakte
+ho karo… note: app tute na, app downgread na ho"* — so the plan was rebuilt around what a CODE generator
+can genuinely make world-class: the engine, the feel, and the craft knowledge, not the art.
+
+**What shipped — seven phases, each a generator + wiring + tests:**
+
+| Phase | Tool | What it removes from the model's plate |
+|---|---|---|
+| 1 | `generate_game_runtime` | Fixed-timestep loop, input (incl. touch), events, pooling, save/load, game feel |
+| 2 | `generate_game_3d` | Colour management, 9 lighting presets, camera rigs, procedural world |
+| 3 | `generate_game_controller` | Coyote time, jump buffering, variable jump, step offset, slope limit |
+| 4 | `generate_game_vfx` | Pooled particles, Web Audio, and the ONE table syncing effect+sound+shake |
+| 5 | `generate_game_shell` | Composition, React mount, HUD, pause/restart, WebGL teardown |
+| 6 | `generate_game_systems` | Combat with i-frames, enemy AI, segment-collision projectiles, waves |
+| 7 | architect prompt + `game` domain | Makes the builder actually REACH for all of the above |
+
+**The design principle throughout:** every rule encoded is a *specific, nameable bug* that a from-scratch
+implementation reliably commits and that is invisible on review — physics in the render callback (the
+character jumps higher on a 144Hz monitor), additive particles writing depth, an AudioContext never
+resumed on a gesture (the #1 reason a web game is silent), damage applied per frame, bullets tunnelling
+through small enemies, enemies converging into one blob, a leaked WebGL context killing the tab.
+
+**Method note that paid off — TEST BY EXECUTION, not by string match.** Phases 1–5 could only assert the
+emitted text *contains* the right thing (it needs three.js + a browser). Phase 6 was deliberately written
+as pure arithmetic so the tests RUN it — and immediately found two real bugs a string match would have
+passed: a bullet through two enemies credited the wrong one (ranked by perpendicular distance; two
+enemies dead ahead are both at distance zero, so array order decided it → now ranked by position ALONG
+the segment), and spawn placement put enemies OUTSIDE the arena when the player stood near its edge
+(clamp-then-push-away walks the point back out → now clamps onto the arena circle and slides along it via
+the law of cosines, with a property sweep over every player position). **Where a generator's output can be
+made pure, make it pure and execute it in the test.**
+
+**Root causes fixed in EARLIER phases, surfaced by later ones (rule 4, not worked around):**
+- `CameraRig.yaw` was private → camera-relative movement was impossible; the controller took `cameraYaw`
+  and nothing could supply it.
+- `CameraRig` had no `setCollidables` → the world is built AFTER the rig exists, so third-person camera
+  collision could never actually be wired.
+- `CharacterController` had no `reset()` → restart could not work. It clears motor state, not just
+  position, or a player who died mid-fall respawns carrying that velocity with `jumping` still true.
+- `handleResize` sized to `window.innerWidth` → correct only fullscreen; embedded, the canvas overflowed
+  its panel, and a window `resize` never fires when a sidebar collapses. Now measures + observes the
+  container, with a zero-size guard so an unopened tab cannot make aspect NaN and blank it permanently.
+- `ParticleSpec.additive` was DEAD DATA — one material fixes the blend mode, so smoke/dust/blood would
+  have glowed like neon. Now two layers, preset-selected; still two draw calls.
+
+**A bug CLASS killed, not its fourth instance.** Every generator holds its output in a TS template
+literal, and a stray backtick in emitted code silently truncates the file — I made that mistake four
+times across these phases. `generatedGameCode.test.ts` now parses every file all SEVEN generators emit as
+real TypeScript, and guards the guard (three cases prove the check detects breakage, so it cannot pass
+vacuously if the internal `parseDiagnostics` property changes).
+
+**A guard found covering only half its subject.** `templatesPromiseWhatWeCanBuild.test.ts` (written
+2026-08-08) extracted only single-quoted prompts, so every backtick template — a growing share of the
+list — sailed past unchecked while the suite reported green. Widened to both forms, plus an assertion
+that the extracted count EQUALS the number of template ids, so a third quoting style fails loudly
+instead of escaping. A guard that silently covers half its subject is worse than none, because it is
+trusted.
+
+**Honesty held (rule 2).** The architect prompt and the knowledge base both state the real limit: games
+are built from CODE and shapes, not a library of ready-made 3D characters. 2D and stylised low-poly come
+out genuinely good; photo-realistic humans do not — and the builder is told to say so and build the
+strong stylised version rather than hand over grey boxes and call them a village. Sound FILES are the
+app's to supply; a missing one warns and plays silently, never a faked sound.
+
+**Discoverability.** Two Project Blueprints added (3D arena survival, 2D endless runner), both fully
+specified as playable — score, sound, pause, restart, phone controls — and a `game` domain in
+`RequirementGapAnalyzer` so a game prompt is proactively given the eight things such prompts always omit.
+Two false positives guarded, because the damage runs the other way (handing a business app a game
+engine): **gamification is not a game**, and **"game plan" is an idiom**.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,378 passed**
+(1,142 files) — up from 13,150 at the start of this arc. Every phase merged green.
+
+**Open / not done (recorded honestly):** no multiplayer/networking; no asset pipeline (models, textures,
+sound files); no physics engine beyond the character controller and projectile collision (no rigid-body
+stacking, ragdolls or vehicles); no level editor. These are real absences, not oversights — each is a
+separate large arc, and none is needed for the games the engine now builds well.
+## 2026-08-10 — "APK download free me ho raha hai" — half true, and the other half was a real defect
+
+**Admin:** "apk download abhi free me ho raha hai, jabki maine kaha tha 1₹ per download! Aur HAR BAR
+USER KO BATAYA JAYE."
+
+**FINDING 1 — it is NOT free, and this is the SECOND report with the same cause.** `/api/mobile-ship/
+download` has charged ₹1 per built file since 2026-08-06. It reads free for the admin because their
+account is on `AGENTV3_FREE_LIST`, which is exempt everywhere by design — exactly why Professionals
+and Doctor AI also looked free in the previous message. **A normal user IS charged.** Worth stating
+plainly: the admin's own account can never be used to check whether a paywall works.
+
+**FINDING 2 — the real defect: the user was never TOLD.** The server fired the debit
+(`void debitWalletForBuild`) and streamed the bytes; the client just saved the file. So ₹1 left a real
+person's balance with **no price shown before and no confirmation after** — money taken silently,
+which is the exact opposite of the billing law's promise that the bill a user sees is the real one.
+
+**FIXED — the response now reports its own charge, and the screen says it, every time.**
+- The download sets `x-navbharatai-charge-inr` and `x-navbharatai-charge-applied` (plus
+  `Access-Control-Expose-Headers`, without which a browser cannot read a custom header at all).
+- `applied` is true ONLY when a charge genuinely happened — a free-list account, an anonymous caller
+  or a price of 0 all report false, so the receipt can never claim a charge nobody paid. Same rule the
+  wallet follows when a provider reports no usage: an unmeasured thing is not a bill.
+- The charge still NEVER blocks the bytes; the debit stays fire-and-forget.
+- BEFORE the click the screen states the price **and the per-BUILD rule** in the same breath —
+  "₹1 for each build; downloading this same file again is free". Without that second half, a user who
+  re-downloads is certain to think they were charged twice (the debit is keyed to the artifact, so
+  they were not), and a bare price would guarantee that support message.
+- AFTER the file arrives, the exact amount is confirmed. Both strings are WRITTEN in Hindi too, not
+  transliterated.
+- A missing/malformed header degrades to "no charge" rather than an invented number, and the client's
+  pre-click price mirrors the server default while the RECEIPT always uses the server's real value —
+  so a price change can never make the receipt lie; only the hint would lag, which is the safe
+  direction to be wrong in.
+
+Tests: 15 in `tests/apkChargeNotice.test.ts` — the price plus the per-build rule, silence when the
+charge is off, Hindi genuinely written, every "no charge" path, malformed headers meaning no charge,
+and wiring assertions that the server exposes the headers, that `applied` is gated on the free list,
+that the debit is still non-blocking, and that the screen shows both the hint and the receipt.
+Gate: tsc clean both projects, full run 13,286/13,286.
+
+---
+
+## 2026-08-10 — "Pass system hata do" — and it was already lying to real users
+
+**Admin:** "pass system hata do!"
+
+**WHAT THE PASS ACTUALLY WAS.** A ₹99/month "Professional Pass" promising unlimited access to every
+professional and every AI-backed tool. It was a **SECOND billing model** competing with the one the
+platform actually adopted: THE ONE-WALLET LAW (2026-08-01) settled that every AI draws on the same
+balance and *"the price of the thing IS the limit"*. A flat monthly promise of "unlimited" sits on
+top of that as a parallel contract the wallet cannot honour, and it forced the customer to reason
+about two systems to answer one question ("what does this cost me?").
+
+**AND IT WAS ALREADY LYING — this is the defect half, not the product half.** The wallet-empty refusal
+in BOTH gates (`passGate.ts`, `toolGate.ts`) ended: *"…or get the Professional Pass for unlimited
+access."* That branch is **LIVE** — `AI_WALLET_SPEND` has been on since 2026-08-08 and the wallet gate
+runs independently of the paywall flag — while the Pass has **never been sellable**:
+`PROFESSIONAL_PAID_ENABLED` defaults off and is not set in Cloud Run (it is not even in CLAUDE.md's
+env registry). So a real user who ran out of credit was pointed at a product that does not exist, at
+exactly the moment they were trying to give us money. Nothing about that was theoretical.
+
+**REMOVED — every user-facing surface, this change:**
+- Both LIVE wallet-empty messages now say the one thing that actually unblocks the user: *"Your
+  balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use."*
+  `passPriceInr`/`passDays` no longer go to the client at all, so a paywall card cannot be rebuilt
+  from the response.
+- The quota-exhausted messages drop the upsell and say when the allowance returns. The tool gate's
+  two variants (pass holder vs everyone else) collapse into one — there is no distinction left to draw.
+- `ProfessionalChat`: the "Get Pass — ₹99/month" checkout, the "Or get the Professional Pass" button
+  under the empty-wallet card, and the crown chip that opened the paywall are gone. The header chip is
+  now a plain COUNTER ("12/50 free today"); the exhausted card states the allowance, says it returns
+  tomorrow, and offers "Add credit".
+- `buyProfessionalPass()` is **deleted, not merely unused** — an exported purchase function is one
+  import away from being live again. `fetchPassStatus` stays; the free-allowance counter is real.
+- Doctor AI's 402 fallback no longer offers the Pass.
+- `AppKnowledgeBase`: the `professional_pass` entry is **replaced, not deleted** (`professionals_cost`).
+  Deleting it was the easy move and the wrong one — 'pass', 'kitne free', 'unlimited', '99' are exactly
+  what a user types when asking what this costs, and an unanswered keyword sends every AI in the app
+  back to guessing, which is how a removed product gets re-invented inside a chat reply. The billing
+  entry's "A Professional Pass covers the assistants and tools" line is gone too.
+
+**NOT removed yet, deliberately (honest sequencing).** The pass STORE, its Cashfree grant path and the
+`hasActivePass` branches in the gates stay for now. These guard money on every professional turn and
+every tool action; the safe order is to remove the grant path first, then delete the branches once
+nothing can set them. They are inert in production today — nothing can grant a pass — and the comments
+now say so instead of describing a live product.
+
+Tests: 9 new in `tests/passRemoved.test.ts`, which read the shipped source so an offer cannot quietly
+reappear the way the old one survived its flag being off: the two live refusals must not say "pass",
+no `passPriceInr:`/`passDays:` may be sent, no component may name or open a checkout for the Pass, the
+purchase helper must not exist, and the cost keywords must still land on an entry. `toolGate.test.ts`'s
+"offers the Pass" assertion is REPLACED in place with the superseding contract (upsell asserted absent,
+the "name what the user tried" intent kept). Gate: tsc clean both projects, full run **13,538/13,538**.
+## 2026-08-11 — I had the language rule BACKWARDS. Reverted, and the real gap fixed instead.
+
+**Admin, stating it in two halves and no third:**
+1. NavBharatAI's own UI = **professional English** — every button, label, and every status line the
+   SERVER emits during a build.
+2. **Only an AI RESPONSE** follows the user's language.
+
+**That is CLAUDE.md's Language standard, written down since long before this session.** I did not
+follow it. `ROADMAP.md` item 6 said the opposite — "~118 hardcoded English strings that OUR SERVER
+emits… do the SERVER NARRATION first" — and I followed the roadmap instead of the constitution. Two
+days of work went the wrong way: a Hindi catalogue for 23 status lines (#2201), Hindi file labels and a
+per-build language threaded onto the wire (#2228, still open).
+
+The mixed feed I was "fixing" was never a defect. **The app speaking English beside an AI speaking
+Hindi is the intended design**, and it is also the only version that scales: being fair to every Indian
+user would have meant 22 hand-written translations per line, forever.
+
+### Reverted (not left half-wired — that state is what rule 2 forbids)
+
+- `narrationCatalogue.ts` → English only. **The catalogue itself STAYS**: one place for the platform's
+  words is still what makes them consistent, greppable, and what lets the white-label guard prove no
+  vendor name reaches a user. Only the translation layer went.
+- `lib/narrationLanguage.ts` — deleted, with its tests.
+- `ToolDispatcher.setNarrationLanguage`, the `SubAgent` threading, both route call sites, the `lang`
+  field on the `workspace` wire event, and the client state + prop — all removed.
+- `LanguageDetect.scriptShare` — the field I added for this — reverted. Nothing read it any more, and
+  shipping dead code a day after a PR that removed 80 dead imports would be its own joke.
+- `fileRole.ts` → English labels, no language parameter.
+
+### The REAL gap, which was on the other half all along
+
+`routes/sda.ts` (Doctor AI) instructed the model: *"LANGUAGE: Primarily English medical terminology.
+Can use Hinglish for brief clarifications if needed."* — the **opposite** of rule 2, on the one surface
+built for junior and rural doctors, i.e. the users most likely to write in Hindi. `LANGUAGE_RULE`
+covers build/plan/chat and `professionals/engine.ts` covers the Professionals; Doctor AI was the hole.
+
+Fixed as *mirror the doctor's language, keep CLINICAL TERMS in English* — drug names, doses, units and
+investigations stay exactly as they appear on a prescription. A translated drug name is a
+patient-safety risk and cannot be looked up. Explain in their language; name the medicine in English.
+
+### On adding a translator (admin asked: Google Translate, or a free dictionary?)
+
+**No — and it would make the product worse.** The models are natively multilingual; that is what
+`LANGUAGE_RULE` uses, and it costs nothing. A translation layer would re-translate an already-correct
+reply (adding errors to a good answer), add latency to every message, mangle code blocks and technical
+terms, and Google Translate is not free at scale (~$20 per million characters after a small tier) while
+the "free" unofficial endpoints breach their terms and break without notice. Recorded in ROADMAP item 6
+so it is not re-proposed.
+
+### ROADMAP item 6 rewritten
+
+The line that contradicted CLAUDE.md is gone, replaced with the two-way rule, an explicit note that
+following the old line cost a session's work, and the remaining scope — which is small and entirely on
+the AI side.
+
+9 new tests (`tests/languageRule.test.ts`) lock BOTH halves, including that the language machinery is
+GONE rather than merely unused, and that no translation package is in `package.json`.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1148 files / 13,462 tests,
+exit 0** · `npm run build` ✓.
+## 2026-08-11 — 57 tests stop writing scratch files into the real source tree
+
+The open item recorded during the 2026-08-09 audit, now root-caused.
+
+**The bug.** 57 `*Generator.test.ts` files each materialised the code they generate as a real `.ts`
+file so the test could IMPORT and EXECUTE it — verifying the emitted business logic for real rather
+than string-matching it, which is a good test. But the file was written into the actual
+`src/server/lib/` directory and deleted moments later. For those seconds the source tree contained a
+file that is not source, so any test walking that tree could list it and then fail reading it. Not
+hypothetical: it broke `tests/envFlag.test.ts` mid-audit, and the fix there (skip anything matching
+`/\._/`) treated the symptom.
+
+**Why `/tmp` is NOT the fix, and the obvious change would have broken 57 tests.** The artifacts are
+TypeScript, imported dynamically; vite-node only transforms files inside the project root. An OS-temp
+artifact fails on the first type annotation. So the artifacts stay in the project — they just move to
+`<repo>/.emitted-test-modules/`, one gitignored directory outside `src/` that nothing scans.
+
+**Fixed as the class** (fourth rule, step 2): the four-line write/afterAll/unlink dance was duplicated
+57 times. It is now one helper, `tests/helpers/emitModule.ts`, which owns the location — so the next
+change to WHERE these live is one edit, not 57. The pid suffix (kept) is what makes it safe under
+vitest's parallel workers; the name is sanitised so it cannot escape the directory.
+
+The sweep also removed the imports it orphaned (`writeFileSync`, `unlinkSync`, `pathToFileURL`,
+`fileURLToPath`, `dirname`, `join`, and the `here` constant) across all 57 files — two passes, because
+dropping `here` is what killed the last two.
+
+8 tests, including the invariant: **no test may build its own artifact path**, and `src/server/lib`
+holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new hand-rolled path.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
+
+---
+
+## 2026-08-11 — The PUBLIC status page was naming our AI vendors (White-Label Law)
+
+Found by pulling on the audit's dullest leftover. The "22 unused locals" list included `esc` in
+`lib/HealthReport.ts` — an HTML-escape helper sitting unused NEXT TO an HTML renderer. That is not a
+tidiness smell, it is a question, and the answer was two real defects.
+
+### 1. `/status` and `/api/health` are PUBLIC, and they listed the providers
+
+The health check rendered:
+
+    AI providers — 4 enabled (gemini, anthropic, grok, vertex)
+
+Neither route has a token or a gate (`app.get('/status', …)`; the client fetches `/api/health`
+unauthenticated on load). So **anyone** could open the status page and read exactly which AI vendors
+NavBharatAI runs on. The standing rule is explicit: a user never encounters a vendor name, and
+provider identity is ADMIN-ONLY.
+
+Now it reports `AI engines — 3 of 4 available`. The COUNT is the honest, useful part — it is what tells
+a reader whether the engine can serve requests at all; the names were never something a visitor could
+act on. The admin dashboard still gets the full `providerEnabled` map from `/api/admin/*`, so this
+hides it from visitors, not from ops.
+
+### 2. The page built its rows with `innerHTML` string concatenation
+
+`h.version`, `h.node`, `c.name` and `c.detail` were concatenated into `innerHTML` in the client script,
+from data fetched at RUNTIME. **Not exploitable as shipped** — every value is server-authored today,
+and that is stated plainly rather than dramatised. But a check `detail` is precisely where a failing
+dependency's own error text gets echoed one day, and that is the version that bites.
+
+Rewritten to build DOM nodes with `textContent`. The one value that must become a class name
+(`c.status`) is stripped to `[a-z]`, because `textContent` cannot protect an attribute.
+
+The unused `esc` is deleted rather than wired: it is a SERVER-side helper, and the interpolation
+happens in the CLIENT after the page is served — it could never have escaped this data. Someone wrote
+the right idea in the wrong layer, and leaving it there would keep implying the page was protected.
+
+9 tests: the rendered page carries no vendor token, the code uses `textContent`/`createElement` and no
+`innerHTML`, the class-name value is sanitised, and — so the hardening cannot have quietly emptied the
+page — it still renders its real content.
+
+### On the other 21 "unused locals"
+
+Left alone deliberately, and now with the reason recorded. Most are INTERFACE-REQUIRED parameters
+(`schema` on three `Provider.generate` implementations, `req` on an Express handler, `traceContext`
+sitting BEFORE `systemPrompt` in a positional signature). Deleting them breaks a contract; renaming
+them to `_x` across ~20 sites is churn with no user value and a small risk each. The genuinely dead
+ones that remain (`JOBS_COLLECTION`, `MAX_HISTORY_STEPS`, `modelFlash`, four lazy client singletons in
+`aiClients.ts`) are candidates for a later sweep — with each one read first, which is exactly why they
+were not swept during the dead-import pass.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1153 files / 13,584 tests,
+exit 0**.
+
+---
+
+## 2026-08-11 — "Andar ke page bas HTML feel dete hai" (PRs #2252, #2254, #2256, #2258)
+
+**Admin report:** *"1st page to theek banta hai, beautiful — par andar ke page bas HTML feel dete hai. koi
+design style nahi, ek dam simple. kya ham designer ko har page par laga sakte hai?"*
+
+**ROOT CAUSE — the whole verification stack was blind to it.** The scaffold already shipped a design kit
+and the architect prompt already told the model to use it, but that was GUIDANCE WITH NO VERIFICATION
+BEHIND IT, and every gate we own asks a different question:
+
+| Gate | Asks | Why a bare page passes |
+|---|---|---|
+| `tsc` | do types check? | class names are strings |
+| ESLint | lint errors? | no rule for "looks unfinished" |
+| `CssConsistency` | class used but UNDEFINED? | a page using *nothing* is spotlessly clean |
+| `ProjectIntegrityChecks` | stylesheet orphaned? | it IS imported — by the good first page |
+| `ReviewerAgent` | does it work? | it does |
+
+So nothing ever objected, and the model's own behaviour supplied the defect: full effort on screen one,
+bare markup by screen five. **Nobody was asking "is this page DESIGNED?" — only "is the styling wired?"**
+
+**BOTH HALVES OF THE 50/50 LAW:**
+- **PREVENT (always on, no flag):** the architect prompt now NAMES the failure rather than adding more
+  praise for good design, states it as *"THE LAST PAGE YOU WRITE MUST LOOK AS DESIGNED AS THE FIRST"*,
+  explains why it is invisible while writing (bare markup compiles and lints), and gives a five-point
+  per-page contract: page shell, real heading, grouped surfaces, styled controls, real empty/loading
+  states.
+- **DETECT + REPAIR:** `DesignCoverage.ts` judges EVERY page file on its own. Deterministic ⇒ **zero LLM
+  cost on a clean build**; warnings are honest whether the flag is on or off; `AGENTV3_DESIGN_GATE=on`
+  adds ONE bounded repair naming the exact offending pages. It can never fail or block a build.
+
+**PRECISION OVER RECALL, deliberately.** A check that nags a good app gets ignored, and an ignored check
+is worse than none — so it skips Tailwind, CSS modules, styled-components/emotion, MUI/Chakra/antd/
+Mantine, inline styles, leaf components and anything under 6 elements. **The false-positive tests
+outnumber the true-positive ones on purpose.**
+
+**STATIC HTML WAS THE SHARPEST CASE (#2254)** and the first analyzer missed it entirely (only read
+`.tsx/.jsx`). A multi-page static site is generated one file at a time and the classic bug is that
+`index.html` links the stylesheet while `about.html` does not — each file is valid HTML alone, so nothing
+notices, and the user clicks from a designed page onto Times New Roman on white. Judged on "has NO CSS
+attached at all", never on class coverage (a static page styled through `body`/`h1` selectors is
+legitimate).
+
+**THE BIGGER FINDING (#2256, #2258).** Auditing my own change: the kit existed in **1 of 24 scaffolds**.
+Vue/Svelte/Preact/Solid/Alpine/Vanilla builds were told to reach for `.card` and `.nb-empty` with nothing
+behind them — they had no design language to be consistent WITH, which is where quality varies most.
+Extracted to ONE `designKit.ts` FIRST (copying into 12 providers is the drifted-copies failure rule 4
+exists to prevent), then rolled out to **12**: Vite+React, Vue, Svelte, Preact, Solid, Alpine, Vanilla,
+Static, Next, Nuxt, SvelteKit, Angular — each through the mechanism that framework really uses.
+
+**THE HALF EVERYONE FORGETS: emitting a stylesheet is not shipping it — something must LOAD it.** An
+unimported `index.css` is dead weight and renders as raw HTML. Tests assert BOTH for every scaffold, and
+this caught a real one: Nuxt's file was emitted while the config edit silently failed to apply.
+
+**Left out honestly:** Remix (needs `?url` + a `links()` export; cannot boot a Remix scaffold here to
+verify, and a wrong guess ships an app that fails to build or flashes unstyled — a test asserts it stays
+out until verified), Astro (needs a layout file it does not emit), Lit (shadow DOM — a global sheet never
+reaches the components).
+
+**Bugs of my own, caught by my own tests:** `NO_STYLESHEET` had no `DEFECT_TEXT` entry, so the repair
+prompt would have contained the literal string `undefined` (a test now walks EVERY member of the defect
+union); an identifier contained a Cyrillic `С` that compiled fine because declaration and use matched;
+and the first page contract named kit classes unconditionally, which on the then-23 kit-less scaffolds
+would have instructed the model to write class names with no CSS behind them.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,614 passed**
+(1,153 files).
+
+**OPEN / NOT VALIDATED (honest):** none of this has been seen on a REAL build yet — it is test-verified
+only. The next step is a real multi-page app: confirm the detector fires on the right pages and tune the
+thresholds from that evidence before `AGENTV3_DESIGN_GATE` is turned on. Remaining scaffolds: Remix,
+Astro, Lit.
+## 2026-08-11 — ROADMAP §2 verified against live code. Two of ten were already built.
+
+Before starting the next item I grepped every line of "SMALLER, VERIFIED-MISSING" against the actual
+source — the discipline safeguard #6 exists for, and which this file has now punished three separate
+times in three days.
+
+**Already built, and fully wired:**
+- **Animation / motion recipe.** The line read "no `generate_animation`". It exists in `ToolCatalog.ts`
+  (definition *and* the enabled list), has its dispatcher case, a pure generator + tests in
+  `lib/MotionGenerator.ts`, an `AppKnowledgeBase` entry, and motion guidance in `systemPrompt.ts`.
+  Shipped **2026-08-08** — three days before the line was read as open.
+
+**Half built, and the halves matter:**
+- **One-click object storage.** `generate_storage` exists and is wired: a real presigned-upload route
+  plus an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is missing is the
+  ZERO-SETUP half — it is **BYO keys**, the user pastes their own into `.env`. The open work is
+  provisioning a bucket in the USER's own account, same shape as the Supabase zero-setup DB path (and
+  under the same standing rule: user apps run on the USER's account, never NavBharatAI's). Rebuilding
+  the code generator would be pure waste.
+
+**Verified genuinely absent** (recorded in the file so the next session need not repeat the grep): MCP ·
+component tree panel · multi-element select · per-version preview URL · service-split generator ·
+design-to-code contract · community gallery/remix · scaling estimates · virus-scanning generated apps.
+
+### Per-version preview URL — sized before starting, and deliberately NOT started
+
+It looks like a small UI feature and is not. Git checkpoints already exist and the user can RESTORE to
+one; what is missing is *viewing* an old version without rewinding, which means running a second
+snapshot in a sandbox — real E2B time, per workspace, per version. That is an infrastructure decision
+with a recurring cost, not an afternoon's work, and it belongs in front of the admin before any code is
+written. Recorded rather than half-started.
+
+**One genuine gap noticed while reading that code, for a later slice:** a restore FAILS when the
+sandbox has recycled ("that checkpoint isn't active in this session yet"), even though the workspace's
+files are durably persisted in `WorkspaceFileStore`. The honest message is good; the underlying
+limitation may be removable by restoring from the durable store rather than requiring live git. Not
+started — it needs its own verification pass first.
+## 2026-08-10 — One input box for every AI: slice 2, the row is REAL now
+
+**Admin:** "sabhi AI's ke input ka acche cheezein utha kar best input box banao, aur wahi sabhi jagah
+laga do … NavBharatAI Free me ON SEND, SEARCH, CLEAR option hai (input box ke just upar), yeh sabhi
+jagah hona chahiye (Export wale ko hata sakte hai)." On Export, asked directly: **"han kato!"**
+
+Slice 1 (#2225) shipped only the DECISIONS with nothing user-visible — an honest but unfinished state.
+This slice makes it real: the row now renders above the input on **all four AIs**.
+
+**Why the row was worth centralising rather than copy-pasting.** It already existed — in exactly ONE
+place, hand-written inside a 1,700-line component, with its preference written straight to
+localStorage at the call site. Copying that block into three more screens is precisely how the four
+input boxes drifted apart to begin with. So `lib/chatToolbar.ts` holds the decisions (toggle label and
+tooltip, whether the actions have anything to act on, what Clear asks, how search matches) and
+`components/chat/ChatToolbar.tsx` is a thin shell over them.
+
+**Three real defects found and fixed while wiring it — none of them was the feature asked for:**
+1. **IME composition.** Three of the four composers checked only `e.key === 'Enter'`, so a Hindi or
+   CJK typist choosing a candidate **sent a half-finished word**. In an India-first app that is not an
+   edge case. `enterShouldSend` refuses while `isComposing`.
+2. **v5.0 guessed Enter from the DEVICE** (`!isTouchDevice`) — wrong in both directions: a phone with a
+   Bluetooth keyboard could not send from it, and a laptop user writing a long spec could not get a
+   newline. It is the user's own toggle now.
+3. **Doctor AI had no keyboard send at all** — every message needed a tap, which on a desktop consult
+   is the slowest possible way to work.
+
+**Per-screen care (a shared row is not a uniform one):**
+- **Doctor AI** — Clear routes to `startNewCase()`, not `setMessages([])`. A consult carries a per-case
+  id and a SERVER-side clinical store; blanking the screen while the previous patient's demographics
+  and red flags stayed live would be a clinical-safety bug, not a UI one.
+- **v5.0** — Clear starts a new SESSION. A thread owns a workspace, build lock, preview and report;
+  emptying the bubbles alone is the "+New chat leak" class this panel has been root-caused for twice.
+  It is also withheld while a build runs. Search filters what the TIMELINE is built from, never `convo`
+  itself, so a query with no hits cannot make the cold-start template screen appear.
+- **Professionals** — Clear also drops the SAVED transcript; this chat restores from localStorage on
+  mount, so wiping only the array would resurrect the conversation on the next visit.
+- **IDE/free chat** — the search field moved from the top of the transcript down INTO the toolbar,
+  beside the button that opens it. On a phone the two were a screen apart and read as unrelated.
+- The `leftSlot` prop keeps each screen's own badges (the IDE's "Pinned" chip): unifying the CONTROLS
+  should not erase what makes a screen itself, or the row gets re-forked the first time one is needed.
+
+**EXPORT CUT** ("han kato!") — it downloaded the transcript as a .md file, which nobody does on a
+phone, and it was the only control in the row that acted on the past rather than the message being
+written. Nothing replaces it.
+
+Tests: 23 in `tests/chatToolbar.test.ts` — the preference's single key and safe default (including a
+storage that throws), the send rule in all its directions (inverted toggle, IME, empty, busy), the
+visibility rule, Clear's singular/plural and its "cannot be brought back", search matching inside a
+token (`useState` finds `useState(0)`) and never blanking on an empty query, plus wiring assertions
+that each of the four screens genuinely renders the toolbar, shares the Enter rule, actually FILTERS
+its rendered messages, and wires Clear to something real — and that Export and the hand-rolled toggles
+are gone. Gate: tsc clean both projects, `npm run build` ✓, full run **13,598/13,598**.
+
+**STILL TO COME (honest status):** delete + edit on a sent message (slice 1's `chatMessageActions.ts`
+is written and tested but not yet wired to any screen), and paid voice chat (slice 3 — consent popup,
+per-second metering and the wallet debit must ship together, since `src/server/sonic/` charges nothing
+today and a popup alone would lie).
+
+---
+
+## 2026-08-10 — Delete + edit a sent message, on every AI (slice 3)
+
+**Admin:** "NavBharatAI Pro me send kiye hue text ko delete kar sakte hai — yah sabhi jagah hona
+chahiye, saath me edit bhi kar sake (WhatsApp ke tarah)."
+
+v5.0 already had a real delete (unsend) and edit on the last user message. This slice brings both to
+the other three AIs, applying the rules slice 1 wrote and tested (`lib/chatMessageActions.ts`).
+
+**The design point that makes this different from WhatsApp:** an assistant reply is an ANSWER TO a
+particular question. Delete therefore takes the replies with it (an orphaned answer reads as the AI
+answering something nobody asked), and edit REWINDS to that point so the AI answers the new question
+— the user edits because they want a different answer, not a different transcript.
+
+**Three real defects found while wiring it:**
+
+1. **The free chat's Clear button did NOTHING.** It fired a magic-string sentinel through
+   `onSendSuggestion`, and nothing in the codebase ever passed that prop or handled the sentinel — the
+   optional-call swallowed it. The button rendered, looked alive, and was inert for every real user.
+   It now goes through `onMessagesChange`, which the only host (NBIChatPanel) genuinely owns, and is
+   offered ONLY when a host can honour it.
+2. **The free chat's "edit" was a duplicate, not an edit.** It copied the text into the composer and
+   left the original message AND its answers in the thread, so re-sending produced the same question
+   twice with two different answers under it.
+3. **A re-ask after a rewind would have sent the taken-back turns.** `setMessages` does not update the
+   `messages` a closure already captured, so both Doctor AI and the professionals needed the surviving
+   transcript passed explicitly into their send path. On a clinical surface that is not cosmetic.
+
+**DOCTOR AI NEEDED REAL CARE — and this is the part that would have been a lie if shipped naively.**
+`/api/sda-chat` keeps a per-case clinical store: `patientData` and `redFlags` are ACCUMULATED from
+each reply into one blob and **never re-derived from the transcript**. So deleting a bubble on the
+client would leave the finding it produced still live in the AI's reasoning — the doctor believing
+they had retracted something while the assistant carried on treating it as fact. A clinical-safety
+bug, not a UI one. `rewindCase()` therefore **rotates the case id**: the next turn finds no entry for
+the new id, so the server starts a fresh clinical store and re-seeds from the SURVIVING transcript.
+It errs toward FORGETTING (state rebuilds over a turn or two) and that is deliberate — the doctor is
+present and can restate anything that matters, whereas a silently-retained retracted finding is the
+failure nobody can see. Red flags are cleared for the same reason.
+
+**Other care:** the controls are hidden while a SEARCH is filtering, because they are addressed by
+position and a filtered list renumbers everything (a delete on the third visible bubble would remove
+the third message of the whole conversation). They are hidden while a turn is in flight — a rewind
+under a running answer is not a state we can honestly draw. The professionals use POSITION as the id,
+because adding a real id field would invalidate every conversation already saved on every user's
+device, and their edit keeps the `edited` marker rather than letting a plain re-send drop it.
+
+Tests: 15 in `tests/messageEditWiring.test.ts` — the search guard, that every screen calls the shared
+rules rather than its own, that the dead Clear and the fake edit are gone and the host really honours
+the new prop, that Doctor AI's rewind rotates the case id, clears red flags and persists, and that
+both re-ask paths carry the surviving transcript instead of stale state. Gate: tsc clean both
+projects, `npm run build` ✓, full run **13,607/13,607**.
+
+**STILL OPEN:** paid voice chat (consent popup + per-second metering + wallet debit must ship
+together — `src/server/sonic/` charges nothing today, so a popup alone would lie).
+
+---
+
+## 2026-08-10 — Voice chat is now a PAID service, on every AI (slice 4 — the last of the three asks)
+
+**Admin:** "ek voice chat ka option hai SDA (doctor ai) me — usko bhi paid service bana kar sabhi me
+laga do. Jab koi user usko use kare to charge karenge. Jo ki user ko dikhega voice chat icon par
+click karne se — user ki language me ek popup aaye … word to word copy nahi kar dena." Rate confirmed
+the same day: **2 paise per second (₹1.20/min)**.
+
+This was deliberately held back from the earlier slices: `src/server/sonic/` charged NOTHING, so a
+consent popup on its own would have been a lie — the screen would say "paid" while the wallet never
+moved. Popup, metering and debit ship together or not at all.
+
+**How the money works, and why each choice:**
+- **Metered as it goes, not billed on hang-up.** A call has no natural length. Billing only at the end
+  means a phone face-down in a pocket runs up an unbounded debt the user learns about when their
+  balance is gone, and an unclean disconnect either loses the whole charge or bills for a call nobody
+  was listening to. Settling every 20s moves the balance while the user can still see it, lets an
+  abandoned call be **cut off** instead of billed, and loses at most one tick if the socket dies.
+- **Billing starts at `ready`, never at connect.** Everything before that is us getting our own
+  provider session up; if it fails the user got nothing. Same standing rule as builds.
+- **Empty wallet ⇒ refused BEFORE the provider is dialled** (in the upgrade path). Unlike a build,
+  a live call has no later pre-flight to catch an overdraft. An UNREADABLE balance is let through —
+  fail-open, like every other gate.
+- **Running out mid-call ENDS the call**, with an on-screen reason. A silent overdraft is discovered
+  later as a number the user cannot explain; ending it can be explained while they are listening.
+- **Whole seconds, remainder carried.** Rounding up per tick would inflate a long call by a partial
+  second each time. A clock that jumps backwards yields 0, never a negative credit.
+- **A retry of one tick collapses onto the same ledger ref; a NEW tick gets a new one** — an
+  idempotent debit keyed to a repeated ref would silently drop every later charge in a long call.
+  Seconds are marked billed BEFORE the await, so a slow write cannot be double-charged.
+- **Hard ceiling of 2 hours.** Beyond any real consultation, so reaching it means something is wedged
+  and the honest response is to end the call, not keep charging.
+- **The on-screen meter shows the SERVER's billed seconds**, never a local stopwatch — a client-side
+  count would drift and end up displaying a different figure from the one actually charged.
+- The ledger line says **"NavBharatAI voice chat · 1m 35s"** — never the vendor (white-label law).
+
+**The popup** is written per language, not translated word-for-word (the admin asked for exactly
+that), and reads the user's own `navbharat_language`; Hindi and Hinglish both get Devanagari, since a
+Hinglish speaker reads it comfortably and showing them English would defeat the point.
+
+**SCOPE SUPERSEDED — recorded, not silently dropped.** The voice button's header said "PROFESSIONAL
+chats ONLY … never NavBharatAI Free, never Pro v5.0 (admin 2026-07-14)". That restriction existed
+because voice cost NavBharatAI money and earned nothing. Now that a call is metered and billed, the
+reason is gone and the admin replaced the instruction ("sabhi me laga do"). Voice is on all four AIs;
+the old note is marked superseded in place, with its date, rather than deleted.
+
+`AppKnowledgeBase` updated in the same change (the sync rule): the entry now says voice is on every
+AI, states the per-second price and that the price is shown before any call, and carries the words a
+user types to ask what it costs ('kitna lagega', 'voice charge', 'per second').
+
+Tests: 26 in `tests/voiceBilling.test.ts` — whole-second billing with the remainder carried, a
+backwards clock, the 2-hour ceiling, the refusal/fail-open matrix, ending a call for an empty balance,
+distinct-vs-retry ledger refs, a vendor-free description, the Hindi/Hinglish language mapping, and
+wiring assertions that the meter starts at `ready`, that the wallet is really debited per tick, that a
+slow write cannot double-charge, that hang-up settles the tail, that the empty-wallet check sits in
+the upgrade path, that the popup is asked BEFORE the call, that the meter uses server seconds, and
+that all four AIs carry the button. Gate: tsc clean both projects, `npm run build` ✓, full run
+**13,666/13,666**.
+
+**All three of the admin's named wants are now delivered end-to-end** (delete + WhatsApp-style edit;
+ON SEND / SEARCH / CLEAR everywhere with Export cut; paid voice everywhere with the price shown first).
+
 ---
 
 ## 2026-08-10 — master import handler, part 4: the first thirty seconds after a project connects

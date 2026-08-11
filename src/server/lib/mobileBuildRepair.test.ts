@@ -280,3 +280,41 @@ describe('the workflow tells us which stage died, instead of us guessing', () =>
     expect(repairFiles(d, { [APK_PATH]: '# old' }, APK_PATH)).toBeNull();
   });
 });
+
+describe('Android resource linking (the real @drawable/splash failure, autopsy 2026-08-10)', () => {
+  // Real user APK build died at aapt2: "resource drawable/splash (aka …:drawable/splash) not found.
+  // error: failed linking references." The broken file is in the GENERATED android/ project (gitignored,
+  // absent from the repo), so the AI repair can't touch it — the deterministic workflow self-heal is the
+  // only fix. The classifier must NAME this class (not sweep it into the generic android fallback) and the
+  // repair must refresh our own workflow, which now writes a placeholder @drawable/splash before compiling.
+  const LINK_LOG = [
+    '##[group]Build the Android app',
+    '> Task :app:processDebugResources FAILED',
+    "error: resource drawable/splash (aka com.shivmedical.app:drawable/splash) not found.",
+    'error: failed linking references.',
+    'Android resource linking failed',
+    '##[error]Process completed with exit code 1.',
+  ].join('\n');
+
+  it('names the failure as ANDROID_RESOURCE_LINKING, not a vague android stall', () => {
+    const d = classifyBuildFailure(LINK_LOG, APK_PATH);
+    expect(d.code).toBe('ANDROID_RESOURCE_LINKING');
+    expect(d.autoFixable).toBe(true);
+    // White-Label Law: the user-facing summary names no vendor and no raw aapt line.
+    expect(d.summary).not.toMatch(/aapt|drawable|gradle|splash/i);
+  });
+
+  it('repairs by refreshing our own workflow (which now self-heals the missing splash)', () => {
+    const d = classifyBuildFailure(LINK_LOG, APK_PATH);
+    const res = repairFiles(d, { [APK_PATH]: '# stale workflow' }, APK_PATH, { workflow: APK_WORKFLOW });
+    expect(res).not.toBeNull();
+    expect(res!.files[APK_PATH]).toBe(APK_WORKFLOW);
+    // and the refreshed workflow genuinely carries the splash self-heal.
+    expect(res!.files[APK_PATH]).toContain('android/app/src/main/res/drawable/splash.xml');
+  });
+
+  it('with an already-current workflow there is nothing to change — no empty commit, no loop', () => {
+    const d = classifyBuildFailure(LINK_LOG, APK_PATH);
+    expect(repairFiles(d, { [APK_PATH]: APK_WORKFLOW }, APK_PATH, { workflow: APK_WORKFLOW })).toBeNull();
+  });
+});

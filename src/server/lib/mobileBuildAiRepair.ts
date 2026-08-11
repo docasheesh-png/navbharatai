@@ -20,8 +20,10 @@
 //   • A reply that changes nothing is a MISS (honest "could not fix"), never an empty commit — the same
 //     loop guard the deterministic tier has.
 //   • Every accepted fix lands as a normal named commit in the user's repository — visible, revertable.
-//   • Model chain per the Model Routing Policy's heal-gate row: flagship GLM → Kimi. NEVER Sonnet/Opus
-//     (this route cannot see the user's tier, so it takes the weak-tier-safe path by construction).
+//   • Model chain follows the USER'S SELECTED PRO TIER, exactly like the main build (admin 2026-08-10):
+//     weak = GLM→Kimi (NEVER Sonnet/Opus — the absolute free-tier rule, enforced twice in
+//     aiRepairModelChain); normal = cheap-first + Sonnet backstop; strong = Sonnet-pinned; powerful/max
+//     = Opus-first. A caller that omits the tier defaults to the weak-safe path by construction.
 //   • Kill switch: MOBILE_AUTOFIX_AI=off reverts to rules-only without a deploy.
 //
 // PURE where it matters: prompt building, reply validation, path extraction and sanitization are pure
@@ -45,10 +47,35 @@ export interface AiRepairFix {
 
 /** A single model rung the route will try, in order. */
 export interface AiRepairModel {
-  provider: 'GLM' | 'KIMI';
+  provider: 'GLM' | 'KIMI' | 'CLAUDE';
   model: string;
   baseURL: string;
   apiKey: string;
+  /** Wire protocol: GLM/Kimi speak OpenAI chat-completions; Claude speaks the Anthropic messages API. */
+  kind?: 'openai' | 'anthropic';
+}
+
+/**
+ * The user's selected NavBharatAI Pro tier, mapped to what the REPAIR model chain may use — the same
+ * Model Routing Policy the main build follows (admin 2026-08-10: "apk builder me jo llm/provider call
+ * hogi woh navbharatai pro — jo user se select kiya hai — vaise hi hogi weak/normal/strong").
+ */
+export type RepairTier = 'weak' | 'normal' | 'strong' | 'powerful' | 'max';
+
+/**
+ * Map the UI/engine power level to a repair tier. UNKNOWN/absent defaults to `weak` — the safest,
+ * cheapest, no-Claude path — so a caller that forgets to send its tier can NEVER accidentally spend a
+ * flagship Claude model or breach the weak-tier no-Claude rule.
+ */
+export function normalizeRepairTier(powerLevel?: string | null): RepairTier {
+  switch (String(powerLevel || '').toLowerCase().trim()) {
+    case 'weak': return 'weak';
+    case 'off': case 'normal': return 'normal';
+    case 'mini': case 'strong': return 'strong';
+    case 'medium': case 'powerful': return 'powerful';
+    case 'max': case 'full': case 'fullteam': case 'full-team': return 'max';
+    default: return 'weak';
+  }
 }
 
 /** Per-file and per-reply caps — a runaway model must not be able to write a megabyte into a repo. */
@@ -88,35 +115,52 @@ export function aiRepairAllowedPaths(workflowPath: string, log: string): string[
 }
 
 /**
- * The model chain, flagship-first per the heal-gate policy row. Empty when no cheap-coder key is
- * configured — the route then reports honestly instead of silently doing nothing.
+ * The tier-aware repair model chain, built per the Model Routing Policy (the SAME tiers the main build
+ * uses). Empty when no usable key is configured — the route then reports honestly instead of silently
+ * doing nothing. Keys may be comma-separated pools (the 429-rotation format); a single repair call takes
+ * the first key — rotation belongs to the build engine's pacer, not here.
  *
- * Keys may be comma-separated pools (the 429-rotation format); a single repair call just takes the
- * first key — rotation belongs to the build engine's pacer, not here.
+ * 🔒 WEAK-TIER NO-CLAUDE (absolute rule, admin-mandated): the weak/free tier gets GLM/Kimi ONLY — never
+ * Sonnet/Opus. Enforced by construction here (Claude rungs are only appended for paid tiers) AND by a
+ * final filter belt-and-suspenders, so a future edit cannot leak a flagship Claude model onto a free
+ * build. The chains mirror the policy: weak = GLM→Kimi; normal = GLM→Kimi→Sonnet (cheap-first, Claude
+ * backstop); strong = Sonnet→GLM→Kimi (Sonnet pinned, cheap fallback only if its key is missing);
+ * powerful/max = Opus→Sonnet→GLM→Kimi. Missing paid keys fall through to the cheap coders (never break).
  */
-export function aiRepairModelChain(env: NodeJS.ProcessEnv = process.env): AiRepairModel[] {
-  const chain: AiRepairModel[] = [];
+export function aiRepairModelChain(env: NodeJS.ProcessEnv = process.env, tier: RepairTier = 'weak'): AiRepairModel[] {
   const firstKey = (raw?: string): string => (raw || '').split(',')[0].trim();
 
-  const glmKey = firstKey(env.GLM_API_KEY);
-  if (glmKey) {
-    chain.push({
-      provider: 'GLM',
-      model: env.MOBILE_AUTOFIX_GLM_MODEL || 'glm-5.2',
-      baseURL: env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4',
-      apiKey: glmKey,
-    });
+  const glm = (): AiRepairModel | null => {
+    const key = firstKey(env.GLM_API_KEY);
+    return key ? { provider: 'GLM', kind: 'openai', model: env.MOBILE_AUTOFIX_GLM_MODEL || 'glm-5.2', baseURL: env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', apiKey: key } : null;
+  };
+  const kimi = (): AiRepairModel | null => {
+    const key = firstKey(env.KIMI_API_KEY);
+    return key ? { provider: 'KIMI', kind: 'openai', model: env.MOBILE_AUTOFIX_KIMI_MODEL || 'kimi-k2.7-code', baseURL: env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', apiKey: key } : null;
+  };
+  const claude = (model: string): AiRepairModel | null => {
+    const key = firstKey(env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY);
+    return key ? { provider: 'CLAUDE', kind: 'anthropic', model, baseURL: env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1', apiKey: key } : null;
+  };
+  const sonnet = () => claude(env.MOBILE_AUTOFIX_SONNET_MODEL || 'claude-sonnet-4-6');
+  const opus = () => claude(env.MOBILE_AUTOFIX_OPUS_MODEL || 'claude-opus-4-8');
+  const cheap = [glm(), kimi()];
+
+  let chain: Array<AiRepairModel | null>;
+  switch (tier) {
+    case 'weak':     chain = [...cheap]; break;                       // GLM → Kimi (NEVER Claude)
+    case 'normal':   chain = [...cheap, sonnet()]; break;             // cheap-first, Sonnet backstop
+    case 'strong':   chain = [sonnet(), ...cheap]; break;            // Sonnet pinned, cheap fallback
+    case 'powerful':
+    case 'max':      chain = [opus(), sonnet(), ...cheap]; break;    // Opus-first, then Sonnet, then cheap
+    default:         chain = [...cheap]; break;
   }
-  const kimiKey = firstKey(env.KIMI_API_KEY);
-  if (kimiKey) {
-    chain.push({
-      provider: 'KIMI',
-      model: env.MOBILE_AUTOFIX_KIMI_MODEL || 'kimi-k2.7-code',
-      baseURL: env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1',
-      apiKey: kimiKey,
-    });
-  }
-  return chain;
+
+  let out = chain.filter((m): m is AiRepairModel => !!m);
+  // 🔒 Belt-and-suspenders: the weak/free tier must NEVER carry a Claude rung, whatever the construction
+  // above did. This mirrors the main engine's enforceNoClaude guard so the invariant holds by two layers.
+  if (tier === 'weak') out = out.filter((m) => m.provider !== 'CLAUDE');
+  return out;
 }
 
 export function aiRepairEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

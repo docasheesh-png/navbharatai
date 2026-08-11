@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateActivityFeedIntegration, ACTIVITYFEED_SERVICE_SOURCE } from './ActivityFeedGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateActivityFeedIntegration, ACTIVITYFEED_SERVICE_SOURCE } from './ActivityFeedGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateActivityFeedIntegration (wiring)', () => {
   it('emits the activity-feed service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateActivityFeedIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the stable-cursor-pagination + unseen-count rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted ActivityFeedService — stable cursor pagination + unseen count (real logic)', () => {
-  const artifact = join(here, `._activityfeed_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, ACTIVITYFEED_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('activityfeed', ACTIVITYFEED_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface ActivityEvent { id: number; actor: string; verb: string; object: string; meta: Record<string, unknown>; createdAt: string }
   interface FeedPage { events: ActivityEvent[]; nextCursor: number | null }
@@ -41,7 +35,7 @@ describe('emitted ActivityFeedService — stable cursor pagination + unseen coun
   }
   interface Emitted { ActivityFeedService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('assigns monotonic ids and validates required fields', async () => {

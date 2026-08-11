@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -156,7 +157,7 @@ export class AngularProvider implements ITemplateProvider {
       'src/app/app.config.ts': APP_CONFIG,
       'src/app/app.component.ts': APP_COMPONENT,
       'src/index.html': INDEX_HTML,
-      'src/styles.css': STYLES_CSS,
+      'src/styles.css': DESIGN_KIT_CSS + '\n\n' + STYLES_CSS,
     };
   }
 }

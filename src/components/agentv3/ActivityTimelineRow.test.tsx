@@ -59,3 +59,44 @@ describe('ActionGroupRow — Claude-style collapsed action row (real render)', (
     expect(html).not.toContain('ZZUNIQUEDIFFMARKER'); // the patch body is NOT rendered by default
   });
 });
+
+// ── PER-FILE NARRATION (admin 2026-08-10) ─────────────────────────────────────────────────────────
+// "user ko ek ek file dikhe narration ke sath" — the row already showed the file NAME; these lock the
+// one thing it was missing, plus the two ways it could go wrong: a WRONG label, or a label that
+// silently disappears the code the user came to read.
+describe('per-file narration', () => {
+  // The detail rows render only while the group is ACTIVE (a live build auto-expands, admin
+  // 2026-07-12) — which is exactly when this label matters, so that is what these render.
+  const liveFile = (id: string, path: string) =>
+    actionsBlock([{ id, ts: 1, kind: 'tool', text: `writing ${path}`, active: true } as ActivityEntry]);
+
+  it('says what a file IS, next to its name', () => {
+    const html = renderToStaticMarkup(
+      <ActionGroupRow block={liveFile('f1', 'src/components/LoginForm.tsx')} />,
+    );
+    expect(html).toContain('LoginForm.tsx');
+    expect(html).toContain('a part of a screen');
+  });
+
+  it('is in ENGLISH, like every other piece of NavBharatAI\'s own text', () => {
+    // Admin rule (2026-08-11, restating CLAUDE.md): the PLATFORM speaks professional English; only an
+    // AI RESPONSE follows the user's language. A file label is the app talking, not the AI.
+    const html = renderToStaticMarkup(<ActionGroupRow block={liveFile('f2', 'pages/api/orders.ts')} />);
+    expect(html).toContain('an API endpoint');
+    expect(/[\u0900-\u097F]/.test(html)).toBe(false);
+  });
+
+  it('shows no label when the path does not confidently say what it is', () => {
+    // A missing label is honest. A guessed one on a file the user cannot read is not.
+    const html = renderToStaticMarkup(<ActionGroupRow block={liveFile('f3', 'weirdfile')} />);
+    expect(html).toContain('weirdfile');
+    expect(html).not.toContain('·  ');
+  });
+
+  it('never replaces the filename — the user still sees the real path', () => {
+    const html = renderToStaticMarkup(
+      <ActionGroupRow block={liveFile('f4', 'src/api/checkout.ts')} />,
+    );
+    expect(html).toContain('src/api/checkout.ts');
+  });
+});

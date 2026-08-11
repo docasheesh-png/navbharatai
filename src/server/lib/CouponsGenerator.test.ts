@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateCouponsIntegration, COUPON_SERVICE_SOURCE } from './CouponsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateCouponsIntegration, COUPON_SERVICE_SOURCE } from './CouponsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateCouponsIntegration (wiring)', () => {
   it('emits the coupon service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateCouponsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the redemption caps + discount math are real business
 // rules, verified against the actual emitted code.
 describe('emitted CouponService — redemption caps + discount math (real logic)', () => {
-  const artifact = join(here, `._coupon_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, COUPON_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('coupon', COUPON_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Coupon { code: string; type: string; value: number }
   interface Redemption { code: string; user: string; discount: number }
@@ -40,7 +34,7 @@ describe('emitted CouponService — redemption caps + discount math (real logic)
   }
   interface Emitted { CouponService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('computes percent (capped at order total) and fixed discounts correctly', async () => {

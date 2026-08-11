@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -64,6 +65,7 @@ const PAGE_SVELTE = `<script lang="ts">
 
 // SvelteKit root layout — wraps every route. Svelte 5 runes: children come in via $props().
 const LAYOUT_SVELTE = `<script lang="ts">
+  import '../app.css';
   let { children } = $props();
 </script>
 
@@ -107,6 +109,7 @@ export class SvelteKitProvider implements ITemplateProvider {
       'vite.config.ts': VITE_CONFIG,
       'src/app.html': APP_HTML,
       'src/app.d.ts': APP_DTS,
+      'src/app.css': DESIGN_KIT_CSS,
       'src/routes/+layout.svelte': LAYOUT_SVELTE,
       'src/routes/+page.svelte': PAGE_SVELTE,
       'src/routes/+error.svelte': ERROR_SVELTE,

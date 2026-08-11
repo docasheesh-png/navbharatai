@@ -1,13 +1,27 @@
-// Compact voice-mode button for the PROFESSIONAL chats ONLY (admin 2026-07-14: voice lives
-// inside professionals — never NavBharatAI Free, never Pro v5.0). Sits in the professional
-// chat input row next to Send; opens the full-screen NavBharatAI Voice surface. Renders
-// NOTHING (takes zero space) unless voice is enabled on the server AND the user is signed in
-// (voice is a paid, logged-in-only feature — the server enforces the same gate on the WS).
+// The voice button — now on EVERY AI, and it asks before it costs anything.
+//
+// SCOPE SUPERSEDED 2026-08-10. This used to read "PROFESSIONAL chats ONLY … never NavBharatAI Free,
+// never Pro v5.0 (admin 2026-07-14)". The admin replaced that instruction: "ek voice chat ka option
+// hai SDA (doctor ai) me — usko bhi paid service bana kar SABHI ME laga do." The earlier restriction
+// existed because voice cost NavBharatAI money and earned nothing; now that a call is metered and
+// billed per second, the reason for keeping it in one corner is gone. Recording the supersession
+// rather than quietly contradicting the old note.
+//
+// Renders NOTHING (takes zero space) unless voice is enabled on the server AND the user is signed in
+// — the server enforces the same gate on the WS, plus an empty-wallet refusal before it dials.
+//
+// Tapping it opens a CONSENT CARD, not a call: a per-second charge that begins without the user
+// agreeing to it is money taken silently, which is exactly the defect just fixed on the ₹1 build-file
+// download. The price is stated in the user's own language before anything starts.
 
 import { useEffect, useState } from 'react';
 import { Mic } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { SonicChat, type SonicTurn } from './SonicChat';
+import { voiceConsent, resolveVoiceLang } from '../../lib/voiceChatBilling';
+
+/** The user's own language for the consent card — read at render, so a change applies immediately. */
+const voiceLang = () => resolveVoiceLang((k) => localStorage.getItem(k));
 
 /**
  * `professionalId` = which professional this chat is (the server loads that professional's own
@@ -28,6 +42,8 @@ export function ProfessionalVoiceButton({ professionalId, getHistory, className,
   const [enabled, setEnabled] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [open, setOpen] = useState(false);
+  /** The consent card is shown BEFORE a call can start — see the button's onClick for why. */
+  const [asking, setAsking] = useState(false);
   const [history, setHistory] = useState<SonicTurn[]>([]);
 
   useEffect(() => {
@@ -42,16 +58,53 @@ export function ProfessionalVoiceButton({ professionalId, getHistory, className,
 
   if (!enabled || !signedIn) return null;
 
+  const consent = voiceConsent(voiceLang());
+
   return (
     <>
       <button
-        onClick={() => { setHistory(getHistory ? getHistory() : []); setOpen(true); }}
+        // THE PRICE IS ASKED BEFORE THE CALL, NOT AFTER (admin 2026-08-10: "user ko dikhega voice chat
+        // icon par click karne se — user ki language me ek popup aaye"). Tapping the mic no longer
+        // opens a call; it opens the consent card. A per-second charge that starts without the user
+        // agreeing to it would be money taken silently — the same defect we just fixed on the ₹1
+        // build-file download.
+        onClick={() => setAsking(true)}
         aria-label={title || 'Talk with voice'}
         title={title || 'Talk with voice'}
         className={className || 'w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-300 hover:text-indigo-200 flex items-center justify-center shrink-0'}
       >
         {icon || <Mic className="w-4 h-4" />}
       </button>
+
+      {asking && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-5"
+          onClick={() => setAsking(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-[#161b22] border border-white/10 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
+              <Mic className="w-6 h-6" />
+            </div>
+            <h3 className="font-bold text-white text-center mb-2">{consent.title}</h3>
+            <p className="text-sm text-[#8b949e] leading-relaxed mb-5">{consent.body}</p>
+            <button
+              onClick={() => { setAsking(false); setHistory(getHistory ? getHistory() : []); setOpen(true); }}
+              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+            >
+              {consent.confirm}
+            </button>
+            <button
+              onClick={() => setAsking(false)}
+              className="mt-2 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 text-[#8b949e] text-sm font-semibold"
+            >
+              {consent.cancel}
+            </button>
+          </div>
+        </div>
+      )}
+
       {open && <SonicChat onClose={() => setOpen(false)} professionalId={professionalId} history={history} />}
     </>
   );

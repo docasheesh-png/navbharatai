@@ -21,7 +21,7 @@ import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFil
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
-import { assembleMobileProject } from '../lib/mobileProjectAssembler';
+import { assembleMobileProject, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
 // One repository-write implementation, shared with the self-healing build loop so the two can never
 // drift apart on branch handling, blob encoding or ref updates (rule 4).
 import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
@@ -32,7 +32,7 @@ import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // receives an app already proven to compile, and every heal is written back into the user's v5
 // workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
 import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
-import { aiRepairEnabled, aiRepairModelChain } from '../lib/mobileBuildAiRepair';
+import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
@@ -72,7 +72,8 @@ export function registerMobileSetupRoutes(app: Express): void {
       });
     }
 
-    const { sessionId, appName, appId, repo, iconDataUrl, ios } = (req.body || {}) as Record<string, unknown>;
+    const { sessionId, appName, appId, repo, iconDataUrl, ios, powerLevel, backgroundColor } = (req.body || {}) as Record<string, unknown>;
+    const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
     const workspaceId = sessionWorkspaceId(uid, String(sessionId || ''));
     if (!workspaceId) return res.status(400).json({ error: 'Which app should be prepared?' });
 
@@ -111,11 +112,11 @@ export function registerMobileSetupRoutes(app: Express): void {
     //
     // A compile error found on the runner costs five minutes, an unreadable remote log, and a repair
     // that can only edit files by committing them. Found HERE it costs seconds, and the fix lands in
-    // the user's own v5 workspace. The AI chain is the same weak-tier-safe one the GitHub loop uses.
+    // the user's own v5 workspace. The AI chain follows the user's selected tier (same as the build).
     const preflight = await preflightAndHeal(
       appFiles,
       callRepairModel,
-      aiRepairEnabled() ? aiRepairModelChain() : [],
+      aiRepairEnabled() ? aiRepairModelChain(process.env, repairTier) : [],
     );
     if (!preflight.ok) {
       return res.status(422).json({
@@ -131,11 +132,15 @@ export function registerMobileSetupRoutes(app: Express): void {
     appFiles = preflight.files;
 
     const includeIos = ios !== false;
-    const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos });
+    // Pin the Android JDK to what THIS app's Capacitor major needs (read from its package.json), so the
+    // workflow's Java and the app's Capacitor can never disagree (G2). Null → the governed default.
+    const capacitorMajor = capacitorMajorFromFiles(appFiles) ?? undefined;
+    const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos, capacitorMajor });
     const project = assembleMobileProject(appFiles, kit.files, {
       appName: name,
       appId: typeof appId === 'string' ? appId : kit.appId,
       iconDataUrl: typeof iconDataUrl === 'string' ? iconDataUrl : undefined,
+      backgroundColor: typeof backgroundColor === 'string' ? backgroundColor : undefined,
       ios: includeIos,
     });
 

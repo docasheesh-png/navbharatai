@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateAddressesIntegration, ADDRESS_SERVICE_SOURCE } from './AddressesGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateAddressesIntegration, ADDRESS_SERVICE_SOURCE } from './AddressesGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateAddressesIntegration (wiring)', () => {
   it('emits the address book, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateAddressesIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the at-most-one-default invariant is a real business rule,
 // verified against the actual emitted code.
 describe('emitted AddressBook — at-most-one-default invariant (real logic)', () => {
-  const artifact = join(here, `._address_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, ADDRESS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('address', ADDRESS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Address { id: string; user: string; isDefault: boolean; name: string; city: string }
   interface Service {
@@ -39,7 +33,7 @@ describe('emitted AddressBook — at-most-one-default invariant (real logic)', (
   }
   interface Emitted { AddressBook: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const A = (over: Partial<{ name: string; line1: string; city: string; postalCode: string; country: string }> = {}) => ({

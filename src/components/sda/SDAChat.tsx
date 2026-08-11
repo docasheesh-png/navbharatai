@@ -18,6 +18,10 @@ import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { MessageEditActions } from '../chat/MessageEditActions';
+import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
+import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -250,6 +254,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // Shared composer toolbar state (admin 2026-08-10). The Enter preference is read from the ONE key
+  // every AI uses, so changing it on any screen changes it here too — that is the point of unifying.
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   const [teachingMode, setTeachingMode] = useState(false);
   const [showPatientPanel, setShowPatientPanel] = useState(true);
   // Quick Tools: the doctor's hide/show choice is REMEMBERED (it used to reset open on every mount,
@@ -513,11 +522,65 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     e.target.value = '';
   };
 
+  /**
+   * Adapter to the shared delete/edit rules. Doctor AI's own senders are 'doctor' (the user) and
+   * 'sda' (the assistant); the shared module speaks 'user'/'ai'. Ids already exist here, so unlike
+   * the professionals this one is a straight rename.
+   */
+  const withIds = (list: readonly SDAMessage[]) => list.map((m) => ({
+    id: m.id,
+    sender: (m.sender === 'doctor' ? 'user' : 'ai') as 'user' | 'ai',
+    text: m.text,
+  }));
+
+  /**
+   * Apply a rewind (a delete or an edit) to the case — and make it TRUE on the server, not just on
+   * screen.
+   *
+   * THIS IS THE WHOLE REASON DOCTOR AI NEEDED SPECIAL CARE. `/api/sda-chat` keeps a per-case clinical
+   * store: `patientData` and `redFlags` are ACCUMULATED from each reply and merged into one blob —
+   * they are never re-derived from the transcript. So removing a bubble on the client would leave the
+   * finding it produced still live in the AI's reasoning. The doctor would believe they had retracted
+   * something, and the assistant would carry on treating it as fact. That is a clinical-safety bug,
+   * not a UI one, and shipping the button without this would have been exactly the kind of
+   * "looks done, does nothing" feature the rules forbid.
+   *
+   * Rotating the case id abandons that accumulation: the next turn finds no entry for the new id, so
+   * the server starts a fresh clinical store and re-seeds its memory from the history the client
+   * sends — which is now the SURVIVING transcript. The accumulated state is rebuilt from what is left
+   * rather than inherited from what was removed.
+   *
+   * It errs toward FORGETTING (the rebuilt state may lag by a turn or two) and that is the safe
+   * direction on purpose: the doctor is present and can restate anything that matters, whereas a
+   * silently-retained retracted finding is the failure nobody can see.
+   */
+  const rewindCase = (surviving: ReadonlyArray<{ id: string }>) => {
+    const keep = new Set(surviving.map((m) => m.id));
+    const next = messages.filter((m) => keep.has(m.id));
+    setMessages(next);
+    setActiveRedFlags([]); // derived from turns that may no longer exist — never carry them over
+    const freshId = newSdaCaseId();
+    caseIdRef.current = freshId;
+    try {
+      localStorage.setItem('sda_case_id', freshId);
+      localStorage.setItem('sda_messages', JSON.stringify(next));
+    } catch { /* private mode — the screen is still correct for this session */ }
+    return next;
+  };
+
   // ── Send ─────────────────────────────────────────────────────────────────
 
-  const handleSend = async (overrideText?: string) => {
+  /**
+   * `baseTranscript` is the transcript an EDIT/DELETE rewind just produced. It has to be passed in
+   * rather than read from state: `setMessages` does not update the `messages` this closure captured,
+   * so a re-ask fired straight after a rewind would send the server the turns the doctor had just
+   * taken back — the exact opposite of what they asked for, and on a clinical surface that is not a
+   * cosmetic bug. It replaces BOTH the list appended to and the history sent upstream.
+   */
+  const handleSend = async (overrideText?: string, baseTranscript?: SDAMessage[]) => {
     const text = (overrideText ?? input).trim();
     if ((!text && !attachedFile) || loading) return;
+    const base = baseTranscript ?? messages;
 
     setInput('');
     if (inputRef.current) inputRef.current.style.height = `${BASE_HEIGHT}px`;
@@ -539,11 +602,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         dataUrl: fileForMsg.preview || (fileForMsg.base64 ? `data:${fileForMsg.type};base64,${fileForMsg.base64}` : undefined),
       } : undefined,
     };
-    setMessages(prev => [...prev, userMsg]);
+    // A rewind hands us the exact surviving transcript, so append to THAT; a normal send still uses
+    // the functional form so it cannot clobber a message that arrived while this one was being typed.
+    if (baseTranscript) setMessages([...base, userMsg]);
+    else setMessages(prev => [...prev, userMsg]);
     setLoading(true);
 
     try {
-      const history = messages.map(m => ({
+      const history = base.map(m => ({
         role: m.sender === 'doctor' ? 'user' : 'assistant',
         content: m.text,
       }));
@@ -574,7 +640,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         const errData = await res.json().catch(() => ({} as { error?: string; code?: string }));
         const honest = errData?.error
           || (res.status === 401 ? 'Please sign in to use Doctor AI — new users get free messages every day.'
-            : res.status === 402 ? 'You have used your free messages for today. Get the Professional Pass for unlimited access.'
+            // This is only the FALLBACK wording — the server almost always sends its own `error`, and
+            // that one now names the real cause (an empty balance vs a used-up daily allowance). It no
+            // longer offers the Professional Pass, which was removed on 2026-08-10 and could never be
+            // bought in the first place.
+            : res.status === 402 ? 'You have used your free messages for today, or your balance is empty. Add credit to carry on.'
             : res.status === 429 ? 'Doctor AI is busy right now — please try again in a few seconds.'
             : 'Doctor AI could not respond right now. Please try again in a moment.');
         setMessages(prev => [...prev, {
@@ -809,7 +879,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             const lastUser = [...messages].reverse().find(m => m.sender === 'doctor');
             return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
           })()}
-          {messages.map(msg => (
+          {filterMessages(messages as any, chatSearchQuery).map((msg: any) => (
             <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
               {msg.sender === 'sda' && (
                 <div className="w-7 h-7 rounded-full bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
@@ -863,8 +933,28 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 </p>
               </div>
               {msg.sender === 'doctor' && (
-                <div className="w-7 h-7 rounded-full bg-indigo-900/40 border border-indigo-700/40 flex items-center justify-center shrink-0 ml-2.5 mt-0.5">
-                  <User className="w-3.5 h-3.5 text-indigo-400" />
+                <div className="flex flex-col items-center shrink-0 ml-2.5 mt-0.5 group/msg">
+                  <div className="w-7 h-7 rounded-full bg-indigo-900/40 border border-indigo-700/40 flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-indigo-400" />
+                  </div>
+                  {/* DELETE + EDIT on something the doctor already said (admin 2026-08-10). See
+                      rewindCase() for why this is safe here and not merely cosmetic. */}
+                  {!searchActive(chatSearchQuery) && (
+                    <MessageEditActions
+                      className="mt-0.5 opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
+                      text={String(msg.text ?? '')}
+                      disabled={loading}
+                      onDelete={() => { rewindCase(deleteMessage(withIds(messages), msg.id)); }}
+                      onEdit={(next) => {
+                        const r = editMessage(withIds(messages), msg.id, next);
+                        // The edited message is dropped from the surviving list and re-sent, so the
+                        // server sees it as a fresh question against the rewound case rather than an
+                        // answer to text it has already been told.
+                        const rewound = rewindCase(r.messages.filter((m) => m.id !== msg.id));
+                        if (r.resend) void handleSend(r.resend, rewound);
+                      }}
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -958,6 +1048,26 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         {/* Input Area */}
         <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/30 px-4 pb-3 pt-2">
 
+          {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). Doctor AI had
+              none of this — no Enter-to-send preference, no way to find something said earlier in a long
+              consult. Clear routes to startNewCase() rather than emptying the array, because a Doctor AI
+              conversation carries a per-case id and a server-side clinical store: blanking the screen
+              while the previous patient's demographics and red flags stayed live on the server would be
+              a clinical-safety bug, not a UI one. */}
+          <ChatToolbar
+            className="mb-2"
+            messageCount={messages.length}
+            sendOnEnter={sendOnEnter}
+            onSendOnEnterChange={setSendOnEnter}
+            searchQuery={chatSearchQuery}
+            onSearchQueryChange={setChatSearchQuery}
+            searchOpen={showChatSearch}
+            onSearchOpenChange={setShowChatSearch}
+            searchMatches={filterMessages(messages as any, chatSearchQuery).length}
+            onClear={startNewCase}
+            charCount={input.length}
+          />
+
           {/* Attached file preview */}
           {attachedFile && (
             <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-[#111827] border border-emerald-900/40 rounded-xl">
@@ -1016,6 +1126,22 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   ref={inputRef}
                   value={input}
                   onChange={e => { setInput(e.target.value); autoResize(e.target); }}
+                  onKeyDown={(e) => {
+                    // Doctor AI previously had NO keyboard send at all — every message needed a tap on
+                    // the button, which on a desktop consult is the slowest possible way to work. Same
+                    // shared rule as every other AI now, IME-safe and honouring the toggle.
+                    if (enterShouldSend({
+                      key: e.key,
+                      shiftKey: e.shiftKey,
+                      sendOnEnter,
+                      hasContent: !!input.trim() || !!attachedFile,
+                      isBusy: loading,
+                      isComposing: (e.nativeEvent as any)?.isComposing,
+                    })) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
                   placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
                   rows={1}
                   className="flex-1 bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed overflow-y-auto custom-scrollbar"

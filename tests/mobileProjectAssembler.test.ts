@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   assembleMobileProject, detectProjectKind, detectWebDir, normaliseAppId,
-  buildPackageJson, buildCapacitorConfig, parseImageDataUrl,
+  buildPackageJson, buildCapacitorConfig, parseImageDataUrl, capacitorMajorFromFiles,
 } from '../src/server/lib/mobileProjectAssembler';
 
 // This is what stands between "we pushed some files to GitHub" and "GitHub produced a real signed
@@ -101,6 +101,19 @@ describe('buildPackageJson', () => {
     expect(pkg.dependencies['@capacitor/core']).toBe('^8.4.1');
   });
 
+  it('reads the Capacitor major an app is built around, from its package.json (G2)', () => {
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ dependencies: { '@capacitor/core': '^7.1.0' } }) })).toBe(7);
+    // devDependencies count too, and core wins over a lagging plugin
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ devDependencies: { '@capacitor/cli': '^6.2.0' } }) })).toBe(6);
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ dependencies: { '@capacitor/core': '^8.0.0', '@capacitor/haptics': '^7.0.0' } }) })).toBe(8);
+  });
+
+  it('expresses NO preference (null) when the app declares no Capacitor or the file is missing/corrupt', () => {
+    expect(capacitorMajorFromFiles({ 'package.json': JSON.stringify({ dependencies: { react: '^19' } }) })).toBeNull();
+    expect(capacitorMajorFromFiles({})).toBeNull();
+    expect(capacitorMajorFromFiles({ 'package.json': '{ not json' })).toBeNull();
+  });
+
   it('survives a corrupt package.json rather than throwing', () => {
     expect(() => buildPackageJson('{ broken', 'X', 'static')).not.toThrow();
   });
@@ -193,5 +206,31 @@ describe('buildCapacitorConfig', () => {
     const cfg = buildCapacitorConfig('com.a.b', "Ravi's Shop", 'www');
     expect(cfg).toContain('"Ravi\'s Shop"');
     expect(cfg).toContain("appId: 'com.a.b'");
+  });
+
+  it('injects a validated background colour into the android + splash config', () => {
+    const cfg = buildCapacitorConfig('com.a.b', 'Shop', 'dist', '#6366F1');
+    expect(cfg).toContain("android: { backgroundColor: '#6366f1' }"); // canonical lowercase
+    expect(cfg).toContain("SplashScreen: { backgroundColor: '#6366f1' }");
+  });
+
+  it('expands a 3-digit hex and accepts a hash-less colour', () => {
+    expect(buildCapacitorConfig('com.a.b', 'Shop', 'dist', 'f0a')).toContain("backgroundColor: '#ff00aa'");
+    expect(buildCapacitorConfig('com.a.b', 'Shop', 'dist', '00ff88')).toContain("backgroundColor: '#00ff88'");
+  });
+
+  it('DROPS anything that is not a hex colour — never interpolates raw input (injection guard)', () => {
+    for (const bad of ['red', "'; process.exit(1); //", 'rgb(1,2,3)', '#12', '#zzzzzz', '']) {
+      const cfg = buildCapacitorConfig('com.a.b', 'Shop', 'dist', bad);
+      expect(cfg).not.toContain('backgroundColor');
+      // byte-identical to the no-colour config
+      expect(cfg).toBe(buildCapacitorConfig('com.a.b', 'Shop', 'dist'));
+    }
+  });
+
+  it('is byte-identical to before when no colour is supplied', () => {
+    const cfg = buildCapacitorConfig('com.a.b', 'Shop', 'dist');
+    expect(cfg).not.toContain('android:');
+    expect(cfg).toContain("webDir: 'dist'");
   });
 });

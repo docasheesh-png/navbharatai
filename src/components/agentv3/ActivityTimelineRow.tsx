@@ -12,7 +12,8 @@ import { ChevronRight, Loader2, X, Check, FileCode, Terminal as TerminalIcon, Se
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ActivityEntry } from './agentV3Types';
 import type { ChatBlock, TimelineMsgLike } from './activityTimeline';
-import { detailEntries, actionGroupOpen } from './activityTimeline';
+import { detailEntries, actionGroupOpen, entryFilePath } from './activityTimeline';
+import { describeFile } from '../../lib/fileRole';
 
 /** Max lines of a single file's diff rendered inline (the rest → the Diff tab), keeps the chat light. */
 const MAX_DIFF_LINES = 200;
@@ -124,6 +125,15 @@ export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Ex
                 <span className={`truncate ${/^running: /.test(e.text || '') ? 'font-mono' : ''}`}>
                   {(e.text || '').replace(/^running: /, '$ ')}
                 </span>
+                {/* WHAT IS THIS FILE (admin 2026-08-10): the row already shows the NAME; this adds the
+                    one thing the name does not carry. Derived from the path — never generated — so it
+                    costs nothing, cannot be wrong about behaviour it did not read, and works the same
+                    when this feed is replayed from history. Absent when the path does not confidently
+                    say what it is: a missing label is honest, a guessed one is not. */}
+                {(() => {
+                  const label = describeFile(entryFilePath(e));
+                  return label ? <span className="shrink-0 text-zinc-600 hidden sm:inline">· {label}</span> : null;
+                })()}
                 {e.active
                   ? <TirangaLoader className="w-3 h-3 text-indigo-400 shrink-0" />
                   : e.ok === false

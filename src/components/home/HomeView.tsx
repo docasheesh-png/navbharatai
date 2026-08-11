@@ -110,7 +110,7 @@ const PRODUCT_CARDS = [
     iconBg: 'bg-fuchsia-500/15',
     iconColor: 'text-fuchsia-400',
     Icon: LayoutGrid,
-    title: 'Other AI',
+    title: 'Other',
     subtitle: 'Builder Tools & Utilities',
     description: 'Every extra AI utility to design, develop, ship and monetize your app — bot builder, image gen, debugger, deploy, SEO, monetization and more.',
     features: ['Design, develop, test & minify', 'Publish, deploy & custom domain', 'Monetize, analytics & team'],

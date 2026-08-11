@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateRecruitmentIntegration, RECRUITMENT_SERVICE_SOURCE } from './RecruitmentGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateRecruitmentIntegration, RECRUITMENT_SERVICE_SOURCE } from './RecruitmentGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateRecruitmentIntegration (wiring)', () => {
   it('emits the service, routes and README + express dep', () => {
@@ -20,9 +17,8 @@ describe('generateRecruitmentIntegration (wiring)', () => {
 });
 
 describe('emitted RecruitmentService — hiring pipeline invariants', () => {
-  const artifact = join(here, `._recruitment_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, RECRUITMENT_SERVICE_SOURCE);
-  afterAll(() => { try { unlinkSync(artifact); } catch { /* gone */ } });
+  const emitted = emitModule('recruitment', RECRUITMENT_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Stage = 'applied' | 'screening' | 'interview' | 'offer' | 'hired' | 'rejected' | 'withdrawn';
   interface Job { id: string; status: string }
@@ -39,7 +35,7 @@ describe('emitted RecruitmentService — hiring pipeline invariants', () => {
   }
   interface Emitted { RecruitmentService: new () => Service; canTransition(a: Stage, b: Stage): boolean }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   async function seed() {
     const { RecruitmentService } = await load();

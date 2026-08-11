@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateWishlistIntegration, WISHLIST_SERVICE_SOURCE } from './WishlistGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateWishlistIntegration, WISHLIST_SERVICE_SOURCE } from './WishlistGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateWishlistIntegration (wiring)', () => {
   it('emits the favorites service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateWishlistIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the idempotency + exact-count rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted FavoritesService — idempotent membership + exact count (real logic)', () => {
-  const artifact = join(here, `._favorites_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, WISHLIST_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('favorites', WISHLIST_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Favorite { user: string; item: string; collection: string }
   interface Service {
@@ -39,7 +33,7 @@ describe('emitted FavoritesService — idempotent membership + exact count (real
   }
   interface Emitted { FavoritesService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('add is IDEMPOTENT — favoriting twice does not create a second entry', async () => {

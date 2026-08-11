@@ -1,7 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
-import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
@@ -181,6 +180,7 @@ import { generateFitnessIntegration } from '../lib/FitnessGenerator';
 import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
+import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -236,6 +236,7 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -466,17 +467,6 @@ export class ToolDispatcher {
     this.signatureEnabled = enabled !== false;
   }
 
-  /**
-   * The language THIS BUILD's platform narration speaks (ROADMAP item 6). Defaults to English, and
-   * the composition root sets it from the user's own prompt exactly as `LANGUAGE_RULE` tells the
-   * model to — so the AI and the platform can never disagree inside one feed.
-   */
-  private narrationLang: NarrationLanguage = 'en';
-
-  /** Set by the composition root from `resolveNarrationLanguage(userPrompt)` before the build runs. */
-  setNarrationLanguage(lang: NarrationLanguage): void {
-    this.narrationLang = lang;
-  }
 
   /**
    * Emit one platform narration line. THE choke point: call sites name a message id, never a
@@ -484,7 +474,7 @@ export class ToolDispatcher {
    * language. Best-effort like every other narration — it must never be able to break a build.
    */
   private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
-    this.events?.emit({ type: 'narration', agent, text: narrationText(this.narrationLang, id, params), ts: Date.now() });
+    this.events?.emit({ type: 'narration', agent, text: narrationText(id, params), ts: Date.now() });
   }
 
   /**
@@ -4206,6 +4196,25 @@ export class ToolDispatcher {
         return `Wired an Invoicing / billing backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
       }
 
+      case 'generate_helpdesk': {
+        // Breadth recipe (domain vertical) — Helpdesk / ticketing (server/helpdesk/): a real HelpdeskService
+        // with a ticket STATE-MACHINE (invalid jumps → 409), priority-driven SLA breach detection, and an
+        // append-only thread, plus an Express router. Pure gen in HelpdeskGenerator.ts.
+        const hdcfg = generateHelpdeskIntegration();
+        const hdWritten: string[] = [];
+        for (const [path, content] of Object.entries(hdcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          hdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('helpdesk starter');
+        const hdDeps = hdcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
+      }
+
       case 'generate_events': {
         // Breadth recipe (domain vertical) — events/RSVP (server/events/): a real EventService with CAPACITY
         // enforcement + a waitlist (auto-promote on cancel) + an Express router. Pure gen in EventsGenerator.ts.
@@ -5235,6 +5244,28 @@ export class ToolDispatcher {
         const okLine = secretRequestResult('saved', savedNames);
         this.events?.emit({ type: 'narration', agent: 'architect', text: okLine, ts: Date.now() });
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
+      }
+
+      case 'generate_game_systems': {
+        // PHASE 6. Combat, AI, projectiles and waves — written as PURE arithmetic so the rules that a
+        // hand-written version gets wrong (i-frames, segment collision, separation, de-aggro
+        // hysteresis, single death) are provable rather than approximated.
+        const gsyRec = (input as Record<string, unknown>) || {};
+        const gsyInclude = Array.isArray(gsyRec.include)
+          ? gsyRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gsy = generateGameSystems(gsyInclude);
+        const gsyWritten: string[] = [];
+        for (const [path, content] of Object.entries(gsy.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('gameplay systems');
+        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}`;
       }
 
       case 'generate_game_shell': {

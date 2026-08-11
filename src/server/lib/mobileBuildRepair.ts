@@ -18,6 +18,9 @@
 // PURE: no network, no I/O. The route supplies the log and the current file contents and writes back
 // whatever comes out, which is what makes every branch below unit-testable.
 
+import { toolchainForMajor } from './capacitorToolchain';
+import { capacitorMajorFromFiles } from './mobileProjectAssembler';
+
 /** Every failure class NavBharatAI can name from a build log. */
 export type RepairCode =
   | 'NPM_LOCK_CACHE'
@@ -31,6 +34,7 @@ export type RepairCode =
   | 'GRADLEW_NOT_EXECUTABLE'
   | 'SDK_LICENSE_NOT_ACCEPTED'
   | 'JAVA_VERSION_TOO_OLD'
+  | 'ANDROID_RESOURCE_LINKING'
   | 'NODE_OUT_OF_MEMORY'
   | 'MISSING_SIGNING_SECRET'
   | 'APP_CODE_BUILD_FAILED'
@@ -224,6 +228,22 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
     return {
       code: 'JAVA_VERSION_TOO_OLD',
       summary: 'The build machine was set up with an older Java than this Android build needs.',
+      autoFixable: true,
+      needs: [workflowPath],
+    };
+  }
+
+  // ── Android resource linking failed (aapt2). Capacitor's launch theme references a drawable/resource
+  // that a fresh `cap add android` did not ship (the reported real case: @drawable/splash not found). This
+  // lives in the GENERATED android/ project — created on CI, gitignored, absent from the user's repo — so
+  // no edit to a repo file the AI can see would fix it. The current workflow now self-heals the missing
+  // splash drawable deterministically, so refreshing our own workflow IS the repair. Named explicitly
+  // (rather than swept into the generic android-stage fallback) so the diagnosis is honest and telemetry
+  // can see the class. Checked BEFORE the app-code error extractor, which does not recognise an aapt error. ──
+  if (/Android resource linking failed|failed linking references|aapt2?(?:\.exe)?\b.*error|error:\s*resource\s+[\w./]+\s+not found/i.test(log)) {
+    return {
+      code: 'ANDROID_RESOURCE_LINKING',
+      summary: 'The build stopped while packaging the app’s images and screens.',
       autoFixable: true,
       needs: [workflowPath],
     };
@@ -579,8 +599,16 @@ export function repairFiles(
       return one(workflowPath, repairGradlewPermission(wf), 'NavBharatAI: allow the Android build tool to run') ?? refresh();
     case 'SDK_LICENSE_NOT_ACCEPTED':
       return one(workflowPath, repairSdkLicenses(wf), 'NavBharatAI: accept the Android build tool terms on the build machine');
-    case 'JAVA_VERSION_TOO_OLD':
-      return one(workflowPath, repairJavaVersion(wf), 'NavBharatAI: use the Java version this Android build needs');
+    case 'JAVA_VERSION_TOO_OLD': {
+      // Target the JDK THIS app's Capacitor major actually needs (governed toolchain), not a blind 21 —
+      // a Capacitor 6 app wants Java 17, a 7/8 app wants 21 (G2). repairJavaVersion only ever raises.
+      const targetJava = toolchainForMajor(capacitorMajorFromFiles(current)).java;
+      return one(workflowPath, repairJavaVersion(wf, targetJava), 'NavBharatAI: use the Java version this Android build needs');
+    }
+    // The current workflow deterministically writes a placeholder @drawable/splash before compiling, so
+    // refreshing our own workflow onto a repo that predates that fix IS the repair.
+    case 'ANDROID_RESOURCE_LINKING':
+      return refresh();
     case 'NODE_OUT_OF_MEMORY':
       return one(workflowPath, repairOutOfMemory(wf), 'NavBharatAI: give the build enough memory for this app');
     case 'WEB_DIR_MISSING': {

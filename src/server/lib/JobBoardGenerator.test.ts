@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateJobBoardIntegration, JOBBOARD_SERVICE_SOURCE } from './JobBoardGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateJobBoardIntegration, JOBBOARD_SERVICE_SOURCE } from './JobBoardGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateJobBoardIntegration (wiring)', () => {
   it('emits the job-board service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateJobBoardIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the apply-once + hiring state-machine rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted JobBoardService — apply-once + hiring state-machine (real logic)', () => {
-  const artifact = join(here, `._jobboard_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, JOBBOARD_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('jobboard', JOBBOARD_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type JobStatus = 'open' | 'closed';
   type AppStatus = 'applied' | 'screening' | 'interview' | 'offer' | 'hired' | 'rejected';
@@ -44,7 +38,7 @@ describe('emitted JobBoardService — apply-once + hiring state-machine (real lo
   }
   interface Emitted { JobBoardService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('posts an open job; the public board shows open jobs only', async () => {

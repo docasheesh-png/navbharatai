@@ -1168,6 +1168,40 @@ export function isRecoverableOnSuccess(code: string): boolean {
 }
 
 /**
+ * ADVISORY findings that must NEVER be named as a build's root cause — on any outcome.
+ *
+ * ROOT CAUSE (Shiv Medical Store report, 2026-08-10): an `ok: true` build whose app was verified
+ * rendering reported its rootCause as
+ *   "@capacitor/android is declared in package.json dependencies but no project file imports it."
+ * That is a tidiness hint, and in this case a FALSE one — Capacitor's packages are consumed by its CLI
+ * and native config, exactly the caveat the message itself spells out. It was the loudest thing in a
+ * clean build, so it won.
+ *
+ * The class was already known: `importTurnObservation` was written for precisely this
+ * ("…named `@hookform/resolvers is declared … but no project file imports it` as the build's
+ * rootCause"), but that fix only covered IMPORT turns, so the sibling survived on every normal build.
+ * Fixing it by code is what closes it for good: an advisory can be reported, counted and read, but it
+ * can never be promoted to the explanation of a build.
+ *
+ * These are findings ABOUT the project that no build outcome depends on. A genuine failure always has
+ * a louder, non-advisory record — and when nothing else exists, "completed successfully with no
+ * problems recorded" is the honest answer, not a dependency hint.
+ */
+const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
+  'INTEGRITY_UNUSED_DEP',        // dependency hygiene; false-positives on CLI/config-only packages
+  'DEPHEALTH_ADVISORY',          // CVE/licence advisory appended to an already-successful build
+  'DESIGN_PAGE_INCONSISTENT',    // per-page design coverage — a quality note, never a cause
+  'TEST_SUITE_UNVERIFIED',       // our sandbox could not run the suite; not the app's defect
+  'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
+  'POST_ANSWER_TIMING',          // pure measurement
+]);
+
+/** True when a finding is advisory-only and must never become the build's rootCause. Pure. */
+export function isNeverRootCause(code: string): boolean {
+  return NEVER_ROOT_CAUSE.has(code);
+}
+
+/**
  * The identity of a command for "did this same thing later succeed?" — the first line, trimmed and
  * capped exactly as the SANDBOX_CMD_FAILED message renders it, so an issue message and a recorded
  * command compare equal without re-parsing either. PURE.
@@ -1310,6 +1344,9 @@ export function deriveRootCause(input: {
     || recovered.has(commandKey(i.message))
     || !failureHasSurvivingConsequence(i.message, issues);
   const excluded = (i: BuildIssue): boolean => isInfra(i)
+    // Advisory findings are excluded on EVERY outcome — a tidiness hint explains nothing, and on this
+    // build it was both the rootCause and factually wrong.
+    || isNeverRootCause(i.code)
     || (ok === true && isRecoverableOnSuccess(i.code) && forgiven(i));
   // Pick the TERMINAL cause, not merely the FIRST noisy one. An unresolved ERROR outranks an unresolved
   // WARNING even when the warning appears earlier in the timeline (EstateNest autopsy 2026-07-20: two

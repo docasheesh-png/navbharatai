@@ -33,12 +33,21 @@ const src = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'ut
  * The ONE documented exemption. makeFastTextRunner deliberately omits onTurnComplete because the fast
  * lane accounts for its own usage through buildUsage; the comment above it says so.
  *
- * ⚠️ OPEN QUESTION, recorded honestly rather than guessed at: the remainder is computed as
- * (build total − attributed), so fast-lane turns may ALSO be landing in the Sonnet-priced remainder —
- * the same defect by a different route. captureTurnUsage only feeds the provider ledger (it never adds
- * to buildUsage), which suggests attributing them would NOT double-count. That needs verifying against
- * the fast lane's own sink before changing, because getting it wrong would double-count and OVERCHARGE
- * — worse than the bug. Until then it stays exempt and documented.
+ * ⚠️ OPEN ITEM — now MEASURED, and messier than it first looked (2026-08-11). The remainder is
+ * max(0, buildTotal − attributed), and captureTurnUsage feeds only the ledger, never buildUsage — so
+ * attributing a turn cannot double-count the TOTAL. But the fast-lane call sites are not uniform:
+ *
+ *   • three of them (blueprint / plan / one-shot) call `buildUsage.add(...)` right after the turn, so
+ *     their tokens ARE in the total and are NOT in the ledger — they sit in the Sonnet-priced
+ *     remainder, exactly the defect this file fixes for heal runners. Those are OVER-charged.
+ *   • three of them add nothing at all, so their tokens reach neither accumulator. Those turns are
+ *     currently billed to nobody — our own margin leak, never a user overcharge.
+ *
+ * So simply adding onTurnComplete to makeFastTextRunner would fix the first three AND start charging
+ * users for the second three, which is a bill INCREASE, not a correction. The right shape is for the
+ * runner to own both halves of the accounting (ledger + total) and for the three manual
+ * `buildUsage.add` calls to be removed with it — a change that moves real money in two directions and
+ * must not be made blind. Raised with the admin; not shipped on a guess.
  */
 const EXEMPT = ['makeFastTextRunner'];
 

@@ -1253,10 +1253,29 @@ describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
     expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
   });
 
-  it('the SAME finding on a real build turn still surfaces as the rootCause (no regression)', () => {
+  /**
+   * SUPERSEDED BY EVIDENCE (Shiv Medical Store report, 2026-08-10). This case previously asserted the
+   * opposite — that on a REAL build turn the same finding SHOULD become the rootCause — on the
+   * reasoning that the file map is the app we just wrote, so "no project file imports it" is provable
+   * there even though it is not on a partial import map.
+   *
+   * A real build disproved it. That turn WAS a normal build turn with a complete map, it succeeded, its
+   * app was verified rendering, and its reported rootCause was
+   * `"@capacitor/android" is declared … but no project file imports it` — which is also FALSE:
+   * Capacitor's packages are consumed by its CLI and native config, exactly the caveat the message
+   * itself spells out.
+   *
+   * The deeper error was never provability, it was relevance: a dependency-hygiene hint explains
+   * nothing about why a build did or did not work. It is still recorded and still visible — it simply
+   * cannot be promoted to the explanation of a build. See NEVER_ROOT_CAUSE.
+   */
+  it('an unused-dep hint is not the rootCause on a real build turn either', () => {
     const real = importTurnObservation(false, MSG);
     const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...real }];
-    expect(deriveRootCause({ issues, ok: true })).toBe(MSG);
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    // The finding itself is NOT suppressed — only its promotion to rootCause.
+    expect(real.message).toBe(MSG);
+    expect(real.autoResolved).toBe(false);
   });
 });
 

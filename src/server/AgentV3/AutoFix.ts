@@ -293,8 +293,34 @@ export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
   };
 }
 
-/** The browser console could not be captured, so runtime was NOT verified — never a clean guarantee. */
-export function runtimeUncheckedRecord(): RuntimeVerifyRecord {
+/**
+ * The browser console could not be captured, so runtime was NOT verified — never a clean guarantee.
+ *
+ * `previewRendered` exists because the flat version of this record CONTRADICTED the rest of the report
+ * (Shiv Medical Store, 2026-08-10). That build opened the app in a real browser, recorded
+ * GREEN_GUARD_SAVE ("opened in a real browser and rendered") and told the user "confirmed it loads
+ * successfully… with no console errors" — while this record simultaneously said the browser console
+ * "could not be captured (no live preview session)". Both cannot be true, and a report that argues with
+ * itself teaches the admin to trust none of it.
+ *
+ * The two questions are different and must be answered separately: DOES IT RUN was answered — the app
+ * was seen rendering — while WERE THERE CONSOLE ERRORS was not. Saying so is honest; collapsing them
+ * into "runtime NOT verified" is not, and neither is claiming clean.
+ */
+export function runtimeUncheckedRecord(opts?: { previewRendered?: boolean }): RuntimeVerifyRecord {
+  if (opts?.previewRendered) {
+    return {
+      phase: 'autofix',
+      severity: 'info',
+      code: 'RUNTIME_UNCHECKED',
+      message:
+        'The app WAS opened in a real browser and rendered, but its console could not be captured on this ' +
+        'run — so console errors specifically were not checked. Not a clean-console guarantee; the app is ' +
+        'confirmed to render.',
+      // The question this gate exists to answer — does the built app actually run — WAS answered.
+      autoResolved: true,
+    };
+  }
   return {
     phase: 'autofix',
     severity: 'warning',

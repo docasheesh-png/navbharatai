@@ -40,6 +40,15 @@ export interface TestOutcome {
   failingTests: string[];
   /** The honest verdict: the process succeeded AND no test is known to have failed. */
   ok: boolean;
+  /**
+   * Did the suite actually EXECUTE? False when it could not run at all (its runner is missing, a
+   * browser binary was never installed, the script does not exist) — which is OUR infrastructure
+   * failing, not a defect in the user's app. Same distinction the tsc gate already draws with
+   * `ran:false`: a suite that could not run must be reported as UNVERIFIED, never as FAILED.
+   */
+  ran: boolean;
+  /** When `ran` is false, the reason in one line — for an honest report instead of a fake failure. */
+  couldNotRunReason?: string;
   /** One-line human summary. */
   summary: string;
 }
@@ -184,6 +193,37 @@ function toInt(v: string | undefined): number | null {
  * Interpret a test command's raw output into an honest outcome. Pure. Never invents a pass:
  * when counts can't be parsed, `passed/failed/total` stay null and `ok` falls back to the exit code.
  */
+
+/**
+ * Could this suite not RUN at all?
+ *
+ * ROOT CAUSE (Shiv Medical Store report, 2026-08-10): the readiness gate recorded
+ * `playwright: FAIL (exit=1)` and counted it as an unresolved defect of the user's app. The real cause
+ * was in OUR sandbox — "Executable doesn't exist at /home/user/.cache/ms-playwright/chromium…": the
+ * browser binaries were never installed. Reporting that as the app's failing test suite is the same
+ * dishonesty the tsc gate already fixed by reporting `ran:false` instead of a compile failure.
+ *
+ * DELIBERATELY SIGNATURE-BASED, never inferred from "no counts parsed". Treating an unparseable run as
+ * "could not run" would hide REAL failing tests behind a reassuring "unverified", which is far worse
+ * than the bug being fixed. Only an explicit, unambiguous infrastructure signature counts.
+ */
+export function testSuiteCouldNotRun(exitCode: number, output: string): string | null {
+  const out = String(output || '');
+  const signatures: Array<{ re: RegExp; reason: string }> = [
+    { re: /Executable doesn't exist at|please run the following command to download new browsers|npx playwright install/i,
+      reason: 'the Playwright browser binaries are not installed in the sandbox' },
+    { re: /browserType\.launch: .*(ENOENT|not found)/i, reason: 'the test browser could not be launched in the sandbox' },
+    { re: /\bMissing script:\s*\S+/i, reason: 'the package.json has no such test script' },
+    { re: /Cannot find module ['"]?(?:@playwright|vitest|jest|mocha)/i, reason: 'the test runner itself is not installed' },
+    { re: /(?:command not found|is not recognized as an internal or external command)/i, reason: 'the test command does not exist in the sandbox' },
+    { re: /No tests found|no test files found/i, reason: 'the suite matched no test files' },
+  ];
+  for (const { re, reason } of signatures) if (re.test(out)) return reason;
+  // 127 is the shell's own "command not found" — unambiguous, and never produced by a failing test.
+  if (exitCode === 127) return 'the test command does not exist in the sandbox';
+  return null;
+}
+
 export function parseTestOutcome(
   plan: TestPlan,
   exitCode: number,
@@ -284,9 +324,18 @@ export function parseTestOutcome(
   }
 
   const ok = exitCode === 0 && (failed == null || failed === 0);
+  // A suite that never executed is UNVERIFIED, not failed. Only asked when the run did not pass —
+  // a green run obviously ran, and an infra string in passing output must not downgrade a real pass.
+  const couldNotRunReason = ok ? null : testSuiteCouldNotRun(exitCode, out);
+  const ran = couldNotRunReason == null;
   const countStr =
     total != null ? `${passed ?? 0}/${total} passed${failed ? `, ${failed} failed` : ''}` : `exit=${exitCode}`;
-  const summary = `${plan.framework}: ${ok ? 'PASS' : 'FAIL'} (${countStr})`;
+  const summary = ran
+    ? `${plan.framework}: ${ok ? 'PASS' : 'FAIL'} (${countStr})`
+    : `${plan.framework}: COULD NOT RUN — ${couldNotRunReason}. The app's tests were not verified (this is a sandbox limitation, not a defect in the app).`;
 
-  return { framework: plan.framework, command: plan.command, exitCode, passed, failed, total, failingTests, ok, summary };
+  return {
+    framework: plan.framework, command: plan.command, exitCode, passed, failed, total, failingTests, ok, summary,
+    ran, ...(couldNotRunReason ? { couldNotRunReason } : {}),
+  };
 }

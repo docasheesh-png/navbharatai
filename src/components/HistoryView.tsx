@@ -30,6 +30,7 @@ export const HistoryView = ({
   onRestoreSession,
   onDeleteSession,
   initialFilter,
+  lockFilter,
 }: {
   user: any;
   onRestoreSession?: (uci: string) => void;
@@ -37,6 +38,10 @@ export const HistoryView = ({
   /** Pre-select a filter when History is opened from a scoped entry point (e.g. the
    *  NavBharatAI Free footer opens it filtered to 'free'). The user can still switch. */
   initialFilter?: FilterMode;
+  /** When true, LOCK the view to `initialFilter` and hide the type/mode filter tabs entirely — so
+   *  "NavBharatAI Free → History" shows ONLY Free sessions and cannot be switched to the whole app
+   *  (admin 2026-08-11: "Free ki history sirf Free ki dikhaye, puri NavBharatAI ki nahi"). */
+  lockFilter?: boolean;
 }) => {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +51,9 @@ export const HistoryView = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   // Re-apply the scoped filter whenever the caller changes it (e.g. opened from the Free footer).
+  // When locked, the filter is fixed to the scoped value and the tabs are not rendered at all.
   useEffect(() => { if (initialFilter) setFilterMode(initialFilter); }, [initialFilter]);
+  const effectiveFilter: FilterMode = lockFilter && initialFilter ? initialFilter : filterMode;
 
   useEffect(() => {
     if (!user) return;
@@ -87,11 +94,11 @@ export const HistoryView = ({
   const filteredSessions = useMemo(() => {
     let result = sessions;
 
-    if (filterMode === 'apps') result = result.filter(isAppSession);
-    else if (filterMode === 'chat') result = result.filter(s => !isAppSession(s));
-    else if (filterMode === 'free') result = result.filter(isFreeSession);
-    else if (filterMode === 'pro')  result = result.filter(isProSession);
-    else if (filterMode === 'sda')  result = result.filter(isSdaSession);
+    if (effectiveFilter === 'apps') result = result.filter(isAppSession);
+    else if (effectiveFilter === 'chat') result = result.filter(s => !isAppSession(s));
+    else if (effectiveFilter === 'free') result = result.filter(isFreeSession);
+    else if (effectiveFilter === 'pro')  result = result.filter(isProSession);
+    else if (effectiveFilter === 'sda')  result = result.filter(isSdaSession);
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -124,9 +131,11 @@ export const HistoryView = ({
         Session History
       </h2>
 
-      {/* Filter + Search bar */}
+      {/* Filter + Search bar. When the view is LOCKED to a scope (e.g. Free → History), the filter tabs
+          are hidden entirely so the user only ever sees that scope's sessions — just the search remains. */}
       <div className="flex flex-col gap-2 mb-5">
-        {/* Row 1: type filters */}
+        {/* Row 1 + 2: type / AI-mode filters — hidden when the caller locked the scope. */}
+        {!lockFilter && (
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
             {([
@@ -167,6 +176,7 @@ export const HistoryView = ({
             ))}
           </div>
         </div>
+        )}
 
         {/* Search box */}
         <div className="flex-1 relative">

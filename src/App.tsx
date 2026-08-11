@@ -109,6 +109,7 @@ const SecretManager    = _lz(() => import('./components/SecretManager'),        
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
+const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
@@ -426,7 +427,7 @@ export default function App() {
   );
   // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
   // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.
-  const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free'>('all');
+  const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free' | 'professional'>('all');
   useEffect(() => { if (activeView !== 'history') setHistoryInitialFilter('all'); }, [activeView]);
   // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
@@ -3564,7 +3565,9 @@ export default function App() {
 
 
           {activeView === 'report' && <ReportsListView user={user} />}
-          {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} />}
+          {activeView === 'history' && (historyInitialFilter === 'professional'
+            ? <ProfessionalHistoryView onOpen={(id) => toggleTab(id as ViewType)} onBack={() => toggleTab('professionals')} />
+            : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'} />)}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel
@@ -3802,8 +3805,10 @@ export default function App() {
                   disabled={comingSoon}
                   onClick={() => {
                     if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; }
-                    // History from the NavBharatAI Free footer shows ONLY Free sessions (not the whole app).
-                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : 'all');
+                    // History is SCOPED to where it was opened from (admin 2026-08-11): NavBharatAI Free
+                    // shows ONLY Free sessions; Professionals shows ONLY professional conversations — never
+                    // the whole app's history.
+                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : activeView === 'professionals' ? 'professional' : 'all');
                     if (id) toggleTab(id);
                   }}
                   aria-label={label}

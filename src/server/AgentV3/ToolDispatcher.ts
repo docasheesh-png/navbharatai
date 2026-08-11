@@ -5790,7 +5790,7 @@ export class ToolDispatcher {
       case 'generate_storage': {
         // U-4 recipe — real BYO file uploads (S3-compatible presigned / Cloudinary signed). Pure generator.
         const sProvider = optStr(input, 'provider');
-        if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "s3" | "cloudinary".';
+        if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "supabase" (zero setup) | "s3" | "cloudinary".';
         const scfg = generateStorageIntegration(sProvider);
         const stWritten: string[] = [];
         for (const [path, content] of Object.entries(scfg.files)) {

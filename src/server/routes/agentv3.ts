@@ -243,7 +243,8 @@ import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
 import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
-import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
+import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
+import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
@@ -8300,6 +8301,22 @@ export function registerAgentV3Routes(app: Express): void {
             // content terms) and a wider block (5) so entry+routes+schema all land. Targeted → BM25 top 3.
             const grounded = buildGroundedContext(filesMap, prompt, sel.overview ? 5 : 3, { preserveOrder: sel.overview });
             if (grounded) architectSystem = `${grounded}\n\n---\n\n${architectSystem}`;
+            // WHERE THE GROUNDING TOKENS WENT (admin 2026-08-11). Recorded on EVERY build, not only
+            // when something is dropped: the number nobody looks at is the number that grows, and
+            // "tokens ARE the bill" was learned the expensive way (776k input tokens to change 3
+            // files). A dominant single block is the #2260 shape generalised — reported by SHAPE, so
+            // it also catches the oversized file nobody thought to exclude.
+            const cost = lastGroundingCost();
+            if (cost) {
+              const dominant = dominantGroundingBlock(cost);
+              buildDiag.record({
+                phase: 'plan', severity: dominant || cost.dropped.length > 0 ? 'warning' : 'info',
+                code: 'GROUNDING_COST',
+                message: groundingProvenance(cost),
+                detail: dominant ? `One file is most of the preamble: ${dominant}` : undefined,
+                autoResolved: true,
+              });
+            }
           } catch { /* grounding is best-effort — never blocks the build */ }
         }
       }

@@ -30916,3 +30916,43 @@ both projects, full run **14,102/14,102**.
 **Remaining in the cheap set (each still to build, each ₹0 to run):** a token/context budget with
 provenance (the 776k-tokens-for-3-files class), a cross-build heal-firing counter (turning the 50/50
 law into a number), and a build idempotency guard (the "whole build ran twice" class).
+
+---
+
+## 2026-08-11 — A budget for the grounding preamble (upgrade 2 of the cheap set)
+
+**Admin:** safe upgrades, minimum ₹. This one does not merely avoid cost — it **removes** cost, and it
+costs **nothing to run** (pure arithmetic, no model call).
+
+**WHY.** Tokens ARE the bill. The 2026-08-10 autopsy measured **776k input tokens to change 3 files**,
+and grounding was the biggest single contributor: a minified React bundle ranked as the #1 "most
+relevant existing file" and was re-sent in the preamble of ~26 calls (#2260). That culprit is now
+filtered out — but **a FILTER only answers "is this file bad?"**. A **BUDGET** answers *"have we spent
+too much?"*, and only the second is a defence against the oversized file nobody predicted. Nothing
+capped how much grounding cost, and nothing reported it.
+
+- `applyGroundingBudget` keeps blocks most-relevant-first until the budget is spent
+  (`AGENTV3_GROUNDING_TOKEN_BUDGET`, default 4,000 — set from what grounding legitimately needs, since
+  3–5 snippets land well under 1k; `0` = no cap, the honest escape hatch).
+- **ONE block is always kept**, even if it alone exceeds the budget: an empty preamble would remove the
+  grounding a build most needs, and the model would read that file anyway through a tool call — at the
+  same token cost plus a round trip. Keeping it and REPORTING the overrun is the honest outcome.
+- **Never truncates mid-file.** Half a function is worse than no function — a model will reason about
+  the half it can see.
+- **It can only SHRINK a hint the model is already told to verify with `read_file`,** so the worst case
+  of dropping a block is one extra tool call. It cannot fail a build.
+- `GROUNDING_COST` is recorded on **every** build, not only when something is dropped: the number
+  nobody looks at is the number that grows.
+- `dominantGroundingBlock` flags "one file is most of the preamble" — **the #2260 shape, generalised**.
+  Reporting by SHAPE rather than by name is what catches the next oversized file in a directory nobody
+  thought to exclude, instead of one more hand-maintained list.
+
+**A test bug worth recording:** the first version of the tests assumed `estimateTokens ≈ chars/4`, but
+it BLENDS chars/4 with words/0.75 — so a 400-char single "word" costs ~51 tokens, not 100. The test
+failed, the code was right. Fixed by giving the blocks realistic whitespace: an assertion built on the
+wrong cost model would have passed while measuring nothing real.
+
+Tests: 15 in `tests/contextBudget.test.ts`. Gate: tsc clean both projects, full run **14,124/14,124**.
+
+**Remaining in the cheap set:** a cross-build heal-firing counter (turning the 50/50 law into a
+number), and a build idempotency guard (the "whole build ran twice" class).

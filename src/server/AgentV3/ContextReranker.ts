@@ -8,6 +8,8 @@
 //
 // Pure + deterministic → unit-tested. No dependency.
 
+import { applyGroundingBudget, groundingTokenBudget, type BudgetedBlock, type BudgetResult } from './contextBudget';
+
 const STOPWORDS = new Set(
   'the a an and or of to in for on with is are be this that it as at by from into your you i we my our app build make create add fix change update use using need want please'.split(
     ' ',
@@ -181,6 +183,7 @@ export function structuralAnchors(fileTree: readonly string[], max = 8): string[
 
 /**
  * Rank files by IMPORT-GRAPH CENTRALITY (in-degree): how many OTHER files import them. Central files
+import { applyGroundingBudget, groundingTokenBudget, type BudgetedBlock, type BudgetResult } from './contextBudget';
  * (storage.ts, schema.ts, lib/db.ts) are structurally load-bearing for almost any edit, even when
  * their name echoes nothing in the request. Import specifiers are resolved to tree files by basename
  * (`./storage`, `@/lib/db` → the tree file whose path ends with that segment) — a deliberate, cheap
@@ -321,18 +324,41 @@ export function buildGroundedContext(files: Record<string, string>, query: strin
     ? Object.keys(files).slice(0, Math.max(0, topK)).map((path) => ({ path, score: 1 }))
     : rankByBM25(files, query, topK);
   if (ranked.length === 0) return '';
-  const blocks: string[] = [];
+  const blocks: BudgetedBlock[] = [];
   for (const { path } of ranked) {
     const content = files[path];
     if (typeof content !== 'string') continue;
     const line = firstRelevantLine(content, query);
     const snippet = snippetAround(content, line);
-    blocks.push(`• ${path}:${line}\n${snippet}`);
+    blocks.push({ path, text: `• ${path}:${line}\n${snippet}` });
   }
-  if (blocks.length === 0) return '';
+  // TOKEN BUDGET (admin 2026-08-11). Tokens ARE the bill: an autopsy measured 776k input tokens to
+  // change 3 files, with grounding the biggest contributor. The specific culprit then (a minified
+  // bundle ranked #1) is now filtered out, but a FILTER only answers "is this file bad?" — a BUDGET
+  // answers "have we spent too much?", which is the only defence against the oversized file nobody
+  // predicted. It can only ever REMOVE blocks from a hint the model is already told to verify with
+  // read_file, so the worst case is one extra tool call.
+  const budgeted = applyGroundingBudget(blocks, groundingTokenBudget());
+  lastGroundingBudget = budgeted;
+  if (budgeted.kept.length === 0) return '';
   return [
     'RELEVANT EXISTING FILES (grounding — ranked by relevance to this request; cited as path:line).',
     'These are the most likely files to read/modify; open them with read_file for full content before editing:',
-    ...blocks,
+    ...budgeted.kept.map((b) => b.text),
   ].join('\n\n');
+}
+
+/**
+ * What the last grounding preamble cost, for the build report.
+ *
+ * Module-level rather than returned, because `buildGroundedContext` returns a STRING to a dozen call
+ * sites and changing that signature to carry provenance would touch every one of them — the kind of
+ * wide edit that breaks something unrelated. The caller that wants the number reads it immediately
+ * after building the context; nothing else depends on it, and a stale read costs a slightly wrong
+ * diagnostic line, never a wrong build.
+ */
+let lastGroundingBudget: BudgetResult | null = null;
+
+export function lastGroundingCost(): BudgetResult | null {
+  return lastGroundingBudget;
 }

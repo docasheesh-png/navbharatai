@@ -152,11 +152,26 @@ Ordered by what a user would actually feel.
 
 ## 2 · 🟢 SMALLER, VERIFIED-MISSING (each checked against live code 2026-08-07)
 
-- **Animation / motion recipe** — no `generate_animation`; micro-interactions are what make an app feel alive.
-- **MCP support** — nothing imports `@modelcontextprotocol`.
+- ~~**Animation / motion recipe**~~ — ✅ **ALREADY BUILT AND WIRED (verified against live code 2026-08-11).**
+  `generate_animation` is in `ToolCatalog.ts` (twice — definition + the enabled list), has its dispatcher
+  case in `ToolDispatcher.ts`, a pure generator + tests in `lib/MotionGenerator.ts`, an `AppKnowledgeBase`
+  entry, AND motion guidance in `systemPrompt.ts`. Shipped 2026-08-08 — three days before this line was
+  read as open. **This file has now sent a session at already-built work three times; verify before building.**
+- **MCP support** — nothing imports `@modelcontextprotocol`. (Re-verified 2026-08-11: still genuinely absent.)
+
+> **Verified genuinely ABSENT on 2026-08-11** (grepped against live code, so the next session need not repeat it):
+> MCP · component tree panel · multi-element select · per-version preview URL · service-split generator ·
+> design-to-code contract (AP-8) · community gallery/remix · scaling/load estimates · virus-scanning the apps
+> we generate. Everything else in this section had already shipped.
 - **Component tree panel** and **multi-element select** in the editor.
 - **Per-version preview URL** — v0 has it.
-- **One-click object storage provisioning** — Replit has it.
+- 🟡 **One-click object storage provisioning** — **HALF BUILT, and the halves matter (verified 2026-08-11).**
+  `generate_storage` EXISTS and is fully wired (catalog + dispatcher + `StorageGenerator`): it writes a real
+  presigned-upload route and an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is
+  missing is the ZERO-SETUP half — it is **BYO keys**: the user pastes their own credentials into `.env`.
+  The open work is provisioning a bucket in the USER's own account automatically, the same shape as the
+  Supabase zero-setup DB path (and subject to the same standing rule: user apps run on the USER's account,
+  never NavBharatAI's). Do NOT rebuild the code generator.
 - **Service-split generator** + named paradigms (Clean/DDD/MVC/Hexagonal). Coupling is already *scored*;
   nothing turns that score into a split.
 - **Design-to-code intermediate contract** (AP-8) — the vision pipeline exists; the

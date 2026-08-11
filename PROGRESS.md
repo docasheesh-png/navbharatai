@@ -29857,3 +29857,43 @@ holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new 
 
 Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
 exit 0**.
+
+---
+
+## 2026-08-11 — ROADMAP §2 verified against live code. Two of ten were already built.
+
+Before starting the next item I grepped every line of "SMALLER, VERIFIED-MISSING" against the actual
+source — the discipline safeguard #6 exists for, and which this file has now punished three separate
+times in three days.
+
+**Already built, and fully wired:**
+- **Animation / motion recipe.** The line read "no `generate_animation`". It exists in `ToolCatalog.ts`
+  (definition *and* the enabled list), has its dispatcher case, a pure generator + tests in
+  `lib/MotionGenerator.ts`, an `AppKnowledgeBase` entry, and motion guidance in `systemPrompt.ts`.
+  Shipped **2026-08-08** — three days before the line was read as open.
+
+**Half built, and the halves matter:**
+- **One-click object storage.** `generate_storage` exists and is wired: a real presigned-upload route
+  plus an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is missing is the
+  ZERO-SETUP half — it is **BYO keys**, the user pastes their own into `.env`. The open work is
+  provisioning a bucket in the USER's own account, same shape as the Supabase zero-setup DB path (and
+  under the same standing rule: user apps run on the USER's account, never NavBharatAI's). Rebuilding
+  the code generator would be pure waste.
+
+**Verified genuinely absent** (recorded in the file so the next session need not repeat the grep): MCP ·
+component tree panel · multi-element select · per-version preview URL · service-split generator ·
+design-to-code contract · community gallery/remix · scaling estimates · virus-scanning generated apps.
+
+### Per-version preview URL — sized before starting, and deliberately NOT started
+
+It looks like a small UI feature and is not. Git checkpoints already exist and the user can RESTORE to
+one; what is missing is *viewing* an old version without rewinding, which means running a second
+snapshot in a sandbox — real E2B time, per workspace, per version. That is an infrastructure decision
+with a recurring cost, not an afternoon's work, and it belongs in front of the admin before any code is
+written. Recorded rather than half-started.
+
+**One genuine gap noticed while reading that code, for a later slice:** a restore FAILS when the
+sandbox has recycled ("that checkpoint isn't active in this session yet"), even though the workspace's
+files are durably persisted in `WorkspaceFileStore`. The honest message is good; the underlying
+limitation may be removable by restoring from the durable store rather than requiring live git. Not
+started — it needs its own verification pass first.

@@ -2546,6 +2546,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'service-split-architecture',
+    name: 'Should My App Be Split Up? (and named architectures)',
+    path: 'Just ask NavBharatAI while building, e.g. "should I split my app into services?" or "set up clean architecture"',
+    description: `Two related things. (1) SHOULD I SPLIT? NavBharatAI reads your app's real import graph, finds the natural groups (orders, billing, …), and counts EXACTLY how many imports would have to become network API calls to separate each one — so "should we split this?" gets a number instead of an opinion. Each group is labelled a clean seam (already self-contained), costly (possible, real work), or tangled (not a module yet — splitting would mean rewriting it first). IMPORTANT AND DELIBERATE: it frequently answers "DON'T split" — for a small app, separate services add deployment and networking work and solve nothing, and even for a clean seam it tells you to split only if you have a real reason (separate deploys, different scaling, a separate team). It never touches your code; it only reports. (2) NAMED ARCHITECTURES: ask for "clean", "ddd", "mvc" or "hexagonal" and NavBharatAI creates the folder structure, a README per layer, an ARCHITECTURE.md — and, crucially, an ESLint config that ENFORCES the layer boundaries. That last part is the point: folders alone are decoration, because within a fortnight someone imports the database straight into your business rules; with the lint rule that import fails instead. Your existing code is never moved or rewritten.`,
+    howToUse: 'Ask NavBharatAI "should I split my app into services?" for the analysis, or "set up clean architecture" (or ddd / mvc / hexagonal) to create the enforced structure. Both are safe — the analysis changes nothing, and the scaffold only adds folders and rules.',
+    relatedFeatures: ['agentv3_builder', 'scaling-check', 'app-component-tree'],
+    keywords: ['split', 'microservices', 'services', 'architecture', 'clean architecture', 'ddd', 'mvc', 'hexagonal', 'monolith', 'refactor', 'structure', 'modules', 'coupling', 'app ko todna', 'alag alag service', 'layers', 'boundaries', 'organise code', 'scale team'],
+  },
+  {
     id: 'mcp-server-generator',
     name: 'Connect Your App to Claude Desktop / Cursor (MCP server)',
     path: 'Just ask NavBharatAI while building, e.g. "connect my app to Claude Desktop" or "make an MCP server for my orders table"',

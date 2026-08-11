@@ -892,6 +892,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'analyze_service_split',
+      description:
+        'Answer "should this app be split into separate services, and where?" using the app\'s real import ' +
+        'graph. Names the natural modules, counts EXACTLY how many imports would have to become API calls ' +
+        'for each possible split, and says honestly when there is no good split — which is the correct ' +
+        'answer for most apps. Use it when the user asks about splitting, microservices, or app structure. ' +
+        'Read-only analysis: it changes nothing. Do NOT split an app just because the user asked — show ' +
+        'them this first; for a small app, splitting adds deployment and networking work and solves nothing.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'setup_architecture',
+      description:
+        'Set up a named architecture — "clean", "ddd", "mvc" or "hexagonal" — as real folders PLUS an ' +
+        'ESLint config that ENFORCES the layer boundaries (import/no-restricted-paths), so a cross-layer ' +
+        'import fails the lint instead of quietly eroding the structure. Writes ARCHITECTURE.md and a ' +
+        'README per layer. Existing code is never moved or rewritten. Prefer this only for a genuinely ' +
+        'large app or a team — layers add indirection a small app does not need.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          style: { type: 'string', enum: ['clean', 'ddd', 'mvc', 'hexagonal'], description: 'The architecture to set up.' },
+        },
+        required: ['style'],
+      },
+    },
+    {
       name: 'generate_mcp_server',
       description:
         'Give the app an MCP server, so the user can connect it to Claude Desktop, Cursor or any AI ' +
@@ -3255,6 +3282,8 @@ export const CATALOG_TOOL_NAMES = [
   'generate_email',
   'generate_storage',
   'generate_mcp_server',
+  'analyze_service_split',
+  'setup_architecture',
   'generate_realtime',
   'generate_search',
   'generate_otp',

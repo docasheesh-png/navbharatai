@@ -288,6 +288,9 @@ import { generateWebhookIntegration } from '../lib/WebhookGenerator';
 import { generateWebhookSenderIntegration } from '../lib/WebhookSenderGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
+import { generateMcpServer, normalizeMcpTables } from '../lib/McpServerGenerator';
+import { analyzeServiceSplit } from './ServiceSplitAnalysis';
+import { generateArchitectureScaffold, isArchitectureStyle } from '../lib/ArchitectureScaffold';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
 import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
 import { generateMobileExport } from '../lib/MobileExportGenerator';
@@ -5785,6 +5788,55 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('email integration');
         return `Wired ${eProvider} email:\n${emWritten.join('\n')}\nAdd the dependency: ${ecfg.dependency.name}@${ecfg.dependency.version}\n\n${ecfg.instructions}`;
+      }
+
+      case 'analyze_service_split': {
+        // ROADMAP §2 — turns the coupling score into a priced split decision. READ-ONLY: it never
+        // rewrites the app, because auto-splitting a working app is a harmful refactor, not a feature.
+        const { files: splitFiles } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const split = analyzeServiceSplit(splitFiles);
+        const seamLines = split.seams.slice(0, 8).map((s) => `- ${s.cluster} [${s.verdict}] ${s.reason}`);
+        return `${split.verdict}\n\nLooked at ${split.filesScanned} files.\n${seamLines.join('\n')}`;
+      }
+
+      case 'setup_architecture': {
+        const archStyle = optStr(input, 'style');
+        if (!isArchitectureStyle(archStyle)) return 'setup_architecture: pass style = "clean" | "ddd" | "mvc" | "hexagonal".';
+        const arch = generateArchitectureScaffold(archStyle);
+        const archWritten: string[] = [];
+        for (const [path, content] of Object.entries(arch.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          archWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('architecture scaffold');
+        return `${archWritten.join('\n')}\nAdd the dependency: ${arch.dependencies.map((d) => `${d.name}@${d.version}`).join(', ')}\n\n${arch.instructions}`;
+      }
+
+      case 'generate_mcp_server': {
+        // ROADMAP §2 — the USER's app becomes usable from Claude Desktop / Cursor. Pure generator.
+        const mcpTables = normalizeMcpTables((input as Record<string, unknown>)?.tables);
+        if (!mcpTables.ok) return `generate_mcp_server: ${mcpTables.message}`;
+        const mcpCfg = generateMcpServer({
+          tables: mcpTables.tables,
+          allowWrites: (input as Record<string, unknown>)?.allowWrites === true,
+          appName: optStr(input, 'appName') || undefined,
+        });
+        const mcpWritten: string[] = [];
+        for (const [path, content] of Object.entries(mcpCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mcpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('MCP server');
+        const mcpDeps = mcpCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `${mcpWritten.join('\n')}\nAdd the dependencies: ${mcpDeps}\n\n${mcpCfg.instructions}`;
       }
 
       case 'generate_storage': {

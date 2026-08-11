@@ -17,6 +17,7 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
 const ProjectInsightsPanel = _lz(() => import('./ProjectInsightsPanel'), 'ProjectInsightsPanel');
+const GalleryPanel = _lz(() => import('./GalleryPanel'), 'GalleryPanel');
 const CodeStudio        = _lz(() => import('../ide/CodeStudio'),         'CodeStudio');
 const TestPanel         = _lz(() => import('../ide/TestPanel'),          'TestPanel');
 const DiffViewer        = _lz(() => import('../ide/DiffViewer'),         'DiffViewer');
@@ -429,6 +430,14 @@ export function ViewPanels({
       {activeView === 'insights' && (
         <div className="flex-1 h-full overflow-hidden">
           <ProjectInsightsPanel user={user} files={files as Record<string, string>} workspaceId={v3Preview?.workspaceId} />
+        </div>
+      )}
+
+      {/* Community gallery / remix (ROADMAP §2). Publishing lands as `pending`; only an admin can
+          make an app public, so this screen never claims an app is live. */}
+      {activeView === 'gallery' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <GalleryPanel user={user} files={files as Record<string, string>} />
         </div>
       )}
 

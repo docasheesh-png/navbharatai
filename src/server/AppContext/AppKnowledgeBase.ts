@@ -2546,6 +2546,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'community-gallery',
+    name: 'Community Gallery — share your app, or start from someone else\'s',
+    path: 'Home \u2192 Other AI \u2192 Community Gallery',
+    description: `Browse apps other NavBharatAI users have shared, and publish your own. Every listing shows what the app does, who made it, how many files it has and how many people have remixed it. REMIX starts a brand-new app for you from that app's code \u2014 you own your copy and can change anything, and the original is untouched. PUBLISHING YOUR OWN: give it a name, a description and some tags, and send it for review. Two things are deliberately true and worth knowing: (1) YOUR KEYS ARE NEVER PUBLISHED \u2014 environment files (.env and friends), installed packages, build output and images are excluded automatically, and if a real key is still sitting inside your code NavBharatAI REFUSES to publish and shows you the exact file and line so you can remove it, instead of quietly stripping it and letting you believe you published something you did not; (2) NOTHING GOES LIVE BY ITSELF \u2014 your app waits in a review queue until a NavBharatAI admin approves it, the same rule the Nav App Store follows, because a clean key-scan proves no secret leaked but does not prove the code is safe to hand to other people. Your submissions list shows exactly where each one stands (waiting for review / approved / rejected, with the reviewer's reason). A remix does not include the original's keys or installed packages \u2014 you add your own and run an install, and the app tells you so.`,
+    howToUse: 'Open Home \u2192 Other AI \u2192 Community Gallery. To use someone else\'s app: find it and press Remix, then add your own keys. To share yours: fill in the name, description and tags and press "Send for review"; it appears publicly once an admin approves it. If publishing is refused, the screen lists the exact file and line where a key is still in your code.',
+    relatedFeatures: ['agentv3_builder', 'nav-app-store', 'app-component-tree'],
+    keywords: ['gallery', 'community', 'remix', 'fork', 'share app', 'publish', 'templates', 'examples', 'showcase', 'dusre ka app', 'app share karo', 'copy app', 'starter', 'inspiration', 'open source', 'clone'],
+  },
+  {
     id: 'service-split-architecture',
     name: 'Should My App Be Split Up? (and named architectures)',
     path: 'Just ask NavBharatAI while building, e.g. "should I split my app into services?" or "set up clean architecture"',

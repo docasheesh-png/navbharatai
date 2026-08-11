@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateListingsIntegration, LISTING_SERVICE_SOURCE } from './ListingsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateListingsIntegration, LISTING_SERVICE_SOURCE } from './ListingsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateListingsIntegration (wiring)', () => {
   it('emits the listing service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateListingsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the lifecycle + sell-once rules are real business rules,
 // verified against the actual emitted code.
 describe('emitted ListingService — lifecycle + sell-once (real logic)', () => {
-  const artifact = join(here, `._listing_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, LISTING_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('listing', LISTING_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Status = 'draft' | 'active' | 'sold' | 'removed';
   interface Listing { id: string; seller: string; status: Status; buyer: string | null; title: string; priceCents: number }
@@ -43,7 +37,7 @@ describe('emitted ListingService — lifecycle + sell-once (real logic)', () => 
   }
   interface Emitted { ListingService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('creates a draft; only ACTIVE listings are publicly searchable', async () => {

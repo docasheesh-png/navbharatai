@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateReactionsIntegration, REACTIONS_SERVICE_SOURCE } from './ReactionsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateReactionsIntegration, REACTIONS_SERVICE_SOURCE } from './ReactionsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateReactionsIntegration (wiring)', () => {
   it('emits the reaction service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateReactionsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the toggle + exact-count + one-emoji-per-user rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted ReactionService — idempotent toggle + exact counts + one emoji per user (real logic)', () => {
-  const artifact = join(here, `._reactions_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, REACTIONS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('reactions', REACTIONS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface ReactionCount { emoji: string; count: number; reactedByViewer: boolean }
   interface ReactionSummary { targetId: string; total: number; reactions: ReactionCount[]; viewerEmoji: string | null }
@@ -38,7 +32,7 @@ describe('emitted ReactionService — idempotent toggle + exact counts + one emo
   }
   interface Emitted { ReactionService: new (allowed?: string[]) => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('reacting twice with the SAME emoji toggles off (idempotent — no double count)', async () => {

@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateInvoicingIntegration, INVOICING_SERVICE_SOURCE } from './InvoicingGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateInvoicingIntegration, INVOICING_SERVICE_SOURCE } from './InvoicingGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateInvoicingIntegration (wiring)', () => {
   it('emits the service, routes and README + express dep', () => {
@@ -20,9 +17,8 @@ describe('generateInvoicingIntegration (wiring)', () => {
 });
 
 describe('emitted InvoicingService — invoice lifecycle + exact payment ledger + derived overdue', () => {
-  const artifact = join(here, `._invoicing_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, INVOICING_SERVICE_SOURCE);
-  afterAll(() => { try { unlinkSync(artifact); } catch { /* gone */ } });
+  const emitted = emitModule('invoicing', INVOICING_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   const DAY = 24 * 60 * 60 * 1000;
   const NOW = Date.UTC(2024, 2, 1);
@@ -42,7 +38,7 @@ describe('emitted InvoicingService — invoice lifecycle + exact payment ledger 
   }
   interface Emitted { InvoicingService: new () => Service; canTransition(a: Status, b: Status): boolean }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   async function seed(opts?: { dueAt?: number; taxRatePct?: number }) {
     const { InvoicingService } = await load();

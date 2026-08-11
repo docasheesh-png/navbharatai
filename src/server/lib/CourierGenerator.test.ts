@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateCourierIntegration, COURIER_SERVICE_SOURCE } from './CourierGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateCourierIntegration, COURIER_SERVICE_SOURCE } from './CourierGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateCourierIntegration (wiring)', () => {
   it('emits the courier service, routes and README + express dep', () => {
@@ -22,11 +19,8 @@ describe('generateCourierIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the state-machine, append-only history and unique
 // tracking numbers are real invariants, verified against the actual emitted code.
 describe('emitted CourierService — real domain invariants', () => {
-  const artifact = join(here, `._courier_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, COURIER_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('courier', COURIER_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Status = 'created' | 'picked_up' | 'in_transit' | 'out_for_delivery' | 'delivered' | 'failed_attempt' | 'returned' | 'cancelled';
   interface Shipment { id: string; trackingNo: string; status: Status; events: unknown[]; driverId?: string }
@@ -40,7 +34,7 @@ describe('emitted CourierService — real domain invariants', () => {
   }
   interface Emitted { CourierService: new () => Service; canTransition(a: Status, b: Status): boolean }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   const addr = (name: string) => ({ name, line1: '1 St', city: 'Pune', pincode: '411001' });
   async function seed() {

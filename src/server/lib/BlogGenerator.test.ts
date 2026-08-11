@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateBlogIntegration, BLOG_SERVICE_SOURCE } from './BlogGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateBlogIntegration, BLOG_SERVICE_SOURCE } from './BlogGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateBlogIntegration (wiring)', () => {
   it('emits the blog service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateBlogIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the publish state-machine + unique-slug generation are
 // real business rules, verified against the actual emitted code.
 describe('emitted BlogService — publish state-machine + unique slugs (real logic)', () => {
-  const artifact = join(here, `._blog_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, BLOG_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('blog', BLOG_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Status = 'draft' | 'published' | 'archived';
   interface Post { id: string; slug: string; status: Status; title: string; publishedAt: string | null }
@@ -44,7 +38,7 @@ describe('emitted BlogService — publish state-machine + unique slugs (real log
   }
   interface Emitted { BlogService: new () => Service; slugify(s: string): string }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const T0 = new Date('2026-01-01T00:00:00.000Z');

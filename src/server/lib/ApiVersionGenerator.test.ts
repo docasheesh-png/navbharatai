@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateApiVersionIntegration, API_VERSION_LIB_SOURCE } from './ApiVersionGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateApiVersionIntegration, API_VERSION_LIB_SOURCE } from './ApiVersionGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateApiVersionIntegration (wiring)', () => {
   it('emits server/lib/apiVersion.ts, dependency-free', () => {
@@ -18,17 +15,14 @@ describe('generateApiVersionIntegration (wiring)', () => {
 });
 
 describe('emitted apiVersion middleware — behaviour', () => {
-  const artifact = join(here, `._apiversion_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, API_VERSION_LIB_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('apiversion', API_VERSION_LIB_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Emitted {
     apiVersion(opts: { supported: string[]; header?: string; default?: string }): (req: { headers: Record<string, unknown>; apiVersion?: string }, res: unknown, next: () => void) => void;
   }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
   function mockRes() {
     return {

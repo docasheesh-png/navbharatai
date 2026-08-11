@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateSupportTicketIntegration, TICKET_SERVICE_SOURCE } from './SupportTicketGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateSupportTicketIntegration, TICKET_SERVICE_SOURCE } from './SupportTicketGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateSupportTicketIntegration (wiring)', () => {
   it('emits the ticket service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateSupportTicketIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the status state-machine is a real business rule,
 // verified against the actual emitted code.
 describe('emitted TicketService — status state-machine (real logic)', () => {
-  const artifact = join(here, `._ticket_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, TICKET_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('ticket', TICKET_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Status = 'open' | 'in_progress' | 'resolved' | 'closed';
   interface Ticket { id: string; status: Status; assignee: string | null; comments: unknown[] }
@@ -39,7 +33,7 @@ describe('emitted TicketService — status state-machine (real logic)', () => {
   }
   interface Emitted { TicketService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('creates open tickets and walks the happy path open→in_progress→resolved→closed', async () => {

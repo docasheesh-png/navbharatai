@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateSoftDeleteIntegration, SOFT_DELETE_LIB_SOURCE } from './SoftDeleteGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateSoftDeleteIntegration, SOFT_DELETE_LIB_SOURCE } from './SoftDeleteGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateSoftDeleteIntegration (wiring)', () => {
   it('emits server/lib/softDelete.ts, dependency-free', () => {
@@ -18,11 +15,8 @@ describe('generateSoftDeleteIntegration (wiring)', () => {
 });
 
 describe('emitted softDelete helpers — behaviour', () => {
-  const artifact = join(here, `._softdelete_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, SOFT_DELETE_LIB_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('softdelete', SOFT_DELETE_LIB_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Row { id: number; deletedAt?: string | null }
   interface Emitted {
@@ -35,7 +29,7 @@ describe('emitted softDelete helpers — behaviour', () => {
     trashedWhere(column?: string): string;
   }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('softDelete stamps deletedAt and isDeleted reflects it; restore clears it', async () => {

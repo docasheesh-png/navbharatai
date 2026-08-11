@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateQuizIntegration, QUIZ_SERVICE_SOURCE } from './QuizGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateQuizIntegration, QUIZ_SERVICE_SOURCE } from './QuizGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateQuizIntegration (wiring)', () => {
   it('emits the quiz service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateQuizIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the grading + pass-mark + answer-key-privacy rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted QuizService — exact grading + pass mark + answer-key privacy (real logic)', () => {
-  const artifact = join(here, `._quiz_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, QUIZ_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('quiz', QUIZ_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Quiz { id: string; title: string; passMarkPercent: number; questions: Array<{ id: string; text: string; points: number; options: Array<{ id: string; text: string; correct: boolean }> }> }
   interface PublicQuiz { id: string; title: string; passMarkPercent: number; totalPoints: number; questions: Array<{ id: string; text: string; points: number; options: Array<{ id: string; text: string }> }> }
@@ -39,7 +33,7 @@ describe('emitted QuizService — exact grading + pass mark + answer-key privacy
   }
   interface Emitted { QuizService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   function sampleQuiz(svc: Service): Quiz {

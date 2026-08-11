@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateCrmIntegration, CRM_SERVICE_SOURCE } from './CrmGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateCrmIntegration, CRM_SERVICE_SOURCE } from './CrmGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateCrmIntegration (wiring)', () => {
   it('emits the CRM service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateCrmIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the sales-stage state-machine + pipeline value are real
 // business rules, verified against the actual emitted code.
 describe('emitted CrmService — sales pipeline state-machine (real logic)', () => {
-  const artifact = join(here, `._crm_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, CRM_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('crm', CRM_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Stage = 'new' | 'contacted' | 'qualified' | 'won' | 'lost';
   interface Contact { id: string }
@@ -42,7 +36,7 @@ describe('emitted CrmService — sales pipeline state-machine (real logic)', () 
   }
   interface Emitted { CrmService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('walks the happy path new→contacted→qualified→won', async () => {

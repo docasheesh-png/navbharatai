@@ -1,10 +1,8 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateWaitlistIntegration, WAITLIST_SERVICE_SOURCE } from './WaitlistGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { join } from 'node:path';
+import { generateWaitlistIntegration, WAITLIST_SERVICE_SOURCE } from './WaitlistGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateWaitlistIntegration (wiring)', () => {
   it('emits the waitlist service, routes and README', () => {
@@ -21,11 +19,8 @@ describe('generateWaitlistIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the dedup + FIFO-position + invite-in-order rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted Waitlist — dedup + FIFO position + invite-in-order (real logic)', () => {
-  const artifact = join(here, `._waitlist_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, WAITLIST_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('waitlist', WAITLIST_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type WaitStatus = 'waiting' | 'invited' | 'removed';
   interface WaitEntry { id: string; email: string; seq: number; status: WaitStatus; invitedAt: string | null }
@@ -40,7 +35,7 @@ describe('emitted Waitlist — dedup + FIFO position + invite-in-order (real log
   }
   interface Emitted { Waitlist: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('assigns contiguous FIFO positions in join order', async () => {

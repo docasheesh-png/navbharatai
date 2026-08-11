@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateShortLinksIntegration, SHORTLINKS_SERVICE_SOURCE } from './ShortLinksGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateShortLinksIntegration, SHORTLINKS_SERVICE_SOURCE } from './ShortLinksGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateShortLinksIntegration (wiring)', () => {
   it('emits the short-link service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateShortLinksIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the uniqueness + click-count + expiry rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted ShortLinkService — unique codes + click counts + expiry (real logic)', () => {
-  const artifact = join(here, `._shortlink_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, SHORTLINKS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('shortlink', SHORTLINKS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface ShortLink { code: string; url: string; clicks: number; active: boolean; expiresAt: string | null }
   interface Service {
@@ -40,7 +34,7 @@ describe('emitted ShortLinkService — unique codes + click counts + expiry (rea
   }
   interface Emitted { ShortLinkService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('generates unique codes and only accepts http(s) URLs', async () => {

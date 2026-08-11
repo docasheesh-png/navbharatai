@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateTimesheetIntegration, TIMESHEET_SERVICE_SOURCE } from './TimesheetGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateTimesheetIntegration, TIMESHEET_SERVICE_SOURCE } from './TimesheetGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateTimesheetIntegration (wiring)', () => {
   it('emits the timesheet service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateTimesheetIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the single-open-session + duration rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted Timesheet — single open session + exact duration (real logic)', () => {
-  const artifact = join(here, `._timesheet_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, TIMESHEET_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('timesheet', TIMESHEET_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface TimeEntry { id: string; user: string; project: string; startedAt: string; endedAt: string | null; durationMs: number }
   interface Service {
@@ -41,7 +35,7 @@ describe('emitted Timesheet — single open session + exact duration (real logic
   }
   interface Emitted { Timesheet: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const T = (iso: string) => new Date(iso);

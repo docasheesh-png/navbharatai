@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateConsentIntegration, CONSENT_SERVICE_SOURCE } from './ConsentGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateConsentIntegration, CONSENT_SERVICE_SOURCE } from './ConsentGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateConsentIntegration (wiring)', () => {
   it('emits the consent service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateConsentIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the latest-wins + append-only-history rules are real
 // business rules, verified against the actual emitted code.
 describe('emitted ConsentService — latest-wins + append-only history (real logic)', () => {
-  const artifact = join(here, `._consent_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, CONSENT_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('consent', CONSENT_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type ConsentAction = 'grant' | 'withdraw';
   interface ConsentEvent { id: string; user: string; purpose: string; action: ConsentAction; at: string }
@@ -40,7 +34,7 @@ describe('emitted ConsentService — latest-wins + append-only history (real log
   }
   interface Emitted { ConsentService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const T = (n: number) => new Date(2_000_000_000_000 + n * 1000);

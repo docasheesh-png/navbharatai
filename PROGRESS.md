@@ -29401,6 +29401,27 @@ FIX — collapse to a SINGLE flow:
 assembler tests 30/30 (4 new: hex inject + 3-digit expand + injection-drop + byte-identical-when-absent),
 mobile suite 132/132, AppKnowledgeBase 6/6.
 
+## 2026-08-11 — Nav cleanup: "Other AI" → "Other" label, and Preview/Files/History removed from the sidebar
+
+Admin: (1) rename the "Other AI" section to just "Other"; (3) remove the Preview/Files/History buttons from
+the sidebar — "inko need nahi hai, yeh sab AI ke andar already hai".
+
+- Rename (task 1): the user-facing label only — Home card title, the Other page `<h1>`, and the TopNav tab
+  label all now read "Other". The internal view id `other_ai` is unchanged (no routing risk). The KB still
+  calls the section "Other AI" in its navigation text — cosmetic (the card is findable as "Other"); a full
+  KB wording sweep is a separate follow-up.
+- Sidebar (task 3): Preview / Files / History are hidden from the rail + drawer via the SAME mechanism Git
+  already uses — a `SIDEBAR_HIDDEN` set filtered out of `visibleItems`. They stay in `menuItems`, so their
+  header tab + view still open from the places that already have them (Preview: Pro v5.0 + bottom footer;
+  Files: Pro v5.0 footer; History: the per-AI footer). No view is orphaned.
+
+NOTE (admin tasks 2, 4, 5 still to do): task 2 ("cut App Settings from Settings into Other") is a larger
+cross-cutting change — ~40 files reference "Settings → App Settings → X" as the canonical nav path (engine
+messages, errors, the centralized `settingsLabels.ts`), and some `Settings → Domain`/etc. strings belong to
+EXTERNAL providers (e.g. Auth0), so a blanket sweep is unsafe. It will be done as a dedicated PR that routes
+those paths through the centralized label module. Tasks 4/5 (Free/Professional history scoping) are next.
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` clean · nav/routing/settings tests green.
 ## 2026-08-11 — Every AI knows NavBharatAI builds APKs itself, and suggests our own APK Builder FIRST (GitHub second)
 
 Admin: "navbharatai pro ko pata hi nahi hai ki ham APK bana sakte hai — fix karo. Sabhi AI ko exact pata

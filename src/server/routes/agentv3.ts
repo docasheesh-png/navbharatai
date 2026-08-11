@@ -7057,9 +7057,10 @@ export function registerAgentV3Routes(app: Express): void {
         // build on the existing (Firestore) durability path, never blocking it.
         if (githubStorageActive()) {
           const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
-          // READABLE repo name (admin 2026-07-18): derive it from the build's OWN stable identity — its
-          // stored title + createdAt — so the GitHub repo is human-readable ("watch-store-11am-180726-3f9a2c")
-          // instead of the old opaque "app-<uid>-<sessionId>". Crucially this stays STABLE across turns: the
+          // READABLE repo name (admin 2026-07-18; simplified 2026-08-10): derive it from the build's OWN
+          // stable identity — its stored title + createdAt — so the GitHub repo is human-readable and SIMPLE
+          // ("watch-18jul26-1100am-3f9a": single word + date + time) instead of the old opaque
+          // "app-<uid>-<sessionId>". Crucially this stays STABLE across turns: the
           // current-turn prompt changes each turn, but the stored title/createdAt do not, so ensureRepo keeps
           // hitting the SAME repo rather than spawning a new one per turn. On the FIRST turn the record may not
           // exist yet — the current prompt IS the first prompt, so deriveTitle(prompt)+now matches the identity

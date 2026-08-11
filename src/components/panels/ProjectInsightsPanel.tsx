@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Brain, FileCode, Layers, Plus, RefreshCcw, Send, ShieldCheck, Trash2, Webhook as WebhookIcon } from 'lucide-react';
+import { Activity, Brain, FileCode, Layers, Plus, RefreshCcw, Send, ShieldCheck, Trash2, TrendingUp, Webhook as WebhookIcon } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
@@ -160,6 +160,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
       if (r.ok) setJsxChk(await r.json());
     } catch { /* ignore */ }
     finally { setJsxChkBusy(false); }
+  };
+
+  // ── Scaling check: will this app survive real traffic? ──
+  const [scale, setScale] = useState<any>(null);
+  const [scaleBusy, setScaleBusy] = useState(false);
+  const runScale = async () => {
+    setScaleBusy(true); setScale(null);
+    try {
+      const r = await fetch('/api/workspace/scale-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setScale(await r.json());
+    } catch { /* ignore */ }
+    finally { setScaleBusy(false); }
   };
 
   // ── Undefined-hook check ──
@@ -424,6 +436,35 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <div className="space-y-1 max-h-40 overflow-auto">{jsxChk.undefinedComponents.slice(0, 30).map((c: any, i: number) => (
               <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">&lt;<span className="text-white">{c.component}</span>&gt; <span className="text-[#8b949e]">({c.file}:{c.line})</span></div>
             ))}</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Scaling / load — ROADMAP §2. The verdict deliberately carries NO capacity figure; see
+          ScaleAnalysis.ts for why an invented "handles N users" number would be the one claim a user
+          would plan a launch around. */}
+      <Card icon={<TrendingUp className="w-4 h-4 text-cyan-400" />} title="Will this app handle real traffic?"
+        action={<Button size="sm" onClick={runScale} disabled={scaleBusy} className="uppercase tracking-widest bg-cyan-600 hover:bg-cyan-700">{scaleBusy ? 'Checking…' : 'Check Scaling'}</Button>}>
+        {!scale ? (
+          <p className="text-[11px] text-[#8b949e]">Find the three things that actually slow an app down as it grows: queries that read <span className="font-mono">every</span> row, database calls running inside a loop, and filters on columns your migrations never indexed. Each finding says how the cost grows with your data and the exact change that fixes it.</p>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className={cn('font-bold', scale.ok ? 'text-emerald-400' : 'text-amber-300')}>{scale.ok ? '✓ ' : ''}{scale.verdict}</div>
+            {!scale.ok && (
+              <div className="space-y-2 max-h-72 overflow-auto">
+                {scale.findings.map((f: any, i: number) => (
+                  <div key={i} className="bg-black/30 rounded px-3 py-2 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className={cn('font-bold uppercase text-[9px] tracking-widest', f.severity === 'critical' ? 'text-red-400' : 'text-amber-400')}>{f.severity}</span>
+                      <span className="font-mono text-[10px] text-[#8b949e]">{f.file}:{f.line}</span>
+                    </div>
+                    <div className="text-white">{f.problem}</div>
+                    <div className="text-[#8b949e]">{f.atScale}</div>
+                    <div className="text-emerald-400/90">Fix: {f.fix}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </Card>

@@ -30481,3 +30481,84 @@ showing a specific edit that went wrong.** Until then there is nothing to root-c
 
 That is the fourth roadmap line this week whose verification changed the job — twice to "already
 built", once to "half built, build the other half", and now once to "do not build".
+## 2026-08-11 — Shiv Medical Store build report: the full autopsy and its five fixes (PRs #2260, #2261, #2264, #2267)
+
+**The report:** a FREE-tier user (welcome bonus) was charged **₹566.96** for a **15.6-minute** build that
+**changed 3 files**. `ok: true`, 4 heals, 5 unresolved. Built by KIMI on the weak tier.
+
+### The five-bucket ledger
+- ✅ **Self-healed — 4:** sandbox recycle (78 files restored from the durable store — this genuinely
+  worked), KIMI timeout → fallback, empty-build → full re-run, dev server restarted 3×.
+- 🔀 **Workaround — 3:** the dev server dying was never root-caused, only restarted; every dev start
+  re-ran `installing dependencies (package.json changed)` when it had not (one `ls` took **76s**);
+  playwright failure abandoned.
+- ⏭️ **Skipped — 2:** two `INTEGRITY_UNUSED_DEP` warnings (both FALSE — Capacitor deps are used via
+  CLI/config, the caveat the message itself names); no attempt to install the playwright browsers.
+- ❌ **Still broken — 5:** PREVIEW_NOT_RENDERED, TEST_SUITE FAIL, RUNTIME_UNCHECKED, a nonsense
+  rootCause, and the bill.
+- 🥵 **Struggle — 6:** ETA said ~3 min and it took 15.6 (4× "bigger than expected"); server died twice
+  MID-BUILD; one command 76s; one LLM call 135s then timed out; **the whole build ran twice**; the
+  reviewer read ~25 files for a 3-file change.
+
+### The missing subsystem (step 2)
+**A dev-server supervisor.** The health-check starts the server and returns; nothing keeps it alive.
+Most of the 15.6 minutes traces back to that one absence.
+
+### What shipped
+1. **#2260 — grounding excluded only `node_modules/`.** This is a Capacitor app, so `npx cap sync` had
+   copied the built web app into `android/app/src/main/assets/public/`, and the **minified React bundle**
+   ranked as the #1 "most relevant existing file" — re-sent in the preamble of all ~26 calls. Tokens ARE
+   the bill (776k input to change 3 files), and the model's context filled with minified vendor code
+   instead of the app's source. Fixed at the one gate (`groundableFile`) plus a `looksMinified` content
+   backstop. **The test that matters most is the inverse one**: `BuildStatus.tsx` / `distance.ts` must
+   still be grounded.
+2. **#2261 — heal runners billed cheap Kimi calls at SONNET rates.** 12 heal/repair runners were written
+   without `onTurnComplete`, so their tokens were attributed to no provider and fell into the
+   "unattributed remainder", which is priced at Sonnet ($3/M) as a conservative upper bound. But
+   `healRunnerRoutingOpts` deliberately routes free-tier heals to the **cheap** coders (~$0.6/M): a **5×
+   overcharge**, on 507k of the build's 776k tokens. Worse, heals fire only when a build STRUGGLES — so
+   the worse a build went, the more of it was billed at the highest rate in the stack. Fixed by
+   construction (one `healRunnerOpts()` factory) because threading a callback through 13 call sites only
+   re-arms it for the 14th. **Attribution is also what makes `noClaude: true` PROVABLE** — an
+   unattributed token has no provider, so a Claude call hidden in that bucket is invisible to the
+   honesty detector on exactly the tier where Claude is forbidden.
+3. **#2264 — the dev server had no keepalive, and Postgres did.** The server started fine and was gone
+   ~4 min later; recovery reported twice that "the log had no recognisable error" and gave up, while a
+   MANUAL start worked instantly every time. There was no error because the sandbox had **reaped** it —
+   the exact class `postgresWatchdogCommand` already exists for ("the sandbox reaps the Postgres daemon
+   minutes after provision — the root class behind builds #14→#18"). The dev server was the sibling
+   nobody hunted. Now a detached, pgrep-guarded, **bounded** keepalive (an unbounded one would be the
+   forbidden "retry loop around code that deterministically fails" and would hide a syntax error
+   forever), reusing the readiness probe's liveness check verbatim so the two can never disagree.
+4. **#2267 — four ways the report lied** (none broke an app; all of them corrode trust in the report):
+   an empty build is not automatically a failed build (the "fix the server" turn correctly wrote 0 files
+   and the whole build re-ran); RUNTIME_UNCHECKED contradicted the summary and GREEN_GUARD_SAVE on the
+   same build; a playwright suite that could not RUN (our missing browser binaries) was reported as the
+   app's FAILURE; and an advisory unused-dep hint became the rootCause of a successful build.
+
+### Method notes worth keeping
+- **The judge question answered against its own premise.** The admin asked which judge to use on free
+  tier. Investigation showed the judge is not Grok at all — sub-agents share the build client, so it
+  runs on Kimi — and moving it to Grok ($3/M vs $0.6/M) would have made the bill WORSE. The real defect
+  was attribution. *Answering the question as asked would have been the expensive wrong move.*
+- **A test that asserted the old behaviour was reversed with evidence, not flipped.** `deriveRootCause`
+  had a test deliberately keeping unused-dep hints as rootCause on real build turns; a real build showed
+  the map was complete and the finding still wrong. Relevance, not provability, was the error.
+- **A shell-command builder needs `sh -n`.** The watchdog's first version emitted `'''` instead of `'\''`
+  and would have silently never armed — every string assertion still passed.
+
+### Open / not done (honest)
+- `makeFastTextRunner` still omits attribution with a documented "avoid double-counting" reason. It may
+  be landing in the same Sonnet-priced bucket by another route; `captureTurnUsage` only feeds the
+  provider ledger, which suggests attributing it would NOT double-count — but that needs verifying
+  against the fast lane's own sink first, because getting it wrong would OVERCHARGE, which is worse than
+  the bug. Recorded beside the exemption in `tests/healRunnerAttribution.test.ts`.
+- **The judge still reviews the whole project, not the diff** (~25 files read for a 3-file change). This
+  is a bigger cost lever than any model swap and is not yet done.
+- **The free-tier blast radius is real:** this single build debited 56,695 tokens against a 50,000-token
+  welcome bonus, pushing the user negative — and with the credit gate on, that locks them out of
+  building. The bill was correct per our formula; the formula ran on tokens that were largely our own
+  grounding bug. Whether to refund/top-up that user is an admin decision, raised.
+- Gemini Flash ($0.30/M in) as the free-tier judge — cheaper than today's Kimi AND independent of the
+  builder — is proposed but NOT shipped; it needs a canary measurement first because Flash is weaker at
+  deep code reasoning.

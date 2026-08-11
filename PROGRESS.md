@@ -29400,3 +29400,37 @@ FIX — collapse to a SINGLE flow:
 **Verification:** frontend `npm run build` ✅ · `tsc --noEmit` + `tsc -p tsconfig.server.json` clean ·
 assembler tests 30/30 (4 new: hex inject + 3-digit expand + injection-drop + byte-identical-when-absent),
 mobile suite 132/132, AppKnowledgeBase 6/6.
+
+## 2026-08-11 — Every AI knows NavBharatAI builds APKs itself, and suggests our own APK Builder FIRST (GitHub second)
+
+Admin: "navbharatai pro ko pata hi nahi hai ki ham APK bana sakte hai — fix karo. Sabhi AI ko exact pata
+hona chahiye ki Other AI → APK Builder me app banti hai, kaise, kya chahiye. Aur jab koi (kisi bhi language
+me) APK banana pooche, to GitHub ka rasta 1st nahi — 1st NavBharatAI ka apna Other AI suggest ho, GitHub 2nd."
+
+INVESTIGATION (Explore agent mapped every AI's knowledge path):
+- `apk_builder` KB entry + the v5 builder prompt were already NavBharatAI-first — good.
+- BUT three capability bullets in the `agentv3_builder` KB description (MOBILE APP EXPORT / STORE-READY BUILD
+  KIT / HOW TO PUBLISH) framed **Capacitor / Android-SDK / GitHub-Actions FIRST** — the source of any
+  GitHub-first answer.
+- **Professionals** (`professionals/engine.ts`) called only `getSupportOffer`, NEVER `getRelevantContext`, so
+  they had NO app knowledge at all — a professional asked "apk kaise banau" knew nothing about the builder.
+- `AppContextInjector.formatBlock` emits only the FIRST line of a `description`; `apk_builder`'s description
+  is a single line (fully surfaced), so strengthening it propagates to every injector-fed AI.
+
+FIX:
+- `AppKnowledgeBase.ts` — `apk_builder` description now opens with an explicit PRIORITY statement: this
+  built-in builder is the FIRST answer to any "make an APK / put app on phone / publish to Play" question in
+  ANY language; the user never needs Android Studio / a computer / the Capacitor CLI / to set up GitHub
+  Actions; GitHub is only the under-the-hood build machine. Enriched keywords with many multilingual /
+  any-phrasing forms (hinglish + english). Reworded the three GitHub-first capability bullets to lead with
+  NavBharatAI's own builder and demote GitHub/Capacitor to "under the hood, not a route you offer".
+- `AgentV3/systemPrompt.ts` — added a firm PRIORITY line to the v5 build prompt: own APK Builder is the first
+  and only route; NEVER tell a user to install Android Studio / use the Capacitor CLI / set up GitHub Actions.
+- `professionals/engine.ts` — every professional now also injects `getRelevantContext(message,'professional')`
+  (mirrors chat.ts / sda.ts), so a professional surfaces the APK Builder for an app-capability question. The
+  injector returns empty for a normal domain question, so nothing else changes.
+
+**Verification:** frontend `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · apkGuidance 24/24 (10 new:
+priority-first framing, v5 prompt rule, 7 multilingual phrasings surface the builder, professional surface) ·
+appKnowledgeBase 6/6 · polish (builder/professionals/white-label/core-chat) + professionals + offline +
+awareness + SDA route suites all green.

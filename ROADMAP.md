@@ -157,13 +157,13 @@ Ordered by what a user would actually feel.
   case in `ToolDispatcher.ts`, a pure generator + tests in `lib/MotionGenerator.ts`, an `AppKnowledgeBase`
   entry, AND motion guidance in `systemPrompt.ts`. Shipped 2026-08-08 — three days before this line was
   read as open. **This file has now sent a session at already-built work three times; verify before building.**
-- **MCP support** — nothing imports `@modelcontextprotocol`. (Re-verified 2026-08-11: still genuinely absent.)
+- ~~**MCP support**~~ — ✅ **SHIPPED 2026-08-11 (#2273)** as `generate_mcp_server`: the USER's app gets its own stdio MCP server (Claude Desktop / Cursor). Read-only by default, NEVER a delete tool, anon key only. Do not rebuild.
 
 > **Verified genuinely ABSENT on 2026-08-11** (grepped against live code, so the next session need not repeat it):
 > MCP · component tree panel · multi-element select · per-version preview URL · service-split generator ·
 > design-to-code contract (AP-8) · community gallery/remix · scaling/load estimates · virus-scanning the apps
 > we generate. Everything else in this section had already shipped.
-- **Component tree panel** and **multi-element select** in the editor.
+- ~~**Component tree panel** and **multi-element select**~~ — ✅ **BOTH SHIPPED 2026-08-11** (#2269, #2272). Do not rebuild.
 - **Per-version preview URL** — v0 has it.
 - 🟡 **One-click object storage provisioning** — **HALF BUILT, and the halves matter (verified 2026-08-11).**
   `generate_storage` EXISTS and is fully wired (catalog + dispatcher + `StorageGenerator`): it writes a real
@@ -172,13 +172,12 @@ Ordered by what a user would actually feel.
   The open work is provisioning a bucket in the USER's own account automatically, the same shape as the
   Supabase zero-setup DB path (and subject to the same standing rule: user apps run on the USER's account,
   never NavBharatAI's). Do NOT rebuild the code generator.
-- **Service-split generator** + named paradigms (Clean/DDD/MVC/Hexagonal). Coupling is already *scored*;
-  nothing turns that score into a split.
+- ~~**Service-split generator** + named paradigms~~ — ✅ **SHIPPED 2026-08-11 (#2273)**: `analyze_service_split` PRICES each seam from the import graph and often answers "keep it as one app"; `setup_architecture` scaffolds clean/ddd/mvc/hexagonal with ESLint-ENFORCED boundaries. It deliberately does NOT auto-rewrite an app into microservices. Do not rebuild. (The original line read: "coupling is already scored; nothing turns that score into a split." It does now.)
 - **Design-to-code intermediate contract** (AP-8) — the vision pipeline exists; the
   image → layout-contract → build step does not.
 - ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.
-- **Community gallery / remix** — both Lovable and v0 have it.
-- **Scaling / load estimates with real numbers** — today's critique is qualitative only.
+- **Community gallery / remix** — both Lovable and v0 have it. ⛔ **STILL OPEN, and deliberately NOT started (2026-08-11).** It publishes the user's SOURCE, so a partial build leaks real credentials. Build the SAFETY GATE first, REUSING `SecurityAnalysis.ts` / `SecretRedactor.ts` / `EnvSecretValueAnalysis.ts` — do NOT write a fourth secret scanner — then App-Store-style admin moderation (nothing reaches `approved` without an admin), then store/routes/UI. Full resume plan in PROGRESS.md 2026-08-11.
+- ~~**Scaling / load estimates with real numbers**~~ — ✅ **SHIPPED 2026-08-11 (#2270)** as `POST /api/workspace/scale-check`. Deliberately prints NO capacity figure. Do not rebuild.
 - **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.
 - 👤 **Daily-spend quota gauge** (`/api/usage/tokens`) — the endpoint does not exist, but building it
   needs the admin to define what the quota IS first. A decision, then a small build.

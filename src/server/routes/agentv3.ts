@@ -3,6 +3,7 @@ import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, pr
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
@@ -8666,6 +8667,25 @@ export function registerAgentV3Routes(app: Express): void {
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
         } catch { /* requirement guidance is best-effort — never affect the build */ }
       }
+
+      // THE USER'S OWN WORDS, RESTATED AS A CONTRACT (the dukaan report, 2026-08-12). The user wrote
+      // "Saari cheezon ki list dikhe, upar search box ho". No search was built. RequirementCoverage
+      // NOTICED and said so — and the app shipped, and the user was told it was ready.
+      //
+      // Everything done about that so far runs AFTER the build: making the finding trustworthy so a
+      // repair could safely act on it. This is the other half the 50/50 law asks for — why was a
+      // feature the user typed in plain words not built on the FIRST pass? The list of what they asked
+      // for is already computed deterministically from their own text at audit time, so there is no
+      // reason the builder cannot be handed it up front. Same table, same regexes: what the build is
+      // ASKED for and what it is JUDGED on are now the same list and cannot drift apart.
+      //
+      // No flag, unlike the requirement-GAP guidance above, because this invents nothing — it restates
+      // what the user themselves said, and only features the end-of-build audit will grade. A request
+      // naming no known surface yields '' and leaves buildPrompt byte-identical.
+      try {
+        const contract = renderRequestedFeatureContract(requestedFeatureLabels(prompt));
+        if (contract) buildPrompt = `${contract}\n\n---\n\n${buildPrompt}`;
+      } catch { /* the contract is best-effort — a fault here must never affect the build */ }
 
       // ASK-USER clarify (opt-in, friction-free resolution of the admin's #1 category). On a FRESH domain
       // build, surface the clarifications the engine ALREADY assumed sensible defaults for as a NON-BLOCKING,

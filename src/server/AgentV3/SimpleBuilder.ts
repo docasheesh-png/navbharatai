@@ -20,6 +20,7 @@ import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
+import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
@@ -785,6 +786,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (process.env.AGENTV3_BARREL_GEN !== 'off') {
           const withCss = { ...beforeGen, ...Object.fromEntries(created.map((c) => [c.path, c.content])) };
           for (const b of await generateMissingBarrels(withCss)) created.push({ path: b.path, content: b.content });
+        }
+        // VITE CLIENT TYPES — the same certainty as the stubs above, and it lands BEFORE this lane's own
+        // tsc gate, so an app reading import.meta.env never spends a repair round on
+        // "Property 'env' does not exist on type 'ImportMeta'". Types-only: zero runtime effect.
+        if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off') {
+          const scaffoldSeen = Object.fromEntries((deps.scaffoldPaths ?? []).map((p) => [p, '']));
+          const dts = missingViteEnvTypes({ ...scaffoldSeen, ...beforeGen, ...Object.fromEntries(created.map((c) => [c.path, c.content])) });
+          if (dts) created.push(dts);
         }
         if (created.length > 0) {
           const have = new Set(written.map((f) => f.path));

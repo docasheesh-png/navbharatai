@@ -136,6 +136,7 @@ import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFet
 import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, materializeRepoViaApi } from '../AgentV3/GithubApiTree';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
+import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
@@ -10011,6 +10012,21 @@ export function registerAgentV3Routes(app: Express): void {
               try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
+          }
+        }
+        // VITE CLIENT TYPES — deterministic, and the cheapest fix in this whole block. See viteEnvTypes:
+        // the dukaan report's build ran `tsc --noEmit` FOUR times over 106 seconds while every failing
+        // round carried "Property 'env' does not exist on type 'ImportMeta'" — an app reading
+        // import.meta.env with no `vite/client` declaration anywhere. A types-only triple-slash directive
+        // has ZERO runtime effect, so this cannot change what the app does, only what the compiler knows.
+        // Kill: AGENTV3_VITE_ENV_TYPES=off.
+        if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
+          const dts = missingViteEnvTypes(integrityFiles);
+          if (dts) {
+            integrityFiles[dts.path] = dts.content;
+            writtenFiles.set(dts.path, dts.content);
+            try { await actuator.writeFile(workspaceId, dts.path, dts.content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
           }
         }
         // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness

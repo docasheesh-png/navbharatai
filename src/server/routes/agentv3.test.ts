@@ -2184,7 +2184,14 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      decision's refusals (import/survey turn, failed build, no UI, existing E2E setup) rather
     //      than re-deriving them and drifting. Create-only, and written at all only when the login
     //      form's real selectors are readable from the markup. Considered ✓.
-    expect(count).toBe(15);
+    //   1× the Vite client-types guard (dukaan autopsy 2026-08-12) — gated on `!isImportTurn` in the
+    //      same integrity block as the css/import-normalize passes above, so it never writes on a
+    //      read-only turn. It intentionally does NOT require result.ok: "Property 'env' does not exist
+    //      on type 'ImportMeta'" is a cause of a FAILED build, so repairing it only on success would
+    //      skip the builds that need it (same discipline as the vite.config ensure). It writes ONE
+    //      types-only declaration, never overwrites an existing file, and stays silent unless the app
+    //      genuinely reads import.meta.env with no `vite/client` declared anywhere. Considered ✓.
+    expect(count).toBe(16);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

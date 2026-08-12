@@ -113,6 +113,7 @@ import {
   JOURNEY_TIMEOUT_MS,
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
+import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -9572,6 +9573,10 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
+      // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
+      // model's "no console errors" against whether anyone actually looked.
+      let runtimeCaptureAvailable = false;
+
       // THE RELEASE GATE'S EVIDENCE (Mission 10/10 Phase 5, §23), collected as the checks below run.
       //
       // Every field starts at 'not-run' and is only ever moved by a check that ACTUALLY RAN. That
@@ -10543,8 +10548,8 @@ export function registerAgentV3Routes(app: Express): void {
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
       ) {
         try {
-          const html = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
-          const verdict = analyzePreviewHtml(html);
+          const shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl');
+          const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
@@ -10580,12 +10585,18 @@ export function registerAgentV3Routes(app: Express): void {
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
+        // Restarting a dead process is NOT a repair attempt and must not spend the repair budget —
+        // otherwise one crashed dev server silently costs the app its only chance at a real fix. Bounded
+        // on its own so a server that refuses to stay up cannot loop.
+        const MAX_SERVER_REVIVALS = 2;
+        let serverRevivals = 0;
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
-          let html = '';
+          let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
           try {
-            html = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+            shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
-          const verdict = analyzePreviewHtml(html);
+          const html = shot.html;
+          const verdict = analyzePreviewHtml(html, { painted: shot.painted, source: shot.source });
           let consoleErrs: string[] = [];
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
@@ -10648,7 +10659,58 @@ export function registerAgentV3Routes(app: Express): void {
             previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
             break;
           }
+          // THE DEV SERVER IS DEAD — RESTART A PROCESS, DO NOT REWRITE AN APP (admin build transcript
+          // 2026-08-12: a 44m50s / ₹42.16 build of one home page). Three times the preview came back
+          // "closed port"; three times a full LLM repair pass ran; all three times the model read the
+          // files, found nothing wrong, restarted the dev server and reported "No code changes were
+          // needed — the app itself is fine." We were paying a language model to be a process
+          // supervisor, at minutes and rupees per restart, and it edited working code while it was in
+          // there. A code repair cannot fix a dead process; nothing in the repair prompt ("fix imports,
+          // undefined variables, failed data access, or a crashing component") applies to one.
+          //
+          // Deterministic, free, and bounded: bring the server back, look again. If it will not stay up
+          // after MAX_SERVER_REVIVALS, THAT is the honest finding — and it is an infrastructure finding,
+          // not an accusation against the user's code.
+          if (verdict.serverDown) {
+            if (serverRevivals >= MAX_SERVER_REVIVALS) {
+              buildDiag.record({
+                phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
+                message: `The dev server would not stay running (${serverRevivals} restarts). The app's code was never the problem here — nothing was listening on the preview port. ${verdict.problems[0] ?? ''}`.trim(),
+                autoResolved: false,
+              });
+              previewVerifiedFailed = true;
+              break;
+            }
+            serverRevivals += 1;
+            events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
+            try {
+              // The health-check wrapper in devServerHost recognises this command, installs stale deps
+              // and waits for the port, so this one call is the whole restart.
+              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-server-revive');
+            } catch { /* the re-check below is the real verdict — a failed restart just means another try */ }
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
+              message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
+              autoResolved: true,
+            });
+            attempt -= 1; // a process restart is not a repair attempt
+            continue;
+          }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
+          // WE COULD NOT SEE THE APP — that is not the same as seeing it broken, and a repair pass here
+          // rewrites working code. This is the loop the admin reported on 2026-08-12: a snapshot taken
+          // before the app painted read as "a runtime error crashed it", the repair restarted the dev
+          // server, the preview really went down, and the cycle repeated for half an hour. With no
+          // console error to corroborate it, an inconclusive read stops here — recorded honestly,
+          // never acted on.
+          if (verdict.inconclusive && consoleErrs.length === 0) {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_UNVERIFIED',
+              message: `Could not confirm the preview either way — ${verdict.problems[0] ?? 'the snapshot showed nothing'}. No repair was attempted: rewriting a working app on a snapshot we cannot trust is worse than not knowing.`,
+              autoResolved: true,
+            });
+            break;
+          }
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
@@ -10873,7 +10935,13 @@ export function registerAgentV3Routes(app: Express): void {
       // says WRITTEN, never "passed" — a scaffold reported as a test run is a fake verdict.
       if (process.env.AGENTV3_AUTO_E2E !== 'off' && !abort.signal.aborted) {
         try {
-          const e2eFiles = Object.fromEntries(writtenFiles);
+          // THE WHOLE PROJECT, NOT THIS TURN'S WRITES (admin report 2026-08-12). An edit build that
+          // wrote one `.env` was judged on that one file and skipped with the reason "this project has
+          // no user interface for a browser to load" — for a React app with a full page of components.
+          // The decision was arguably right and the REASON was false, which is worse: it tells the user
+          // something untrue about their own app, and it hides the real reason from the next reader.
+          const projectFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
           const decision = shouldAutoScaffoldE2e({
             files: e2eFiles,
             ok: result.ok,
@@ -11110,7 +11178,7 @@ export function registerAgentV3Routes(app: Express): void {
           let captured: RuntimeError[] = [];
           try {
             const cap = await actuator.getConsoleErrors!(workspaceId, sinceMs);
-            if (cap.captured !== false) captureAvailable = true; // undefined = back-compat "assume captured"
+            if (cap.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
             captured = filterActionableErrors(cap.errors);
           } catch { break; /* console capture needs a real sandbox — availability stays unproven */ }
           if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
@@ -11138,7 +11206,7 @@ export function registerAgentV3Routes(app: Express): void {
         let remaining: RuntimeError[] = [];
         try {
           const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
-          if (fin.captured !== false) captureAvailable = true;
+          if (fin.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
           remaining = filterActionableErrors(fin.errors);
         } catch { /* best-effort — availability stays whatever the loop proved */ }
         try {
@@ -11156,6 +11224,35 @@ export function registerAgentV3Routes(app: Express): void {
           }
         } catch { /* diagnostics recording is best-effort — never breaks a build */ }
       }
+
+      // DOES THE SUMMARY SURVIVE CONTACT WITH WHAT WE MEASURED? (admin transcript + report 2026-08-12)
+      //
+      // Two contradictions came out of ONE build. The model wrote "I verified this with a real browser
+      // screenshot and confirmed there are no console errors" while the same report recorded that the
+      // console could not be captured. And it described the screen as showing "Health 100/100, Level 1,
+      // XP 0/100 · Location: Forest Path · Inventory · Game Log" — for a home page with four corner
+      // buttons, whose source contains none of those words. It had described the same screen correctly
+      // earlier in the same build; the second time it described an image it did not look at.
+      //
+      // A wrong verdict is a bug. A fabricated observation is the platform telling the user something
+      // that never happened, in the confident voice of a verification — and the user has no way to know
+      // which sentence to distrust. So the platform corrects itself, in its own reply, out loud.
+      try {
+        const contradictions = auditSummaryClaims(result.summary, {
+          consoleCaptured: runtimeCaptureAvailable,
+          screenshotTaken: buildDiag.toolWasUsed('screenshot'),
+          previewVerified: previewVerifiedRendered,
+          // The app's real source — a label it does not contain cannot have been on the screen.
+          sourceText: Array.from(writtenFiles.values()).join('\n'),
+        });
+        if (contradictions.length > 0) {
+          result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'CLAIM_UNSUPPORTED',
+            message: claimAuditSummary(contradictions), autoResolved: false,
+          });
+        }
+      } catch { /* the audit reports on the summary; it must never break the build */ }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the

@@ -12,6 +12,83 @@ export interface PreviewVerdict {
   rendered: boolean;
   /** Human-readable problems found (empty when rendered) — fed back to the agent to repair. */
   problems: string[];
+  /**
+   * True when we could not SEE the app rather than seeing it broken — so `rendered: false` here is
+   * ignorance, not a defect, and the caller must NOT launch a repair pass on it.
+   *
+   * ROOT CAUSE (admin field report 2026-08-12, and the reason this field exists at all): for any
+   * single-page app the un-hydrated shell is `<div id="root"></div>` and nothing else — byte-identical
+   * to an app that crashed on mount. Judged by the same rules, a perfectly healthy React app was
+   * declared to have "a runtime error [that] likely crashed it before render". The build then repaired
+   * a bug that did not exist, the repair restarted the dev server, the preview genuinely went down,
+   * and the next check could snapshot early again. That loop turned a 7-minute app into a 34-minute
+   * build, and every pass through it edited working code.
+   */
+  inconclusive?: boolean;
+  /**
+   * The dev server is not running — nothing is listening on the preview port.
+   *
+   * ROOT CAUSE (admin build transcript, 2026-08-12, a 44m50s / ₹42.16 build of a home page): this was
+   * detected correctly and then handled as if the APP were broken. Three times the preview came back
+   * "closed port", three times the platform spent a full LLM repair pass on it, and all three times the
+   * model — after reading files, typechecking and finding nothing — restarted the dev server and wrote
+   * some version of "No code changes were needed; the app itself is fine."
+   *
+   * A code repair CANNOT fix a dead process. The repair prompt literally asks the model to "fix
+   * imports, undefined variables, failed data access, or a crashing component", none of which exist.
+   * We were paying a language model, for minutes at a time, to act as a process supervisor — and while
+   * it was in there it edited working code, which is how one home page took forty-five minutes.
+   *
+   * Kept separate from `inconclusive` because the two need OPPOSITE handling: an unpainted snapshot
+   * means do nothing, a dead server means do one specific, deterministic, free thing.
+   */
+  serverDown?: boolean;
+}
+
+/**
+ * What the caller knows about HOW the html was captured.
+ *
+ * Without this, `analyzePreviewHtml` is being asked to distinguish "the app crashed" from "I took the
+ * photograph before the app was ready", using only the photograph.
+ */
+export interface PreviewCaptureContext {
+  /** Did the capturing browser observe content in the mount root? `undefined` = it could not tell. */
+  painted?: boolean;
+  /** 'curl' can only ever return the static shell — it never executes the app's JavaScript. */
+  source?: 'browser' | 'curl';
+}
+
+/**
+ * How long browseUrl waits for a single-page app to PAINT before giving up on it.
+ *
+ * This replaced a fixed `waitForTimeout(1800)`. A fixed sleep cannot be right: too short and a healthy
+ * app is snapshotted blank and then accused of crashing; too long and every build pays for the slowest
+ * app. Polling ends the moment content appears, so the common case is FASTER than the old guess while
+ * the slow case stops producing a false accusation.
+ */
+export const BROWSE_PAINT_DEADLINE_MS = 10_000;
+/** How often to look. Short enough that a fast app is barely delayed. */
+export const BROWSE_PAINT_POLL_MS = 250;
+
+/** The marker the in-sandbox script prints so we know whether the app had painted when we looked. */
+export const PAINT_MARKER = 'NBAI_PAINTED:';
+
+/**
+ * Split the paint marker off the captured HTML. Pure; never throws.
+ *
+ * A snapshot with NO marker came from somewhere that could not tell us (an older script, a truncated
+ * stream). That is reported as `painted: undefined` — unknown — rather than as `false`, because
+ * "unknown" and "it did not paint" lead to opposite decisions and collapsing them is how this whole
+ * class of false accusation started.
+ */
+export function splitPaintMarker(stdout: string): { painted?: boolean; html: string } {
+  const text = String(stdout ?? '');
+  const at = text.indexOf(PAINT_MARKER);
+  if (at < 0) return { html: text };
+  const nl = text.indexOf('\n', at);
+  const flag = text.slice(at + PAINT_MARKER.length, nl < 0 ? undefined : nl).trim();
+  const html = nl < 0 ? '' : text.slice(nl + 1);
+  return { painted: flag === '1', html };
 }
 
 /** Strip scripts/styles/tags to the visible text, so we can tell a real UI from an empty shell. */
@@ -85,10 +162,15 @@ export function hostErrorPage(html: string): string {
  * Judge whether a preview's RENDERED HTML represents a working app. Conservative: only declares
  * `rendered` when there is genuine visible content AND no error/empty-mount signal.
  */
-export function analyzePreviewHtml(html: string): PreviewVerdict {
+export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext = {}): PreviewVerdict {
   const h = (html || '').trim();
   const lower = h.toLowerCase();
   const problems: string[] = [];
+  // An un-painted snapshot cannot testify about the app. A curl capture NEVER runs the app's
+  // JavaScript, so its empty mount root proves nothing at all; a browser capture that polled to its
+  // deadline without seeing content is weaker evidence than a positive error signal, but it is still
+  // evidence — the app really did fail to paint within ten seconds.
+  const blind = capture.source === 'curl' || capture.painted === false;
 
   // Dev-server / routing failures — checked FIRST (an Express "Cannot GET /" page is short, so it
   // must not be misread as a generic blank page by the length check below).
@@ -119,11 +201,13 @@ export function analyzePreviewHtml(html: string): PreviewVerdict {
   // exact bug the flip was built to fix. Recognising it here is what makes that whole mechanism work.
   const hostError = hostErrorPage(h);
   if (hostError) {
-    problems.push(hostError);
+    // Return IMMEDIATELY and say what this is. Nothing else in this function can tell us anything
+    // about an app we never reached, and the caller must restart a process rather than rewrite code.
+    return { rendered: false, serverDown: true, problems: [hostError] };
   }
 
   if (problems.length === 0 && h.length < 40) {
-    return { rendered: false, problems: ['the preview returned an empty/blank page (the dev server may not be serving the app)'] };
+    return blindVerdict(capture, 'the preview returned an empty/blank page (the dev server may not be serving the app)');
   }
   // Build-error overlays surfaced into the DOM. T0-5 fix: the old check only knew Vite's overlay, so a
   // React / Next.js / webpack / Parcel overlay (or a bundler module-resolution error) that had crashed
@@ -151,19 +235,44 @@ export function analyzePreviewHtml(html: string): PreviewVerdict {
     problems.push('an uncaught runtime error is shown on the page');
   }
 
-  // SPA mount root left empty → JS crashed before the UI rendered.
+  // SPA mount root left empty. This USED to say "a runtime error likely crashed it before render" —
+  // a cause, asserted from an observation that cannot distinguish a crash from a photograph taken too
+  // early. When the capture could not see the app, it now says what actually happened instead.
   const rootEmpty = /<div[^>]*id=["'](?:root|app)["'][^>]*>\s*<\/div>/i.test(h);
   const text = visibleText(h);
   if (rootEmpty && text.length < 5) {
-    problems.push("the app's root element is empty — the UI never rendered (a runtime error likely crashed it before render)");
+    // POSITIVE EVIDENCE OUTRANKS BLINDNESS. An error overlay or a host error page in this same html is
+    // something we genuinely SAW, and returning "inconclusive" here would throw that away and let a
+    // real failure through as "we could not tell". Only an otherwise-clean page is inconclusive.
+    if (blind && problems.length === 0) return blindVerdict(capture, "the app's root element is empty");
+    if (!blind) problems.push("the app's root element is empty — the UI never rendered (a runtime error likely crashed it before render)");
   }
 
   // No error signal but also no visible content → a blank page.
   if (problems.length === 0 && text.length < 5) {
+    if (blind) return blindVerdict(capture, 'the preview showed no visible content');
     problems.push('the preview rendered no visible content (a blank page)');
   }
 
   return { rendered: problems.length === 0, problems };
+}
+
+/**
+ * The honest verdict when the capture could not see the app.
+ *
+ * `rendered` stays false — we have not earned a pass, and "preview is EARNED" is a standing rule. But
+ * `inconclusive` is set so the caller knows this is IGNORANCE, not a defect, and does not spend a
+ * repair pass rewriting working code. The wording never names a cause we did not observe.
+ */
+function blindVerdict(capture: PreviewCaptureContext, observed: string): PreviewVerdict {
+  const why = capture.source === 'curl'
+    ? 'the page was fetched without running its JavaScript, so a single-page app looks empty here whether it works or not'
+    : 'nothing had painted yet when the snapshot was taken';
+  return {
+    rendered: false,
+    inconclusive: true,
+    problems: [`${observed} — but this is NOT evidence the app is broken: ${why}.`],
+  };
 }
 
 /** A short, agent-facing instruction to fix the observed preview problems (used when repairing). */

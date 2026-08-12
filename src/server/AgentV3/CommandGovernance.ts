@@ -432,6 +432,78 @@ export function isDestructiveEmptyOverwrite(path: string, existingContent: strin
   return hadContent && nowEmpty;
 }
 
+/** Dotenv files the PLATFORM fills in from the user's own saved secrets. */
+const PLATFORM_ENV_FILE = /(^|\/)\.env(\.local|\.development|\.production)?$/;
+
+/** A value that carries no secret — a placeholder, a template, or nothing at all. */
+function isPlaceholderValue(raw: string): boolean {
+  const v = (raw ?? '').trim().replace(/^["']|["']$/g, '');
+  if (!v) return true;
+  return /^(your[_-]?|my[_-]?|<|\.\.\.|xxx+$|change[_-]?me|placeholder|todo|example|dummy|replace[_-]?)/i.test(v)
+    || /(here|_here|goes_here)$/i.test(v)
+    || /^[*x]{3,}$/i.test(v);
+}
+
+/** `KEY=value` pairs from a dotenv body. Pure; ignores comments and blank lines. */
+function parseDotEnvPairs(body: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of String(body ?? '').split('\n')) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    if (m) out.set(m[1], m[2]);
+  }
+  return out;
+}
+
+/**
+ * Would this write REPLACE a real secret with a placeholder in a platform-managed `.env`?
+ *
+ * ROOT CAUSE (admin build transcript 2026-08-12). The platform loads the user's own saved keys into
+ * `.env` — "🔐 Loaded 3 of your saved keys (Settings → Secrets & API Keys) into the app". Twenty-five
+ * seconds later the reviewer flagged "hardcoded secrets in .env", and the builder dutifully replaced
+ * them with placeholders and told the user to "add your real credentials later". The app's database
+ * and payments were dead from that moment, and the build reported "Your source files are untouched —
+ * I only wrote a setup file (.env)". That one file was the only thing it broke.
+ *
+ * The model was applying a real best practice — do not commit secrets — to a file that is sandbox-only,
+ * gitignored, and written BY US from the user's vault. Nothing told it that, and a prompt asking it not
+ * to would be one more instruction to forget. This makes the write impossible instead.
+ *
+ * Precise by construction: only fires when a key that HELD a real value is being emptied or
+ * placeholdered. Adding keys, changing one real value to another, filling a blank in, and creating the
+ * file for the first time are all untouched. Pure; never throws.
+ */
+export function wouldEraseUserSecrets(
+  path: string,
+  existingContent: string,
+  newContent: string,
+): string[] {
+  if (!PLATFORM_ENV_FILE.test(String(path ?? ''))) return [];
+  const before = parseDotEnvPairs(existingContent);
+  if (before.size === 0) return [];
+  const after = parseDotEnvPairs(newContent);
+  const erased: string[] = [];
+  for (const [key, oldValue] of before) {
+    if (isPlaceholderValue(oldValue)) continue; // there was no secret here to lose
+    // A key REMOVED entirely is as gone as a key blanked.
+    if (!after.has(key) || isPlaceholderValue(after.get(key) as string)) erased.push(key);
+  }
+  return erased;
+}
+
+/** The honest refusal shown when a write would erase the user's own keys. */
+export function eraseUserSecretsMessage(path: string, keys: readonly string[]): string {
+  const shown = keys.slice(0, 6).join(', ');
+  return (
+    `[GOVERNANCE BLOCKED] Refused to overwrite "${path}" — it would replace the user's REAL values for ` +
+    `${keys.length} key(s) with placeholders: ${shown}${keys.length > 6 ? ', …' : ''}. ` +
+    `This file is written BY THE PLATFORM from the keys the user saved in Settings → Secrets & API Keys. ` +
+    `It is sandbox-only and already gitignored, so there is nothing to protect here — but blanking it ` +
+    `breaks the running app's database, payments and API calls immediately. Leave ${path} alone. If you ` +
+    `want to document which variables the app needs, write a .env.example instead, with placeholder ` +
+    `values and no real ones.`
+  );
+}
+
 /** The honest refusal shown when a tool call would blank a populated source file. */
 export function emptyOverwriteMessage(path: string): string {
   return (

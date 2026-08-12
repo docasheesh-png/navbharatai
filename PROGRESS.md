@@ -31983,3 +31983,37 @@ symbol I had just been reading (`confirmedMissing`) instead of for the capabilit
 ever repaired?*). Grepping for the name you have in hand finds the absence of that name, not the absence
 of the behaviour — and it reads exactly like proof. The redundant-work check has to be run against the
 BEHAVIOUR, which is the same discipline that caught the two already-shipped items earlier today.
+## 2026-08-12 — Autopsy (2 reports: restart-button fix + BENCHMARK #3 power-ups): the REAL browser_action bug
+
+Both reports (same game workspace) confirmed fixes already shipped AND exposed one dominant NEW bug.
+
+**Confirmed already-fixed (these builds predate the deploys):**
+- rootCause = TIME_TO_FIRST_CALL "169s/167s of preparation" on a SUCCESSFUL build → now "completed
+  successfully" via #2318.
+- RELEASE_GATE YELLOW "whether it actually SAVES anything is untested" on a game → honest wording via #2321.
+
+**THE NEW BUG (fixed here) — browser_action 64KB stdout truncation.** In BOTH reports browser_action failed
+(twice each) with "Unterminated string in JSON at position 65536". Root cause: `browser-action.js`
+`JSON.stringify({...,screenshot:<base64 PNG>,...})` to stdout, and the sandbox caps `commands.run` stdout at
+64KB (65536 bytes) — a base64 screenshot blows past it, truncating the JSON mid-string so `JSON.parse` throws
+on EVERY interaction. This — not the CDP daemon (#2319) — is why the model could never actually click a
+button and kept claiming "Verified"/"PASS"/"Final gate: GREEN" on interactions it never drove (the true root
+of the item-1 honesty gap: the restart-button report claimed the button "fixed & Verified" and #3 claimed all
+power-ups "PASS (verified)", both while browser_action was failing).
+
+**Fix:** the action script writes the PNG to a FILE (`${TOOLS_DIR}/last-action.png`) and its stdout carries
+only small JSON metadata `{result,url,cursorX,cursorY}`; the TS side reads the screenshot bytes via
+`sandbox.files.read(path, {format:'bytes'})` (no 64KB cap). Both browser_action failure modes are now closed
+(#2319 daemon reachability + this truncation), so the engine can finally PROVE interactive features work
+instead of guessing PASS. Source-level regression test locks the fix (no base64 in stdout JSON; screenshot
+read from file). tsc clean both.
+
+**SIBLING recorded (rule 3/6 — next, careful): `screenshot()` / `screenshot-cdp.js` have the SAME latent
+64KB truncation** — they write raw base64 to stdout, so a large/detailed screen is silently truncated to a
+corrupt image (it did not bite these simple game screens, and screenshot "succeeds" without throwing because
+raw base64 needs no JSON.parse). Will be converted to the same file-based read as a focused follow-up, kept
+separate to avoid regressing the working screenshot path on the untestable E2B sandbox.
+
+**Advisory (not platform bugs):** 4× unsafe-html-sink (innerHTML) in the generated game.ts — the systemPrompt
+already warns against dynamic innerHTML; edit_file "old_string not found" once (self-healed retry); KIMI
+provider timeout once (self-healed fallback); DATA_LOSS_EVENT (sandbox recycle) restored from durable store.

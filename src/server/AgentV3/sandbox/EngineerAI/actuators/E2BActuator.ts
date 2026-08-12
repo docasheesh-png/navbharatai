@@ -252,7 +252,13 @@ const {chromium}=require('playwright');
   }catch(e){result='ERROR: '+String(e&&e.message||e);}
   const url=page.url();
   const buf=await page.screenshot({type:'png'});
-  process.stdout.write(JSON.stringify({result,url,screenshot:buf.toString('base64'),cursorX,cursorY}));
+  // Write the PNG to a FILE instead of embedding its base64 in stdout. The sandbox caps commands.run
+  // stdout at 64KB (65536 bytes); a base64 screenshot blows past that, which truncated the JSON
+  // mid-string and broke JSON.parse with "Unterminated string in JSON at position 65536" on EVERY
+  // interaction (BENCHMARK #2/#3 + the restart-button fix, 2026-08-12) — so the model could never
+  // verify a click and fell back to claiming PASS it had not confirmed. The TS side reads the bytes.
+  require('fs').writeFileSync('${TOOLS_DIR}/last-action.png', buf);
+  process.stdout.write(JSON.stringify({result,url,cursorX,cursorY}));
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
@@ -1431,7 +1437,13 @@ ${paintWaitJs('p')}
       if (!result.stdout || result.exitCode !== 0) {
         throw new Error(`Browser action failed: ${result.stderr.slice(0, 300) || 'the browser was not reachable'}`);
       }
-      return JSON.parse(result.stdout.trim());
+      const meta = JSON.parse(result.stdout.trim()) as { result: string; url?: string; cursorX?: number; cursorY?: number };
+      // The screenshot comes from a FILE, never stdout — stdout is capped at 64KB and a base64 PNG blows
+      // past it, which is exactly what broke every interaction with "Unterminated string in JSON at
+      // position 65536". files.read has no such cap. A missing file degrades to no image, never a throw.
+      const shot = await sandbox.files.read(`${TOOLS_DIR}/last-action.png`, { format: 'bytes' }).catch(() => null);
+      const screenshot = shot ? Buffer.from(shot as Uint8Array).toString('base64') : '';
+      return { ...meta, screenshot };
     };
 
     // The one failure worth retrying: the CDP daemon was not reachable (the action script's OUTER catch,

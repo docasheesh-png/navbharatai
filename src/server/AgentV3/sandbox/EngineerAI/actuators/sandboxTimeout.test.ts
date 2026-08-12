@@ -1,6 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { withTimeout, isIgnoredListPath, resolveE2bTemplate, withDaemonRetry } from './E2BActuator';
 
+describe('browser_action screenshot is read from a FILE, not stdout (64KB truncation autopsy)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'E2BActuator.ts'), 'utf8') as string;
+
+  it('the in-sandbox action script does NOT embed the screenshot base64 in its stdout JSON', () => {
+    // The bug: JSON.stringify({...,screenshot:buf.toString('base64'),...}) to stdout, which the sandbox
+    // caps at 64KB → "Unterminated string in JSON at position 65536" on every interaction.
+    expect(src).not.toContain("screenshot:buf.toString('base64')");
+    // It writes the PNG to a file instead, and the JSON carries only small metadata.
+    expect(src).toContain("writeFileSync('${TOOLS_DIR}/last-action.png', buf)");
+    expect(src).toContain("JSON.stringify({result,url,cursorX,cursorY})");
+  });
+
+  it('the TS side reads the screenshot bytes from the file (no 64KB stdout cap)', () => {
+    expect(src).toContain('last-action.png`, { format: \'bytes\' }');
+    expect(src).toContain("Buffer.from(shot as Uint8Array).toString('base64')");
+  });
+});
+
 describe('withDaemonRetry — browser_action survives a dead CDP daemon (BENCHMARK #2 autopsy)', () => {
   it('a first-try success runs the action once and never relaunches the daemon', async () => {
     let attempts = 0; let relaunches = 0;

@@ -71,3 +71,55 @@ export function describeSandboxCost(cost: SandboxCostRecord | null, buildSeconds
   const idle = ((cost.seconds - b) / 60).toFixed(1);
   return `${base} — ${idle} min of it after the build finished`;
 }
+
+/**
+ * THE SANDBOX COST THAT GOES INTO THE USER'S BILL — and the gate that keeps it honest.
+ *
+ * ADMIN 2026-08-11: "e2b ka kharcha bill me jodo." They are right that it is a real gap: every v5 build
+ * runs a cloud VM billed by wall-clock, and until now NavBharatAI absorbed 100% of it — a build that
+ * spent almost nothing on tokens but held a VM for forty minutes was pure loss.
+ *
+ * BUT IT CANNOT SIMPLY BE SWITCHED ON, and this is the part worth being careful about. The billing law
+ * says the bill a user sees is 100% REAL and that we must NEVER invent a cost. `sandboxUsdPerHour`
+ * defaults to **$0.10 — a deliberate placeholder**, described in this file's own header as "a ROUND,
+ * conservative placeholder". Feeding that default into a real person's bill would be charging money on
+ * a number nobody has verified, which is exactly what the law forbids.
+ *
+ * So this is billable ONLY when BOTH are true:
+ *   1. `AGENTV3_BILL_SANDBOX=on` — the admin's explicit decision to charge for it, and
+ *   2. `E2B_USD_PER_HOUR` is EXPLICITLY SET — the admin's real, verified rate from their E2B plan.
+ *
+ * The second condition is the one that matters: without it, turning the feature on would silently bill
+ * the placeholder. With it, the seconds are MEASURED (a clock, not an estimate) and the rate is the
+ * admin's own real price — which is a measurement times a stated price, not a guess. That is the same
+ * shape as voice billing, and it is honest.
+ *
+ * Until the rate is set this returns 0, the user's bill is unchanged, and the admin report keeps
+ * showing the (estimated) infrastructure cost exactly as it does today.
+ */
+export function sandboxBillableUsd(
+  cost: SandboxCostRecord | null,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  if (!cost || !(cost.usd > 0)) return 0;
+  if (String(env.AGENTV3_BILL_SANDBOX || '').trim().toLowerCase() !== 'on') return 0;
+  // An UNSET or unusable rate means we do not know what a sandbox-hour really costs. Billing the
+  // placeholder would be inventing the number the whole billing law exists to prevent.
+  const raw = Number(env.E2B_USD_PER_HOUR);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return cost.usd;
+}
+
+/** Why the sandbox cost is or is not on this bill — for the admin report, never the user's. */
+export function sandboxBillingNote(cost: SandboxCostRecord | null, env: NodeJS.ProcessEnv = process.env): string {
+  if (!cost || !(cost.usd > 0)) return 'Sandbox time: not measured on this build.';
+  const on = String(env.AGENTV3_BILL_SANDBOX || '').trim().toLowerCase() === 'on';
+  const rate = Number(env.E2B_USD_PER_HOUR);
+  const rateSet = Number.isFinite(rate) && rate > 0;
+  if (!on) return `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} — absorbed by NavBharatAI (AGENTV3_BILL_SANDBOX is off).`;
+  if (!rateSet) {
+    return `Sandbox ${cost.seconds}s — NOT billed: E2B_USD_PER_HOUR is unset, so the only available rate is a placeholder. `
+      + 'Set the real rate from your E2B plan to start charging for it.';
+  }
+  return `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} at $${rate}/hr — included in this build's real cost before markup.`;
+}

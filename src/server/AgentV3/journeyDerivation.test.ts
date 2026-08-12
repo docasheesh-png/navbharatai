@@ -2,8 +2,42 @@ import { describe, it, expect } from 'vitest';
 import {
   deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason,
   targetForInput, valueForInput, submitTargetIn, rendersList, writesToUserDatabase,
-  MAX_JOURNEYS, type JourneyResult,
+  appHasNoDataEntry, MAX_JOURNEYS, type JourneyResult,
 } from './journeyDerivation';
+
+describe('appHasNoDataEntry — is there genuinely nothing to save? (release-gate fairness to games)', () => {
+  it('a canvas game with only keyboard/click controls has no data-entry surface', () => {
+    const game = {
+      'src/App.tsx': `export default function App(){
+        const onKeyDown=(e)=>move(e.key);
+        return <canvas onClick={shoot} tabIndex={0} onKeyDown={onKeyDown}/>;
+      }`,
+    };
+    expect(appHasNoDataEntry(game)).toBe(true);
+  });
+
+  it('an app with a plain <input> is NOT stateless — a real save-journey exists', () => {
+    expect(appHasNoDataEntry({ 'src/App.tsx': '<input name="title"/>' })).toBe(false);
+  });
+
+  it('catches a <form>, an onSubmit/onChange handler, and a UI-library input component', () => {
+    expect(appHasNoDataEntry({ 'a.tsx': '<form onSubmit={save}></form>' })).toBe(false);
+    expect(appHasNoDataEntry({ 'a.tsx': '<div onChange={update}/>' })).toBe(false);
+    expect(appHasNoDataEntry({ 'a.tsx': '<TextField label="Name"/>' })).toBe(false);
+    expect(appHasNoDataEntry({ 'a.tsx': '<textarea/>' })).toBe(false);
+    expect(appHasNoDataEntry({ 'a.tsx': '<div contentEditable/>' })).toBe(false);
+  });
+
+  it('a read-only dashboard / landing page counts as no-data-entry (nothing to save is honest)', () => {
+    const dashboard = { 'src/App.tsx': '<div><h1>Sales</h1><Chart data={rows}/><ul>{rows.map(r=><li>{r.n}</li>)}</ul></div>' };
+    expect(appHasNoDataEntry(dashboard)).toBe(true);
+  });
+
+  it('empty / missing input is safe', () => {
+    expect(appHasNoDataEntry({})).toBe(true);
+    expect(appHasNoDataEntry(null as never)).toBe(true);
+  });
+});
 
 /**
  * THE WHOLE POINT: catch the app that PRETENDS.

@@ -80,6 +80,28 @@ function inputTags(source: string): string[] {
 }
 
 /**
+ * True when the app has NO data-entry surface ANYWHERE — no input/textarea/select/form element, no
+ * common form component, and no change/submit handler in any source file.
+ *
+ * Such an app — a game, a dashboard, a landing page, an animation, a calculator with no form — has no
+ * "save" journey to prove, so the release gate must not imply one is missing (BENCHMARK #1 & #2, a game
+ * reported YELLOW with "whether it actually SAVES anything is untested" — a category error for something
+ * that saves nothing). CONSERVATIVE BY DESIGN: any sign of data entry returns false, so a real data app
+ * is never mislabelled "stateless" — the worst a false positive could do is soften a YELLOW headline, and
+ * it can NEVER promote anything to GREEN (rendering alone still cannot earn green). Pure.
+ */
+export function appHasNoDataEntry(files: Record<string, string>): boolean {
+  for (const src of Object.values(files ?? {})) {
+    if (!src) continue;
+    if (/<(?:input|textarea|select|form)\b/i.test(src)) return false;           // real HTML form elements
+    if (/<(?:Input|Textarea|TextField|Select|Form|Autocomplete|Checkbox|Radio|Switch|Slider)\b/.test(src)) return false; // UI-library form components
+    if (/\bon(?:Submit|Change|Input)\s*=/.test(src)) return false;              // a change/submit handler
+    if (/\bcontentEditable\b/i.test(src)) return false;                         // an editable surface
+  }
+  return true;
+}
+
+/**
  * How to address this input, or null when it carries nothing we can honestly select it by.
  *
  * The order is deliberate: a `data-testid` is a promise the author made to tests, a `name` is what the

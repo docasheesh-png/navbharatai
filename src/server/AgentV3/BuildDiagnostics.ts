@@ -1548,7 +1548,18 @@ export function deriveRootCause(input: {
   const { issues, errors, review, ok } = input;
   const outcome = [...issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
   if (outcome) return outcome.message;
-  if (review) {
+  // A reviewer [CRITICAL] is the rootCause ONLY when the build did not succeed. On a SUCCESSFUL, rendered
+  // build the app works and the reviewer's finding was OFFERED to the user, not applied (GREEN STOP /
+  // REVIEW_SUGGESTED_NOT_APPLIED) — so promoting it to the build's rootCause reports a working app as
+  // FAILING, the exact dishonesty rule 5 forbids. Real case (BENCHMARK #1 game evolution, 2026-08-12):
+  // an admin-confirmed-correct game was headlined "Critical issue found by review: Missing Required
+  // Features" while three of the reviewer's own four items were "PARTIAL" (present-but-different) on an
+  // app that ran and rendered. The finding still appears in the report as a review suggestion; only its
+  // promotion to the build's rootCause is withheld on success. `ok !== true` keeps a FAILED build
+  // (ok:false — where a critical genuinely explains the failure) and a STILL-RUNNING build (ok undefined)
+  // exactly as before; this can only ever make a successful build's verdict more honest. Sibling of the
+  // already-closed "an advisory hint became the rootCause of a SUCCESSFUL build" class just below.
+  if (review && ok !== true) {
     const m = review.match(/\[CRITICAL\]\s*([^\n]+)/);
     if (m) return `Critical issue found by review: ${m[1].trim()}`;
   }

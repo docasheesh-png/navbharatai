@@ -31656,3 +31656,55 @@ Both allowed write-passes (runtime-error-autofix, feature-presence-heal) now go 
 the third allowlisted pass (green-guard-restore) is the restore itself and needs no net. Test locks it:
 verifyAfterFix.test.ts asserts BOTH passes are wrapped (≥2 verifyAfterFix< call sites + the
 'feature-presence heal' label). Gate: tsc clean both projects; verifyAfterFix (14) + greenFreeze (30) green.
+
+---
+
+## 2026-08-12 — Autopsy: the engine reported a WORKING game as FAILING (BENCHMARK #1 rootCause honesty)
+
+**Report:** BENCHMARK #1 — existing-game evolution ("Coin Collector 3D" → "Survival Mode"), free-list/admin,
+ok:true, ₹91.23, 11.5 min. The admin PLAYED the result and confirmed: **the game is 100% correct.**
+
+**What the engine reported about that correct game — the defect:**
+- Reviewer: **35/100**, `[CRITICAL] (confidence: high) Missing Required Features`
+- Release gate: **YELLOW** ("whether it actually SAVES anything is untested" — a category error for a game)
+- **rootCause: "Critical issue found by review: Missing Required Features"** ← a working, rendering app
+  headlined as FAILING.
+
+**Verification of the reviewer's claims (evidence-first, admin chose "verify first"):** the reviewer's OWN
+detail table marked three of its four items **"PARTIAL"** (timer frame-based; hearts show 3/5; no damage
+flash) — i.e. present-but-different on an app that RAN — yet stamped the whole thing `[CRITICAL] Missing
+Required Features (confidence: high)`. The model's own inspection log confirms the base game already had
+"health, timer, hazards, coins, Pause/Resume, Win/Game-over states"; the model correctly ADDED the requested
+health-regen (3→5 hearts). So the "3 vs 5 hearts" the reviewer penalised was the model DOING the task. Only
+the "no START screen" item is a possible genuine (minor) gap — unverifiable from here (built source lives in
+the user's app storage / an expired sandbox), and one minor feature is nowhere near a "35/100 CRITICAL failure".
+
+**Root cause (code-anchored):** `deriveRootCause` (`BuildDiagnostics.ts`) lifted the reviewer's first
+`[CRITICAL]` line into the build's rootCause **without consulting `ok`**. On a SUCCESSFUL, rendered build the
+reviewer finding is OFFERED to the user, not applied (GREEN STOP / REVIEW_SUGGESTED_NOT_APPLIED) — so
+promoting it to rootCause reports a working app as failing. This is the exact sibling of the already-closed
+"an advisory hint became the rootCause of a SUCCESSFUL build" class; the review branch just never got the
+same `ok` guard.
+
+**Fix:** `if (review && ok !== true)` — a reviewer `[CRITICAL]` is the rootCause ONLY on a build that did not
+succeed (ok:false) or is still running (ok undefined); on ok:true the honest verdict falls through to the
+real-error pick (a genuine unresolved error STILL wins) or "Build completed successfully with no problems
+recorded." The finding itself is NOT hidden — it still appears as a review suggestion; only its promotion to
+the failing-headline is withheld on success. Regression tests encode the benchmark case + both boundaries.
+Gate: tsc clean both projects; BuildDiagnostics 144 tests green.
+
+**A misread I own (rule 3):** I first read the app's "हार गए! / Health खत्म / Restart" screen as a BROKEN
+app. It is a normal GAME-OVER-with-restart state — a working game, and one of the required states. My
+"instant death from missing invulnerability" theory was wrong. I also began a fix correcting the summary's
+"RELEASE GATE: GREEN" DOWN to the gate's YELLOW — which pointed the WRONG way (it would deepen the
+false-negative on a correct game). Reverted it before it shipped.
+
+**Open items (rule 6, honestly deferred — not silently patched):**
+1. **Reviewer accuracy (the deeper 50%).** The reviewer tagged `[CRITICAL] (confidence: high)` on items its
+   own body called "PARTIAL", violating its own instruction ("if the app runs fine despite it, do NOT tag
+   [CRITICAL]"). That is an LLM-adherence gap; a deterministic guard (downgrade a [CRITICAL] whose body says
+   PARTIAL/incomplete on a rendering app) is a candidate but risks suppressing real criticals — needs care.
+2. **Release gate for games/stateless apps.** GREEN requires a proven form-fill→submit→reload journey, so a
+   game (no form, saves nothing) is structurally capped at YELLOW with a "doesn't save anything" knock. The
+   gate needs a domain-aware notion of "this app legitimately has no data-journey" WITHOUT reopening the
+   "renders = GREEN" hole the gate exists to close. Higher-risk core-honesty change — flagged for admin.

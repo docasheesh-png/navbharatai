@@ -37,6 +37,9 @@ export type RepairCode =
   | 'ANDROID_RESOURCE_LINKING'
   | 'NODE_OUT_OF_MEMORY'
   | 'MISSING_SIGNING_SECRET'
+  | 'SIGNING_CREDENTIALS_WRONG'
+  | 'GOOGLE_SERVICES_MISSING'
+  | 'NPM_REGISTRY_AUTH'
   | 'APP_CODE_BUILD_FAILED'
   | 'UNKNOWN';
 
@@ -109,6 +112,30 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       autoFixable: false,
       needs: [],
       detail: secretMatch ? { secret: secretMatch[1] } : undefined,
+    };
+  }
+
+  // ── The keystore IS on the repository, but the password/alias saved with it does not match it. A
+  // DIFFERENT failure from a missing secret (which is caught above), and equally not ours to fix — only
+  // the user knows their key's real password. Named so they get a real instruction, not a Gradle wall. ──
+  if (/keystore password was incorrect|Cannot recover key|keystore was tampered with, or password was incorrect|Given final block not properly padded|Keystore .*integrity check failed|failed to (read|decrypt) .* from .*keystore|wrong keystore password/i.test(log)) {
+    return {
+      code: 'SIGNING_CREDENTIALS_WRONG',
+      summary: 'Your signing key is on the repository, but the password or alias saved with it does not match the key. Check that ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD are exactly the ones you set when you created the keystore.',
+      autoFixable: false,
+      needs: [],
+    };
+  }
+
+  // ── A library lives in a PRIVATE registry the build machine has no login for. Not ours to fix — the
+  // token is the user's. Distinct from a package that does not exist (E404, below): here it exists but
+  // access is refused. Anchored to npm's own error codes so an unrelated 401/403 cannot claim it. ──
+  if (/npm ERR!\s*code\s*(E401|E403|ENEEDAUTH)|npm ERR!.*401 Unauthorized|npm ERR!.*403 Forbidden|Unable to authenticate, need:|This command requires you to be logged in/i.test(log)) {
+    return {
+      code: 'NPM_REGISTRY_AUTH',
+      summary: 'One of your app’s libraries is in a private registry that needs a login the build machine does not have. Publish that library publicly, or add its registry token as a repository secret and reference it from an .npmrc.',
+      autoFixable: false,
+      needs: [],
     };
   }
 
@@ -230,6 +257,19 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       summary: 'The build machine was set up with an older Java than this Android build needs.',
       autoFixable: true,
       needs: [workflowPath],
+    };
+  }
+
+  // ── A Firebase / Google-services plugin needs google-services.json from the user's OWN Firebase
+  // project, and the build cannot invent it (it carries their project's real keys). Named BEFORE the
+  // generic aapt/resource-linking and app-code fallbacks so the user gets a real instruction instead of
+  // a Gradle wall. Not ours to fix — it is the user's file to add. ──
+  if (/google-services\.json is missing|File google-services\.json is missing|Could not (find|read) google-services\.json|The Google Services Plugin cannot function without/i.test(log)) {
+    return {
+      code: 'GOOGLE_SERVICES_MISSING',
+      summary: 'Your app uses Firebase or Google services, which need the google-services.json file from your own Firebase project. Open the Firebase console, download google-services.json for your Android app, and add it to your project before building.',
+      autoFixable: false,
+      needs: [],
     };
   }
 

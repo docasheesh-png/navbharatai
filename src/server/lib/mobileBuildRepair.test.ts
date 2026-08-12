@@ -54,8 +54,35 @@ describe('reading a failed build log', () => {
     ['sdk terms', 'You have not accepted the license agreements of the following SDK components', 'SDK_LICENSE_NOT_ACCEPTED'],
     ['old java', 'Unsupported class file major version 61', 'JAVA_VERSION_TOO_OLD'],
     ['out of memory', 'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory', 'NODE_OUT_OF_MEMORY'],
+    ['wrong keystore password', 'Execution failed for task \':app:validateSigningRelease\'. > Keystore was tampered with, or password was incorrect', 'SIGNING_CREDENTIALS_WRONG'],
+    ['cannot recover key', 'com.android.ide.common.signing.KeytoolException: Failed to read key app from store: Cannot recover key', 'SIGNING_CREDENTIALS_WRONG'],
+    ['private registry auth', 'npm ERR! code E401\nnpm ERR! 401 Unauthorized - GET https://npm.mycompany.com/@acme%2fui', 'NPM_REGISTRY_AUTH'],
+    ['needs login token', 'npm ERR! code ENEEDAUTH\nnpm ERR! need auth This command requires you to be logged in', 'NPM_REGISTRY_AUTH'],
+    ['missing google-services', 'Execution failed for task \':app:processReleaseGoogleServices\'. > File google-services.json is missing. The Google Services Plugin cannot function without it.', 'GOOGLE_SERVICES_MISSING'],
   ])('recognises %s', (_name, log, code) => {
     expect(classifyBuildFailure(log, APK_PATH).code).toBe(code);
+  });
+
+  it('names infra failures honestly (not auto-fixable, actionable message, no vendor leak) — G6/G11/G12', () => {
+    const cases = [
+      'Keystore was tampered with, or password was incorrect',
+      'npm ERR! code E403\nnpm ERR! 403 Forbidden - GET https://npm.private.io/@acme%2fkit',
+      'File google-services.json is missing. The Google Services Plugin cannot function without it.',
+    ];
+    for (const log of cases) {
+      const d = classifyBuildFailure(log, APK_PATH);
+      expect(d.autoFixable).toBe(false);              // infra we cannot fix — never a fake "fixed"
+      expect(d.summary.length).toBeGreaterThan(20);   // a real instruction, not a shrug
+      // White-Label Law: a user-facing message never leaks an AI vendor/model name
+      expect(d.summary).not.toMatch(/GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Anthropic|Moonshot/i);
+      // and a rules repair never pretends to fix it
+      expect(repairFiles(d, { [APK_PATH]: AAB_WORKFLOW }, APK_PATH)).toBeNull();
+    }
+  });
+
+  it('keeps a MISSING key (absent) distinct from a WRONG key (present but bad password) — G11', () => {
+    expect(classifyBuildFailure('##[error]Missing required secret: ANDROID_KEYSTORE_BASE64', APK_PATH).code).toBe('MISSING_SIGNING_SECRET');
+    expect(classifyBuildFailure('> Keystore was tampered with, or password was incorrect', APK_PATH).code).toBe('SIGNING_CREDENTIALS_WRONG');
   });
 
   it('pulls the directory Capacitor actually wanted out of the log', () => {

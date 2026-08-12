@@ -2764,7 +2764,12 @@ export class ToolDispatcher {
           .episodes.filter((e) => e.kind === 'request')
           .map((e) => e.text);
         const requestText = currentRequestForCoverage(requestEpisodes);
-        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph());
+        // The file BODIES are passed alongside the graph so a feature built INLINE (a search box
+        // inside a list page owns no file of its own) is seen as built instead of reported missing —
+        // and so a feature found in neither names nor bodies is a CONFIRMED absence rather than a
+        // guess. Everything readiness needs is already in `snap.sources`; this analyzer simply was
+        // never given it.
+        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph(), snap.sources);
         // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
         // actually start/build? Reads package.json; never throws, never breaks
         // evaluate. "Preview is EARNED" — a build that compiles can still not run.
@@ -2882,7 +2887,13 @@ export class ToolDispatcher {
         if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         if (viteEnv.length) extra.push({ severity: 'medium', label: `${viteEnv.length} non-VITE_ import.meta.env reference(s) (undefined in the browser)` });
         if (asyncPatterns.length) extra.push({ severity: 'medium', label: `${asyncPatterns.length} forEach(async …) loop(s) that do not await` });
-        for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
+        // A CONFIRMED absence says so plainly. The old single wording — "not found" — read like a
+        // lookup that came up empty, which is exactly how a true finding gets skimmed past: in the
+        // dukaan report the user had literally written "upar search box ho", no search existed, this
+        // line said so, and the build shipped anyway. "not built" is what actually happened.
+        for (const f of reqCoverage.findings) {
+          extra.push({ severity: 'medium', label: f.confirmed ? `Requested feature NOT BUILT: ${f.feature}` : `Requested feature not found: ${f.feature}` });
+        }
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness

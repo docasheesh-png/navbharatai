@@ -14,7 +14,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
-import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
@@ -688,6 +688,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json(record);
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to load the build report.' });
+    }
+  });
+
+  // TRIAGE MARKS (admin request 2026-08-12: "download kar le to build report par koi tag lag jaye").
+  //
+  // TWO marks, not one — see reportTriage.ts. `downloaded` is set automatically by the panel's Download
+  // button (a fact about the admin's action); `fixed` is only ever set by a person clicking it (a fact
+  // about the work). Collapsing them would have shown this session's own report as "fixed" from the
+  // first minute, while nine of its ten defects were still shipping.
+  //
+  // It returns the MERGED marks so the panel renders what was actually persisted — a badge drawn from
+  // an optimistic local guess would show "fixed" on a write that silently failed.
+  app.post('/api/admin/build-reports/:id/mark', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
+      const triage = await markAdminBuildReport(String(req.params.id), {
+        downloaded: body.downloaded === true,
+        // Tri-state on purpose: absent leaves the mark alone, true sets it, false CLEARS it. The admin
+        // will tick one by mistake, and a mark that cannot be undone silently buries a real bug.
+        fixed: typeof body.fixed === 'boolean' ? body.fixed : undefined,
+        note: typeof body.note === 'string' ? body.note : null,
+      });
+      if (!triage) { res.status(404).json({ error: 'Build report not found (or the mark could not be saved).' }); return; }
+      res.json({ ok: true, triage });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to mark the build report.' });
     }
   });
 

@@ -713,12 +713,27 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(r.issues.find((i) => i.code === 'LLM_CALL_FAILED')?.message).toContain('overloaded');
   });
 
-  it('#4 a normal (end_turn) call adds NO timeline noise, only the channel record', () => {
+  it('#4 a normal (end_turn) call adds NO PER-CALL timeline noise, only the channel record', () => {
+    // The invariant this protects is per-call: a clean call must not leave a struggle marker, or a
+    // 100-step build buries its real findings under 100 non-findings. It is NOT "recordLlmCall may
+    // never touch the timeline" — the first call also stamps TIME_TO_FIRST_CALL, one entry for the
+    // whole build, because 227 seconds of setup silence was invisible until something recorded it
+    // (admin report 2026-08-12). Asserted below as exactly one, and never again.
     const d = fresh();
     d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
     const r = d.report();
     expect(r.llmCalls).toHaveLength(1);
-    expect(r.issues).toHaveLength(0); // success + not truncated → no struggle marker
+    expect(r.issues.filter((i) => i.code !== 'TIME_TO_FIRST_CALL')).toHaveLength(0);
+  });
+
+  it('#4b a SECOND clean call adds nothing at all — the per-call invariant, sharpened', () => {
+    const d = fresh();
+    d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
+    const after = d.report().issues.length;
+    for (let i = 0; i < 20; i += 1) {
+      d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
+    }
+    expect(d.report().issues).toHaveLength(after);
   });
 
   it('#1 keeps the FULL error message (un-truncated) alongside the short timeline line', () => {

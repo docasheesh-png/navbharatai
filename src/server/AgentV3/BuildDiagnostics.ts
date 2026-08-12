@@ -579,7 +579,34 @@ export class BuildDiagnostics {
    * preview, finish reason, tokens, latency). A `finishReason: 'max_tokens'` here is the smoking gun
    * for a truncated multi-file generation (the OneShot 8K-token cut-off).
    */
+  /**
+   * HOW LONG BEFORE THE BUILD ACTUALLY STARTED THINKING (admin report 2026-08-12).
+   *
+   * That build's first model call came 227 seconds in. For those 3 minutes 47 the user saw heartbeats
+   * saying "still working" with nothing to report, and `SETUP_TIMING` cheerfully said "Workspace ready
+   * in 0s" — measured before the sandbox restore, the dependency install and the secrets load, which
+   * were the whole of it. So the one number the report did print about setup was the one part of setup
+   * that was instant.
+   *
+   * Recorded HERE, on the first LLM call, because that is the only moment that can be defined without
+   * guessing: everything before it is preparation, and the user experiences all of it as waiting. A
+   * number nobody records is a number that grows.
+   */
+  private recordTimeToFirstCall(): void {
+    if (this.llmCalls.length > 0) return; // only the first
+    const seconds = Math.round((this.now() - this.startedAt) / 1000);
+    this.record({
+      phase: 'plan',
+      // Loud past the point where a user starts wondering whether anything is happening.
+      severity: seconds >= 60 ? 'warning' : 'info',
+      code: 'TIME_TO_FIRST_CALL',
+      message: `${seconds}s passed before the build made its first model call — sandbox setup, project restore, dependency install and secrets loading all happen before this point, and the user waits through every second of it.`,
+      autoResolved: seconds < 60,
+    });
+  }
+
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
+    this.recordTimeToFirstCall();
     if (this.llmCalls.length < MAX_LLM_CALLS) {
       this.llmCalls.push({
         ts: this.now(),
@@ -1013,6 +1040,21 @@ export class BuildDiagnostics {
     ).length;
   }
 
+  /**
+   * Did a given TOOL actually run during this build?
+   *
+   * Exists so the claim audit can check a sentence like "I verified this with a real browser
+   * screenshot" against whether a screenshot was ever taken. Reads the timeline rather than a separate
+   * counter, so it cannot drift from what the report shows.
+   */
+  toolWasUsed(tool: string): boolean {
+    const needle = String(tool ?? '').trim().toLowerCase();
+    if (!needle) return false;
+    return this.issues.some(
+      (i) => i.phase === 'tool' && i.code === 'TOOL_DONE' && i.message.toLowerCase().includes(needle),
+    );
+  }
+
   report(): BuildDiagnosticsReport {
     // Normalize recovered-on-success issues at SERIALIZATION time, so counts, issues[] and the derived
     // rootCause are all consistent even when a finalize path bypassed finish()'s back-fill. Idempotent.
@@ -1205,6 +1247,13 @@ export function isTestOnlyTypecheckFailure(command: string, stdout?: string, std
  * and deriveRootCause — so all three agree. Pure.
  */
 const RECOVERABLE_ON_SUCCESS: ReadonlySet<string> = new Set([
+  // A PREVIEW FAILURE THE BUILD LATER RECOVERED FROM (admin report 2026-08-12). The preview went down
+  // mid-build, was restarted, and was then verified rendering by a real browser — and the report still
+  // named "nothing is listening on that port" as the ROOT CAUSE of a SUCCESSFUL build. A recovered
+  // transient is not a root cause; it is a thing that happened and then stopped happening. Guarded
+  // below by the same rule as a failed command: only forgiven when the run carries no surviving
+  // problem about it (`previewVerifiedRendered` records the positive proof).
+  'PREVIEW_NOT_RENDERED',
   'TOOL_ERROR', 'NO_BUILD_NUDGE', 'EMPTY_BUILD_RETRY', 'SANDBOX_CMD_FAILED',
 ]);
 export function isRecoverableOnSuccess(code: string): boolean {

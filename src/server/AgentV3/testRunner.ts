@@ -224,6 +224,26 @@ export function testSuiteCouldNotRun(exitCode: number, output: string): string |
   return null;
 }
 
+/**
+ * Did this run report a single test result?
+ *
+ * NOT a downgrade — deliberately. An earlier attempt at the admin's `playwright: FAIL (exit=1)` report
+ * made "no tally" mean "could not run", and the existing suite rejected it for a better reason than the
+ * one I had: hiding genuinely failing tests behind a reassuring "unverified" is the opposite mistake
+ * and a more damaging one, so only an EXPLICIT infra signature may downgrade a failure.
+ *
+ * The real defect in that report was never the verdict, it was the silence. `playwright: FAIL (exit=1)`
+ * with no other word leaves the admin unable to tell "your tests failed" from "our sandbox died", and
+ * the two need completely different responses. So the verdict stands and the SUMMARY says which of the
+ * two it cannot rule out. Pure.
+ */
+export function reportedNoTestResults(output: string): boolean {
+  const out = String(output || '');
+  return !(/\b\d+\s+(passed|failed|passing|failing|skipped|pending|tests?)\b/i.test(out)
+    || /Tests?:\s*\d+/i.test(out)
+    || /\b\d+\s*\/\s*\d+\b/.test(out));
+}
+
 export function parseTestOutcome(
   plan: TestPlan,
   exitCode: number,
@@ -330,8 +350,18 @@ export function parseTestOutcome(
   const ran = couldNotRunReason == null;
   const countStr =
     total != null ? `${passed ?? 0}/${total} passed${failed ? `, ${failed} failed` : ''}` : `exit=${exitCode}`;
+  // A BARE VERDICT WITH NO EVIDENCE IS NOT A REPORT (admin report 2026-08-12). That build recorded
+  // exactly `playwright: FAIL (exit=1)` — no counts, no failing test names, nothing. The admin could
+  // not tell "your tests failed" from "our sandbox died", and those need opposite responses. The
+  // verdict is unchanged (only an explicit infra signature may downgrade a failure); what changes is
+  // that the report now admits which of the two it cannot rule out.
+  const blindFailure = !ok && ran && total == null && reportedNoTestResults(out);
   const summary = ran
     ? `${plan.framework}: ${ok ? 'PASS' : 'FAIL'} (${countStr})`
+      + (blindFailure
+        ? ' — the run reported no test results at all, so this could be a failing test OR the runner'
+          + ' failing to start; the output gave nothing to tell them apart'
+        : '')
     : `${plan.framework}: COULD NOT RUN — ${couldNotRunReason}. The app's tests were not verified (this is a sandbox limitation, not a defect in the app).`;
 
   return {

@@ -74,7 +74,7 @@ import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
@@ -2005,6 +2005,19 @@ export class ToolDispatcher {
           );
           return blockMsg;
         }
+        // THE USER'S OWN KEYS ARE NOT OURS TO DELETE (admin build transcript 2026-08-12). The platform
+        // writes .env from the user's saved secrets; twenty-five seconds later the builder "fixed" the
+        // hardcoded secrets it found there, and the app's database and payments were dead — reported as
+        // "your source files are untouched". A prompt asking the model not to would be one more
+        // instruction to forget; this makes the write impossible.
+        const erasedKeys = wouldEraseUserSecrets(path, existingContent, content);
+        if (erasedKeys.length > 0) {
+          const blockMsg = eraseUserSecretsMessage(path, erasedKeys);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${path}`,
+          );
+          return blockMsg;
+        }
         // DUPLICATE-MODULE guard (TaskForge autopsy 2026-07-18): the ORIGIN of the 2-hour failure was the
         // builder CREATING the same component under two convention roots (app/ AND src/), whose interfaces
         // then drift and break the build. Refuse to create a parallel copy of a module that already exists
@@ -2133,6 +2146,14 @@ export class ToolDispatcher {
           if (isDestructiveEmptyOverwrite(file.path, priorContent, file.content)) {
             getWorkspaceMemory(this.workspaceId).recordAudit(
               `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (batch): ${file.path}`,
+            );
+            return { path: file.path, kind, shrink: false, blocked: true };
+          }
+          // Secrets guard PARITY — a guard that only covers write_file is one tool call from bypassed.
+          const batchErased = wouldEraseUserSecrets(file.path, priorContent, file.content);
+          if (batchErased.length > 0) {
+            getWorkspaceMemory(this.workspaceId).recordAudit(
+              `[BLOCKED-DESTRUCTIVE] refused to erase ${batchErased.length} user secret(s) in ${file.path} (batch)`,
             );
             return { path: file.path, kind, shrink: false, blocked: true };
           }

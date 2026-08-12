@@ -113,6 +113,7 @@ import {
   JOURNEY_TIMEOUT_MS,
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
+import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -9572,6 +9573,10 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
+      // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
+      // model's "no console errors" against whether anyone actually looked.
+      let runtimeCaptureAvailable = false;
+
       // THE RELEASE GATE'S EVIDENCE (Mission 10/10 Phase 5, §23), collected as the checks below run.
       //
       // Every field starts at 'not-run' and is only ever moved by a check that ACTUALLY RAN. That
@@ -10930,7 +10935,13 @@ export function registerAgentV3Routes(app: Express): void {
       // says WRITTEN, never "passed" — a scaffold reported as a test run is a fake verdict.
       if (process.env.AGENTV3_AUTO_E2E !== 'off' && !abort.signal.aborted) {
         try {
-          const e2eFiles = Object.fromEntries(writtenFiles);
+          // THE WHOLE PROJECT, NOT THIS TURN'S WRITES (admin report 2026-08-12). An edit build that
+          // wrote one `.env` was judged on that one file and skipped with the reason "this project has
+          // no user interface for a browser to load" — for a React app with a full page of components.
+          // The decision was arguably right and the REASON was false, which is worse: it tells the user
+          // something untrue about their own app, and it hides the real reason from the next reader.
+          const projectFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
           const decision = shouldAutoScaffoldE2e({
             files: e2eFiles,
             ok: result.ok,
@@ -11167,7 +11178,7 @@ export function registerAgentV3Routes(app: Express): void {
           let captured: RuntimeError[] = [];
           try {
             const cap = await actuator.getConsoleErrors!(workspaceId, sinceMs);
-            if (cap.captured !== false) captureAvailable = true; // undefined = back-compat "assume captured"
+            if (cap.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
             captured = filterActionableErrors(cap.errors);
           } catch { break; /* console capture needs a real sandbox — availability stays unproven */ }
           if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
@@ -11195,7 +11206,7 @@ export function registerAgentV3Routes(app: Express): void {
         let remaining: RuntimeError[] = [];
         try {
           const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
-          if (fin.captured !== false) captureAvailable = true;
+          if (fin.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
           remaining = filterActionableErrors(fin.errors);
         } catch { /* best-effort — availability stays whatever the loop proved */ }
         try {
@@ -11213,6 +11224,35 @@ export function registerAgentV3Routes(app: Express): void {
           }
         } catch { /* diagnostics recording is best-effort — never breaks a build */ }
       }
+
+      // DOES THE SUMMARY SURVIVE CONTACT WITH WHAT WE MEASURED? (admin transcript + report 2026-08-12)
+      //
+      // Two contradictions came out of ONE build. The model wrote "I verified this with a real browser
+      // screenshot and confirmed there are no console errors" while the same report recorded that the
+      // console could not be captured. And it described the screen as showing "Health 100/100, Level 1,
+      // XP 0/100 · Location: Forest Path · Inventory · Game Log" — for a home page with four corner
+      // buttons, whose source contains none of those words. It had described the same screen correctly
+      // earlier in the same build; the second time it described an image it did not look at.
+      //
+      // A wrong verdict is a bug. A fabricated observation is the platform telling the user something
+      // that never happened, in the confident voice of a verification — and the user has no way to know
+      // which sentence to distrust. So the platform corrects itself, in its own reply, out loud.
+      try {
+        const contradictions = auditSummaryClaims(result.summary, {
+          consoleCaptured: runtimeCaptureAvailable,
+          screenshotTaken: buildDiag.toolWasUsed('screenshot'),
+          previewVerified: previewVerifiedRendered,
+          // The app's real source — a label it does not contain cannot have been on the screen.
+          sourceText: Array.from(writtenFiles.values()).join('\n'),
+        });
+        if (contradictions.length > 0) {
+          result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'CLAIM_UNSUPPORTED',
+            message: claimAuditSummary(contradictions), autoResolved: false,
+          });
+        }
+      } catch { /* the audit reports on the summary; it must never break the build */ }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the

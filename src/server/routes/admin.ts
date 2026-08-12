@@ -12,6 +12,7 @@ import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
+import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
@@ -432,6 +433,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ history });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read AgentV3 cost telemetry.' });
+    }
+  });
+
+  // ASSISTANT SPEND — what the Professionals / Doctor AI / Other-AI tools cost us, and the free-model
+  // share that is the early warning behind it. The rupee total moves with traffic and so says little;
+  // the SHARE is flat at ~100% while the free tier-1 leader carries turns and collapses the day it
+  // stops, which is a vendor decision we do not control and that breaks nothing visible when it lands.
+  // Admin-only: the payload names models and providers (White-Label Law §3 — never a user surface).
+  app.get('/api/admin/assistant-spend', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '14'), 10) || 14, 1), 365);
+      res.json(await assistantSpendStore.summary(days));
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read assistant spend.' });
     }
   });
 

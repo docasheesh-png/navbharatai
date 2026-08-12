@@ -15,8 +15,10 @@
 // provider identity ever leaks to the user.
 
 import { AIRouterManager } from '../AI/AIRouterManager';
-import type { ChatTurnUsage } from './chatSpend';
+import { chatTurnCost, type ChatTurnUsage } from './chatSpend';
 import { recordAiSpend } from './aiSpendZone';
+import { assistantSpendStore } from './AssistantSpendStore';
+import { usdInrRate } from './UsdInrRate';
 
 export type ProfessionalTier = 'free' | 'paid';
 
@@ -59,6 +61,18 @@ export async function callProfessionalAIWithUsage(
     // running inside a spend zone accumulates this call automatically, including a tool that fans out
     // over batches and makes a dozen of them. See aiSpendZone.ts. A no-op outside a zone.
     recordAiSpend(spend);
+    // WHICH RUNG ANSWERED — recorded in the same place, for the same reason. Our assistants are
+    // effectively free only because the tier-1 leader is priced at zero, which is a VENDOR's decision.
+    // If that changes, every turn quietly routes to a paid rung below and nothing breaks, nothing
+    // complains, and the bill moves — so the free/paid split has to be measured while it is still
+    // boring. Sitting beside recordAiSpend is what makes it cover every professional and every
+    // Other-AI tool by construction, rather than by remembering to add it at each call site.
+    // Deliberately NOT awaited: a telemetry write must never delay or fail a user's answer.
+    void assistantSpendStore.record({
+      provider: spend.provider,
+      model: spend.model,
+      cost: chatTurnCost(spend, usdInrRate()),
+    });
     return { content: response.content, spend };
   };
 

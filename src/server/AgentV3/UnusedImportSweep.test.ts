@@ -91,3 +91,41 @@ describe('sweepUnusedImports + flag', () => {
     expect(importSweepEnabled({ AGENTV3_IMPORT_SWEEP: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
   });
 });
+
+/**
+ * `import type { … }` MUST NOT BE CORRUPTED INTO `import type, { … }` (admin audit 2026-08-12).
+ *
+ * A post-build audit found this pass — which runs on every build, rewrites source, and persists
+ * durably — turning `import type { Props, Unused }` into `import type, { Props }`, a syntax error, in
+ * a WORKING app. The `type` keyword is a type-only MODIFIER on the whole import, not a default binding.
+ * `import type {` appears in 390 files in this repo alone, and findSyntaxErrors parses the broken output
+ * fine, so nothing downstream catches it.
+ */
+describe('the import-type modifier is a modifier, not a default binding', () => {
+  it('drops the unused specifier and KEEPS the type modifier — no `type,` corruption', () => {
+    const out = stripUnusedNamedImports('src/x.ts', "import type { Props, Unused } from './types';\nexport const x = (p: Props) => p;\n");
+    expect(out).toContain('import type { Props } from');
+    expect(out).not.toContain('import type,');
+  });
+
+  it('drops the whole statement when every type specifier is unused', () => {
+    const out = stripUnusedNamedImports('src/x.ts', "import type { Unused } from './types';\nexport const y = 1;\n");
+    expect(out).not.toContain('import');
+    expect(out).toContain('export const y = 1;');
+  });
+
+  it('leaves a fully-used type import untouched', () => {
+    const src = "import type { Props, State } from './types';\nexport const z = (p: Props, s: State) => 0;\n";
+    expect(stripUnusedNamedImports('src/x.ts', src)).toContain('import type { Props, State } from');
+  });
+
+  it('inline `import { type A, type B }` modifiers still work', () => {
+    const out = stripUnusedNamedImports('src/x.ts', "import { type Props, type Unused } from './t';\nexport const a = (p: Props) => p;\n");
+    expect(out).toContain('import { type Props } from');
+  });
+
+  it('a genuine default binding is still preserved — the fix did not break that path', () => {
+    const out = stripUnusedNamedImports('src/x.ts', "import Def, { Used, Dead } from './m';\nexport const b = () => Def(Used);\n");
+    expect(out).toContain('import Def, { Used } from');
+  });
+})

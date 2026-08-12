@@ -31451,3 +31451,58 @@ OPEN, honestly: the interactive per-item "fix" card needs frontend work to rende
 text offer in the summary already delivers the feature end-to-end today. And the 44-min report's broken
 ErrorBoundary.tsx remains an open root cause (needs the generated file to confirm — the model wrote it
 over a correct scaffold, not the scaffold's fault).
+
+---
+
+## 2026-08-12 (continued) — two more root causes from the "continue" report + a structural audit
+
+### The recurring ErrorBoundary.tsx TS2339 — root-caused and fixed deterministically
+
+Confirmed across THREE reports: `src/ErrorBoundary.tsx(10,10): error TS2339: Property 'state' does not
+exist on type 'ErrorBoundary'`, five `npx tsc` passes burned on it, shipped broken. My first reading
+("our scaffold produces the error") was WRONG and is corrected: the scaffold's class-component error
+boundary compiles CLEAN when react is present (proven — `TSC_EXIT=0` against real node_modules). The
+real chain: a sandbox recycle restores a PREVIOUSLY MODEL-BROKEN ErrorBoundary from the durable store;
+the weak coder cannot fix a class component (it tries to convert it to a functional component, which a
+React error boundary cannot be — its own words in the report) and thrashes.
+
+FIX (scaffoldBoilerplate.ts): the tsc gate now restores the canonical scaffold boilerplate
+DETERMINISTICALLY before spending a model pass — same shape as the dead-server fix (when the failure is
+in a file we own with one correct form, do the free certain thing). Only pure boilerplate the user never
+asked for is eligible (never App.tsx); only a file that has DRIFTED from canonical is restored (an
+already-canonical file being blamed means the cause is elsewhere, e.g. types momentarily missing).
+Kill switch AGENTV3_SCAFFOLD_RESTORE=off.
+
+### A real corruption in the unused-import sweep — found by the post-green audit, verified, fixed
+
+A background audit (6 agents + adversarial verify) of every post-green mutation path surfaced, and I
+reproduced by running the module:
+
+    import type { Props, Unused } from './types';   →   import type, { Props } from './types';
+
+The `type` keyword is a type-only MODIFIER on the whole import; the sweep mistook it for a default
+binding and rebuilt it as `type, { … }`, a syntax error. `import type {` appears in 390 files in this
+repo alone, this pass runs on EVERY build, rewrites source, is default-on, has no green check, and
+`findSyntaxErrors` parses the broken output fine — so it silently corrupts a working app and persists it
+durably. Fixed by peeling the `type ` modifier off before the default-binding logic; five regression
+cases lock it.
+
+### THE STRUCTURAL FINDING (raised with the admin, not yet built) — "permission by default is the bug"
+
+The same audit established, from our own code, that the admin's observation is exact: after the app is
+latched `previewGreen = true`, TWELVE more write-capable passes run and only ONE (GREEN STOP, shipped
+today) checks whether the app already works. NINE are live in production; one is LLM-driven. Worse:
+nothing re-verifies after those mutations, so a build broken by a late pass is still reported "preview
+verified"; and GreenGuard then SAVES the post-mutation files as the new last-known-good, overwriting the
+version the browser actually saw.
+
+The proposed root fix is NOT another per-site `if (previewGreen) skip` — that has to be re-remembered at
+every call site and every future pass. It is a GREEN WRITE-AUTHORITY CHOKE POINT: once green, deny writes
+by default, allow only by explicit named exception — the exact mechanism CLAUDE.md already endorses for
+noClaudeZone / aiSpendZone ("by construction, not convention"). Plus moving GreenGuard's snapshot to the
+latch and making it restore on a freshly-measured regression. This is a large hot-path change (enforced
+in ToolDispatcher.dispatch + E2BActuator.writeFile) and is being put to the admin before building, with
+the allowlist (runtime-error auto-fix and feature-presence heal stay — those are the user's own requests,
+not our opinion).
+
+Gate: tsc clean both projects, full run **14,694 / 14,694**.

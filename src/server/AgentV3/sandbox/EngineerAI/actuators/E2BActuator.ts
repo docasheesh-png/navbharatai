@@ -29,6 +29,7 @@ const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 import {
   BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
 } from '../../../PreviewVerify';
+import { assertWriteAllowed } from '../../../greenFreeze';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -685,13 +686,22 @@ export class E2BActuator implements IEngineerActuator {
 
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
     const rel = safeRelPath(filePath);
+    // GREEN FREEZE — refuse to overwrite a file on a verified-working app unless an allowlisted pass is
+    // doing it (admin 2026-08-12). Checked at the ONE place every sandbox write passes through, before
+    // disk is touched, so a corrupting post-green pass is a no-op rather than damage. Throws, which the
+    // caller's write-then-record idiom skips cleanly (sandbox + writtenFiles + durable save together).
+    assertWriteAllowed(workspaceId, rel);
     await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, content));
     this._cacheFileWrite(workspaceId, rel, content); // warm-durability: remember for recreate-after-death restore
   }
 
   async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const rel = safeRelPath(filePath);
+    // GREEN FREEZE — a binary asset (a logo/icon/font the working app depends on) is source too, so a
+    // post-green overwrite of one is refused by the same rule as a code file (adversarial review 2026-08-12).
+    assertWriteAllowed(workspaceId, rel);
     const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
-    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, bytes));
+    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, bytes));
   }
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {

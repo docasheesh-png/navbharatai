@@ -239,3 +239,24 @@ describe('generateArchitectureDoc (P-PIPE.112 — real ARCHITECTURE.md)', () => 
     expect(typeof doc).toBe('string');
   });
 });
+
+describe('scaffold ErrorBoundary is never a false "orphan component"', () => {
+  it('an ErrorBoundary imported by nobody is NOT flagged — it is scaffold boilerplate, restored and re-wired', () => {
+    // When the model rewrites main.tsx and drops the import, the boundary is momentarily unimported. It
+    // is ours; flagging "created but never used" was a phantom finding in real reports.
+    const graph = {
+      files: ['src/ErrorBoundary.tsx', 'src/App.tsx', 'src/main.tsx'],
+      symbols: [
+        { name: 'ErrorBoundary', file: 'src/ErrorBoundary.tsx', kind: 'class' as const },
+        { name: 'App', file: 'src/App.tsx', kind: 'function' as const },
+      ],
+      components: ['ErrorBoundary', 'App'],
+      routes: [],
+      imports: { 'src/main.tsx': ['./App'] }, // note: ErrorBoundary import dropped
+      dependencies: [],
+      references: {},
+    };
+    const orphans = findOrphanComponents(graph as never);
+    expect(orphans.join(' ')).not.toContain('ErrorBoundary');
+  });
+});

@@ -31506,3 +31506,125 @@ the allowlist (runtime-error auto-fix and feature-presence heal stay — those a
 not our opinion).
 
 Gate: tsc clean both projects, full run **14,694 / 14,694**.
+
+---
+
+## 2026-08-12 (continued) — GREEN FREEZE: deny writes to a verified-working app by default
+
+The admin approved the structural fix the post-green audit recommended (default on). After the app is
+latched `previewGreen`, twelve write-capable passes could still edit it and only one (GREEN STOP)
+checked. The real bug is that write permission was OPEN BY DEFAULT after green — the guarantee had to be
+re-remembered at every call site. Same class the codebase already solved twice (noClaudeZone,
+aiSpendZone) by moving the invariant to the ONE place the thing happens and denying by construction.
+
+greenFreeze.ts: a per-workspace latch (the set of source paths present at green) + an AsyncLocalStorage
+pass zone. The actuator's writeFile calls assertWriteAllowed at its first line; a write that would
+OVERWRITE a file present at green is refused (throws GreenFreezeError) UNLESS the current async pass is
+allowlisted. Every post-build pass writes through the same idiom — actuator.writeFile THEN record into
+writtenFiles/durable — so a throw cleanly skips the sandbox write, the in-memory record AND the durable
+save together, and the pass's try/catch swallows it. Refusing a write can only ever keep the working app
+as it was; it can never break it — safe by the one absolute rule, by construction.
+
+Allowlist (the user's own requests + the safety mechanism): runtime-error-autofix, feature-presence-heal,
+green-guard-restore — each wrapped in runInPass. A NEW file is always allowed (a test/doc scaffold cannot
+break the rendered app). Everything else — the reviewer's opinions, the deterministic sweeps, index.html
+rewrites — becomes a no-op it cannot perform, recorded as GREEN_FREEZE_DEFERRED and offered to the user.
+The latch is cleared in BOTH the main finally and the deadline finalizer so it can never leak to the next
+build. Kill switch AGENTV3_GREEN_FREEZE=off restores today's behaviour byte-for-byte.
+
+A nice consequence: because the freeze prevents the corrupting post-green writes, GreenGuard's end-of-turn
+save now saves a GOOD state (there is no damage left to save), without touching GreenGuard.
+
+Before merge: an adversarial review (3 attackers + judge) is checking for any way a refused write could
+break a build, any latch-leak timing hole, and any post-green write path still un-guarded. Not merged
+until that clears.
+
+Gate: tsc clean both projects, full run **14,718 / 14,718** (24 new green-freeze tests).
+
+### Adversarial review of Green Freeze — 6 real blockers found and closed before merge
+
+A 3-attacker + judge workflow reviewed the Green Freeze change (this is the discipline for a hot-path
+change under the "never break the app" rule). It found real defects — the review did its job:
+
+1. **[BUILD-BREAKER] Latch leak into the next build.** A prior build for the same workspace can end via
+   a reclaim/sweeper/drain path that BYPASSES the finally, leaving its latch set — which would then
+   freeze the NEXT build's early generation writes and produce a broken app. FIXED by clearing the latch
+   at the VERY START of every build, before a single write, so no teardown path can leak a latch.
+2. **[BUILD-BREAKER, subsumed] Partial multi-file change.** The "a new file is always allowed" carve-out
+   let a non-allowlisted pass half-apply a coordinated change. FIXED by FULL DENY: a non-allowlisted
+   pass cannot write to the app at all once green (new file or edit); only infra paths (node_modules /
+   build output) stay writable. An allowlisted pass may still create the new files its fix needs.
+3. **writeBinaryFile un-guarded** (a logo/font/icon the app depends on) — FIXED, same assertWriteAllowed.
+4. **Latch set on a curl fallback** rather than a real browser render — FIXED, latches only when
+   `shot.source === 'browser'`.
+5. **ADR write recorded a refused write** (a `.catch` swallowed the throw, then onFileWrite ran) — FIXED,
+   records only on a successful write.
+6. **Re-latching a mutated tree** could overwrite the real green snapshot — FIXED, latchGreen is a no-op
+   once already latched this build.
+
+OPEN, honestly (rule 6): a post-green `run_command` (e.g. `npm install X`, `npx prisma format`) mutates
+files on disk that the freeze's writeFile guard does not see, and the durable save's disk scan could
+persist them. No current NON-allowlisted post-green pass mutates app source via run_command (the sweeps
+use writeFile, the reviewer is GREEN STOP'd, the vaccine only RUNS tests), so this is not a current-build
+breaker — it is a latent gap. It is closed by the next piece (verify-after-fix: re-render after any
+post-green change and revert on regression), which the admin has approved building next.
+
+Gate after the fixes: tsc clean both projects, full run **14,724 / 14,724** (30 green-freeze tests).
+
+---
+
+## 2026-08-12 (continued) — VERIFY AFTER FIX: a post-green change stands only if the app still works
+
+The second layer the admin approved, and the close of the one gap Green Freeze's review left open.
+Green Freeze denies writes to a green app by default, but three passes are ALLOWED to write (the user's
+own requests + the restore). Those wrote and nothing re-checked — a runtime-error repair or a
+feature-presence heal that itself broke the app shipped broken, and a post-green `run_command` (npm
+install / prisma format) could corrupt it unseen.
+
+verifyAfterFix.ts wraps an allowed post-green change: snapshot the working files → apply → RE-RENDER →
+keep if it still renders, else RESTORE the exact green snapshot and report honestly. "Trust, then
+verify." A regression is undone within seconds, not shipped — which is the direct answer to the admin's
+first question (a non-technical user can never be handed a broken app). The revert runs through the
+allowlisted green-guard-restore pass (so Green Freeze permits it) and reverts the durable store too.
+
+Three honest outcomes, each a distinct report code: FIX_VERIFIED (applied + re-rendered clean),
+FIX_REVERTED (broke it → rolled back, app is back to green), FIX_UNVERIFIED (could not re-render — kept,
+but we do NOT revert a change we cannot prove is bad). A revert we cannot complete is FIX_REVERT_FAILED
+(the end-of-turn GreenGuard save is the backstop). Wired around the runtime-error auto-fix first (the
+most common allowed post-green writer); feature-presence can follow the same pattern. Only engaged once
+green-latched. Kill switch AGENTV3_VERIFY_AFTER_FIX=off.
+
+Pure orchestration (every side effect injected) so the keep-vs-revert logic is fully unit-tested and
+cannot lie. Gate: tsc clean both projects, full run **14,737 / 14,737** (13 verify-after-fix tests).
+
+---
+
+## 2026-08-12 (continued) — LAYER 3 (PREVENTION) batch 1: stop generating the ErrorBoundary thrash
+
+The 50/50 law's "prevent, don't heal" half. A prevention audit (4 agents reading the code + three real
+reports) found the biggest recurring post-build fix is the ErrorBoundary/main.tsx class, and its cause is
+UPSTREAM: the architect prompt told the model to AUTHOR an error boundary in THREE places and named it as
+provided in ZERO. So the model kept writing (and breaking) one the scaffold already ships correctly.
+
+Batch 1 — all prompt/scaffold, no engine behaviour change:
+- systemPrompt.ts: the three "add an ErrorBoundary" / "write the CANONICAL class" instructions are
+  replaced by one "it is ALREADY PROVIDED at src/ErrorBoundary.tsx and wired in main.tsx — DO NOT rewrite
+  it (a boundary must be a class; rewriting breaks its typing); reuse the existing one for a new subtree."
+  When editing main.tsx, KEEP the ErrorBoundary import.
+- Added two items to the WRITE-IT-RIGHT-THE-FIRST-TIME list: (4) no unused imports/vars, (5) never assign
+  a dynamic value to innerHTML/outerHTML/insertAdjacentHTML (XSS). Both were recurring report defects the
+  engine only caught reactively.
+- The scaffold's main.tsx now carries a sealed-entry banner: "put routing/providers in App.tsx, not here;
+  keep the ErrorBoundary import." Removes the incentive to rewrite the entry.
+- ArchitectureAnalysis.findOrphanComponents exempts ErrorBoundary.tsx — when the model drops its import,
+  the momentary orphan was a phantom "created but never used" finding in real reports.
+
+This composes with the reactive scaffold-restore (the heal that now becomes dead code when prevention
+works) — prevent first, restore as the last line of defence. Gate: tsc clean both projects, full run
+**14,742 / 14,742**. systemPrompt.test.ts updated (the old "how to write a boundary" assertions replaced
+by the new "do not rewrite it" ones — the intent, preventing the thrash, is unchanged).
+
+⚠️ CI STATUS: GitHub Actions has run NO CI since 12:46 today despite many pushes + a PR reopen — almost
+certainly the repo's Actions minutes/quota (admin-only to resolve). Everything above is verified by the
+LOCAL gate (the same tsc + vitest CI runs), but per the constitution nothing merges until CI is green.
+Green Freeze + verify-after-fix (#2314) and this Prevention batch are all waiting on Actions.

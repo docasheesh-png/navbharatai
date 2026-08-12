@@ -185,11 +185,14 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
   });
 
   it('green is EARNED — only a real-browser render sets it', () => {
-    // Both setters sit beside a recordPreviewVerified() call; nothing else may set it.
+    // Both setters sit beside a recordPreviewVerified() call; nothing else may set it. (The window is
+    // wide enough to clear the GREEN FREEZE latch block (which latches the snapshot only on a real
+    // browser render) that now sits between the setter and the
+    // recordPreviewVerified() call — the earned-green association is unchanged, only spaced out.)
     const setters = route.match(/previewGreen = true;/g) || [];
     expect(setters.length).toBe(2);
     for (const m of route.matchAll(/previewGreen = true;/g)) {
-      expect(route.slice(m.index!, m.index! + 260)).toContain('recordPreviewVerified()');
+      expect(route.slice(m.index!, m.index! + 1400)).toContain('recordPreviewVerified()');
     }
   });
 

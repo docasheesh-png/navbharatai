@@ -129,6 +129,11 @@ export function findOrphanComponents(graph: ProjectGraph): string[] {
   }
   const isEntryPoint = (f: string): boolean =>
     /(^|\/)(main|index|App)\.(t|j)sx?$/i.test(f) ||
+    // Scaffold-provided boilerplate is a root BY DESIGN, not an unused component. When the model
+    // rewrites main.tsx and drops its `import ErrorBoundary`, the boundary is momentarily orphaned —
+    // but it is ours, it is restored (scaffoldBoilerplate), and re-wired; flagging it as "created but
+    // never used" is a false alarm that made real reports show a phantom unused component.
+    /(^|\/)ErrorBoundary\.(t|j)sx?$/i.test(f) ||
     // Next.js App Router SPECIAL files (TaskForge autopsy 2026-07-18): layout/page/loading/error/
     // not-found/route/template/default/global-error under app/ are wired by Next by FILENAME convention
     // and never `import`-ed — so they are entry points, NOT "unused components". Without this, a clean

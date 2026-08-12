@@ -116,6 +116,8 @@ import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySign
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold } from '../AgentV3/scaffoldBoilerplate';
+import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
+import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -5801,6 +5803,7 @@ export function registerAgentV3Routes(app: Express): void {
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void> } | undefined;
+    let disposeGreenFreezeObserver: (() => void) | null = null;
 
     const events = new AgentEventStream();
     events.subscribe((e) => emit(e), false);
@@ -5814,6 +5817,13 @@ export function registerAgentV3Routes(app: Express): void {
     const buildWriteLock = new PathWriteLock();
     const actuator = parallelBuild ? lockedActuator(rawActuator, buildWriteLock) : rawActuator;
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    // GREEN FREEZE — clear any stale green latch for this workspace at the VERY START, before a single
+    // write. This is the robust fix for the leak the adversarial review found (2026-08-12): a prior
+    // build for the same workspace can end via a reclaim / sweeper / drain path that bypasses the
+    // finally, leaving its latch set — which would then freeze THIS build's early generation writes and
+    // break it. Clearing here does not depend on any prior build's cleanup running, so no teardown path
+    // can leak a latch into the next build.
+    try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
     // Phase G1 — git as the third organ: durably persist every real git checkpoint as it is emitted,
     // so the commit timeline survives sandbox recycling and is visible across sessions/devices (not just
     // this session's RAM). Best-effort — a persist failure never affects the build or the stream.
@@ -6727,6 +6737,7 @@ export function registerAgentV3Routes(app: Express): void {
       // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has
       // captured the result facts. The delta cursor makes a later finally call a no-op.
       await persistSessionTimeline();
+      try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
@@ -7898,6 +7909,18 @@ export function registerAgentV3Routes(app: Express): void {
       // model (Haiku especially) does not reliably call update_todo to advance statuses. Each file
       // written advances the progress; the build's final success marks every item done (below).
       let planSteps = 0;
+      // GREEN FREEZE — record each refused post-green write as an honest, offered-not-applied finding,
+      // and collect them so the user is told (via the GREEN STOP suggestion path) rather than left with
+      // a silent no-op. Disposed in the finally so nothing leaks between builds.
+      disposeGreenFreezeObserver = setGreenFreezeObserver(({ path, pass }) => {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'GREEN_FREEZE_DEFERRED',
+            message: `The app was already verified working, so an edit to "${path}"${pass ? ` (${pass})` : ''} was NOT applied — the working app was left untouched. Reply if you want this change made.`,
+            autoResolved: true,
+          });
+        } catch { /* best-effort */ }
+      });
       const onFileWrite = (path: string, content: string) => {
         // Security gate: scan AI-generated JS/TS files for malicious patterns before
         // they are persisted. Critical findings emit a security warning event so the
@@ -10621,6 +10644,18 @@ export function registerAgentV3Routes(app: Express): void {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
+            // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files
+            // unless an allowlisted pass (the user's own request) makes them, so no later pass can
+            // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
+            try {
+              // Only latch on a REAL browser render — never on a curl fallback, whose empty-shell
+              // "render" cannot be trusted (adversarial review 2026-08-12). A curl-verified build simply
+              // does not engage the freeze rather than freeze on a false positive.
+              if (greenFreezeEnabled() && shot.source === 'browser' && !isGreenLatched(workspaceId)) {
+                const present = await actuator.listFiles(workspaceId).catch(() => [...writtenFiles.keys()]);
+                latchGreen(workspaceId, present.length ? present : [...writtenFiles.keys()]);
+              }
+            } catch { /* latching is best-effort — never affects a build */ }
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
@@ -10667,6 +10702,18 @@ export function registerAgentV3Routes(app: Express): void {
             // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
             // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
             previewGreen = true; // opened in a real browser, rendered, and no console errors
+            // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files
+            // unless an allowlisted pass (the user's own request) makes them, so no later pass can
+            // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
+            try {
+              // Only latch on a REAL browser render — never on a curl fallback, whose empty-shell
+              // "render" cannot be trusted (adversarial review 2026-08-12). A curl-verified build simply
+              // does not engage the freeze rather than freeze on a false positive.
+              if (greenFreezeEnabled() && shot.source === 'browser' && !isGreenLatched(workspaceId)) {
+                const present = await actuator.listFiles(workspaceId).catch(() => [...writtenFiles.keys()]);
+                latchGreen(workspaceId, present.length ? present : [...writtenFiles.keys()]);
+              }
+            } catch { /* latching is best-effort — never affects a build */ }
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             // APP HEALTH CULTURE (slice 1, admin 2026-07-12 "culture, not just stain"): the app RENDERS
             // — now check it actually has the interactive features the user asked for (Add/Delete/Filter…
@@ -10692,7 +10739,7 @@ export function registerAgentV3Routes(app: Express): void {
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
-                  const healed = await featureRunner.run(featurePresenceRepairPrompt(coverage));
+                  const healed = await runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage)));
                   if (healed.ok) {
                     result = healed;
                     try {
@@ -11307,8 +11354,44 @@ export function registerAgentV3Routes(app: Express): void {
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
           try {
-            const fix = await fixRunner.run(buildRepairPrompt(captured));
-            if (fix.ok) result = fix;
+            const applyFix = () => runInPass('runtime-error-autofix', () => fixRunner.run(buildRepairPrompt(captured)));
+            // VERIFY AFTER FIX (admin 2026-08-12) — this repair is ALLOWED to write to a green app, so it
+            // must PROVE the app still works afterwards. Snapshot the working files, apply, re-render; if
+            // the fix broke the app, roll back to the snapshot automatically. Only engaged once the app is
+            // green-latched (before green there is nothing to protect and no net is needed). This is what
+            // guarantees a non-technical user is never handed a broken app. Kill: AGENTV3_VERIFY_AFTER_FIX=off.
+            if (verifyAfterFixEnabled() && isGreenLatched(workspaceId) && lastPreviewUrl && actuator.browseUrl) {
+              let fixResult: { ok: boolean } | undefined;
+              const reRenderOk = async (): Promise<boolean> => {
+                const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl!), 35_000, 'verify-after-fix');
+                const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                if (v.inconclusive || v.serverDown) throw new Error('cannot re-verify'); // unproven → keep, do not revert on a guess
+                return v.rendered;
+              };
+              const vr = await verifyAfterFix<Record<string, string>>({
+                snapshot: async () => (await collectWorkspaceFiles(actuator, workspaceId)).files,
+                apply: async () => { fixResult = await applyFix(); },
+                reverify: reRenderOk,
+                revert: async (snap) => {
+                  const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                  const plan = restorePlan(snap, cur);
+                  await runInPass('green-guard-restore', async () => {
+                    for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
+                    const rm = buildRemoveCommand(plan.remove);
+                    if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
+                  });
+                  await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
+                },
+              });
+              try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('runtime-error fix', vr) }); } catch { /* best-effort */ }
+              // Promote the repaired result ONLY when it was kept — a reverted fix leaves the app exactly
+              // as green as it was, so `result` must stay the working version, not the broken repair.
+              if (vr.kept && fixResult?.ok) result = fixResult as typeof result;
+              if (vr.reverted) break; // the repair broke it and was undone — stop, do not try again
+            } else {
+              const fix = await applyFix();
+              if (fix.ok) result = fix;
+            }
           } catch (e) {
             console.log(`[AGENTV3] auto-fix attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
             break;
@@ -11873,8 +11956,12 @@ export function registerAgentV3Routes(app: Express): void {
             const rec = await adrStore.record(userId, workspaceId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString());
             if (rec) {
               const { path, content } = renderAdrMarkdown(rec);
-              await actuator.writeFile(workspaceId, path, content).catch(() => {});
-              onFileWrite?.(path, content);
+              // Only RECORD the write if it actually happened. A `.catch` that swallows a green-freeze
+              // refusal and then calls onFileWrite would record a file the sandbox never received
+              // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
+              let adrWritten = false;
+              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              if (adrWritten) onFileWrite?.(path, content);
             }
           } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
         })();
@@ -12061,9 +12148,11 @@ export function registerAgentV3Routes(app: Express): void {
                 const plan = restorePlan(snapshot, toSave);
                 // Keep the broken attempt before undoing it — nothing the user paid for is thrown away.
                 await saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave).catch(() => {});
-                for (const [path, content] of Object.entries(plan.write)) {
-                  try { await actuator.writeFile(workspaceId, path, content); } catch { /* per-file best-effort */ }
-                }
+                await runInPass('green-guard-restore', async () => {
+                  for (const [path, content] of Object.entries(plan.write)) {
+                    try { await actuator.writeFile(workspaceId, path, content); } catch { /* per-file best-effort */ }
+                  }
+                });
                 const rm = buildRemoveCommand(plan.remove);
                 if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
                 await saveWorkspaceFiles(workspaceId, snapshot);
@@ -12723,6 +12812,10 @@ export function registerAgentV3Routes(app: Express): void {
       emit({ type: 'error', message: errMsg, ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
       void notifyBuildComplete(userId, false);
     } finally {
+      // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale
+      // latch can never freeze the EARLY writes of the NEXT build for the same workspace.
+      try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
+      try { disposeGreenFreezeObserver?.(); } catch { /* best-effort */ }
       // Flush the LAST background checkpoint so the finished app is captured in History/restore.
       // Bounded (6s) + best-effort: checkpoints are off the hot path during the build, so this is
       // the ONLY place git is awaited, and the cap guarantees a slow/stuck git can never re-stall a

@@ -29389,6 +29389,93 @@ messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the 
 minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
 written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
 
+---
+
+## 2026-08-10 — Import runs itself (no model call), the 161 MB upload fix, and two corrections I owed the admin
+
+**Merged: PR #2230** (`a2bfbd1d`). Four root-cause fixes plus one deletion of my own work.
+
+### The admin's rule, and where the real gap was
+
+Admin, verbatim: *"navbharatai pro koi user kitni bhi badi file upload kyu na kare! usko llm / provider
+tak bhejki need hai hi nahi! ide/vsc jaise usko install kar ke preview chala dena hai bas!!"*
+
+Investigating before touching code (rule 4 step 1) turned up something worth recording: **the upload
+path was ALREADY model-free.** The uploaded bytes never reached a provider. The gap was one step later
+— nothing RAN the project. An import landed the files durably and stopped in the Files tab, so the only
+way to see the app was to type a message, which starts a full build turn and pushes the whole imported
+codebase through the model. A real report showed the shape: **37 imported files, 11 model calls,
+~21-25k input tokens each**, to do what `npm install && npm run dev` does. Wrong twice over — the user
+pays for tokens that bought nothing, and the model is made responsible for pure infrastructure.
+
+Fix: the import now ends on the Preview and signals it to boot. The boot is the EXISTING model-free
+path (`preview-diagnose` — hydrate from durable files → install → dev server → publish URL, zero model
+calls), signalled rather than reimplemented. A second copy in `AgentV3Panel` (which is what I wrote
+first) would have raced PreviewSurface's own boot and started the same sandbox twice; I threw that
+version away and replaced it with a nonce. Decision extracted pure + test-locked in
+`importedProjectBoot.ts`, including the case that motivated it: a RE-import into a workspace whose
+preview already resumed — C1 auto-resume is once-per-workspace and only fires with no URL, so it can
+never serve "there are NEW files". Honest failure path: the view switches to Live so the install
+progress is visible, and switches BACK if the app does not come up (a static site has no dev server to
+boot) rather than stranding the user on a dead tab.
+
+### The 161 MB zip upload — same disease as the sandbox reaper
+
+"Unknown or expired upload." on a 161 MB archive. The in-flight upload lived in a module-level `Map`
+plus an `os.tmpdir()` file — both PER-INSTANCE — while the archive's ~21 chunk requests are routed
+independently by Cloud Run. Worse than random: the burst of chunk requests is itself a scale-up
+trigger, so a BIG upload reliably summons the second instance that then breaks it, while small archives
+fit in one instance and worked. That is why it looked intermittent instead of structural.
+
+The record now lives in Firestore and each chunk is its own Cloud Storage object (`zipUploadStore.ts`).
+Chunk names are zero-padded because lexicographic order IS the archive's byte order — unpadded, part 10
+sorts before part 2 and the user gets a corrupt zip reported as a damaged file. Every part is verified
+present before assembly. With no bucket configured (local dev, CI) it reports unavailable and the
+original single-instance path runs, which is correct where there is only one instance.
+
+### I deleted my own module for main's better one
+
+I had built `healRepeat.ts` for the open root cause where the identical three repairs fired at t=126s,
+216s and 313s of one build. While I was blocked on push access, another session shipped `HealLedger.ts`
+for the same thing — and theirs is stronger: keyed by WORKSPACE so it sees across `ToolDispatcher`
+instances (the reviewer runs on a CHILD dispatcher, exactly the case a per-instance map is blind to),
+records a content hash as evidence, and is already read at settle into the build report. Mine is the
+weaker duplicate, so mine is gone. Keeping both would be two ledgers for one job — the drift rule 4
+exists to prevent. A bonus: main's localized `narrate(...)` calls came back, so the hardcoded English
+strings I was introducing (a White-Label Law regression) went with it.
+
+### Two corrections I owed the admin
+
+1. **`AGENTV3_REVIEW_AUTOFIX_WARNINGS=off` — I recommended it, from memory, and I was wrong.** I told
+   the admin this was the #1 lever on a 23-minute build. The code says otherwise: it adds NO pass (it
+   only widens what the single C9 pass repairs), and ALL post-build work is hard-capped at
+   `ADVISORY_CAP_MS = 120_000` — two minutes. So a long build spent that time in the BUILD LOOP, inside
+   `maxBuildSeconds()` (default 1800s). Turning it off would have saved nothing and shipped real
+   functional bugs (the Notes-report defects were all WARNINGS, which is why C9 alone missed them). The
+   admin asked the right question before acting. A ⛔ note is now pinned on that flag in `CLAUDE.md` so
+   no session repeats this.
+
+2. **`CASHFREE_WEBHOOK_SECRET` — I framed a nice-to-have as a priority.** With reconcile-on-sign-in
+   merged, the money never depends on the webhook; it is a speed upgrade (seconds vs the user's next
+   visit). Said so plainly and removed it from the admin's list. (The admin set it anyway the same day,
+   along with confirming `AI_WALLET_SPEND=on` — both now recorded in the `CLAUDE.md` key registry, and
+   the stale "webhook secret is NOT set" premise there is corrected.)
+
+Also fixed: missing-binary signatures (`sh: 1: tsc: not found`, `command not found`, `npm ERR! ENOENT`)
+now classify as REAL errors, so a gate that never ran can no longer pass as success.
+
+### Open root causes (unchanged, recorded honestly)
+
+- **Why heal writes do not survive.** `HealLedger` now records the FACT with names, counts and hashes,
+  but the mechanism (lost write, or something restoring older content over it) is still unknown. The
+  next real build report should show it. Not fixed from a theory.
+- **The build loop is the real 20-minute cost**, not the post-build gates. Per the 50/50 law the
+  answer is to make the FIRST build correct, not to cap the loop harder. Next investigation.
+- `E2B_USD_PER_HOUR` stays at the placeholder `0.10` by the admin's decision — safe because the figure
+  is admin-only, never on a user's bill, and always carries `estimated: true`.
+
+Gate: `tsc` (frontend + server) clean, **13343/13343 tests**, build green, `boot:check` PASS, bundle
+within budget.
 ## 2026-08-10 — Mobile GitHub login now returns to the APP (in-app popup + deep-link), not the browser
 
 Admin report: in the installed app, GitHub login redirected the whole WebView to the browser and never came

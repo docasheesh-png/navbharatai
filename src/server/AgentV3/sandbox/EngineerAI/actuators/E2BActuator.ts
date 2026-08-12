@@ -696,8 +696,12 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const rel = safeRelPath(filePath);
+    // GREEN FREEZE — a binary asset (a logo/icon/font the working app depends on) is source too, so a
+    // post-green overwrite of one is refused by the same rule as a code file (adversarial review 2026-08-12).
+    assertWriteAllowed(workspaceId, rel);
     const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
-    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, bytes));
+    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, bytes));
   }
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {

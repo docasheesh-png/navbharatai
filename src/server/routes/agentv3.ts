@@ -5816,6 +5816,13 @@ export function registerAgentV3Routes(app: Express): void {
     const buildWriteLock = new PathWriteLock();
     const actuator = parallelBuild ? lockedActuator(rawActuator, buildWriteLock) : rawActuator;
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    // GREEN FREEZE — clear any stale green latch for this workspace at the VERY START, before a single
+    // write. This is the robust fix for the leak the adversarial review found (2026-08-12): a prior
+    // build for the same workspace can end via a reclaim / sweeper / drain path that bypasses the
+    // finally, leaving its latch set — which would then freeze THIS build's early generation writes and
+    // break it. Clearing here does not depend on any prior build's cleanup running, so no teardown path
+    // can leak a latch into the next build.
+    try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
     // Phase G1 — git as the third organ: durably persist every real git checkpoint as it is emitted,
     // so the commit timeline survives sandbox recycling and is visible across sessions/devices (not just
     // this session's RAM). Best-effort — a persist failure never affects the build or the stream.
@@ -10640,7 +10647,10 @@ export function registerAgentV3Routes(app: Express): void {
             // unless an allowlisted pass (the user's own request) makes them, so no later pass can
             // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
             try {
-              if (greenFreezeEnabled() && !isGreenLatched(workspaceId)) {
+              // Only latch on a REAL browser render — never on a curl fallback, whose empty-shell
+              // "render" cannot be trusted (adversarial review 2026-08-12). A curl-verified build simply
+              // does not engage the freeze rather than freeze on a false positive.
+              if (greenFreezeEnabled() && shot.source === 'browser' && !isGreenLatched(workspaceId)) {
                 const present = await actuator.listFiles(workspaceId).catch(() => [...writtenFiles.keys()]);
                 latchGreen(workspaceId, present.length ? present : [...writtenFiles.keys()]);
               }
@@ -10695,7 +10705,10 @@ export function registerAgentV3Routes(app: Express): void {
             // unless an allowlisted pass (the user's own request) makes them, so no later pass can
             // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
             try {
-              if (greenFreezeEnabled() && !isGreenLatched(workspaceId)) {
+              // Only latch on a REAL browser render — never on a curl fallback, whose empty-shell
+              // "render" cannot be trusted (adversarial review 2026-08-12). A curl-verified build simply
+              // does not engage the freeze rather than freeze on a false positive.
+              if (greenFreezeEnabled() && shot.source === 'browser' && !isGreenLatched(workspaceId)) {
                 const present = await actuator.listFiles(workspaceId).catch(() => [...writtenFiles.keys()]);
                 latchGreen(workspaceId, present.length ? present : [...writtenFiles.keys()]);
               }
@@ -11906,8 +11919,12 @@ export function registerAgentV3Routes(app: Express): void {
             const rec = await adrStore.record(userId, workspaceId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString());
             if (rec) {
               const { path, content } = renderAdrMarkdown(rec);
-              await actuator.writeFile(workspaceId, path, content).catch(() => {});
-              onFileWrite?.(path, content);
+              // Only RECORD the write if it actually happened. A `.catch` that swallows a green-freeze
+              // refusal and then calls onFileWrite would record a file the sandbox never received
+              // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
+              let adrWritten = false;
+              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              if (adrWritten) onFileWrite?.(path, content);
             }
           } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
         })();

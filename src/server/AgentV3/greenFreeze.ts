@@ -100,6 +100,7 @@ function norm(path: string): string {
  */
 export function latchGreen(workspaceId: string, presentPaths: Iterable<string>): void {
   if (!workspaceId) return;
+  if (latches.has(workspaceId)) return; // already latched this build — never re-snapshot a mutated tree
   const paths = new Set<string>();
   for (const p of presentPaths) {
     const n = norm(p);
@@ -128,19 +129,28 @@ export function currentPass(): string | null {
   return passZone.getStore()?.name ?? null;
 }
 
+/** Infrastructure paths that are never the app's own source — a write here is never the concern. */
+function isInfraPath(path: string): boolean {
+  return /(^|\/)(node_modules|dist|build|\.next|\.nuxt|\.svelte-kit|\.vite|\.git|coverage|\.cache|\.turbo)\//.test(norm(path));
+}
+
 /**
  * THE PURE DECISION. Would a write to `path` in `workspaceId` be refused right now?
  *
- * Refused iff: the freeze is enabled, the workspace is green-latched, the path was PRESENT at green (so
- * this is an EDIT to the working app, not a new file), and the current pass is not on the allowlist.
- * Creating a new file, or writing from an allowlisted pass, is always permitted. Pure (reads the module
- * latch + the async pass zone).
+ * Refused iff: the freeze is enabled, the workspace is green-latched, the path is APP SOURCE (not
+ * node_modules / a build artefact), and the current pass is not on the allowlist. This is FULL DENY for
+ * a non-allowlisted pass — a NEW app file is refused too, not only an edit.
+ *
+ * The earlier "a new file is always allowed" carve-out was removed after the adversarial review
+ * (2026-08-12): a non-allowlisted pass making a coordinated change (a new file plus an edit to an
+ * existing one) would land the new half and have the edit refused, a half-applied state. Deny-by-default
+ * must mean deny, so a non-allowlisted pass simply cannot write to the app at all once it is green.
+ * (An allowlisted pass — the user's own request — may still create the new files its fix needs.) Pure.
  */
 export function writeRefused(workspaceId: string, path: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!greenFreezeEnabled(env)) return false;
-  const latch = latches.get(workspaceId);
-  if (!latch) return false;                          // not green yet → today's behaviour
-  if (!latch.paths.has(norm(path))) return false;    // a genuinely new file — cannot break the rendered app
+  if (!latches.has(workspaceId)) return false;        // not green yet → today's behaviour
+  if (isInfraPath(path)) return false;                // node_modules / build output — never app source
   const pass = currentPass();
   if (pass && ALLOWED_PASSES.has(pass)) return false; // the user's own request, or the restore itself
   return true;

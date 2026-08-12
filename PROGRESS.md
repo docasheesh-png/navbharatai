@@ -31540,3 +31540,33 @@ break a build, any latch-leak timing hole, and any post-green write path still u
 until that clears.
 
 Gate: tsc clean both projects, full run **14,718 / 14,718** (24 new green-freeze tests).
+
+### Adversarial review of Green Freeze — 6 real blockers found and closed before merge
+
+A 3-attacker + judge workflow reviewed the Green Freeze change (this is the discipline for a hot-path
+change under the "never break the app" rule). It found real defects — the review did its job:
+
+1. **[BUILD-BREAKER] Latch leak into the next build.** A prior build for the same workspace can end via
+   a reclaim/sweeper/drain path that BYPASSES the finally, leaving its latch set — which would then
+   freeze the NEXT build's early generation writes and produce a broken app. FIXED by clearing the latch
+   at the VERY START of every build, before a single write, so no teardown path can leak a latch.
+2. **[BUILD-BREAKER, subsumed] Partial multi-file change.** The "a new file is always allowed" carve-out
+   let a non-allowlisted pass half-apply a coordinated change. FIXED by FULL DENY: a non-allowlisted
+   pass cannot write to the app at all once green (new file or edit); only infra paths (node_modules /
+   build output) stay writable. An allowlisted pass may still create the new files its fix needs.
+3. **writeBinaryFile un-guarded** (a logo/font/icon the app depends on) — FIXED, same assertWriteAllowed.
+4. **Latch set on a curl fallback** rather than a real browser render — FIXED, latches only when
+   `shot.source === 'browser'`.
+5. **ADR write recorded a refused write** (a `.catch` swallowed the throw, then onFileWrite ran) — FIXED,
+   records only on a successful write.
+6. **Re-latching a mutated tree** could overwrite the real green snapshot — FIXED, latchGreen is a no-op
+   once already latched this build.
+
+OPEN, honestly (rule 6): a post-green `run_command` (e.g. `npm install X`, `npx prisma format`) mutates
+files on disk that the freeze's writeFile guard does not see, and the durable save's disk scan could
+persist them. No current NON-allowlisted post-green pass mutates app source via run_command (the sweeps
+use writeFile, the reviewer is GREEN STOP'd, the vaccine only RUNS tests), so this is not a current-build
+breaker — it is a latent gap. It is closed by the next piece (verify-after-fix: re-render after any
+post-green change and revert on regression), which the admin has approved building next.
+
+Gate after the fixes: tsc clean both projects, full run **14,724 / 14,724** (30 green-freeze tests).

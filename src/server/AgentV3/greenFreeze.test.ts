@@ -38,17 +38,24 @@ describe('once green, an EDIT to an existing file is refused by default', () => 
     expect(writeRefused(WS, '/src/App.tsx')).toBe(true);
   });
 
-  it('a genuinely NEW file is allowed — it cannot break the app the browser rendered', () => {
-    // This is what lets the e2e/test/doc scaffolds still write, while the unused-import sweep (which
-    // edits existing files) is refused.
-    expect(writeRefused(WS, 'e2e/smoke.spec.ts')).toBe(false);
-    expect(writeRefused(WS, 'src/NewThing.tsx')).toBe(false);
+  it('a NEW app file is ALSO refused for a non-allowlisted pass — full deny, no partial application', () => {
+    // The adversarial review (2026-08-12) showed the old "new files always allowed" carve-out let a
+    // coordinated change half-apply. Deny-by-default now means a non-allowlisted pass cannot write to
+    // the app at all once green — new file or edit.
+    expect(writeRefused(WS, 'e2e/smoke.spec.ts')).toBe(true);
+    expect(writeRefused(WS, 'src/NewThing.tsx')).toBe(true);
   });
 
-  it('node_modules / build artefacts were never part of the snapshot, so they are never frozen', () => {
-    latchGreen(WS, ['src/App.tsx', 'node_modules/react/index.js', 'dist/bundle.js']);
+  it('an ALLOWLISTED pass may still create the new files its fix needs', async () => {
+    await runInPass('feature-presence-heal', async () => {
+      expect(writeRefused(WS, 'src/NewFeature.tsx')).toBe(false);
+    });
+  });
+
+  it('node_modules / build artefacts are never frozen — they are not the app source', () => {
     expect(writeRefused(WS, 'node_modules/react/index.js')).toBe(false);
     expect(writeRefused(WS, 'dist/bundle.js')).toBe(false);
+    expect(writeRefused(WS, '.git/HEAD')).toBe(false);
   });
 });
 
@@ -112,9 +119,10 @@ describe('the enforcement an actuator calls', () => {
   beforeEach(() => latchGreen(WS, ['src/App.tsx']));
   afterEach(() => setGreenFreezeObserver(() => {})); // reset
 
-  it('throws GreenFreezeError on a refused write, and nothing on an allowed one', () => {
+  it('throws GreenFreezeError on a refused write, and nothing on an infra path', () => {
     expect(() => assertWriteAllowed(WS, 'src/App.tsx')).toThrow(GreenFreezeError);
-    expect(() => assertWriteAllowed(WS, 'src/New.tsx')).not.toThrow();
+    expect(() => assertWriteAllowed(WS, 'src/New.tsx')).toThrow(GreenFreezeError); // full deny — new files too
+    expect(() => assertWriteAllowed(WS, 'node_modules/react/index.js')).not.toThrow();
   });
 
   it('notifies the observer before throwing, with the path and pass', () => {
@@ -190,5 +198,47 @@ describe('it is wired into the build', () => {
 
   it('the latch is cleared in the finally AND the deadline finalizer — it must never leak', () => {
     expect((routes.match(/clearGreenLatch\(workspaceId\)/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * THE BLOCKERS THE ADVERSARIAL REVIEW FOUND (2026-08-12) — each closed and locked.
+ */
+describe('the latch cannot leak into the next build', () => {
+  const routes = readFileSync(join(__dirname, '../routes/agentv3.ts'), 'utf8');
+
+  it('the latch is cleared at the VERY START of a build, before any write', () => {
+    // The robust fix: build B clears any stale latch a bypassed teardown of build A may have left,
+    // BEFORE build B writes a line — so no teardown path can freeze the next build's generation.
+    const clearAtStart = routes.indexOf('clearGreenLatch(workspaceId); } catch { /* best-effort */ }\n    // Phase G1');
+    const latch = routes.indexOf('latchGreen(workspaceId,');
+    expect(clearAtStart).toBeGreaterThan(-1);
+    expect(clearAtStart).toBeLessThan(latch); // cleared before it could ever be set this build
+  });
+
+  it('re-latching is a no-op — a mutated tree can never overwrite the real green snapshot', () => {
+    latchGreen(WS, ['src/App.tsx']);
+    latchGreen(WS, ['src/App.tsx', 'src/Injected.tsx']); // a later, mutated view
+    // Still frozen for the app, and the second call did not replace the first.
+    expect(writeRefused(WS, 'src/App.tsx')).toBe(true);
+  });
+});
+
+describe('coverage the review demanded', () => {
+  const actuator = readFileSync(join(__dirname, 'sandbox/EngineerAI/actuators/E2BActuator.ts'), 'utf8');
+  const routes = readFileSync(join(__dirname, '../routes/agentv3.ts'), 'utf8');
+
+  it('writeBinaryFile is guarded too — a logo/font the app depends on is source', () => {
+    const at = actuator.indexOf('async writeBinaryFile(');
+    expect(actuator.slice(at, at + 500)).toContain('assertWriteAllowed(workspaceId, rel)');
+  });
+
+  it('the latch is set only on a REAL browser render, never a curl fallback', () => {
+    expect((routes.match(/shot\.source === 'browser' && !isGreenLatched/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the ADR write records only on success — a refused write is not logged as done', () => {
+    expect(routes).toContain('if (adrWritten) onFileWrite?.(path, content)');
+    expect(routes).not.toContain('await actuator.writeFile(workspaceId, path, content).catch(() => {});\n              onFileWrite?.(path, content)');
   });
 });

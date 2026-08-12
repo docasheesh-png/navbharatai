@@ -599,6 +599,18 @@ export interface SimpleBuildResult {
    * cause (a plan↔contract mismatch) could not be mined. Capped; only set on the ok:false verify path.
    */
   verifyErrors?: string;
+  /**
+   * How many files this lane's MANIFEST planned, whether or not the lane went on to succeed. 0 when
+   * the plan never produced one (the plan call failed, timed out, or returned nothing parseable).
+   *
+   * ROOT CAUSE this exists for (admin report 2026-08-12, the dukaan stock app): after this lane failed,
+   * the caller ran the ONE-SHOT lane — whose entire stated purpose is "a TRIVIAL one-file app the
+   * manifest skips" — even though this lane's manifest had just planned EIGHT files. The one-shot's
+   * precondition was already disproven, and 150 seconds went into a single ~8k-token call that could
+   * not have produced that app under any circumstances. The measurement existed; it just died with the
+   * closure before the caller could see it.
+   */
+  plannedFiles?: number;
 }
 
 /**
@@ -631,6 +643,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   //     it continues from real files instead of rebuilding from an empty tree.
   let lapsed = false;
   const generatedSoFar: OneShotFile[] = [];
+  // How many files this lane's own manifest planned. Hoisted OUT of the closure for the same reason
+  // `generatedSoFar` is: it is the lane's most valuable measurement of how big the app really is, and
+  // on the failure path the closure's locals are gone before the caller can ask. See
+  // `SimpleBuildResult.plannedFiles` for what the caller does with it.
+  let plannedFiles = 0;
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -650,6 +667,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
         preambleCapMs(overallMs, 0, configuredPlanCap), 'simple-plan');
       const manifest = parseFileManifest(manifestText);
+      // Recorded BEFORE the minFiles bail: a manifest too small to be worth this lane is exactly the
+      // case the one-shot lane exists for, and it must still be able to see that number.
+      plannedFiles = manifest.length;
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
       // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`
@@ -881,6 +901,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       reason,
       outcome: 'BUILD_FAILED',
       salvagedPaths,
+      plannedFiles,
     };
   }
 
@@ -939,6 +960,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         ok: false, filesWritten: files.length, reason: 'verify_failed',
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
+        plannedFiles,
         typecheckRan: verdict.ran !== false,
         // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
         verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
@@ -964,5 +986,5 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // wired OR could not execute (an un-run check is "unknown", never a pass — no fake success).
   // previewOk is left unknown here — the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS.
   const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify && typecheckRan ? true : null });
-  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan };
+  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan, plannedFiles };
 }

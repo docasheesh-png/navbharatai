@@ -420,6 +420,27 @@ the code (it is actually read somewhere) on 2026-07-11.
   tell it apart from an abandoned VM). The reaper reads the DURABLE record, so a sandbox orphaned by a
   Cloud Run instance recycle (i.e. by every deploy) is finally pausable; its cut-off is held a whole
   `AGENTV3_MAX_BUILD_SECONDS` + 10 min past last activity so it can never reach a running build.
+- **📊 WHAT E2B ACTUALLY COSTS — measured, not estimated (admin's own dashboard, 2026-08-11).** The
+  knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
+  read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·
+  4,156.57 RAM-hours · $172.08 total**.
+  - **A running sandbox costs ~$0.083/hour (~₹7).** Derived: $172.08 ÷ 2,078.29 vCPU-hours. RAM-hours ÷
+    vCPU-hours is **exactly 2.0**, so every sandbox is **1 vCPU + 2 GB**, and $0.083 matches E2B's
+    published per-vCPU + per-GB rates almost to the cent — which is what makes this a measurement rather
+    than a guess.
+  - Per sandbox: **~$0.137** (they average 1.65 hours each). Whole-clock burn: **~$0.24/hour**, i.e.
+    ~$5.70/day, ~$172/month (**~₹15,000/month** at ~₹87/$).
+  - **🔑 THE BILL IS RUNNING TIME, NOT BUILDS.** A build that finishes in 5 minutes and then leaves the
+    VM warm is charged for the warm minutes too. That is why `AGENTV3_SANDBOX_IDLE_MINUTES` is the
+    single biggest cost lever in this file, and why the 45 → 15 change was not a tidy-up: at 1,260
+    sandboxes, 45 idle minutes each is 945 billed hours (**~$78/month**) versus 315 hours (**~$26**) at
+    15. That one default is saving roughly **₹4,500/month**.
+  - **Remaining lever, NOT taken (admin's call):** 15 → 5 idle minutes would save a further ~$17/month
+    (~₹1,500). The trade-off is real — a user returning after 6 minutes meets a cold sandbox and waits
+    through a slower first build — so it is a product decision, not an optimisation to apply quietly.
+  - ⚠️ **This is ONE 30-day snapshot, not a forecast.** Cost scales with concurrent build hours, so it
+    moves with usage. To recompute: E2B dashboard → Billing → Usage; per-hour = cost ÷ vCPU-hours.
+    Re-measure before quoting these numbers as current.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say

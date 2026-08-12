@@ -11,6 +11,7 @@
 // events (a provider fallback, a sandbox-create timeout).
 
 import type { AgentEvent } from './types';
+import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
@@ -502,7 +503,41 @@ export class BuildDiagnostics {
    * `commands` channel. This is the single highest-value diagnostic signal: a non-zero `npm install`
    * / `tsc` / `vite build` here explains most "the app generated but won't run" failures.
    */
+  /** The last audit note recorded, so a re-install replaces its predecessor instead of stacking. */
+  private lastAuditNote: string | null = null;
+
   recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }): void {
+    // NPM ALREADY TOLD US (dukaan report 2026-08-12). That build's install printed "8 vulnerabilities
+    // (4 moderate, 4 high)" and the report said nothing at all — not "clean", not "couldn't check". The
+    // OSV-backed dep-health gate returns '' for BOTH outcomes, so silence proved nothing either way,
+    // while the real answer sat in a log nobody parsed. Reading it here costs no network call, no model
+    // call and no extra command, and it covers every install path by construction.
+    if (looksLikeDependencyInstall(rec.command)) {
+      try {
+        const audit = parseNpmAuditSummary(`${rec.stdout ?? ''}\n${rec.stderr ?? ''}`);
+        const severity = auditSeverity(audit);
+        const note = npmAuditNote(audit);
+        // Only the LATEST install describes the tree the app ships with, so a later result replaces an
+        // earlier one rather than stacking a second, contradictory line in the same report.
+        if (severity && note && this.lastAuditNote !== note) {
+          this.lastAuditNote = note;
+          // Spliced out and re-recorded rather than edited in place, so the entry carries the timestamp
+          // of the install that actually produced it — the timeline stays a timeline.
+          for (let i = this.issues.length - 1; i >= 0; i--) {
+            if (this.issues[i].code === 'DEPENDENCY_VULNERABILITIES') this.issues.splice(i, 1);
+          }
+          this.record({
+            phase: 'build',
+            severity,
+            // Never an ERROR: a working app with a vulnerable transitive dependency still works, and
+            // blocking it would fail builds over something we cannot safely fix for the user.
+            code: 'DEPENDENCY_VULNERABILITIES',
+            message: note,
+            autoResolved: false,
+          });
+        }
+      } catch { /* a diagnostic must never break the command it is describing */ }
+    }
     if (this.commands.length < MAX_COMMANDS) {
       this.commands.push({
         ts: this.now(),

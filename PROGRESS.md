@@ -31158,3 +31158,81 @@ Tests across the session: **14,070 → 14,469.** Gate green each time (tsc ×2 +
 - **Multi-service runner** waits on field data.
 - **Admin-only:** `ANDROID_LATEST_VERSION_CODE = 66` still needs setting in Cloud Run, or the update
   banner and the broadcast button both stay silent by design.
+
+---
+
+## 2026-08-12 — Autopsy of the dukaan stock app: the verdict may no longer contradict the evidence (fix 1 of N)
+
+**Admin report (build `ae2d464c`).** The worst failure this engine has produced — and it was not a
+crash. **It lied.**
+
+ONE report carried, simultaneously:
+```
+ok: true
+RELEASE_GATE: RED — Not shippable
+rootCause: 2 local modules are STILL missing — the app will crash at runtime
+```
+…and the user was told, in their own language: *"App tayyar hai! 🎉 **App live hai:** <link>"*.
+**The link showed a Closed Port Error.** The admin's screenshot is the proof.
+
+### The five buckets
+
+- ✅ **Self-healed — 19:** CSS import injected, dev server restarted deterministically, tsc errors
+  cleared over 3 rounds, unused imports swept, 6 KIMI timeouts + 2 GLM 429s absorbed, repeated-step
+  nudge fired.
+- 🔀 **Worked around — 4:** simple-build timed out at 240s → full builder; one-shot timed out at 150s →
+  full builder (**~6.5 min spent on two lanes that both failed**); `npm run server &` timed out at 45s
+  and was routed around with `timeout 10` rather than root-caused; **EADDRINUSE on port 3000 ignored**.
+- ⏭️ **Skipped — 4:** `Requested feature not found: search` (the user ASKED for it, readiness caught it,
+  nothing acted); playwright FAIL left indeterminate; the reviewer's own **[CRITICAL]** (CSS classes
+  used but never defined) never applied; 8 unresolved warnings.
+- ❌ **Still broken — 8:** dead preview (5173 closed); 2 missing modules; **`ok:true` on a RED gate**;
+  a summary claiming "live hai"; undefined CSS classes; the missing search feature; backend unable to
+  bind 3000; 4 vulnerable deps.
+- 🥵 **Struggle — 7:** 22 minutes against a 5-minute ETA (**4.4×**); **107s before the first model
+  call**; one LLM call at 380s; reviewer timed out at 114s on 26 files; tsc failed 3× on the same file.
+
+### The root-cause chain behind the dead preview (step 2)
+
+1. `npm run server &` hit the 45s command timeout — **but the process it started did not die.**
+2. The build then ran `timeout 10 npm run server` again.
+3. The second one hit **`EADDRINUSE: address already in use :::3000`** — it collided with its own
+   orphan.
+4. The backend crashed; the app runs server+client under `concurrently`, so **the client died with it**.
+5. Port 5173 went dead → the user's Closed Port Error.
+
+**The missing subsystem: the build keeps no account of the processes it starts itself.** A timed-out
+command leaves a live process behind, and the next command collides with it. (The dev-server keepalive
+from #2264 restarts the *frontend*; nothing owned the *backend* the build had spawned twice.)
+
+### What shipped in THIS change — the honesty half
+
+**A build that reports success while the release gate is RED *with real blockers* now has its verdict
+corrected to NOT ok.** Everything needed was already computed; the gate block was simply forbidden
+from acting ("reports on the build, must never affect it"). That is right for the gate's ADVISORY half
+and wrong for its EVIDENTIAL half: **RED because a build-breaking blocker was recorded is not an
+opinion, it is the build's own error log.**
+
+**Deliberately narrow — this is the guard-versus-nuisance line:**
+- Fires only when RED coincides with a genuine unresolved ERROR, counted by the **same**
+  `shippingIssueCount('error')` the gate itself used, so the two can never disagree.
+- Does **not** fire on a RED driven only by tests. This report's suite said *"could be a failing test
+  OR the runner failing to start; the output gave nothing to tell them apart"* — failing a working app
+  over an ambiguity in **our own** sandbox is the #2267 mistake in the other direction.
+- Lives inside the gate's try/catch: a fault in the honesty check must never fail the build it judges.
+- `buildResultRef` is deliberately untouched — it is not set yet at that point and is captured
+  downstream only `if (result.ok)`, so flipping `result` keeps BOTH exits honest by construction. (TypeScript
+  proved it: the attempt to update the ref failed to compile because it is typed `null` there.)
+- **Flipping ok:false also makes the build FREE** — the standing "working app or free" guard keys on
+  `!result.ok`. Telling the truth and not charging for a broken app are the same action.
+
+`releaseGateFailureSummary` replaces the celebration with the truth, and names WHAT is broken —
+"something went wrong" is the sentence that makes people abandon a product; being told *what* is what
+makes them reply "fix it". It takes only the first line of the cause, capped, so the user is not handed
+a stack of file paths they cannot act on.
+
+Tests: 12 in `tests/releaseGateVerdict.test.ts`. Gate: tsc clean both projects, **14,474/14,474**.
+
+**Next from this autopsy, in order:** the orphaned-process/EADDRINUSE class (the actual cause of the
+dead preview), the reviewer's CRITICAL never being applied, and `Requested feature not found` being
+detected and then ignored.

@@ -8,6 +8,7 @@ import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildRepor
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../lib/firstPassQuality';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
+import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -28,7 +29,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
 
 type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 
-interface AdminBuildReportRow {
+interface AdminBuildReportRow extends ReportTriage {
   /** True when the build had not finished at the moment Report was pressed — see AdminBuildReportStore. */
   inFlight?: boolean;
   /** The whole-SESSION view: the wait the user actually lived, and any workspace wipes. */
@@ -376,9 +377,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const selectedPartJson = useMemo(() => partJson(selectedReport, reportPart), [selectedReport, reportPart]);
   const selectedPartMeta = selectedParts.find((p) => p.key === reportPart) ?? selectedParts[0];
 
+  /**
+   * TRIAGE MARKS (admin request 2026-08-12). Sends one mark and folds the SERVER's merged answer back
+   * into the list, so a badge is only ever drawn from a mark that actually persisted — an optimistic
+   * local update would show "Fixed" on a write that silently failed, which is the one thing this
+   * feature must never do.
+   */
+  const markReport = async (id: string, mark: { downloaded?: boolean; fixed?: boolean; note?: string }) => {
+    try {
+      const r = await fetch(`/api/admin/build-reports/${encodeURIComponent(id)}/mark`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(mark),
+      });
+      if (!r.ok) { toast('Could not save that mark.'); return; }
+      const { triage } = await r.json() as { triage: ReportTriage };
+      setBuildReports((rows) => rows.map((row) => (row.id === id ? { ...row, ...triage } : row)));
+      setSelectedReport((s) => (s && s.meta.id === id ? { ...s, meta: { ...s.meta, ...triage } } : s));
+    } catch (e) { console.error(e); toast('Could not save that mark.'); }
+  };
+
   const downloadSelectedReport = () => {
     if (!selectedPartJson) { toast('Nothing to download.'); return; }
     saveJsonFile(selectedPartJson, `${selectedPartMeta?.filename || `build-report-${selectedReport?.meta.id}`}.json`);
+    // Downloading is a FACT about the admin's action, so it is recorded automatically. It is NOT a
+    // claim that the work is done — that is the separate "Fixed" mark, which only a person sets.
+    if (selectedReport?.meta.id) void markReport(selectedReport.meta.id, { downloaded: true });
   };
 
   const copySelectedReport = () => void copyJson(selectedPartJson, selectedPartMeta?.label || 'Report');
@@ -1359,8 +1381,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-black text-white tracking-tight">Build Reports</h3>
-                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only.</p>
+                  <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                    Build Reports
+                    {/* THE ONE NUMBER WORTH SEEING FIRST (admin 2026-08-12): how many still need work.
+                        Counted from the marks, so it can never disagree with the badges below it. */}
+                    {(() => {
+                      const open = openReportCount(buildReports);
+                      return open > 0 ? (
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300">{open} open</span>
+                      ) : null;
+                    })()}
+                  </h3>
+                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only. Download marks a report sent; “Mark fixed” is yours to set once the work is merged.</p>
                 </div>
                 <button
                   onClick={fetchBuildReports}
@@ -1684,6 +1716,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       {(r.sessionParts ?? 1) > 1 && (
                                         <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-indigo-300">{r.sessionParts} parts</span>
                                       )}
+                                      {/* TRIAGE (admin 2026-08-12) — "is report ka kaam ho chuka hai?".
+                                          Downloaded and Fixed are DIFFERENT facts and are shown as such:
+                                          a report downloaded this morning may still be shipping its bugs
+                                          tonight. See reportTriage.ts. */}
+                                      {(() => {
+                                        const st = reportStatus(r);
+                                        if (st === 'new') return null; // an untouched report needs no badge — the list is already full
+                                        return (
+                                          <span
+                                            title={reportStatusHint(r, (ms) => new Date(ms).toLocaleString())}
+                                            className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
+                                          >{reportStatusLabel(st)}</span>
+                                        );
+                                      })()}
                                     </span>
                                     {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
                                   </td>
@@ -1755,6 +1801,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         >
                           <Download className="w-3.5 h-3.5" /> Download JSON
                         </button>
+                        {/* THE MARK ONLY A PERSON SETS (admin 2026-08-12). Download records itself; this
+                            does not, because "I have the file" and "the bugs are gone" are different
+                            facts and only one of them can be observed by a button. Reversible on
+                            purpose — a mis-click that could not be undone would bury a real bug. */}
+                        {(() => {
+                          const id = selectedReport?.meta.id;
+                          const isFixed = reportStatus(selectedReport?.meta) === 'fixed';
+                          return (
+                            <button
+                              onClick={() => id && void markReport(id, { fixed: !isFixed })}
+                              disabled={!id}
+                              title={isFixed
+                                ? reportStatusHint(selectedReport?.meta, (ms) => new Date(ms).toLocaleString())
+                                : 'Mark this report as fixed — only after the work is actually merged'}
+                              className={`flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
+                                ? 'border-emerald-500/60 text-emerald-200 bg-emerald-600/20 hover:bg-emerald-600/30'
+                                : 'border-white/15 text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> {isFixed ? 'Fixed' : 'Mark fixed'}
+                            </button>
+                          );
+                        })()}
                         <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
                       </div>
                     </div>

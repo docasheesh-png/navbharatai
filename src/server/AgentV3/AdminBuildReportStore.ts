@@ -10,6 +10,7 @@
 // Pattern mirrors DiagnosticsStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
+import { applyReportMark, type ReportTriage } from './reportTriage';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { trimReportForStorage } from './DiagnosticsStore';
@@ -108,6 +109,19 @@ export interface AdminBuildReportMeta {
    */
   healCount?: number;
   unresolvedCount?: number;
+  /**
+   * TRIAGE (admin request 2026-08-12) — has this report been downloaded, and has the work been done?
+   *
+   * Two marks, not one, and see reportTriage.ts for why: the admin asked for a "fixed" tag on download,
+   * but downloading is when the work STARTS. This session is the proof — one report downloaded on
+   * 2026-08-12 took TEN merged PRs to resolve, and a one-state design would have shown it "fixed" from
+   * the first minute while nine of its ten defects were still shipping.
+   *
+   * `undefined` means "this row predates the field", which reads as 'new' — never as fixed.
+   */
+  downloadedAt?: number | null;
+  fixedAt?: number | null;
+  fixedNote?: string | null;
 }
 
 /**
@@ -320,6 +334,36 @@ export async function listAdminBuildReports(limit = ADMIN_REPORTS_DEFAULT_LIMIT)
     return snap.docs.map((d) => (d.data() as AdminBuildReportRecord).meta).filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+/**
+ * Set the triage marks on ONE report (admin request 2026-08-12). Returns the merged marks, or null when
+ * the report is absent or the write failed — the caller reports that honestly rather than showing a
+ * badge for a mark that never persisted.
+ *
+ * Writes ONLY the three meta fields (a merge, not a set), so a mark can never damage the report payload
+ * it is annotating.
+ */
+export async function markAdminBuildReport(
+  id: string,
+  mark: { downloaded?: boolean; fixed?: boolean; note?: string | null },
+  now: number = Date.now(),
+): Promise<ReportTriage | null> {
+  const db = getDb();
+  if (!db || !id) return null;
+  try {
+    const ref = db.collection(COLLECTION).doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) return null;
+    const meta = ((doc.data() as AdminBuildReportRecord)?.meta ?? {}) as AdminBuildReportMeta;
+    const next = applyReportMark(meta, mark, now);
+    await ref.set({ meta: next }, { merge: true });
+    return next;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[ADMIN_BUILD_REPORT] MARK FAILED (${id}): ${message}`);
+    return null;
   }
 }
 

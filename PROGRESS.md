@@ -31570,3 +31570,29 @@ breaker — it is a latent gap. It is closed by the next piece (verify-after-fix
 post-green change and revert on regression), which the admin has approved building next.
 
 Gate after the fixes: tsc clean both projects, full run **14,724 / 14,724** (30 green-freeze tests).
+
+---
+
+## 2026-08-12 (continued) — VERIFY AFTER FIX: a post-green change stands only if the app still works
+
+The second layer the admin approved, and the close of the one gap Green Freeze's review left open.
+Green Freeze denies writes to a green app by default, but three passes are ALLOWED to write (the user's
+own requests + the restore). Those wrote and nothing re-checked — a runtime-error repair or a
+feature-presence heal that itself broke the app shipped broken, and a post-green `run_command` (npm
+install / prisma format) could corrupt it unseen.
+
+verifyAfterFix.ts wraps an allowed post-green change: snapshot the working files → apply → RE-RENDER →
+keep if it still renders, else RESTORE the exact green snapshot and report honestly. "Trust, then
+verify." A regression is undone within seconds, not shipped — which is the direct answer to the admin's
+first question (a non-technical user can never be handed a broken app). The revert runs through the
+allowlisted green-guard-restore pass (so Green Freeze permits it) and reverts the durable store too.
+
+Three honest outcomes, each a distinct report code: FIX_VERIFIED (applied + re-rendered clean),
+FIX_REVERTED (broke it → rolled back, app is back to green), FIX_UNVERIFIED (could not re-render — kept,
+but we do NOT revert a change we cannot prove is bad). A revert we cannot complete is FIX_REVERT_FAILED
+(the end-of-turn GreenGuard save is the backstop). Wired around the runtime-error auto-fix first (the
+most common allowed post-green writer); feature-presence can follow the same pattern. Only engaged once
+green-latched. Kill switch AGENTV3_VERIFY_AFTER_FIX=off.
+
+Pure orchestration (every side effect injected) so the keep-vs-revert logic is fully unit-tested and
+cannot lie. Gate: tsc clean both projects, full run **14,737 / 14,737** (13 verify-after-fix tests).

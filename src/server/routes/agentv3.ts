@@ -117,6 +117,7 @@ import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../Agent
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
+import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -11353,8 +11354,44 @@ export function registerAgentV3Routes(app: Express): void {
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
           try {
-            const fix = await runInPass('runtime-error-autofix', () => fixRunner.run(buildRepairPrompt(captured)));
-            if (fix.ok) result = fix;
+            const applyFix = () => runInPass('runtime-error-autofix', () => fixRunner.run(buildRepairPrompt(captured)));
+            // VERIFY AFTER FIX (admin 2026-08-12) — this repair is ALLOWED to write to a green app, so it
+            // must PROVE the app still works afterwards. Snapshot the working files, apply, re-render; if
+            // the fix broke the app, roll back to the snapshot automatically. Only engaged once the app is
+            // green-latched (before green there is nothing to protect and no net is needed). This is what
+            // guarantees a non-technical user is never handed a broken app. Kill: AGENTV3_VERIFY_AFTER_FIX=off.
+            if (verifyAfterFixEnabled() && isGreenLatched(workspaceId) && lastPreviewUrl && actuator.browseUrl) {
+              let fixResult: { ok: boolean } | undefined;
+              const reRenderOk = async (): Promise<boolean> => {
+                const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl!), 35_000, 'verify-after-fix');
+                const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                if (v.inconclusive || v.serverDown) throw new Error('cannot re-verify'); // unproven → keep, do not revert on a guess
+                return v.rendered;
+              };
+              const vr = await verifyAfterFix<Record<string, string>>({
+                snapshot: async () => (await collectWorkspaceFiles(actuator, workspaceId)).files,
+                apply: async () => { fixResult = await applyFix(); },
+                reverify: reRenderOk,
+                revert: async (snap) => {
+                  const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                  const plan = restorePlan(snap, cur);
+                  await runInPass('green-guard-restore', async () => {
+                    for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
+                    const rm = buildRemoveCommand(plan.remove);
+                    if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
+                  });
+                  await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
+                },
+              });
+              try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('runtime-error fix', vr) }); } catch { /* best-effort */ }
+              // Promote the repaired result ONLY when it was kept — a reverted fix leaves the app exactly
+              // as green as it was, so `result` must stay the working version, not the broken repair.
+              if (vr.kept && fixResult?.ok) result = fixResult as typeof result;
+              if (vr.reverted) break; // the repair broke it and was undone — stop, do not try again
+            } else {
+              const fix = await applyFix();
+              if (fix.ok) result = fix;
+            }
           } catch (e) {
             console.log(`[AGENTV3] auto-fix attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
             break;

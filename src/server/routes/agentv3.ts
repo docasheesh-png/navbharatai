@@ -10543,8 +10543,8 @@ export function registerAgentV3Routes(app: Express): void {
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
       ) {
         try {
-          const html = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
-          const verdict = analyzePreviewHtml(html);
+          const shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl');
+          const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
@@ -10581,11 +10581,12 @@ export function registerAgentV3Routes(app: Express): void {
       ) {
         const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
-          let html = '';
+          let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
           try {
-            html = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+            shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
-          const verdict = analyzePreviewHtml(html);
+          const html = shot.html;
+          const verdict = analyzePreviewHtml(html, { painted: shot.painted, source: shot.source });
           let consoleErrs: string[] = [];
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
@@ -10649,6 +10650,20 @@ export function registerAgentV3Routes(app: Express): void {
             break;
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
+          // WE COULD NOT SEE THE APP — that is not the same as seeing it broken, and a repair pass here
+          // rewrites working code. This is the loop the admin reported on 2026-08-12: a snapshot taken
+          // before the app painted read as "a runtime error crashed it", the repair restarted the dev
+          // server, the preview really went down, and the cycle repeated for half an hour. With no
+          // console error to corroborate it, an inconclusive read stops here — recorded honestly,
+          // never acted on.
+          if (verdict.inconclusive && consoleErrs.length === 0) {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_UNVERIFIED',
+              message: `Could not confirm the preview either way — ${verdict.problems[0] ?? 'the snapshot showed nothing'}. No repair was attempted: rewriting a working app on a snapshot we cannot trust is worse than not knowing.`,
+              autoResolved: true,
+            });
+            break;
+          }
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {

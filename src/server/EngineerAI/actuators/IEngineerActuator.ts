@@ -44,7 +44,7 @@ export interface IEngineerActuator {
    * Fetch a URL from inside the sandbox and return the HTML body.
    * Requires a real sandbox; LocalActuator rejects for the same reason as runCommand.
    */
-  browseUrl(workspaceId: string, url: string): Promise<{ html: string }>;
+  browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl' }>;
   /**
    * Return the public HTTPS URL for a port running inside the sandbox.
    * Used for live-preview when the agent starts a dev server.

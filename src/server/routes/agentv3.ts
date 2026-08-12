@@ -11,6 +11,7 @@ import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
@@ -10634,6 +10635,54 @@ export function registerAgentV3Routes(app: Express): void {
             }
           }
         } catch { /* hooks heal is best-effort — never blocks or fails a build */ }
+      }
+
+      // INCOMPLETE-CODE HEAL — complete a fix the (weak/free) model left as a stub, WITHIN the same tier
+      // (admin 2026-08-12: "free tier me claude nahi. jo kuch karna hai isi me karo"). A real report: KIMI
+      // correctly DIAGNOSED the Level-2 bug but left one function a placeholder/not-implemented, so the
+      // authenticity scan raised a build-breaking READINESS_BLOCKER, the build failed honestly, GreenGuard
+      // restored the working app, and the user was charged ₹0 — all correct, but the fix never LANDED. This
+      // runs ONE bounded pass that completes the flagged stub, then RE-JUDGES through the SAME readiness gate.
+      //
+      // Weak-tier routed BY CONSTRUCTION: buildTurnRunner(healRunnerOpts()) carries the same `noClaude`
+      // enforcement as every build turn, so on a free build the completion runs on GLM/Kimi flagship →
+      // Vertex/Gemini → Haiku (last) and NEVER Sonnet/Opus (the 🔒 weak-module law). Fires ONLY when a
+      // build FAILED with a real HIGH-severity authenticity issue (a clean build pays nothing), is time-
+      // budgeted + abortable, never flips a still-not-ready verdict to ok, and the honest failure + GreenGuard
+      // restore below remain the backstop if it cannot complete. Kill switch AGENTV3_INCOMPLETE_CODE_HEAL=off.
+      if ((process.env.AGENTV3_INCOMPLETE_CODE_HEAL ?? '').trim().toLowerCase() !== 'off'
+        && result && !result.ok && expectsArtifacts && writtenFiles.size > 0 && autoFixEnabled() && !abort.signal.aborted) {
+        try {
+          const stubs = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles));
+          const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+          if (stubs.length > 0 && timeLeft) {
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 Completing ${stubs.length} unfinished piece(s) of the code so the feature actually works…`, ts: Date.now() });
+            const completeRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner(healRunnerOpts()),
+              model: resolveModel(powerLevelReqEffective),
+              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+            });
+            const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+            if (healed.ok) {
+              const after = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles));
+              if (after.length === 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'INCOMPLETE_CODE_HEALED', message: `Completed ${stubs.length} unfinished/placeholder code section(s) the first pass left behind.`, autoResolved: true });
+                // Recover to OK only if the FULL readiness gate now passes — a build with OTHER unresolved
+                // blockers stays honestly NOT-ready (same discipline as the hooks heal above).
+                if (readinessGateEnabled()) {
+                  try {
+                    const verdict = await dispatcher.assessBuildReadiness();
+                    if (verdict.ready) {
+                      result = { ...result, ok: true, summary: 'Built your app — an unfinished section of the code was detected and completed, so the feature now works.' };
+                      buildDiag.record({ phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_COMPLETION', message: `Readiness re-judged after completing the unfinished code: now READY (score ${verdict.score}/100).`, autoResolved: true });
+                    }
+                  } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
+                }
+              }
+            }
+          }
+        } catch { /* completion heal is best-effort — never blocks or fails a build */ }
       }
 
       // BOOT-KILLER HEAL — the second half of the missing-credential contract (admin 2026-08-03: "us option

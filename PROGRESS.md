@@ -32034,3 +32034,36 @@ an empty read falling through to the fallback / throwing rather than returning a
 test extended (no raw base64 to stdout; screenshot reads last-shot.png). The entire 64KB-truncation class —
 browser_action (loud) AND screenshot (silent) — is now closed. Same rule-6 boundary: the E2B sandbox path is
 verified by code-reasoning + tsc + source test, confirmed live on the next real build.
+
+---
+
+## 2026-08-12 — Incomplete-code heal: complete a weak-tier stub WITHIN the tier (admin "free tier me claude nahi")
+
+**Report (Level-2 fix attempt, ok:FALSE, ₹0):** the honesty architecture worked PERFECTLY — KIMI (weak/free
+tier) correctly DIAGNOSED the Level-2 bug (score-based win condition + coin carry-forward + undefined
+`loadLevel2()`), but left one function a placeholder/not-implemented. The authenticity scan raised a
+build-breaking `READINESS_BLOCKER`, the release gate went RED honestly (no fake GREEN), GreenGuard restored
+the last working version (app NOT broken — Level 1 still works), and the user was charged ₹0. #2318 also
+validated live: rootCause was the REAL blocker (fake code), NOT the 233s timing note. The ONLY gap: the fix
+never LANDED — the weak model left a stub and nothing escalated to complete it.
+
+**Admin decision:** "free tier me claude nahi. jo kuch karna hai isi me karo" — complete the fix WITHIN the
+weak tier, never Sonnet/Opus.
+
+**Fix — INCOMPLETE_CODE_HEAL (default on, kill AGENTV3_INCOMPLETE_CODE_HEAL=off):** after a build that
+FAILED with a real HIGH-severity authenticity issue, run ONE bounded pass that COMPLETES the flagged stub
+(`authenticityRepairInstruction` names the exact file:line and forbids placeholder/delete/hide), then
+RE-JUDGE through the SAME readiness gate; recover ok:true ONLY if the WHOLE gate now passes. Mirrors the
+existing hooks-heal / credential-guard heals exactly. **Weak-tier-safe BY CONSTRUCTION:**
+`buildTurnRunner(healRunnerOpts())` carries the same `noClaude` enforcement as every build turn, so on a
+free build the completion runs GLM/Kimi flagship → Vertex/Gemini → Haiku (last) and NEVER Sonnet/Opus (the
+🔒 weak-module law) — there is no separate model path to leak through. Fires only on a FAILED build with a
+genuine stub (a clean build pays nothing), is time-budgeted + abortable, never flips a still-not-ready
+verdict to ok, and the honest failure + GreenGuard restore remain the backstop if it cannot complete.
+`highSeverityAuthenticityIssues` + `authenticityRepairInstruction` are pure + tested; wiring test asserts
+the weak-tier routing. Gate: tsc clean both.
+
+**Honesty win to record plainly:** this build is the proof the whole session's honesty work landed — the
+engine refused to fake success, protected the app, and charged nothing. The heal now turns that honest
+failure into an honest COMPLETION where the weak model can finish the job; where it genuinely cannot, it
+still fails honestly rather than shipping a stub.

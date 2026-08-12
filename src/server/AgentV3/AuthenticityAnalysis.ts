@@ -267,6 +267,46 @@ function trimSnippet(line: string): string {
   return t.length > SNIPPET_MAX ? t.slice(0, SNIPPET_MAX) + '…' : t;
 }
 
+/**
+ * Scan a whole workspace and return ONLY the HIGH-severity issues — the ones that actually block a build
+ * (a placeholder / not-implemented / fake-data stub the model left behind). Medium/low are advisory and
+ * are deliberately excluded, so an incomplete-code heal fires only on genuine build-breakers. Pure.
+ */
+export function highSeverityAuthenticityIssues(files: Record<string, string>): AuthenticityIssue[] {
+  const out: AuthenticityIssue[] = [];
+  for (const [path, content] of Object.entries(files ?? {})) {
+    if (typeof content !== 'string' || !content) continue;
+    for (const issue of scanAuthenticity(path, content)) {
+      if (issue.severity === 'high') out.push(issue);
+    }
+  }
+  return out;
+}
+
+/**
+ * A FOCUSED repair instruction to COMPLETE incomplete/placeholder code the model left behind — the
+ * "real features only" law (rule 2), enforced as a heal. Names the exact file:line so the completion pass
+ * fixes what the readiness scan flagged, and forbids the escape hatches (delete/comment-out/fake) that
+ * would merely hide the stub instead of implementing it. Pure.
+ */
+export function authenticityRepairInstruction(issues: AuthenticityIssue[]): string {
+  const locations = issues.slice(0, 15).map((x) => `  - ${x.file}:${x.line} — ${x.kind}: ${x.snippet}`).join('\n');
+  return [
+    'The app was built, but a readiness scan found INCOMPLETE / PLACEHOLDER / NOT-IMPLEMENTED code that',
+    'must be completed before it can work. For EACH location below, replace the stub with a REAL, WORKING',
+    'implementation that does what the surrounding code expects — the actual function body, the real logic,',
+    'the real data flow.',
+    '',
+    'STRICT RULES:',
+    '  • NO placeholder, NO "TODO"/"FIXME", NO "not implemented", NO fake/hardcoded sample data.',
+    '  • Do NOT delete the feature, comment it out, or throw to hide it — IMPLEMENT it for real.',
+    '  • Keep everything else that already works untouched; change only what is needed to complete these.',
+    '',
+    'Locations the scan flagged:',
+    locations,
+  ].join('\n');
+}
+
 /** A concise, honest authenticity/completeness report for the agent. */
 export function authenticitySummary(issues: AuthenticityIssue[]): string {
   if (issues.length === 0) return 'Authenticity scan: ✓ No fake/incomplete code detected.';

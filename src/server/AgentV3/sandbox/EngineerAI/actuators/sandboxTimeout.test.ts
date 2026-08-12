@@ -17,6 +17,14 @@ describe('browser_action screenshot is read from a FILE, not stdout (64KB trunca
     expect(src).toContain('last-action.png`, { format: \'bytes\' }');
     expect(src).toContain("Buffer.from(shot as Uint8Array).toString('base64')");
   });
+
+  it('the screenshot() paths (CDP + fallback) are also file-based — the sibling 64KB bug is closed too', () => {
+    // Both screenshot scripts used to write raw base64 to stdout, silently truncated at 64KB on a large
+    // screen. Now they write last-shot.png and screenshot() reads its bytes.
+    expect(src).not.toContain("process.stdout.write(buf.toString('base64'))");
+    expect(src).toContain("writeFileSync('${TOOLS_DIR}/last-shot.png', buf)");
+    expect(src).toContain('last-shot.png`, { format: \'bytes\' }');
+  });
 });
 
 describe('withDaemonRetry — browser_action survives a dead CDP daemon (BENCHMARK #2 autopsy)', () => {

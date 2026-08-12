@@ -31402,3 +31402,52 @@ be exactly the surface patch rule 4 forbids. What would close it: the file conte
 regression case from a build that reproduces it.
 
 Gate: tsc clean both projects, full run **14,653 / 14,653**.
+
+---
+
+## 2026-08-12 (later still) — GREEN STOP: once the app works, offer improvements, do not impose them
+
+The admin's sharpest observation of the whole project, now VERIFIED with numbers rather than argued:
+"bahut sari app pehle hi 5-7 min me 100% ban jati hai … hamara AI bani hui running app ko tod tod ke
+wapas banata hai."
+
+BENCHMARK 0 timeline, from the report's own timestamps: preview LIVE at **6.6 min**, build ran to
+**14.3 min**. **7.7 minutes — 54% of the build — was spent on an app that already rendered and worked.**
+And in the 44-minute report before it, that post-green work is where the reviewer silently replaced the
+user's real .env secrets with placeholders and killed the app's database and payments.
+
+A background audit (6 agents + adversarial verify) plus a manual read confirmed the mechanism: after
+the app is verified GREEN, FOUR LLM passes can still edit it — the C9 reviewer auto-fix (the big one),
+feature-presence heal, runtime-error auto-fix, and the opt-in red-team. Not one of them asked "the app
+already works — should I touch it?"
+
+THE ROOT CAUSE is a missing distinction, not any single pass. After a build there are two completely
+different kinds of finding, and the engine treated them identically:
+  • "The app does not do what the USER ASKED" — a missing requested feature, a real runtime error.
+    That is the user's own request; finishing it is the job. Keep fixing automatically.
+  • "The app could be BETTER by our standards" — a security nit, a design inconsistency, a refactor,
+    the reviewer's own opinion. Silently applying THAT to a working app is the re-break class.
+
+THE FIX (greenReviewPolicy.ts, admin's own idea): once the app is verified rendering in a real browser,
+the reviewer's opinions become a "want me to fix these?" OFFER in the user's own summary — the working
+app ships untouched. The user's actual requests (feature-presence, runtime-error) keep fixing
+automatically; only the reviewer's opinions are gated. A green app is also no longer marked not-ok by
+those opinions (they are suggestions, not blockers). Kill switch AGENTV3_GREEN_STOP=off; default ON.
+New event `type:'suggest'` for a richer client; the summary carries the whole feature for a plain one.
+
+This is the admin's screenshot idea, made real: the app already proves it renders (PreviewVerify);
+what was missing was "if it works but has issues, ASK — don't silently edit." Now it asks.
+
+WHAT IT DELIBERATELY DOES NOT CHANGE: the deterministic monotone sweeps (duplicate-import dedupe,
+orphan-stylesheet fix) still run — those PREVENT the app from being broken (a duplicate import is a
+babel crash), they are not opinions being imposed. Feature-presence and runtime-autofix still run —
+the user asked for those. Only the reviewer's own-opinion write pass is turned into an offer.
+
+Gate: tsc clean both projects, full run **14,671 / 14,671**. One existing wiring test (reviewLateLanding)
+asserted the old literal of the honesty-holder line; updated faithfully — its intent (the holder sits
+after the race, one path not two) is unchanged.
+
+OPEN, honestly: the interactive per-item "fix" card needs frontend work to render `type:'suggest'`; the
+text offer in the summary already delivers the feature end-to-end today. And the 44-min report's broken
+ErrorBoundary.tsx remains an open root cause (needs the generated file to confirm — the model wrote it
+over a correct scaffold, not the scaffold's fault).

@@ -166,6 +166,10 @@ export type AgentEvent =
   // into the executor's queue (they are NEVER auto-enqueued).
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
+  // GREEN STOP (admin 2026-08-12): the app is built and works; the engine noticed improvements it did
+  // NOT apply (silently editing a working app is how it gets re-broken) and offers them. A richer client
+  // renders per-item "fix" buttons; a plain client already has the same offer in the done summary.
+  | { type: 'suggest'; kind: 'review_suggestions'; count: number; items: Array<{ title: string; detail: string; functional: boolean }>; ts: number }
   | { type: 'error'; message: string; ts: number }
   | { type: 'security_warning'; filePath: string; safe: boolean; findings: Array<{ severity: string; rule: string; description: string; line: number }>; report: string; ts: number };
 

@@ -2413,6 +2413,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * vanished, and nothing happened: "sabhi button farzi hai". The precondition is now a reported
    * value (src/lib/deployGuard.ts) that every caller must surface — never a hidden branch.
    */
+  /** Live state of the direct publish, so the button can report honestly instead of vanishing. */
+  const [publishing, setPublishing] = useState(false);
+  const [publishMsg, setPublishMsg] = useState('');
+
+  /**
+   * Start a real publish. Returns an HONEST reason when it could NOT start, null when it did.
+   *
+   * ROOT CAUSE (admin 2026-08-11: "publish button kisi kaam ka nahi hai"). This used to send the CHAT
+   * PROMPT "run npm run build, then call the deploy tool" and hope the model complied. Publishing is a
+   * DETERMINISTIC operation, and routing it through a language model made it non-deterministic (the
+   * model might not call the tool at all), slow, and BILLED — for something that should cost nothing.
+   * It now calls the server directly; the model is not involved.
+   */
   const deployLive = (providerOverride?: string): string | null => {
     const prov0 = providerOverride || deployProvider;
     const blocked = deployBlockedReason({
@@ -2422,22 +2435,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       providerName: providers.find((p) => p.id === prov0)?.name,
     });
     if (blocked) return blocked;
-    // When triggered from the Git panel a specific provider is passed; otherwise use the picker.
-    const prov = providerOverride || deployProvider;
+    if (publishing) return 'Your app is already being published — one moment.';
     if (providerOverride) setDeployProvider(providerOverride);
-    if (state.narration.length > 0) {
-      setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
-    }
-    if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    const providerName = configuredProviders.find((p) => p.id === prov)?.name || 'a live URL';
-    setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
-    start(
-      'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, deployProvider: prov, appSignature: appSignaturePref() },
-    );
-    // Show the live progress the publish is now producing — on mobile the user was left staring at
-    // whatever surface they came from, which is half of why the button felt like it did nothing.
-    setShowWorkspace(false); // the chat surface, where the deploy narration streams
+
+    setPublishing(true);
+    setPublishMsg('Building your app…');
+    void (async () => {
+      try {
+        let githubToken: string | undefined;
+        try { githubToken = localStorage.getItem('gh_token') || undefined; } catch { /* optional */ }
+        const res = await fetch('/api/agentv3/publish', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, deployProvider: prov0, githubToken }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          // The server's own reason, verbatim — a generic "publish failed" is what made this button
+          // feel dead. A build error carries the compiler's real output.
+          setPublishMsg(data?.detail ? `${data.error}\n\n${data.detail}` : (data?.error || 'Could not publish your app.'));
+          return;
+        }
+        if (typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
+        setPublishMsg(data?.url ? `Your app is live at ${data.url}` : (data?.message || 'Published.'));
+      } catch (e) {
+        setPublishMsg(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPublishing(false);
+      }
+    })();
     return null;
   };
 
@@ -2846,7 +2872,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       {showHostingChooser && (
         <HostingChooser
           providers={configuredProviders}
-          busy={running}
+          // The publish now happens in THIS panel, so the chooser must reflect it: a button that
+          // starts real work and shows nothing is the dead button this whole change exists to kill.
+          busy={running || publishing}
+          publishStatus={publishMsg}
           workspaceId={state.workspaceId}
           customDomainsEnabled={customDomainsEnabled}
           ownRepo={state.ownRepo}
@@ -2860,13 +2889,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
           }}
           onClose={() => setShowHostingChooser(false)}
-          // Close ONLY when the publish genuinely started; otherwise hand the reason back so the
-          // chooser shows it inline (never a modal that vanishes with nothing happening).
-          onDeploy={(id) => {
-            const reason = deployLive(id);
-            if (!reason) setShowHostingChooser(false);
-            return reason;
-          }}
+          // STAYS OPEN, always. Closing on a successful start made sense while publishing streamed
+          // into the chat — the user was sent somewhere that showed progress. Now the publish runs
+          // directly and reports into THIS surface, so closing it would hide the very thing the user
+          // is waiting for, and reproduce the "sheet vanished, nothing happened" complaint that the
+          // blocked-reason plumbing was built to end. A refused publish still hands its reason back.
+          onDeploy={(id) => deployLive(id)}
         />
       )}
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}

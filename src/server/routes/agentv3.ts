@@ -4617,6 +4617,124 @@ export function registerAgentV3Routes(app: Express): void {
   // R5 §5.1 — list the available deploy providers and which are configured right now (no lock-in).
   // Honest status: a provider whose API token is missing reports configured:false with what to set,
   // so the UI can show "available — add token" instead of faking a deploy target.
+  /**
+   * The deploy function used by BOTH the AI `deploy` tool and the direct Publish endpoint.
+   *
+   * Extracted so the two paths cannot drift: it carries the provider choice, the custom-domain
+   * republish and the durable deployment record. A second copy would be the kind of duplicate that
+   * quietly loses one of those three.
+   */
+  const makeDeployFn = (opts: { userId: string | null; githubToken?: string; providerId: string }) => {
+    const provider = getDeployProvider(opts.providerId)
+      ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER)
+      ?? getDeployProvider('firebase')!;
+    return withDeploymentPersistence(
+      async (ws: string, files: Map<string, Buffer>) => {
+        const url = await provider.deploy(ws, files, { userId: opts.userId, githubToken: opts.githubToken });
+        // Firebase-NATIVE custom domain: when publishing on OUR hosting AND this workspace has a
+        // connected domain, ALSO publish the same build to its dedicated site so the domain serves the
+        // fresh app. Best-effort — a failure here never fails the primary publish, which is already live.
+        if (opts.providerId === 'firebase' && firebaseCustomDomainsEnabled()) {
+          try {
+            if (await workspaceHasFirebaseDomain(ws)) {
+              await new FirebaseHostingDeployer().deployToSite(ws, files);
+            }
+          } catch (e) {
+            console.warn('[agentv3] custom-domain site publish failed (primary publish is live):', e);
+          }
+        }
+        return url;
+      },
+      opts.userId,
+      opts.providerId,
+    );
+  };
+
+  /**
+   * PUBLISH — the direct, deterministic path. POST /api/agentv3/publish
+   *
+   * ROOT CAUSE this replaces (admin 2026-08-11: "publish button kisi kaam ka nahi hai"). Publishing
+   * used to be driven by asking the MODEL to do it: the button sent the chat prompt "run npm run build,
+   * then call the deploy tool". Publishing is a DETERMINISTIC operation — build, collect dist, upload,
+   * return the URL — and routing it through a language model made it non-deterministic (the model might
+   * not call the tool at all; one recorded build had it running `ls -la dist/` trying to work out what
+   * had happened), SLOW, and BILLED, for something that should cost the user nothing. A button that
+   * might publish is not a Publish button.
+   *
+   * This runs the same steps directly and reuses the SAME `deploy` tool implementation the agent calls,
+   * so custom domains, the production-database migration, the liveness check and the durable deployment
+   * record all still happen — none of it is reimplemented here.
+   */
+  app.post('/api/agentv3/publish', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'Build an app first — there is nothing to publish yet.' });
+      return;
+    }
+    // Strict: publishing writes to a public host, so a claimed uid is not enough.
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const providerId = typeof req.body?.deployProvider === 'string' ? req.body.deployProvider : DEFAULT_DEPLOY_PROVIDER;
+    const provider = getDeployProvider(providerId);
+    if (!provider) {
+      res.status(400).json({ error: 'That hosting option is not available.' });
+      return;
+    }
+    const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined;
+    if (!provider.isConfigured({ userId, githubToken })) {
+      res.status(422).json({ error: `${provider.name} is not connected yet — add its access token in Settings → Secrets & API Keys, then publish.` });
+      return;
+    }
+
+    try {
+      const actuator = buildActuator();
+      // 1. BUILD. Deterministic, and its real output is returned on failure — the user gets the
+      //    compiler's own reason instead of "publish failed".
+      const build = await actuator.runCommand(workspaceId, 'npm run build');
+      if (build.exitCode !== 0) {
+        const detail = (build.stderr || build.stdout || '').trim().split('\n').slice(-12).join('\n');
+        res.status(422).json({
+          error: 'Your app did not build, so there was nothing to publish. Fix the build error and try again.',
+          detail: detail.slice(0, 4000),
+        });
+        return;
+      }
+
+      // 2. DEPLOY, through the SAME tool the agent uses — so the custom-domain republish, the
+      //    production-database migration, the liveness probe and the durable record all still run.
+      const dispatcher = new ToolDispatcher(
+        actuator, workspaceId, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+        makeDeployFn({ userId, githubToken, providerId }),
+      );
+      const result = await dispatcher.dispatch({ id: 'publish', name: 'deploy', input: {} });
+      if (result.is_error) {
+        res.status(422).json({ error: result.content });
+        return;
+      }
+
+      // The URL is read back from the durable record rather than parsed out of the message — the
+      // record is what every other surface reads, so they cannot disagree.
+      let url = '';
+      try { url = (await deploymentStore.get(workspaceId))?.url || ''; } catch { /* fall through */ }
+      if (!url) {
+        const m = result.content.match(/https?:\/\/[^\s)]+/);
+        url = m ? m[0] : '';
+      }
+      res.json({ ok: true, url, message: result.content });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Could not publish your app. Please try again.' });
+    }
+  });
+
   app.get('/api/agentv3/deploy-providers', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
@@ -7867,29 +7985,8 @@ export function registerAgentV3Routes(app: Express): void {
       // choice is absent or unknown; an unconfigured choice still routes there and returns an honest
       // "configure <PROVIDER>" error rather than silently deploying somewhere else.
       const chosenProviderId = typeof req.body?.deployProvider === 'string' ? req.body.deployProvider : DEFAULT_DEPLOY_PROVIDER;
-      const deployProvider = getDeployProvider(chosenProviderId) ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER) ?? getDeployProvider('firebase')!;
-      const deploy = withDeploymentPersistence(
-        async (ws, files) => {
-          const url = await deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy });
-          // Firebase-NATIVE custom domain (Slice 2, gated by AGENTV3_FIREBASE_CUSTOM_DOMAINS): when
-          // the user publishes on OUR hosting (firebase) AND this workspace has a connected custom
-          // domain, ALSO publish the same build to the workspace's dedicated Firebase site so the
-          // domain serves the fresh app. Best-effort: a failure here is logged but NEVER fails the
-          // primary publish (the `.web.app` URL is already live) — honest degradation, no breakage.
-          if (chosenProviderId === 'firebase' && firebaseCustomDomainsEnabled()) {
-            try {
-              if (await workspaceHasFirebaseDomain(ws)) {
-                await new FirebaseHostingDeployer().deployToSite(ws, files);
-              }
-            } catch (e) {
-              console.warn('[agentv3] custom-domain site publish failed (primary publish is live):', e);
-            }
-          }
-          return url;
-        },
-        userId,
-        chosenProviderId, // Phase 0 hosting quota: classify first-party (platform-paid) vs BYO
-      );
+      // ONE implementation, shared with the direct Publish endpoint — see makeDeployFn.
+      const deploy = makeDeployFn({ userId, githubToken: githubTokenForDeploy, providerId: chosenProviderId });
       // writtenFiles is declared further up (hoisted so the deadline-timeout/crash paths can see it too).
       // Fix 2 — PROGRESSIVE SERVER PERSISTENCE: save every written file to Firestore
       // within 3 s of each write. If the client connection drops mid-build (tab close,

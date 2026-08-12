@@ -116,6 +116,15 @@ describe('it is wired around the allowed post-green passes', () => {
     expect(routes).toContain('verifyAfterFixEnabled()');
   });
 
+  it('the feature-presence heal is ALSO wrapped — it is an allowed post-green write too', () => {
+    // The heal adds a missing control to a green app; if that write breaks the render it must be
+    // reverted, not shipped. It reports under its own label so the two passes stay distinguishable.
+    expect(routes).toContain("verifyAfterFixNote('feature-presence heal'");
+    // Both allowed write-passes now go through the net.
+    const wraps = routes.match(/verifyAfterFix</g) ?? [];
+    expect(wraps.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('a reverted fix is restored through the allowlisted green-guard-restore pass', () => {
     // The revert writes through actuator.writeFile, which is frozen — so it must run inside the
     // allowlisted restore pass or the restore would itself be refused.

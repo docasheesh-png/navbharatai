@@ -10739,14 +10739,58 @@ export function registerAgentV3Routes(app: Express): void {
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
-                  const healed = await runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage)));
-                  if (healed.ok) {
-                    result = healed;
-                    try {
-                      const after = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
-                      const afterCoverage = checkFeaturePresence(prompt, after);
-                      if (afterCoverage.probes.length > 0) coverage = afterCoverage;
-                    } catch { /* re-open best-effort — keep the pre-heal coverage */ }
+                  const applyHeal = () => runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage)));
+                  // VERIFY AFTER FIX (admin 2026-08-12) — the feature-presence heal is ALSO an allowed
+                  // post-green write, so it must PROVE the app still renders afterwards, exactly like the
+                  // runtime-error auto-fix below. Same snapshot→apply→re-render→keep-or-revert net: a heal
+                  // that adds a control but breaks the render is rolled back to the green snapshot, never
+                  // shipped. The post-heal browse doubles as the coverage re-probe (one render, both checks).
+                  // Only engaged once green-latched; before green there is nothing to protect and no net is
+                  // needed. Kill: AGENTV3_VERIFY_AFTER_FIX=off.
+                  if (verifyAfterFixEnabled() && isGreenLatched(workspaceId) && lastPreviewUrl && actuator.browseUrl) {
+                    let healResult: { ok: boolean } | undefined;
+                    let afterHtml: string | undefined;
+                    const vr = await verifyAfterFix<Record<string, string>>({
+                      snapshot: async () => (await collectWorkspaceFiles(actuator, workspaceId)).files,
+                      apply: async () => { healResult = await applyHeal(); },
+                      reverify: async () => {
+                        const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl!), 35_000, 'verify-after-fix');
+                        const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                        if (v.inconclusive || v.serverDown) throw new Error('cannot re-verify'); // unproven → keep, never revert on a guess
+                        afterHtml = shot.html;
+                        return v.rendered;
+                      },
+                      revert: async (snap) => {
+                        const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                        const plan = restorePlan(snap, cur);
+                        await runInPass('green-guard-restore', async () => {
+                          for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
+                          const rm = buildRemoveCommand(plan.remove);
+                          if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
+                        });
+                        await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
+                      },
+                    });
+                    try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('feature-presence heal', vr) }); } catch { /* best-effort */ }
+                    // Only a KEPT heal updates result + coverage; a reverted heal leaves the app exactly as
+                    // green as it was, and the honest pre-heal FEATURE_COVERAGE warning below still stands.
+                    if (vr.kept && healResult?.ok) {
+                      result = healResult as typeof result;
+                      if (afterHtml) {
+                        const afterCoverage = checkFeaturePresence(prompt, afterHtml);
+                        if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                      }
+                    }
+                  } else {
+                    const healed = await applyHeal();
+                    if (healed.ok) {
+                      result = healed;
+                      try {
+                        const after = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+                        const afterCoverage = checkFeaturePresence(prompt, after);
+                        if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                      } catch { /* re-open best-effort — keep the pre-heal coverage */ }
+                    }
                   }
                 } catch (e) {
                   console.log(`[AGENTV3] feature heal failed: ${e instanceof Error ? e.message : String(e)}`);

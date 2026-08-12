@@ -31628,3 +31628,31 @@ by the new "do not rewrite it" ones — the intent, preventing the thrash, is un
 certainly the repo's Actions minutes/quota (admin-only to resolve). Everything above is verified by the
 LOCAL gate (the same tsc + vitest CI runs), but per the constitution nothing merges until CI is green.
 Green Freeze + verify-after-fix (#2314) and this Prevention batch are all waiting on Actions.
+
+---
+
+## 2026-08-12 — Verify-after-fix now covers BOTH allowed post-green write passes (not just runtime-error)
+
+**Correction to the previous entry's ⚠️ CI STATUS note:** the "GitHub Actions ran no CI — almost certainly
+a quota/minutes problem" diagnosis was WRONG. The admin corrected it: PR #2314 simply had a **merge
+conflict** (another session had merged #2308 to main), so it was un-mergeable, not CI-starved. The conflict
+was resolved (import block in routes/agentv3.ts), CI ran green, and **#2314 merged** (squash → e3fa331) —
+Green Freeze + Verify-after-fix + Prevention batch 1 are now LIVE on main. No Actions quota issue existed.
+
+**This change — closing the one gap #2314's own PR body flagged.** Verify-after-fix was wired around the
+runtime-error auto-fix only; the PR body said "feature-presence follows the same pattern" but it had NOT
+yet been wrapped. So a **feature-presence heal** (an ALLOWED post-green write that adds a missing control)
+that itself broke the render would still ship broken — the exact class Verify-after-fix exists to kill.
+
+Now the feature-presence heal (routes/agentv3.ts ~L10742) runs through the identical net:
+`snapshot → apply → RE-RENDER → keep if it still renders, else RESTORE the green snapshot`. A heal that
+adds a control but breaks the app is rolled back through the allowlisted `green-guard-restore` pass
+(durable store included) and reported honestly (FIX_VERIFIED / FIX_REVERTED / FIX_UNVERIFIED) under its own
+`'feature-presence heal'` label so the two passes stay distinguishable in the report. The post-heal browse
+does double duty as the coverage re-probe (one render, both checks). Only engaged once green-latched; kill
+switch AGENTV3_VERIFY_AFTER_FIX=off reverts both passes to today's behaviour byte-for-byte.
+
+Both allowed write-passes (runtime-error-autofix, feature-presence-heal) now go through verify-after-fix;
+the third allowlisted pass (green-guard-restore) is the restore itself and needs no net. Test locks it:
+verifyAfterFix.test.ts asserts BOTH passes are wrapped (≥2 verifyAfterFix< call sites + the
+'feature-presence heal' label). Gate: tsc clean both projects; verifyAfterFix (14) + greenFreeze (30) green.

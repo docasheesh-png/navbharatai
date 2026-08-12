@@ -91,6 +91,7 @@ export interface GateVerdict {
   failures: string[];
 }
 
+/** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
   preview: 'the app came up and rendered',
   pages: 'every page route rendered in a real browser',
@@ -98,6 +99,33 @@ const RUNTIME_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
   typecheck: 'the project typechecks',
   tests: 'the app\'s own test suite passes',
 };
+
+/**
+ * What a FAILURE means — a separate sentence, not the pass sentence with "this FAILED" bolted on.
+ *
+ * The first real build after this gate shipped led its report with "Not shippable — the app's own test
+ * suite passes — this FAILED", which is gibberish, and it was the headline the admin saw on a working
+ * game. Reusing a pass-phrased label for the failure case cannot produce a readable sentence; two
+ * sentences can.
+ */
+const FAILURE_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
+  preview: 'the app did not come up or did not render',
+  pages: 'a page route failed to render in a real browser',
+  journeys: 'a real user journey failed — the app did not do what the user asked of it',
+  typecheck: 'the project does not typecheck',
+  tests: 'the app\'s own test suite did not pass',
+};
+
+/**
+ * Which failures mean THE APP DOES NOT WORK, as opposed to "something about it is not ideal".
+ *
+ * The mirror of the green rule. Green cannot be earned by static cleanliness; RED cannot be earned by
+ * static failure either. A generated test suite that fails — and whose own report says it cannot tell a
+ * failing test from a runner that never started — is a caveat worth naming loudly, not proof that a
+ * working app is unshippable. The first real build made exactly that mistake about a game the admin was
+ * playing at the time.
+ */
+const RED_ON_FAILURE: Array<keyof Omit<RuntimeEvidence, 'buildOk'>> = ['preview', 'pages', 'journeys'];
 
 /** Why a missing check is missing — so "not run" reads as a gap rather than as an absence of concern. */
 const WHY_MISSING: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
@@ -136,11 +164,16 @@ export function releaseGate(
   const proven: string[] = [];
   const unproven: string[] = [];
   const failures: string[] = [];
+  const softFailures: string[] = [];
 
   for (const key of Object.keys(RUNTIME_LABEL) as Array<keyof typeof RUNTIME_LABEL>) {
     const outcome = ev[key];
     if (outcome === 'passed') proven.push(RUNTIME_LABEL[key]);
-    else if (outcome === 'failed') failures.push(`${RUNTIME_LABEL[key]} — this FAILED`);
+    else if (outcome === 'failed') {
+      if (RED_ON_FAILURE.includes(key)) failures.push(FAILURE_LABEL[key]);
+      // Named in the caveats instead — prominently, but it cannot condemn a running app.
+      else softFailures.push(FAILURE_LABEL[key]);
+    }
     else if (outcome === 'unreachable') {
       // Reached but inconclusive. Neither a pass nor a defect, and it must be neither here too.
       unproven.push('a user journey was derived but could not be reached (a login wall or a route needing seeded data)');
@@ -182,7 +215,8 @@ export function releaseGate(
   if (q.a11yIssues > 0) qualityCaveats.push(`${q.a11yIssues} accessibility problem(s) real users would hit`);
   if (q.slowRoutes > 0) qualityCaveats.push(`${q.slowRoutes} page(s) measured as slow in the preview sandbox`);
 
-  if (journeyProven && f.warnings === 0 && qualityCaveats.length === 0 && ev.preview === 'passed') {
+  if (journeyProven && f.warnings === 0 && qualityCaveats.length === 0 && softFailures.length === 0
+      && ev.preview === 'passed') {
     return {
       state: 'green',
       headline: 'Shippable — it runs, and a real user journey held up end to end.',
@@ -191,6 +225,9 @@ export function releaseGate(
   }
 
   const caveat = [
+    // Loudest first: a failed typecheck or test suite is the most serious thing that can be true of an
+    // app that still runs, so it leads the caveats rather than trailing the count of "things".
+    ...softFailures,
     f.warnings > 0 ? `${f.warnings} thing(s) worth a look` : '',
     ...qualityCaveats,
   ].filter(Boolean).join(', ');

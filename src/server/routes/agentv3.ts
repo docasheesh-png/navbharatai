@@ -11092,7 +11092,10 @@ export function registerAgentV3Routes(app: Express): void {
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,
           // and filing it as info is how it stops being read.
-          severity: gate.state === 'red' ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          // A RED gate on a build that SUCCEEDED is a warning about shipping, not an error in the run —
+          // recording it as an error made it outrank every real finding and become the report's root
+          // cause. Only a gate that agrees with a failed build is an error.
+          severity: gate.state === 'red' && !result.ok ? 'error' : gate.state === 'green' ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           autoResolved: gate.state === 'green',

@@ -3,6 +3,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseTestOutcome, reportedNoTestResults } from './testRunner';
 import { BuildDiagnostics, isRecoverableOnSuccess } from './BuildDiagnostics';
+import { isSpaMountShell, analyzeHtmlPage, analyzeDesignCoverage } from './DesignCoverage';
+import { journeyCandidates, noJourneyReason } from './journeyDerivation';
 
 /**
  * FOUR THINGS THE 2026-08-12 REPORT SAID THAT WERE NOT TRUE.
@@ -131,5 +133,65 @@ describe('the E2E decision judges the project, not this turn\'s writes', () => {
     // about their own app.
     expect(routes).toContain('const projectFiles = await loadWorkspaceFiles(workspaceId)');
     expect(routes).toContain('{ ...projectFiles, ...Object.fromEntries(writtenFiles) }');
+  });
+});
+
+/**
+ * TWO FALSE REASONS THE FIRST REAL BUILD PRODUCED (2026-08-12).
+ *
+ * Neither broke anything. Both told the admin something untrue about his own app, which is how a report
+ * stops being read.
+ */
+describe('an SPA mount shell is not a page', () => {
+  const SHELL = `<!doctype html><html><head><title>Game</title></head><body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <meta a><meta b><meta c><meta d><meta e>
+  </body></html>`;
+
+  it('index.html is not judged for having no heading — React renders the heading', () => {
+    // This fired on the very first build: "index.html does not match the app's own design standard
+    // (NO_HEADING; 0% of its elements carry a class)". It would fire on essentially every app this
+    // platform builds, about the one file that is SUPPOSED to look like that.
+    expect(isSpaMountShell(SHELL)).toBe(true);
+    expect(analyzeHtmlPage('index.html', SHELL)).toBeNull();
+  });
+
+  it('nor is it COUNTED — otherwise "1 of 1 pages fall short" is still wrong', () => {
+    const r = analyzeDesignCoverage({ 'index.html': SHELL });
+    expect(r.findings).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('a REAL static page with no stylesheet is still caught — this is what the check is for', () => {
+    const bare = '<html><body><h1>About</h1><p>a</p><p>b</p><p>c</p><p>d</p><p>e</p></body></html>';
+    expect(isSpaMountShell(bare)).toBe(false);
+    expect(analyzeHtmlPage('about.html', bare)?.defects).toContain('NO_STYLESHEET');
+  });
+
+  it('BOTH signals are required — a mount root alone is not an SPA shell', () => {
+    // A genuine static page may contain a div#app, and a page may load a module. Neither alone means
+    // the visible content arrives from JavaScript.
+    expect(isSpaMountShell('<div id="app"></div>')).toBe(false);
+    expect(isSpaMountShell('<script type="module" src="/x.js"></script>')).toBe(false);
+  });
+});
+
+describe('the journey reason describes the search that actually happened', () => {
+  it('a single-file app is NOT "no page components were found"', () => {
+    // The first build said exactly that about a React game whose whole UI lives in src/App.tsx — a
+    // file deriveJourneys looks at and noJourneyReason did not. One candidate list now serves both.
+    const game = { 'src/App.tsx': '<canvas /><div>Score</div>' };
+    expect(journeyCandidates(game)).toEqual(['src/App.tsx']);
+    expect(noJourneyReason(game)).toContain('no form');
+  });
+
+  it('a project with genuinely no pages still says so', () => {
+    expect(noJourneyReason({ 'src/util.ts': 'export const x = 1;' })).toContain('no page components');
+  });
+
+  it('the candidate list is deterministic and shared', () => {
+    const files = { 'src/pages/B.tsx': 'x', 'src/pages/A.tsx': 'x', 'src/App.tsx': 'x' };
+    expect(journeyCandidates(files)).toEqual(['src/pages/A.tsx', 'src/pages/B.tsx', 'src/App.tsx']);
   });
 });

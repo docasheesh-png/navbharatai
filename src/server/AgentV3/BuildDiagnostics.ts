@@ -1288,6 +1288,12 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
   'POST_ANSWER_TIMING',          // pure measurement
   'ARCHITECTURE_INVARIANT_VIOLATED', // consistency with the project's own conventions — not a failure
+  // THE GATE IS A SUMMARY OF OTHER FINDINGS, SO IT CANNOT BE A CAUSE OF ANYTHING (first real build after
+  // it shipped, 2026-08-12). It became the rootCause of a SUCCESSFUL build, and the headline the admin
+  // read about a game he was playing at the time was "Not shippable". This is the same defect that was
+  // fixed for PREVIEW_NOT_RENDERED and then reintroduced by a new code — which is why the fix belongs
+  // in this set rather than at the gate's call site.
+  'RELEASE_GATE',
 ]);
 
 /** True when a finding is advisory-only and must never become the build's rootCause. Pure. */

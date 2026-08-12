@@ -189,6 +189,19 @@ export function writesToUserDatabase(files: Record<string, string>): boolean {
 // DERIVATION
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The files a journey could come from — deterministic order, so the same project always yields the same
+ * journeys, and shared with noJourneyReason so the explanation can never describe a different search.
+ */
+export function journeyCandidates(files: Record<string, string>): string[] {
+  const out = Object.keys(files ?? {}).filter(isPageFile).sort();
+  // A single-page app keeps everything in App.tsx, which is not under a pages directory.
+  for (const extra of ['src/App.tsx', 'src/App.jsx', 'App.tsx']) {
+    if (files?.[extra] && !out.includes(extra)) out.push(extra);
+  }
+  return out;
+}
+
 const isPageFile = (p: string): boolean =>
   /(^|\/)(pages|screens|views|routes|app)\//i.test(p) && /\.(t|j)sx$/.test(p);
 
@@ -220,12 +233,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   const out: Journey[] = [];
   const noWrites = writesToUserDatabase(files);
 
-  // Deterministic order: same project, same journeys, every time.
-  const candidates = Object.keys(files).filter(isPageFile).sort();
-  // A single-page app keeps everything in App.tsx, which is not under a pages directory.
-  for (const extra of ['src/App.tsx', 'src/App.jsx', 'App.tsx']) {
-    if (files[extra] && !candidates.includes(extra)) candidates.push(extra);
-  }
+  const candidates = journeyCandidates(files);
 
   for (const path of candidates) {
     if (out.length >= MAX_JOURNEYS) break;
@@ -277,7 +285,11 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
 
 /** Why a derivation produced nothing — so a quiet report is explained rather than merely quiet. */
 export function noJourneyReason(files: Record<string, string>): string {
-  const pages = Object.keys(files ?? {}).filter(isPageFile);
+  // THE SAME CANDIDATE LIST THE DERIVATION USES. When these two disagree the report gives a reason that
+  // is simply untrue: the first real build said "no page components were found to derive a user journey
+  // from" about a React game whose whole UI lives in src/App.tsx — a file deriveJourneys looks at and
+  // this function did not. One list, so the explanation always describes what actually happened.
+  const pages = journeyCandidates(files ?? {});
   if (pages.length === 0) return 'no page components were found to derive a user journey from';
   const anyForm = pages.some((p) => inputTags(files[p] || '').length > 0);
   if (!anyForm) return 'this app has no form for a journey to fill in — nothing here takes user input';

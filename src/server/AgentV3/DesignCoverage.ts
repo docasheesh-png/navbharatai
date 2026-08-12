@@ -171,6 +171,14 @@ export function analyzePage(path: string, content: string): PageFinding | null {
  */
 export function analyzeHtmlPage(path: string, content: string): PageFinding | null {
   if (!/\.html?$/i.test(path)) return null;
+  // A SINGLE-PAGE APP'S MOUNT SHELL IS NOT A PAGE (first real build after the design gate shipped,
+  // 2026-08-12). A Vite/React `index.html` is `<div id="root"></div>` plus a module script: it has no
+  // heading BY DESIGN, because React renders the heading a moment later. Judging it as a page produced
+  // "index.html does not match the app's own design standard (NO_HEADING; 0% of its elements carry a
+  // class)" — which would fire on essentially every app this platform builds, about the one file that
+  // is supposed to look like that. The multi-page static site this function exists for has no mount
+  // root and no module script, so the two are cleanly separable.
+  if (isSpaMountShell(content)) return null;
 
   const { total, classed } = countHtmlElements(content);
   if (total < 6) return null;
@@ -194,6 +202,21 @@ export function analyzeHtmlPage(path: string, content: string): PageFinding | nu
   };
 }
 
+/**
+ * Is this HTML the mount shell of a single-page app rather than a page in its own right?
+ *
+ * Both signals are required: an empty mount root AND a module script that fills it. A genuine static
+ * page can contain a `<div id="app">`, and a page can load a module — neither alone means the visible
+ * content arrives from JavaScript. Pure.
+ */
+export function isSpaMountShell(content: string): boolean {
+  const html = String(content ?? '');
+  const mountRoot = /<div[^>]*\bid\s*=\s*["'](?:root|app|__next|___gatsby)["'][^>]*>\s*<\/div>/i.test(html);
+  const moduleScript = /<script\b[^>]*\btype\s*=\s*["']module["']/i.test(html)
+    || /<script\b[^>]*\bsrc\s*=\s*["'][^"']*\/(?:main|index|entry)\.[jt]sx?["']/i.test(html);
+  return mountRoot && moduleScript;
+}
+
 /** Judge every page in the project — components AND plain HTML pages. Pure; never throws. */
 export function analyzeDesignCoverage(files: Record<string, string>): DesignCoverageReport {
   const findings: PageFinding[] = [];
@@ -204,6 +227,7 @@ export function analyzeDesignCoverage(files: Record<string, string>): DesignCove
 
     if (/\.html?$/i.test(path)) {
       if (countHtmlElements(content).total < 6) continue;
+      if (isSpaMountShell(content)) continue; // not a page — see analyzeHtmlPage
       pagesExamined++;
       const htmlFinding = analyzeHtmlPage(path, content);
       if (htmlFinding) findings.push(htmlFinding);

@@ -31708,3 +31708,43 @@ false-negative on a correct game). Reverted it before it shipped.
    game (no form, saves nothing) is structurally capped at YELLOW with a "doesn't save anything" knock. The
    gate needs a domain-aware notion of "this app legitimately has no data-journey" WITHOUT reopening the
    "renders = GREEN" hole the gate exists to close. Higher-risk core-honesty change — flagged for admin.
+
+---
+
+## 2026-08-12 — Autopsy BENCHMARK #2 (Add Level 2): a SUCCESSFUL build's rootCause was a setup-timing advisory
+
+**Report:** BENCHMARK #2 — existing-game evolution, add a playable Level 2. ok:true, 0 errors, tsc PASS
+(exit 0), prod build PASS (exit 0), preview rendered. ₹203.43, 18.8 min. A genuinely clean build.
+
+**5-bucket tally:** ✅ 4 self-heals (2× KIMI timeout → provider fallback; dev server stopped → deterministic
+restart, no code/model; tsc+build clean) · 🔀 0 · ⏭️ in-browser interaction skipped (browser_action failed
+2× exit 1 — only Level 1 was ever screenshotted) · ❌ 0 in code · 🥵 231s time-to-first-call, 2× KIMI timeout,
+18.8 min.
+
+**Defect 1 (FIXED this session): rootCause of a SUCCESSFUL build was a pure timing advisory.**
+meta.rootCause = "231s of preparation before the build's first model call". `deriveRootCause` on ok:true,
+finding no error/review-critical, picked the first unresolved non-info issue — TIME_TO_FIRST_CALL (a
+warning, autoResolved:false) — as the "cause". It is a pure setup-timing MEASUREMENT, never a cause. Same
+class as POST_ANSWER_TIMING/RELEASE_GATE already in NEVER_ROOT_CAUSE; TIME_TO_FIRST_CALL was simply missing
+from that set. Fix: added it. A clean build now reads "Build completed successfully with no problems
+recorded." Regression test encodes the exact case. Gate: tsc clean both; BuildDiagnostics 145 tests.
+
+**Defect 2 (OPEN — flagged, not hastily patched): the report claimed PASS on unverified interactive features.**
+The prompt said "Only report PASS when actually verified." The model reported Level 2 loads / gameplay /
+restart / final victory = PASS — but browser_action failed twice, so it never clicked NEXT LEVEL or reached
+Level 2; it only screenshotted Level 1. tsc/build PASS are real; the INTERACTIVE PASSes were not verified.
+Opposite risk from BENCHMARK #1 (there the engine under-claimed a correct game; here the model over-claims
+verification it could not perform). claimAudit did not catch it — its checks are console-clean / screenshot /
+preview-renders / ui-described, none of which cover "PASS on an interactive feature the browser tool never
+reached." Fixing generically is fuzzy (false-positive risk) — recorded as open.
+
+**Proactive layer (rule 5 step 6 — world-best): the root lever is browser_action reliability.** When the
+click/interact tool fails, the engine CANNOT truly verify interactive features, so it either guesses PASS
+(dishonest) or reports UNVERIFIED. Making in-browser interaction reliable is what lets the engine actually
+PROVE "Level 2 works" — and it also feeds the still-open release-gate-fairness-for-games item (a game with
+no form-journey is stuck at YELLOW "whether it SAVES anything is untested"; note the no-journey REASON was
+inconsistent between #1 "no form/input-less" and #2 "no page components", so that signal needs hardening
+before the gate keys on it).
+
+**Reliability note:** KIMI (cheap floor) timed out twice this build — the GLM/Kimi cheap-tier ceiling
+CLAUDE.md already flags; auto-fallback covered it, but it is real latency the user paid for in wall-clock.

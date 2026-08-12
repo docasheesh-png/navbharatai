@@ -398,6 +398,16 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     expect(deriveRootCause({ issues: [], review })).toBe('Critical issue found by review: Login is completely broken.');
   });
 
+  // BENCHMARK #2 autopsy 2026-08-12: a fully successful build (tsc PASS, prod build PASS, preview
+  // rendered) was headlined rootCause "231s of preparation before the build's first model call" — a
+  // setup-timing advisory, unresolved-but-not-a-failure, picked as the successful build's cause.
+  it('a setup-timing advisory (TIME_TO_FIRST_CALL) is NOT the rootCause of a SUCCESSFUL build', () => {
+    const issues = [
+      { ts: 1, phase: 'plan' as const, severity: 'warning' as const, code: 'TIME_TO_FIRST_CALL', message: '231s of preparation before the build\'s first model call began.', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
   it('on ok:true a GENUINE unresolved error still outranks a working-app review suggestion', () => {
     // The rootCause suppression is scoped to the review finding — a real error on the timeline still wins.
     const issues = [

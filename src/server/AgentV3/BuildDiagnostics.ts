@@ -1389,6 +1389,12 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   'TEST_SUITE_UNVERIFIED',       // our sandbox could not run the suite; not the app's defect
   'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
   'POST_ANSWER_TIMING',          // pure measurement
+  // A setup-timing measurement (how long prep took before the first model call) is an advisory about
+  // the WAIT, never the CAUSE of anything. BENCHMARK #2 (2026-08-12): a fully successful build — tsc
+  // PASS, prod build PASS, preview rendered — was headlined rootCause "231s of preparation before the
+  // build's first model call", because this warning is unresolved-but-not-a-failure and got picked as
+  // the successful build's cause. Same class as POST_ANSWER_TIMING directly above; it belongs here too.
+  'TIME_TO_FIRST_CALL',          // pure setup-timing measurement — the wait, not a cause
   'ARCHITECTURE_INVARIANT_VIOLATED', // consistency with the project's own conventions — not a failure
   // THE GATE IS A SUMMARY OF OTHER FINDINGS, SO IT CANNOT BE A CAUSE OF ANYTHING (first real build after
   // it shipped, 2026-08-12). It became the rootCause of a SUCCESSFUL build, and the headline the admin

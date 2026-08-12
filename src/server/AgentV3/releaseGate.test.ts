@@ -49,6 +49,38 @@ describe('UNKNOWN — we did not look, and we say so', () => {
   });
 });
 
+describe('a stateless app (a game) is judged honestly, not "it does not save anything"', () => {
+  // BENCHMARK #1/#2 (2026-08-12): a working game was reported YELLOW with "whether it actually SAVES
+  // anything is untested" — a category error for something that saves nothing.
+  const game = ev({ preview: 'passed', pages: 'passed', journeys: 'none-derivable', typecheck: 'passed' });
+
+  it('renders + no data-entry flow → YELLOW, but the headline never implies a missing save', () => {
+    const v = releaseGate(game, clean);
+    expect(v.state).toBe('yellow'); // still not green — a journey was never proven
+    expect(v.headline).not.toContain('SAVES anything');
+    expect(v.headline).toContain('no data-entry flow');
+    expect(v.headline).toContain('not machine-verified');
+  });
+
+  it('lists the missing journey as "not a defect", not as a gap', () => {
+    expect(releaseGate(game, clean).unproven.join(' ')).toContain('not a defect');
+  });
+
+  it('"none-derivable" still CANNOT earn GREEN — rendering alone never does', () => {
+    // The safety property: softening the wording must never promote a stateless app to shippable-green.
+    expect(releaseGate(game, clean).state).not.toBe('green');
+  });
+
+  it('a real data app whose journey was not proven still gets the honest "SAVES" caveat', () => {
+    const dataApp = ev({ preview: 'passed', pages: 'passed', journeys: 'not-run', typecheck: 'passed' });
+    expect(releaseGate(dataApp, clean).headline).toContain('SAVES anything');
+  });
+
+  it('runtimeProven is unaffected — a game that rendered is still proven to RUN', () => {
+    expect(runtimeProven(game)).toBe('passed');
+  });
+});
+
 describe('RED — something we checked is actually broken', () => {
   it('a failed build is red before anything else is considered', () => {
     expect(releaseGate(ev({ buildOk: false }), clean).state).toBe('red');

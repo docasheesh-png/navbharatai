@@ -109,7 +109,7 @@ import {
   a11yIssueCount, slowRouteCount,
 } from '../AgentV3/PageRouteCheck';
 import {
-  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason,
+  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry,
   JOURNEY_TIMEOUT_MS,
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
@@ -11145,6 +11145,11 @@ export function registerAgentV3Routes(app: Express): void {
               message: `No user journey was run — ${noJourneyReason(journeyFiles)}.`,
               autoResolved: true,
             });
+            // When the app has NO data-entry surface at all (a game, a dashboard, a landing page), there is
+            // genuinely no "save" journey to prove — mark it 'none-derivable' so the release gate reports
+            // that honestly instead of "whether it actually SAVES anything is untested" (BENCHMARK #1/#2, a
+            // game wrongly implied deficient). Conservative: any input/form/handler leaves it 'not-run'.
+            if (appHasNoDataEntry(journeyFiles)) gateEvidence.journeys = 'none-derivable';
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }

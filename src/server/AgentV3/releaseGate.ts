@@ -31,8 +31,13 @@
 /** How a single check came out. `not-run` is a first-class outcome, never folded into a pass. */
 export type CheckOutcome = 'passed' | 'failed' | 'not-run';
 
-/** A journey can additionally be reached-but-inconclusive, which is neither a pass nor a failure. */
-export type JourneyOutcome = CheckOutcome | 'unreachable';
+/**
+ * A journey can additionally be reached-but-inconclusive ('unreachable'), or genuinely NOT APPLICABLE
+ * ('none-derivable') — the app has no data-entry flow at all, so there is no user journey to prove. The
+ * two are different facts: 'unreachable' is a journey we could not finish (a login wall); 'none-derivable'
+ * is the honest "there was nothing here to save", which must not be reported as a missing capability.
+ */
+export type JourneyOutcome = CheckOutcome | 'unreachable' | 'none-derivable';
 
 export interface RuntimeEvidence {
   /** Did the build itself report success? */
@@ -177,8 +182,16 @@ export function releaseGate(
     else if (outcome === 'unreachable') {
       // Reached but inconclusive. Neither a pass nor a defect, and it must be neither here too.
       unproven.push('a user journey was derived but could not be reached (a login wall or a route needing seeded data)');
+    }
+    else if (outcome === 'none-derivable') {
+      // NOT a gap: the app has no data-entry flow to drive, so there was no journey to prove. Naming it as
+      // a missing capability is the category error this branch exists to prevent (a game "saves" nothing).
+      unproven.push('this app has no data-entry flow, so there was no user journey to prove (not a defect)');
     } else unproven.push(WHY_MISSING[key]);
   }
+  // A game / dashboard / landing page with no data-entry surface at all: there is genuinely no "save"
+  // journey to prove, so the YELLOW headline must not imply one is missing.
+  const noDataJourney = ev.journeys === 'none-derivable';
 
   if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)`);
   if (f.highSeverity > 0) failures.push(`${f.highSeverity} high-severity security/privacy finding(s)`);
@@ -231,11 +244,18 @@ export function releaseGate(
     f.warnings > 0 ? `${f.warnings} thing(s) worth a look` : '',
     ...qualityCaveats,
   ].filter(Boolean).join(', ');
+  // The honest not-proven headline. For an app with no data-entry flow at all, "whether it SAVES anything
+  // is untested" is a category error — it saves nothing — so it gets a NEUTRAL line that neither invents a
+  // missing capability nor claims a verification we did not do. GREEN is still out of reach (a journey was
+  // never proven), so this only changes the WORDING of a YELLOW, never the verdict.
+  const notProvenHeadline = noDataJourney
+    ? `It runs and renders. This app has no data-entry flow to exercise, so there was no user journey to prove — its interactive behaviour was not machine-verified${caveat ? ` (also: ${caveat})` : ''}.`
+    : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`;
   return {
     state: 'yellow',
     headline: journeyProven
       ? `It runs and a user journey held up${caveat ? `, with ${caveat} before shipping` : ''}.`
-      : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`,
+      : notProvenHeadline,
     proven, unproven, failures,
   };
 }

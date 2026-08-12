@@ -31936,3 +31936,50 @@ placeholder by admin decision: admin-only, never on a user's bill, always carrie
 A correction is pinned on `AGENTV3_REVIEW_AUTOFIX_WARNINGS`: I recommended turning it OFF to shorten a
 23-minute build, from memory rather than from the code. It adds no pass and all post-build work is
 capped at 120s, so it cannot help — and OFF ships real functional bugs.
+
+---
+
+## 2026-08-10 (correction) — I claimed a missing-feature heal does not exist. It does, and it is better than what I proposed.
+
+**Correcting my own entry above, per the append-only rule.** In the entry for #2322/#2324 I wrote that a
+CONFIRMED-missing feature "is still not BUILT" and that making one get built would be a risky post-build
+LLM pass needing an admin decision. Investigating the next item, `greenReviewPolicy.ts` referred in
+passing to "the feature-presence heal", which by my account should not have existed. It does.
+
+**What is actually there** (`FeaturePresence.ts`, wired at `routes/agentv3.ts` ~10848):
+
+- `checkFeaturePresence(prompt, html)` probes the **RUNNING DOM of the rendered app** for a control per
+  requested feature. That is a strictly stronger check than the file-name/body matching I was reasoning
+  from — it asks "can the user actually SEE and use this?", not "does a file mention it?".
+- When a control is missing it runs ONE bounded heal pass, then **re-opens the app and re-probes**;
+  only a control now genuinely in the live DOM counts.
+- It is wrapped in `verifyAfterFix`: a snapshot is taken before the change, the app is re-rendered
+  after, and a change that BROKE the app is **reverted to the exact green snapshot** automatically. The
+  precise risk I said made this an admin decision is already designed out.
+- Budget-gated, abortable, and it can never block or fail a build. It is on the Green-Freeze ALLOWED
+  list on purpose: the reviewer's opinions must not touch a working app, but the user's OWN request is
+  the job, not an opinion.
+
+**So the correct statement is:** the capability exists and is well built; it is **default OFF**
+(`AGENTV3_FEATURE_HEAL=on`, with an optional `AGENTV3_FEATURE_HEAL_PCT` canary), and per this repo's own
+flag registry it is not enabled in Cloud Run. My narrower sentence — `confirmedMissing` (the
+RequirementCoverage field) has no consumer — is literally true and was misleading, because it implied no
+missing-feature repair exists at all. The heal keys on the live-DOM probe instead, which is the better
+signal.
+
+The admin decision is therefore not "shall I build this?" but "shall we turn it on?", which is a much
+smaller question with a real safety net behind it.
+
+**Task #77 also resolves as already-addressed, not as a bug.** "The reviewer's [CRITICAL] never being
+applied" is now a deliberate design: `greenStopReview` (default ON, kill switch `AGENTV3_GREEN_STOP=off`)
+turns the reviewer's findings into a user-facing OFFER once the app is verified rendering, instead of a
+silent edit, and records `REVIEW_SUGGESTED_NOT_APPLIED` for the admin. The recorded rationale matters for
+the admin's own 23-minute question: **"the app rendered at 6.6 min and the build ran to 14.3, most of it
+spent editing a working app"** — the same shape as "3-4 min me app ban gayi, phir 23 min chala". A large
+part of that class was already root-caused and is already on by default.
+
+**Why I got it wrong, so the method improves and not just the record:** I searched for consumers of the
+symbol I had just been reading (`confirmedMissing`) instead of for the capability (*is a missing feature
+ever repaired?*). Grepping for the name you have in hand finds the absence of that name, not the absence
+of the behaviour — and it reads exactly like proof. The redundant-work check has to be run against the
+BEHAVIOUR, which is the same discipline that caught the two already-shipped items earlier today.

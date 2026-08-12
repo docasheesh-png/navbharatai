@@ -2963,11 +2963,14 @@ export class ToolDispatcher {
               for (const fx of rec.fixes) {
                 const content = rec.files[fx.file];
                 if (typeof content !== 'string') continue;
+                // What THIS pass read, captured before the snapshot is updated — comparing it with what
+                // the previous heal left is what tells a lost write apart from a re-firing detector.
+                const before = astFiles[fx.file];
                 astFiles[fx.file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
-                noteHeal(this.workspaceId, fx.file, content);
+                noteHeal(this.workspaceId, fx.file, content, before);
               }
               this.narrate('fix.importKind', { count: rec.fixes.length });
             }
@@ -2984,10 +2987,15 @@ export class ToolDispatcher {
               for (const file of changedFiles) {
                 const content = addRes.files[file];
                 if (typeof content !== 'string') continue;
+                const before = astFiles[file];
                 astFiles[file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+                // This heal was MISSING from the ledger, and it is the one the 2026-08-09 report showed
+                // repeating first ("Added 2 missing import(s)" at t=126s/216s/313s) — so the very
+                // evidence the ledger exists to capture was being dropped for it.
+                noteHeal(this.workspaceId, file, content, before);
               }
               this.narrate('fix.missingImports', { count: addRes.added.length });
             }
@@ -3002,11 +3010,12 @@ export class ToolDispatcher {
               for (const file of changedFiles) {
                 const content = wrongRes.files[file];
                 if (typeof content !== 'string') continue;
+                const before = astFiles[file];
                 astFiles[file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
-                noteHeal(this.workspaceId, file, content);
+                noteHeal(this.workspaceId, file, content, before);
               }
               this.narrate('fix.repointedImports', { count: wrongRes.fixes.length });
             }
@@ -3030,7 +3039,8 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
                 // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
-                noteHeal(this.workspaceId, file, deduped);
+                // This one already holds both halves: `content` is what it read, `deduped` what it wrote.
+                noteHeal(this.workspaceId, file, deduped, content);
                 this.narrate('fix.duplicateImport', { file });
               }
             }

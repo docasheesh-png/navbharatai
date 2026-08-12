@@ -23,8 +23,37 @@
 
 import { createHash } from 'node:crypto';
 
-/** Per workspace: file path → how many times we healed it, and the content we last left behind. */
-const LEDGER = new Map<string, Map<string, { times: number; hash: string }>>();
+/**
+ * Per workspace: file path → how many times we healed it, the content we last left behind, and what
+ * the NEXT pass found there.
+ *
+ * WHY `seenBefore` WAS ADDED (2026-08-10). The hash of what we left was already stored and nothing
+ * ever read it, so the ledger could prove a heal REPEATED but not say why — and "a lost write, or
+ * something restoring older content" is two different bugs in two different places. Comparing what the
+ * next pass FOUND against what we LEFT separates them without guessing:
+ *
+ *   • found ≠ left  → the file genuinely changed underneath us. A lost write, or something later
+ *                     overwriting it from a stale copy. The bug is in the write/restore path.
+ *   • found = left  → our write survived intact, and the detector fired again on content we had
+ *                     already fixed. Nothing was lost; the repair or its detector is not idempotent.
+ *                     The bug is in OUR analyzer.
+ *
+ * Nobody had distinguished these, and the second was never even considered — the message asserted a
+ * lost write as fact. One hash comparison decides it, at no cost, from the next real build.
+ */
+const LEDGER = new Map<string, Map<string, HealRecord>>();
+
+interface HealRecord {
+  times: number;
+  /** Hash of what we left behind on the most recent heal. */
+  hash: string;
+  /**
+   * What a LATER pass found before healing again, compared with `hash` above.
+   * 'unchanged' = our write survived; 'changed' = the file differs from what we left;
+   * undefined = healed only once, so there is nothing to compare yet.
+   */
+  seenBefore?: 'unchanged' | 'changed';
+}
 
 /** Bound the memory: a pathological build must not grow this without limit. */
 const MAX_PATHS_PER_WORKSPACE = 500;
@@ -38,8 +67,13 @@ function hashOf(content: string): string {
 /**
  * Record that we just healed `path`, leaving `contentAfter` behind. Called by every deterministic
  * self-heal that writes a file. Never throws.
+ *
+ * `contentBefore` is what this pass READ before repairing. Passing it is what turns a repeat from
+ * "something went wrong" into a named cause — see the LEDGER comment. It is optional so an existing
+ * caller keeps working unchanged; a repeat recorded without it simply reports the cause as unknown
+ * rather than asserting one.
  */
-export function noteHeal(workspaceId: string, path: string, contentAfter: string): void {
+export function noteHeal(workspaceId: string, path: string, contentAfter: string, contentBefore?: string): void {
   try {
     if (!workspaceId || !path) return;
     let ws = LEDGER.get(workspaceId);
@@ -54,13 +88,26 @@ export function noteHeal(workspaceId: string, path: string, contentAfter: string
     }
     const prev = ws.get(path);
     if (!prev && ws.size >= MAX_PATHS_PER_WORKSPACE) return;
-    ws.set(path, { times: (prev?.times ?? 0) + 1, hash: hashOf(contentAfter) });
+    // Only meaningful on a REPEAT: on the first heal there is nothing we left behind to compare with.
+    // Once a verdict is recorded it STICKS — a third pass that happens to read something else must not
+    // erase the evidence the second pass gave us.
+    const seenBefore = prev && contentBefore !== undefined
+      ? (prev.seenBefore ?? (hashOf(contentBefore) === prev.hash ? 'unchanged' : 'changed'))
+      : prev?.seenBefore;
+    ws.set(path, { times: (prev?.times ?? 0) + 1, hash: hashOf(contentAfter), ...(seenBefore ? { seenBefore } : {}) });
   } catch { /* bookkeeping must never break a heal */ }
 }
 
 export interface HealRepeat {
   path: string;
   times: number;
+  /**
+   * What the repeating pass found, relative to what the previous one left.
+   * 'changed' → the file moved underneath us (lost write / stale overwrite).
+   * 'unchanged' → our write held and the detector re-fired on already-fixed content.
+   * undefined → the caller did not supply the before-content, so we do not claim to know.
+   */
+  cause?: 'changed' | 'unchanged';
 }
 
 /**
@@ -72,7 +119,7 @@ export function healRepeats(workspaceId: string): HealRepeat[] {
   if (!ws) return [];
   return [...ws.entries()]
     .filter(([, v]) => v.times > 1)
-    .map(([path, v]) => ({ path, times: v.times }))
+    .map(([path, v]) => ({ path, times: v.times, ...(v.seenBefore ? { cause: v.seenBefore } : {}) }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -83,9 +130,42 @@ export function healRepeats(workspaceId: string): HealRepeat[] {
  */
 export function healRepeatMessage(repeats: readonly HealRepeat[]): string {
   const total = repeats.reduce((n, r) => n + r.times, 0);
-  const shown = repeats.slice(0, 5).map((r) => `${r.path} ×${r.times}`).join(', ');
+  const label = (r: HealRepeat): string =>
+    `${r.path} ×${r.times}${r.cause === 'changed' ? ' (file changed under us)' : r.cause === 'unchanged' ? ' (our write held)' : ''}`;
+  const shown = repeats.slice(0, 5).map(label).join(', ');
   const more = repeats.length - Math.min(5, repeats.length);
-  return `${repeats.length} file(s) had to be healed MORE THAN ONCE in this build (${shown}${more > 0 ? ` +${more} more` : ''}, ${total} heal passes in total). Each pass re-reads the file fresh from the sandbox and only acts when the defect is genuinely still there, so a repeat proves the earlier heal's write was NOT present on the next read — a lost write, or something restoring older content over it. The repair itself worked; what failed is that it did not last.`;
+  const head = `${repeats.length} file(s) had to be healed MORE THAN ONCE in this build (${shown}${more > 0 ? ` +${more} more` : ''}, ${total} heal passes in total).`;
+
+  // The verdict is stated ONLY from the hash comparison. The previous wording asserted "the write was
+  // NOT present" as established fact, which was a theory — and it happens to be the theory that sends
+  // whoever reads it to investigate the sandbox write path. If the truth is the other branch, that is
+  // days spent in the wrong file.
+  const changed = repeats.filter((r) => r.cause === 'changed').length;
+  const held = repeats.filter((r) => r.cause === 'unchanged').length;
+  const unknown = repeats.length - changed - held;
+
+  const parts: string[] = [];
+  if (changed) {
+    parts.push(
+      `${changed} file(s) did NOT contain what the previous heal left behind — the file genuinely changed `
+      + 'underneath us, so the cause is a lost write or something later overwriting it from a stale copy. '
+      + 'Look at the write/restore path.',
+    );
+  }
+  if (held) {
+    parts.push(
+      `${held} file(s) still contained EXACTLY what the previous heal wrote — nothing was lost. The repair `
+      + 'survived and the detector fired again on content it had already fixed, so the bug is in our '
+      + 'analyzer or in a repair that is not idempotent. Look at the detector, not at the sandbox.',
+    );
+  }
+  if (unknown) {
+    parts.push(
+      `${unknown} file(s) were recorded without the content the pass read, so their cause is genuinely `
+      + 'unknown — not assumed.',
+    );
+  }
+  return `${head} ${parts.join(' ')}`;
 }
 
 /** Start a build with a clean sheet, so a repeat means "twice in THIS build". Never throws. */

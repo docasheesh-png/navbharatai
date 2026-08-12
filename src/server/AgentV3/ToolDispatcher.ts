@@ -305,7 +305,7 @@ import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLin
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
-import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
+import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -1573,6 +1573,23 @@ export class ToolDispatcher {
   }
 
   /**
+   * Files that are NAMED like an error boundary but implement none. See looksLikeBrokenErrorBoundary:
+   * without this, such a file produces "React app has no error boundary", which invites a repair pass to
+   * ADD one beside the broken one — the duplicate-ErrorBoundary failure this repo has already paid for
+   * twice.
+   */
+  private collectBrokenErrorBoundaries(sources: EvalSourceFile[]): string[] {
+    const FRONTEND = /\.(tsx|jsx)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const out: string[] = [];
+    for (const { path, content } of sources) {
+      if (!FRONTEND.test(path) || SKIP.test(path)) continue;
+      if (looksLikeBrokenErrorBoundary(path, content)) out.push(path);
+    }
+    return out;
+  }
+
+  /**
    * Best-effort trust/safety/compliance scan (Layer 77 "Bharosa") over the
    * project's source files. Combines file-local privacy defects (PII in logs,
    * sensitive values in browser storage, cookies without SameSite, personal data
@@ -2764,7 +2781,12 @@ export class ToolDispatcher {
           .episodes.filter((e) => e.kind === 'request')
           .map((e) => e.text);
         const requestText = currentRequestForCoverage(requestEpisodes);
-        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph());
+        // The file BODIES are passed alongside the graph so a feature built INLINE (a search box
+        // inside a list page owns no file of its own) is seen as built instead of reported missing —
+        // and so a feature found in neither names nor bodies is a CONFIRMED absence rather than a
+        // guess. Everything readiness needs is already in `snap.sources`; this analyzer simply was
+        // never given it.
+        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph(), snap.sources);
         // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
         // actually start/build? Reads package.json; never throws, never breaks
         // evaluate. "Preview is EARNED" — a build that compiles can still not run.
@@ -2803,6 +2825,7 @@ export class ToolDispatcher {
         const errorBoundary = analyzeErrorBoundary(
           mem.graph().components.length,
           this.collectHasErrorBoundary(snap.sources),
+          this.collectBrokenErrorBoundaries(snap.sources),
         );
         // Best-effort security-config pass (Section I #4): insecure TLS/CORS config.
         const securityConfig = this.collectSecurityConfigIssues(snap.sources);
@@ -2882,8 +2905,21 @@ export class ToolDispatcher {
         if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         if (viteEnv.length) extra.push({ severity: 'medium', label: `${viteEnv.length} non-VITE_ import.meta.env reference(s) (undefined in the browser)` });
         if (asyncPatterns.length) extra.push({ severity: 'medium', label: `${asyncPatterns.length} forEach(async …) loop(s) that do not await` });
-        for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
-        if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
+        // A CONFIRMED absence says so plainly. The old single wording — "not found" — read like a
+        // lookup that came up empty, which is exactly how a true finding gets skimmed past: in the
+        // dukaan report the user had literally written "upar search box ho", no search existed, this
+        // line said so, and the build shipped anyway. "not built" is what actually happened.
+        for (const f of reqCoverage.findings) {
+          extra.push({ severity: 'medium', label: f.confirmed ? `Requested feature NOT BUILT: ${f.feature}` : `Requested feature not found: ${f.feature}` });
+        }
+        // A boundary that EXISTS but does not work is a different instruction from one that is absent —
+        // see looksLikeBrokenErrorBoundary. The old single label said "has no error boundary" for both,
+        // which is what invites a duplicate.
+        if (errorBoundary.findings.length) {
+          extra.push({ severity: 'medium', label: errorBoundary.brokenBoundaries.length > 0
+            ? `${errorBoundary.brokenBoundaries[0]} is named like an error boundary but implements none — fix that file, do NOT add another`
+            : 'React app has no error boundary' });
+        }
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
@@ -2927,11 +2963,14 @@ export class ToolDispatcher {
               for (const fx of rec.fixes) {
                 const content = rec.files[fx.file];
                 if (typeof content !== 'string') continue;
+                // What THIS pass read, captured before the snapshot is updated — comparing it with what
+                // the previous heal left is what tells a lost write apart from a re-firing detector.
+                const before = astFiles[fx.file];
                 astFiles[fx.file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
-                noteHeal(this.workspaceId, fx.file, content);
+                noteHeal(this.workspaceId, fx.file, content, before);
               }
               this.narrate('fix.importKind', { count: rec.fixes.length });
             }
@@ -2948,10 +2987,15 @@ export class ToolDispatcher {
               for (const file of changedFiles) {
                 const content = addRes.files[file];
                 if (typeof content !== 'string') continue;
+                const before = astFiles[file];
                 astFiles[file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+                // This heal was MISSING from the ledger, and it is the one the 2026-08-09 report showed
+                // repeating first ("Added 2 missing import(s)" at t=126s/216s/313s) — so the very
+                // evidence the ledger exists to capture was being dropped for it.
+                noteHeal(this.workspaceId, file, content, before);
               }
               this.narrate('fix.missingImports', { count: addRes.added.length });
             }
@@ -2966,11 +3010,12 @@ export class ToolDispatcher {
               for (const file of changedFiles) {
                 const content = wrongRes.files[file];
                 if (typeof content !== 'string') continue;
+                const before = astFiles[file];
                 astFiles[file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
-                noteHeal(this.workspaceId, file, content);
+                noteHeal(this.workspaceId, file, content, before);
               }
               this.narrate('fix.repointedImports', { count: wrongRes.fixes.length });
             }
@@ -2994,7 +3039,8 @@ export class ToolDispatcher {
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
                 // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
-                noteHeal(this.workspaceId, file, deduped);
+                // This one already holds both halves: `content` is what it read, `deduped` what it wrote.
+                noteHeal(this.workspaceId, file, deduped, content);
                 this.narrate('fix.duplicateImport', { file });
               }
             }

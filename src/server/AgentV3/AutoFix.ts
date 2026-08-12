@@ -348,3 +348,33 @@ export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerify
     autoResolved: false,
   };
 }
+
+/**
+ * What the user is told when the build reported success while the release gate was RED.
+ *
+ * ADMIN REPORT 2026-08-12 (the dukaan stock app) — the worst failure this engine has produced, and it
+ * was not a crash: it LIED. One report carried `ok: true`, `RELEASE_GATE: RED — Not shippable`, and
+ * `rootCause: 2 local modules are STILL missing — the app will crash at runtime` — while the user was
+ * told, in their own language, *"App tayyar hai! 🎉 App live hai: <link>"*. The link showed a Closed
+ * Port Error.
+ *
+ * The wording follows the same three rules as the reviewer-critical summary above, because the user's
+ * situation is identical: their work is SAFE, they are NOT charged, and there is one thing to type.
+ * It names the count and (when known) the actual cause, because "something went wrong" is the sentence
+ * that makes people abandon a product — being told *what* is what makes them reply "fix it".
+ *
+ * WHITE-LABEL: never a provider or model name. PURE.
+ */
+export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null): string {
+  const n = Math.max(1, blockerCount);
+  const one = n === 1;
+  // The root cause is an internal diagnostic sentence; take only its first line and cap it, so the
+  // user gets the fact without a stack of file paths they cannot act on.
+  const because = String(rootCause ?? '').split('\n')[0].trim();
+  const why = because ? ` The main one: ${because.length > 160 ? `${because.slice(0, 157)}…` : because}` : '';
+  return (
+    `Your app is built and saved, but ${n} thing${one ? '' : 's'} ${one ? 'is' : 'are'} still broken, so it ` +
+    `is NOT ready to use yet — I will not tell you it is working when it is not.${why} ` +
+    `You have NOT been charged for this build. Reply "fix it" (or "continue") and I'll finish it.`
+  );
+}

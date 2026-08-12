@@ -29389,6 +29389,93 @@ messages, edit rewinding/no-op/empty-as-delete/marked, the window's bounds, the 
 minimum fee and no rounding up, the popup carrying the same rate the wallet charges, Hindi genuinely
 written in Devanagari rather than transliterated, and the no-vendor-name guarantee.
 
+---
+
+## 2026-08-10 — Import runs itself (no model call), the 161 MB upload fix, and two corrections I owed the admin
+
+**Merged: PR #2230** (`a2bfbd1d`). Four root-cause fixes plus one deletion of my own work.
+
+### The admin's rule, and where the real gap was
+
+Admin, verbatim: *"navbharatai pro koi user kitni bhi badi file upload kyu na kare! usko llm / provider
+tak bhejki need hai hi nahi! ide/vsc jaise usko install kar ke preview chala dena hai bas!!"*
+
+Investigating before touching code (rule 4 step 1) turned up something worth recording: **the upload
+path was ALREADY model-free.** The uploaded bytes never reached a provider. The gap was one step later
+— nothing RAN the project. An import landed the files durably and stopped in the Files tab, so the only
+way to see the app was to type a message, which starts a full build turn and pushes the whole imported
+codebase through the model. A real report showed the shape: **37 imported files, 11 model calls,
+~21-25k input tokens each**, to do what `npm install && npm run dev` does. Wrong twice over — the user
+pays for tokens that bought nothing, and the model is made responsible for pure infrastructure.
+
+Fix: the import now ends on the Preview and signals it to boot. The boot is the EXISTING model-free
+path (`preview-diagnose` — hydrate from durable files → install → dev server → publish URL, zero model
+calls), signalled rather than reimplemented. A second copy in `AgentV3Panel` (which is what I wrote
+first) would have raced PreviewSurface's own boot and started the same sandbox twice; I threw that
+version away and replaced it with a nonce. Decision extracted pure + test-locked in
+`importedProjectBoot.ts`, including the case that motivated it: a RE-import into a workspace whose
+preview already resumed — C1 auto-resume is once-per-workspace and only fires with no URL, so it can
+never serve "there are NEW files". Honest failure path: the view switches to Live so the install
+progress is visible, and switches BACK if the app does not come up (a static site has no dev server to
+boot) rather than stranding the user on a dead tab.
+
+### The 161 MB zip upload — same disease as the sandbox reaper
+
+"Unknown or expired upload." on a 161 MB archive. The in-flight upload lived in a module-level `Map`
+plus an `os.tmpdir()` file — both PER-INSTANCE — while the archive's ~21 chunk requests are routed
+independently by Cloud Run. Worse than random: the burst of chunk requests is itself a scale-up
+trigger, so a BIG upload reliably summons the second instance that then breaks it, while small archives
+fit in one instance and worked. That is why it looked intermittent instead of structural.
+
+The record now lives in Firestore and each chunk is its own Cloud Storage object (`zipUploadStore.ts`).
+Chunk names are zero-padded because lexicographic order IS the archive's byte order — unpadded, part 10
+sorts before part 2 and the user gets a corrupt zip reported as a damaged file. Every part is verified
+present before assembly. With no bucket configured (local dev, CI) it reports unavailable and the
+original single-instance path runs, which is correct where there is only one instance.
+
+### I deleted my own module for main's better one
+
+I had built `healRepeat.ts` for the open root cause where the identical three repairs fired at t=126s,
+216s and 313s of one build. While I was blocked on push access, another session shipped `HealLedger.ts`
+for the same thing — and theirs is stronger: keyed by WORKSPACE so it sees across `ToolDispatcher`
+instances (the reviewer runs on a CHILD dispatcher, exactly the case a per-instance map is blind to),
+records a content hash as evidence, and is already read at settle into the build report. Mine is the
+weaker duplicate, so mine is gone. Keeping both would be two ledgers for one job — the drift rule 4
+exists to prevent. A bonus: main's localized `narrate(...)` calls came back, so the hardcoded English
+strings I was introducing (a White-Label Law regression) went with it.
+
+### Two corrections I owed the admin
+
+1. **`AGENTV3_REVIEW_AUTOFIX_WARNINGS=off` — I recommended it, from memory, and I was wrong.** I told
+   the admin this was the #1 lever on a 23-minute build. The code says otherwise: it adds NO pass (it
+   only widens what the single C9 pass repairs), and ALL post-build work is hard-capped at
+   `ADVISORY_CAP_MS = 120_000` — two minutes. So a long build spent that time in the BUILD LOOP, inside
+   `maxBuildSeconds()` (default 1800s). Turning it off would have saved nothing and shipped real
+   functional bugs (the Notes-report defects were all WARNINGS, which is why C9 alone missed them). The
+   admin asked the right question before acting. A ⛔ note is now pinned on that flag in `CLAUDE.md` so
+   no session repeats this.
+
+2. **`CASHFREE_WEBHOOK_SECRET` — I framed a nice-to-have as a priority.** With reconcile-on-sign-in
+   merged, the money never depends on the webhook; it is a speed upgrade (seconds vs the user's next
+   visit). Said so plainly and removed it from the admin's list. (The admin set it anyway the same day,
+   along with confirming `AI_WALLET_SPEND=on` — both now recorded in the `CLAUDE.md` key registry, and
+   the stale "webhook secret is NOT set" premise there is corrected.)
+
+Also fixed: missing-binary signatures (`sh: 1: tsc: not found`, `command not found`, `npm ERR! ENOENT`)
+now classify as REAL errors, so a gate that never ran can no longer pass as success.
+
+### Open root causes (unchanged, recorded honestly)
+
+- **Why heal writes do not survive.** `HealLedger` now records the FACT with names, counts and hashes,
+  but the mechanism (lost write, or something restoring older content over it) is still unknown. The
+  next real build report should show it. Not fixed from a theory.
+- **The build loop is the real 20-minute cost**, not the post-build gates. Per the 50/50 law the
+  answer is to make the FIRST build correct, not to cap the loop harder. Next investigation.
+- `E2B_USD_PER_HOUR` stays at the placeholder `0.10` by the admin's decision — safe because the figure
+  is admin-only, never on a user's bill, and always carries `estimated: true`.
+
+Gate: `tsc` (frontend + server) clean, **13343/13343 tests**, build green, `boot:check` PASS, bundle
+within budget.
 ## 2026-08-10 — Mobile GitHub login now returns to the APP (in-app popup + deep-link), not the browser
 
 Admin report: in the installed app, GitHub login redirected the whole WebView to the browser and never came
@@ -31158,3 +31245,81 @@ Tests across the session: **14,070 → 14,469.** Gate green each time (tsc ×2 +
 - **Multi-service runner** waits on field data.
 - **Admin-only:** `ANDROID_LATEST_VERSION_CODE = 66` still needs setting in Cloud Run, or the update
   banner and the broadcast button both stay silent by design.
+
+---
+
+## 2026-08-12 — Autopsy of the dukaan stock app: the verdict may no longer contradict the evidence (fix 1 of N)
+
+**Admin report (build `ae2d464c`).** The worst failure this engine has produced — and it was not a
+crash. **It lied.**
+
+ONE report carried, simultaneously:
+```
+ok: true
+RELEASE_GATE: RED — Not shippable
+rootCause: 2 local modules are STILL missing — the app will crash at runtime
+```
+…and the user was told, in their own language: *"App tayyar hai! 🎉 **App live hai:** <link>"*.
+**The link showed a Closed Port Error.** The admin's screenshot is the proof.
+
+### The five buckets
+
+- ✅ **Self-healed — 19:** CSS import injected, dev server restarted deterministically, tsc errors
+  cleared over 3 rounds, unused imports swept, 6 KIMI timeouts + 2 GLM 429s absorbed, repeated-step
+  nudge fired.
+- 🔀 **Worked around — 4:** simple-build timed out at 240s → full builder; one-shot timed out at 150s →
+  full builder (**~6.5 min spent on two lanes that both failed**); `npm run server &` timed out at 45s
+  and was routed around with `timeout 10` rather than root-caused; **EADDRINUSE on port 3000 ignored**.
+- ⏭️ **Skipped — 4:** `Requested feature not found: search` (the user ASKED for it, readiness caught it,
+  nothing acted); playwright FAIL left indeterminate; the reviewer's own **[CRITICAL]** (CSS classes
+  used but never defined) never applied; 8 unresolved warnings.
+- ❌ **Still broken — 8:** dead preview (5173 closed); 2 missing modules; **`ok:true` on a RED gate**;
+  a summary claiming "live hai"; undefined CSS classes; the missing search feature; backend unable to
+  bind 3000; 4 vulnerable deps.
+- 🥵 **Struggle — 7:** 22 minutes against a 5-minute ETA (**4.4×**); **107s before the first model
+  call**; one LLM call at 380s; reviewer timed out at 114s on 26 files; tsc failed 3× on the same file.
+
+### The root-cause chain behind the dead preview (step 2)
+
+1. `npm run server &` hit the 45s command timeout — **but the process it started did not die.**
+2. The build then ran `timeout 10 npm run server` again.
+3. The second one hit **`EADDRINUSE: address already in use :::3000`** — it collided with its own
+   orphan.
+4. The backend crashed; the app runs server+client under `concurrently`, so **the client died with it**.
+5. Port 5173 went dead → the user's Closed Port Error.
+
+**The missing subsystem: the build keeps no account of the processes it starts itself.** A timed-out
+command leaves a live process behind, and the next command collides with it. (The dev-server keepalive
+from #2264 restarts the *frontend*; nothing owned the *backend* the build had spawned twice.)
+
+### What shipped in THIS change — the honesty half
+
+**A build that reports success while the release gate is RED *with real blockers* now has its verdict
+corrected to NOT ok.** Everything needed was already computed; the gate block was simply forbidden
+from acting ("reports on the build, must never affect it"). That is right for the gate's ADVISORY half
+and wrong for its EVIDENTIAL half: **RED because a build-breaking blocker was recorded is not an
+opinion, it is the build's own error log.**
+
+**Deliberately narrow — this is the guard-versus-nuisance line:**
+- Fires only when RED coincides with a genuine unresolved ERROR, counted by the **same**
+  `shippingIssueCount('error')` the gate itself used, so the two can never disagree.
+- Does **not** fire on a RED driven only by tests. This report's suite said *"could be a failing test
+  OR the runner failing to start; the output gave nothing to tell them apart"* — failing a working app
+  over an ambiguity in **our own** sandbox is the #2267 mistake in the other direction.
+- Lives inside the gate's try/catch: a fault in the honesty check must never fail the build it judges.
+- `buildResultRef` is deliberately untouched — it is not set yet at that point and is captured
+  downstream only `if (result.ok)`, so flipping `result` keeps BOTH exits honest by construction. (TypeScript
+  proved it: the attempt to update the ref failed to compile because it is typed `null` there.)
+- **Flipping ok:false also makes the build FREE** — the standing "working app or free" guard keys on
+  `!result.ok`. Telling the truth and not charging for a broken app are the same action.
+
+`releaseGateFailureSummary` replaces the celebration with the truth, and names WHAT is broken —
+"something went wrong" is the sentence that makes people abandon a product; being told *what* is what
+makes them reply "fix it". It takes only the first line of the cause, capped, so the user is not handed
+a stack of file paths they cannot act on.
+
+Tests: 12 in `tests/releaseGateVerdict.test.ts`. Gate: tsc clean both projects, **14,474/14,474**.
+
+**Next from this autopsy, in order:** the orphaned-process/EADDRINUSE class (the actual cause of the
+dead preview), the reviewer's CRITICAL never being applied, and `Requested feature not found` being
+detected and then ignored.

@@ -20,13 +20,14 @@ import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
+import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
-import { preambleCapMs, canFinishRemainingTiers, earlyBailReason } from './FastLaneBudget';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, preambleBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
   path: string;
@@ -599,6 +600,18 @@ export interface SimpleBuildResult {
    * cause (a plan↔contract mismatch) could not be mined. Capped; only set on the ok:false verify path.
    */
   verifyErrors?: string;
+  /**
+   * How many files this lane's MANIFEST planned, whether or not the lane went on to succeed. 0 when
+   * the plan never produced one (the plan call failed, timed out, or returned nothing parseable).
+   *
+   * ROOT CAUSE this exists for (admin report 2026-08-12, the dukaan stock app): after this lane failed,
+   * the caller ran the ONE-SHOT lane — whose entire stated purpose is "a TRIVIAL one-file app the
+   * manifest skips" — even though this lane's manifest had just planned EIGHT files. The one-shot's
+   * precondition was already disproven, and 150 seconds went into a single ~8k-token call that could
+   * not have produced that app under any circumstances. The measurement existed; it just died with the
+   * closure before the caller could see it.
+   */
+  plannedFiles?: number;
 }
 
 /**
@@ -631,6 +644,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   //     it continues from real files instead of rebuilding from an empty tree.
   let lapsed = false;
   const generatedSoFar: OneShotFile[] = [];
+  // How many files this lane's own manifest planned. Hoisted OUT of the closure for the same reason
+  // `generatedSoFar` is: it is the lane's most valuable measurement of how big the app really is, and
+  // on the failure path the closure's locals are gone before the caller can ask. See
+  // `SimpleBuildResult.plannedFiles` for what the caller does with it.
+  let plannedFiles = 0;
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -649,7 +667,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const manifestText = await withTimeout(
         deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
         preambleCapMs(overallMs, 0, configuredPlanCap), 'simple-plan');
+      // The plan call is a REAL model call on this build's REAL provider chain, and it is the only
+      // latency measurement that exists before a single file is generated. See canFinishAfterPreamble.
+      const planCallMs = Date.now() - laneStartedAt;
       const manifest = parseFileManifest(manifestText);
+      // Recorded BEFORE the minFiles bail: a manifest too small to be worth this lane is exactly the
+      // case the one-shot lane exists for, and it must still be able to see that number.
+      plannedFiles = manifest.length;
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
       // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`
@@ -708,6 +732,20 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // this is exactly today's single parallel batch.
       const depOrder = deps.depOrder !== false;
       const tiers = depOrder ? [0, 1, 2] : [0];
+      // ARITHMETICALLY DOOMED BEFORE FILE ONE (dukaan report 2026-08-12). The between-tiers check below
+      // needs a COMPLETED tier to measure, so it cannot protect a lane whose FIRST tier never finishes —
+      // which is precisely what a timing-out provider produces. That build's plan call took 86.6s; three
+      // tiers at that latency need ~260s against a 240s budget, and the lane still sat for its full 240
+      // seconds and produced nothing. Only the tiers that actually have files are counted, so a manifest
+      // that happens to be single-tier is judged on the one stage it will really run.
+      const populatedTiers = depOrder
+        ? tiers.filter((t) => manifest.some((s) => generationTier(s.path) === t)).length
+        : 1;
+      if (!canFinishAfterPreamble({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })) {
+        // No file has been generated yet, so there is nothing to salvage — this is the same handoff the
+        // timeout was going to perform, minutes earlier and without burning the budget to reach it.
+        throw new Error(`simple-build ${preambleBailReason({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })}`);
+      }
       const written: OneShotFile[] = [];
       for (let ti = 0; ti < tiers.length; ti++) {
         const tier = tiers[ti];
@@ -765,6 +803,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (process.env.AGENTV3_BARREL_GEN !== 'off') {
           const withCss = { ...beforeGen, ...Object.fromEntries(created.map((c) => [c.path, c.content])) };
           for (const b of await generateMissingBarrels(withCss)) created.push({ path: b.path, content: b.content });
+        }
+        // VITE CLIENT TYPES — the same certainty as the stubs above, and it lands BEFORE this lane's own
+        // tsc gate, so an app reading import.meta.env never spends a repair round on
+        // "Property 'env' does not exist on type 'ImportMeta'". Types-only: zero runtime effect.
+        if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off') {
+          const scaffoldSeen = Object.fromEntries((deps.scaffoldPaths ?? []).map((p) => [p, '']));
+          const dts = missingViteEnvTypes({ ...scaffoldSeen, ...beforeGen, ...Object.fromEntries(created.map((c) => [c.path, c.content])) });
+          if (dts) created.push(dts);
         }
         if (created.length > 0) {
           const have = new Set(written.map((f) => f.path));
@@ -881,6 +927,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       reason,
       outcome: 'BUILD_FAILED',
       salvagedPaths,
+      plannedFiles,
     };
   }
 
@@ -939,6 +986,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         ok: false, filesWritten: files.length, reason: 'verify_failed',
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
+        plannedFiles,
         typecheckRan: verdict.ran !== false,
         // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
         verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
@@ -964,5 +1012,5 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // wired OR could not execute (an un-run check is "unknown", never a pass — no fake success).
   // previewOk is left unknown here — the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS.
   const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify && typecheckRan ? true : null });
-  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan };
+  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan, plannedFiles };
 }

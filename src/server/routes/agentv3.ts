@@ -136,6 +136,7 @@ import { fetchGithubRepoZip, type ZipFetchReason } from '../AgentV3/GithubZipFet
 import { fetchRepoTree, fetchRepoTextFile, summarizeRepoTree, pickSurveyFiles, materializeRepoViaApi } from '../AgentV3/GithubApiTree';
 import { importFailureNarration, importFailureModelReason } from '../AgentV3/importDiagnostics';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
+import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
@@ -193,7 +194,7 @@ import {
 } from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
-import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -242,7 +243,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
-import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -256,7 +257,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
@@ -9353,15 +9354,23 @@ export function registerAgentV3Routes(app: Express): void {
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }
+        // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
+        // read in the report as "the one-shot was never eligible", which is a different fact.
+        if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the file plan had already found ${sb.plannedFiles} files, and that lane only fits a single-file app — going straight to the full builder instead of spending a generation call proving it.`, autoResolved: true });
+        }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier)) {
+        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
+          //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
+          //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
+          //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
           const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
@@ -10003,6 +10012,21 @@ export function registerAgentV3Routes(app: Express): void {
               try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
+          }
+        }
+        // VITE CLIENT TYPES — deterministic, and the cheapest fix in this whole block. See viteEnvTypes:
+        // the dukaan report's build ran `tsc --noEmit` FOUR times over 106 seconds while every failing
+        // round carried "Property 'env' does not exist on type 'ImportMeta'" — an app reading
+        // import.meta.env with no `vite/client` declaration anywhere. A types-only triple-slash directive
+        // has ZERO runtime effect, so this cannot change what the app does, only what the compiler knows.
+        // Kill: AGENTV3_VITE_ENV_TYPES=off.
+        if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
+          const dts = missingViteEnvTypes(integrityFiles);
+          if (dts) {
+            integrityFiles[dts.path] = dts.content;
+            writtenFiles.set(dts.path, dts.content);
+            try { await actuator.writeFile(workspaceId, dts.path, dts.content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
           }
         }
         // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness
@@ -11100,7 +11124,49 @@ export function registerAgentV3Routes(app: Express): void {
           message: releaseGateSummary(gate),
           autoResolved: gate.state === 'green',
         });
-      } catch { /* the gate reports on the build; it must never affect it */ }
+        // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
+        //
+        // ADMIN REPORT 2026-08-12 (the dukaan stock app) — the worst failure this engine has produced,
+        // and not a crash: it LIED. One report carried, simultaneously:
+        //     ok: true
+        //     RELEASE_GATE: RED — Not shippable
+        //     rootCause: 2 local modules are STILL missing — the app will crash at runtime
+        // …and the user was told, in their own language, "App tayyar hai! 🎉 App live hai: <link>".
+        // The link showed a Closed Port Error. Everything needed to know better was already computed
+        // and written down; nothing was allowed to act on it, because this block was explicitly
+        // "reports on the build, must never affect it".
+        //
+        // That separation was right for the gate's ADVISORY half and wrong for its evidential half. A
+        // gate that is RED *because a build-breaking blocker was recorded* is not an opinion — it is the
+        // build's own error log, and shipping ok:true over it is a false success the platform forbids.
+        //
+        // ⚠️ DELIBERATELY NARROW — this is the difference between a guard and a nuisance:
+        //   • It fires ONLY when RED coincides with a genuine unresolved ERROR (`shippingIssueCount`),
+        //     which is the same count the gate itself used, so the two can never disagree.
+        //   • It does NOT fire on a RED driven only by tests, because a suite can be RED while merely
+        //     INDETERMINATE — this very report's suite said "could be a failing test OR the runner
+        //     failing to start; the output gave nothing to tell them apart". Failing a working app over
+        //     an ambiguity of OUR OWN sandbox is exactly the #2267 mistake, in the other direction.
+        //   • Flipping ok:false also makes the build FREE (the standing "working app or free" guard
+        //     keys on !result.ok) — so this fix hands money back as well as telling the truth.
+        const gateBlockers = buildDiag.shippingIssueCount('error');
+        const settled = result; // captured once — `result` is reassigned in the heal loop above
+        if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+          // The cause comes from the gate's own sentence, not a second derivation — one source, so the
+          // summary the user reads and the verdict that flipped can never describe different builds.
+          result = { ...settled, ok: false, summary: releaseGateFailureSummary(gateBlockers, releaseGateSummary(gate)) };
+          // NOTE: `buildResultRef` (the deadline finalizer's snapshot) is deliberately NOT touched here
+          // — it is not set yet at this point, and downstream it is captured ONLY `if (result.ok)`.
+          // Flipping `result` above therefore keeps BOTH exits honest by construction, which is the
+          // same reasoning the preview-compile guard records. TypeScript agrees: it types the ref as
+          // null here, which is how the attempt to update it failed to compile.
+          buildDiag.record({
+            phase: 'readiness', severity: 'error', code: 'OUTCOME_RELEASE_GATE_RED',
+            message: `The build reported success while the release gate was RED with ${gateBlockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`,
+            autoResolved: false,
+          });
+        }
+      } catch { /* the gate reports on the build; a fault HERE must never affect it */ }
 
       // APP HEALTH CULTURE — RED-TEAM (Immune System Phase 3 / GA-17, opt-in AGENTV3_REDTEAM=on): the
       // happy-path preview check only proves the app renders on GOOD input. The red-team ADVERSARIALLY
@@ -11452,8 +11518,14 @@ export function registerAgentV3Routes(app: Express): void {
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
           let review;
-          try {
-            review = await raceTimeout(reviewBuild({
+          // THE TIMEOUT STOPS US WAITING — IT MUST NOT STOP US LOOKING (admin report 2026-08-12).
+          //
+          // The promise is held in its own binding so that when the budget expires it is still
+          // reachable. In the dukaan stock app the reviewer landed its `[CRITICAL] Missing CSS
+          // Styling — App will look broken` **1.5 seconds** after `raceTimeout` rejected; because the
+          // reference was gone with the expression, that finding — 26 files of the user's tokens,
+          // already spent — was discarded, and the user shipped the broken app instead.
+          const reviewPromise = reviewBuild({
               userRequest: prompt,
               fileTree: rFiles,
               fileSample: rSample,
@@ -11462,16 +11534,43 @@ export function registerAgentV3Routes(app: Express): void {
               // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
               // spent re-reading code they did not touch.
               changedFiles: [...writtenFiles.keys()],
-            }), reviewBudget, 'post-build-review');
+          });
+          try {
+            review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
             // instead of silently dropping the completeness check (the empty-`review` report gap).
             const timedOut = e instanceof Error && /timed out/i.test(e.message);
-            events.emit({ type: 'narration', agent: 'architect', text: timedOut
-              ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
-              : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
-            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms on ${rFiles.length} files` : 'Post-build review errored', autoResolved: true }); } catch { /* best-effort */ }
-            review = null;
+            // GRACE — collect a review that is ABOUT TO LAND. Only after a TIMEOUT: a reviewer that
+            // THREW has already produced its answer (an error), and waiting on a settled rejection
+            // would buy nothing. Bounded by reviewGraceMs against the CURRENT headroom, so a genuinely
+            // hung reviewer can never eat the build's remaining wall clock — and returns 0 (skip
+            // entirely, today's behaviour byte-for-byte) when the safety margin is not there.
+            //
+            // Re-racing the SAME promise is safe: the first raceTimeout already attached handlers to
+            // it, so a rejection can never surface as an unhandled rejection, and no second reviewer
+            // is spawned — this waits on work that is already running and already paid for.
+            const graceMs = timedOut
+              ? reviewGraceMs(reviewBudget, effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)))
+              : 0;
+            if (graceMs > 0) {
+              review = await raceTimeout(reviewPromise, graceMs, 'post-build-review-grace').catch(() => null);
+            }
+            if (review) {
+              // It landed. Everything downstream — recordReview, the C9 auto-fix, the honesty holder —
+              // now runs exactly as it would have on a review that finished inside its budget.
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LATE', message: `Post-build review overran its ${reviewBudget}ms budget and was collected within the ${graceMs}ms grace — its findings were kept, not discarded.`, autoResolved: true }); } catch { /* best-effort */ }
+            } else {
+              events.emit({ type: 'narration', agent: 'architect', text: timedOut
+                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
+                : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
+              // HONESTY (rule 5): this used to be recorded `autoResolved: true` — a literal claim that
+              // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
+              // build, which is exactly the caveat the health card should carry. It is a warning, not
+              // an error, so it can never block a working app from shipping.
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
+              review = null;
+            }
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {

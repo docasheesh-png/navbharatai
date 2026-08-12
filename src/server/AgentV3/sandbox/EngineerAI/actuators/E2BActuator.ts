@@ -156,7 +156,8 @@ const {chromium}=require('playwright');
   await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
 ${paintWaitJs('p')}
   const buf=await p.screenshot({type:'png',fullPage:false});
-  process.stdout.write(buf.toString('base64'));
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
   await b.close();
 })().catch(e=>{process.stderr.write(String(e));process.exit(1)});
 `.trim();
@@ -181,7 +182,8 @@ const {chromium}=require('playwright');
   }
 ${paintWaitJs('page')}
   const buf=await page.screenshot({type:'png',fullPage:false});
-  process.stdout.write(buf.toString('base64'));
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
@@ -1348,13 +1350,23 @@ ${paintWaitJs('p')}
     // Prefer the SHARED persistent browser (CDP) so the screenshot reflects the
     // same session the agent's browser_action hands have been driving. Falls back
     // to a fresh standalone browser if the daemon/CDP isn't reachable.
+    // The PNG is read from a FILE, never stdout. commands.run caps stdout at 64KB (65536 bytes), so a
+    // base64 screenshot past that was silently TRUNCATED to a corrupt image (the same 64KB cap that broke
+    // browser_action loudly; here it failed quietly because raw base64 needs no JSON.parse). files.read
+    // has no such cap. Returns '' when the file is missing, so an empty result falls through / throws.
+    const readShotBase64 = async (): Promise<string> => {
+      const bytes = await sandbox.files.read(`${TOOLS_DIR}/last-shot.png`, { format: 'bytes' }).catch(() => null);
+      return bytes ? Buffer.from(bytes as Uint8Array).toString('base64') : '';
+    };
+
     await this._ensureBrowserDaemon(sandbox, workspaceId).catch(() => {});
     const cdp = await sandbox.commands.run(
       `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
     ).catch(() => null);
-    if (cdp && cdp.exitCode === 0 && cdp.stdout) {
-      return { base64: cdp.stdout.trim(), mimeType: 'image/png' };
+    if (cdp && cdp.exitCode === 0) {
+      const b64 = await readShotBase64();
+      if (b64) return { base64: b64, mimeType: 'image/png' };
     }
 
     // Fallback: fresh standalone browser (clean session, but always works).
@@ -1367,7 +1379,9 @@ ${paintWaitJs('p')}
       throw new Error(`Screenshot failed: ${result.stderr.slice(0, 300)}`);
     }
 
-    return { base64: result.stdout.trim(), mimeType: 'image/png' };
+    const b64 = await readShotBase64();
+    if (!b64) throw new Error('Screenshot produced no image file');
+    return { base64: b64, mimeType: 'image/png' };
   }
 
   /** Launch the persistent browser daemon once and wait for its CDP port to open. */

@@ -32017,3 +32017,20 @@ separate to avoid regressing the working screenshot path on the untestable E2B s
 **Advisory (not platform bugs):** 4× unsafe-html-sink (innerHTML) in the generated game.ts — the systemPrompt
 already warns against dynamic innerHTML; edit_file "old_string not found" once (self-healed retry); KIMI
 provider timeout once (self-healed fallback); DATA_LOSS_EVENT (sandbox recycle) restored from durable store.
+
+---
+
+## 2026-08-12 — Sibling closed: screenshot() also file-based (64KB truncation class fully killed)
+
+Follow-up to #2328. `screenshot()` (both the CDP path and the standalone-browser fallback) had the SAME
+64KB stdout cap: `screenshot.js` / `screenshot-cdp.js` wrote raw base64 to stdout, so a large/detailed
+screen was silently TRUNCATED to a corrupt image. It failed quietly (raw base64 needs no JSON.parse, so it
+"succeeded" with a cut-off image) — worse than a loud failure, because the model then "saw" a corrupt
+screenshot and could misjudge the app.
+
+Fix (mirrors #2328): both scripts now write the PNG to `${TOOLS_DIR}/last-shot.png` and emit only an "OK"
+marker; `screenshot()` reads the bytes via `sandbox.files.read(path, {format:'bytes'})` (no 64KB cap), with
+an empty read falling through to the fallback / throwing rather than returning a truncated image. Regression
+test extended (no raw base64 to stdout; screenshot reads last-shot.png). The entire 64KB-truncation class —
+browser_action (loud) AND screenshot (silent) — is now closed. Same rule-6 boundary: the E2B sandbox path is
+verified by code-reasoning + tsc + source test, confirmed live on the next real build.

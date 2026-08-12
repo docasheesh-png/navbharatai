@@ -5,7 +5,7 @@ import { TirangaLoader } from './ui/TirangaLoader';
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
-import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../lib/firstPassQuality';
+import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
@@ -218,7 +218,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // Per the 50/50 law a self-heal is a RED FLAG, so the headline is the CLEAN rate (zero repairs
   // needed), never the delivered rate. Computed from the SAME rows already fetched — one shared
   // implementation with the server route (src/lib/firstPassQuality.ts), so the two can never drift.
-  const firstPass = useMemo(() => firstPassStatsFromMeta(buildReports), [buildReports]);
+  /**
+   * IT WAS MEASURING COMPLAINTS, NOT BUILDS (admin screenshot 2026-08-12, showing 4.3%).
+   *
+   * `buildReports` is the inbox of reports USERS SUBMITTED by pressing "Report", and people press
+   * Report when something went WRONG. Computing the engine's first-pass rate from that sample makes
+   * the headline read as an engine-wide number while describing a self-selected pile of failures.
+   *
+   * "4.3% of builds are right first time" and "4.3% of the builds people complained about were right
+   * first time" are different sentences, and only the second one was ever true.
+   *
+   * The comment this replaces said the client shares the server's implementation "so the two can never
+   * drift" — which was right about the FUNCTION and blind to the DATA. Sharing a formula while feeding
+   * it a different population is exactly how two numbers drift while looking identical. So the card now
+   * takes the server's answer, computed over every build by every user, and the local computation is
+   * gone rather than left as a second path to get this wrong again.
+   */
+  const [firstPassData, setFirstPassData] = useState<(FirstPassMetaStats & { headline?: string; reported?: FirstPassMetaStats & { headline?: string } }) | null>(null);
+  const fetchFirstPass = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/first-pass-quality?limit=500', { headers });
+      const d = await r.json();
+      setFirstPassData(d && typeof d.cleanRate !== 'undefined' ? d : null);
+    } catch (e) { console.error(e); setFirstPassData(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+  const firstPass = firstPassData;
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
   const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
   const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
@@ -574,7 +599,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
-  useEffect(() => { if (activeTab === 'reports') fetchBuildReports(); }, [activeTab, fetchBuildReports]);
+  useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -1602,7 +1627,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   healed itself is NOT counted as a success (50/50 law: a heal is a red flag), so this
                   deliberately reads lower than the delivered rate shown beside it. Honest by
                   construction: shows nothing rather than a fake 0% when no row carries the signal. */}
-              {!buildReportsLoading && firstPass.cleanRate !== null && (
+              {firstPass && firstPass.cleanRate !== null && (
                 <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
                     <Target className="w-4 h-4 text-indigo-400" />
@@ -1633,10 +1658,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Failed</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)}</p>
+                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)} <span className="text-[#6e7681]">Across EVERY build by every user — not only the ones someone reported.</span></p>
+                  {/* THE GAP IS THE SIGNAL (admin screenshot 2026-08-12). Complaints far below the
+                      engine-wide rate is healthy self-selection — people report what broke. The two
+                      being EQUAL would mean users are reporting a fair sample, which is much worse
+                      news, and only showing both makes that visible. */}
+                  {firstPass.reported && firstPass.reported.cleanRate !== null && (
+                    <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
+                      Among the {firstPass.reported.total} build(s) users actually pressed “Report” on, {(firstPass.reported.cleanRate * 100).toFixed(1)}% were right first time.
+                      {firstPass.cleanRate !== null && firstPass.reported.cleanRate < firstPass.cleanRate
+                        ? ' Lower than the rate above, which is expected — people report what broke.'
+                        : ' NOT lower than the rate above — users are reporting a fair sample, so the gap is not self-selection.'}
+                    </p>
+                  )}
                   {firstPass.skippedLegacy > 0 && (
                     <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
-                      {firstPass.skippedLegacy} older report(s) excluded — they predate this measurement and
+                      {firstPass.skippedLegacy} older build(s) excluded — they predate this measurement and
                       carry no repair count. Counting them as clean would inflate the number.
                     </p>
                   )}

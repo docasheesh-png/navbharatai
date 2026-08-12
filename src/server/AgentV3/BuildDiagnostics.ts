@@ -591,22 +591,52 @@ export class BuildDiagnostics {
    * Recorded HERE, on the first LLM call, because that is the only moment that can be defined without
    * guessing: everything before it is preparation, and the user experiences all of it as waiting. A
    * number nobody records is a number that grows.
+   *
+   * SECOND ROOT CAUSE — this diagnostic was itself misattributing time (admin report 2026-08-12, the
+   * dukaan stock app). It printed:
+   *
+   *     107s passed before the build made its first model call — sandbox setup, project restore,
+   *     dependency install and secrets loading all happen before this point
+   *
+   * The same report's narration disproves it: "Setting up your workspace…" at 0s, keys loaded at 18s,
+   * "Planning the file list…" at 20s. Setup was over at ~20 seconds. The other ~87 were the planning
+   * CALL running — because this hook fires from `recordLlmCall`, which runs when a call RETURNS, so
+   * the number always contained the first call's own duration and then blamed setup for it.
+   *
+   * That is not a rounding error, it is a diagnostic pointing at the wrong subsystem: anyone acting on
+   * it goes and optimises sandbox startup and finds nothing, while an 87-second model call goes
+   * unexamined. (The "227 seconds" in the note above came from this same inflated measurement.) So the
+   * call's own latency is subtracted, and the two numbers are reported separately — preparation is a
+   * platform problem, model latency is a provider one, and they have nothing to do with each other.
    */
-  private recordTimeToFirstCall(): void {
+  private recordTimeToFirstCall(latencyMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
-    const seconds = Math.round((this.now() - this.startedAt) / 1000);
+    const elapsedMs = Math.max(0, this.now() - this.startedAt);
+    // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
+    // not a measurement we can subtract, and a negative prep time would be worse than the old bug.
+    const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
+      ? Math.min(latencyMs, elapsedMs)
+      : undefined;
+    const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
+    const message = lat === undefined
+      // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
+      // an upper bound rather than repeating the old confident, wrong attribution.
+      ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
+      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore, dependency install and secrets loading all happen in it, and the user waits through every second. The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
     this.record({
       phase: 'plan',
-      // Loud past the point where a user starts wondering whether anything is happening.
+      // Loud past the point where a user starts wondering whether anything is happening. Judged on
+      // PREPARATION alone now — a fast setup followed by a slow model call is a provider problem, and
+      // flagging it here sent the reader hunting the wrong subsystem.
       severity: seconds >= 60 ? 'warning' : 'info',
       code: 'TIME_TO_FIRST_CALL',
-      message: `${seconds}s passed before the build made its first model call — sandbox setup, project restore, dependency install and secrets loading all happen before this point, and the user waits through every second of it.`,
+      message,
       autoResolved: seconds < 60,
     });
   }
 
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
-    this.recordTimeToFirstCall();
+    this.recordTimeToFirstCall(rec.latencyMs);
     if (this.llmCalls.length < MAX_LLM_CALLS) {
       this.llmCalls.push({
         ts: this.now(),

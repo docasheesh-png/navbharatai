@@ -78,6 +78,62 @@ export function canFinishRemainingTiers(p: TierProgress): boolean {
   return p.elapsedMs + projectedMs <= p.overallMs;
 }
 
+export interface PreambleProgress {
+  /** The MEASURED duration of the plan call — one real model call, on this build's real provider chain. */
+  preambleCallMs: number;
+  /** How many dependency tiers the file-generation phase will run. */
+  tiers: number;
+  /** Time spent in the lane so far (plan + contract). */
+  elapsedMs: number;
+  /** The lane's whole budget. */
+  overallMs: number;
+}
+
+/**
+ * TRUE when file generation can still plausibly finish, judged BEFORE the first file is generated.
+ *
+ * ROOT CAUSE (admin report 2026-08-12, the dukaan stock app). `canFinishRemainingTiers` above only runs
+ * BETWEEN tiers — it needs a completed tier to measure. So it protects against a lane that starts well
+ * and slows down, and not at all against the case where the FIRST tier never completes. That second
+ * case is not exotic; it is what a failing provider looks like, and it is what happened:
+ *
+ *     SIMPLE_BUILD_FALLBACK   detail: "simple-build timed out after 240000ms"
+ *     PROVIDER_FALLBACK ×8    "Provider KIMI failed"  detail: "Request timed out."
+ *     PROVIDER_FALLBACK ×4    "Provider GLM failed"   detail: "429 … temporarily overloaded"
+ *
+ * The lane sat for its entire 240 seconds and produced nothing, because no tier ever finished for the
+ * between-tiers check to fire on. And it was knowable long before that: the PLAN call — a real model
+ * call, on the same provider chain, already completed — had taken **86.6 seconds**. Three tiers at that
+ * latency need ~260s, and the lane had ~144s left. It was arithmetically doomed with 8 files still
+ * unwritten and 144 seconds still to burn.
+ *
+ * Same philosophy as its sibling: project from a REAL measurement rather than a model of one, so the
+ * decision improves automatically on a fast provider instead of encoding a guess about any particular
+ * one. A tier runs its files in parallel, so a tier costs about one call — which is what the plan call
+ * measures.
+ *
+ * Bailing here hands off IMMEDIATELY to the full builder — the same handoff that was going to happen at
+ * the timeout, only ~2.5 minutes sooner. Nothing is lost: no file had been generated yet, so there was
+ * never anything to salvage.
+ */
+export function canFinishAfterPreamble(p: PreambleProgress): boolean {
+  if (p.tiers <= 0) return true;
+  // NEVER bail on an absent signal — the same rule as canFinishRemainingTiers. Without a real measured
+  // call duration we know nothing, and guessing "too slow" from no evidence abandons healthy builds.
+  if (!(p.preambleCallMs > 0) || !Number.isFinite(p.preambleCallMs)) return true;
+  if (!(p.overallMs > 0) || !Number.isFinite(p.overallMs)) return true;
+  const projectedMs = p.tiers * p.preambleCallMs;
+  return Math.max(0, p.elapsedMs) + projectedMs <= p.overallMs;
+}
+
+/** The honest, provider-anonymous reason recorded when the lane bails before generating any file. */
+export function preambleBailReason(p: PreambleProgress): string {
+  const projectedS = Math.round((Math.max(0, p.elapsedMs) + p.tiers * p.preambleCallMs) / 1000);
+  const budgetS = Math.round(p.overallMs / 1000);
+  const callS = Math.round(p.preambleCallMs / 1000);
+  return `fast lane stopped before writing files — planning alone took ${callS}s, so ${p.tiers} stage(s) would need about ${projectedS}s against a ${budgetS}s budget`;
+}
+
 /** The honest, provider-anonymous reason recorded when the lane bails early (White-Label Law). */
 export function earlyBailReason(p: TierProgress): string {
   const projectedS = Math.round((p.elapsedMs + p.tiersRemaining * p.lastTierMs) / 1000);

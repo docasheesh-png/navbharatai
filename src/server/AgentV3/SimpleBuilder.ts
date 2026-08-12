@@ -27,7 +27,7 @@ import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
-import { preambleCapMs, canFinishRemainingTiers, earlyBailReason } from './FastLaneBudget';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, preambleBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
   path: string;
@@ -667,6 +667,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const manifestText = await withTimeout(
         deps.generate(manifestSystemPrompt(deps.framework), manifestUserPrompt(deps.prompt, deps.scaffoldPaths)),
         preambleCapMs(overallMs, 0, configuredPlanCap), 'simple-plan');
+      // The plan call is a REAL model call on this build's REAL provider chain, and it is the only
+      // latency measurement that exists before a single file is generated. See canFinishAfterPreamble.
+      const planCallMs = Date.now() - laneStartedAt;
       const manifest = parseFileManifest(manifestText);
       // Recorded BEFORE the minFiles bail: a manifest too small to be worth this lane is exactly the
       // case the one-shot lane exists for, and it must still be able to see that number.
@@ -729,6 +732,20 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // this is exactly today's single parallel batch.
       const depOrder = deps.depOrder !== false;
       const tiers = depOrder ? [0, 1, 2] : [0];
+      // ARITHMETICALLY DOOMED BEFORE FILE ONE (dukaan report 2026-08-12). The between-tiers check below
+      // needs a COMPLETED tier to measure, so it cannot protect a lane whose FIRST tier never finishes —
+      // which is precisely what a timing-out provider produces. That build's plan call took 86.6s; three
+      // tiers at that latency need ~260s against a 240s budget, and the lane still sat for its full 240
+      // seconds and produced nothing. Only the tiers that actually have files are counted, so a manifest
+      // that happens to be single-tier is judged on the one stage it will really run.
+      const populatedTiers = depOrder
+        ? tiers.filter((t) => manifest.some((s) => generationTier(s.path) === t)).length
+        : 1;
+      if (!canFinishAfterPreamble({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })) {
+        // No file has been generated yet, so there is nothing to salvage — this is the same handoff the
+        // timeout was going to perform, minutes earlier and without burning the budget to reach it.
+        throw new Error(`simple-build ${preambleBailReason({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })}`);
+      }
       const written: OneShotFile[] = [];
       for (let ti = 0; ti < tiers.length; ti++) {
         const tier = tiers[ti];

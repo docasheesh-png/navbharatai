@@ -287,6 +287,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
 
+  /**
+   * SERVER NECESSITY (admin 2026-08-12) — the one number that decides whether the browser-native plan
+   * is worth building: how many past apps were given a Node server they never needed?
+   *
+   * It lives behind a button rather than loading with the tab because it reads up to 500 build
+   * documents. That is a real cost to pay on every visit for a number nobody is looking at most days.
+   */
+  const [necessity, setNecessity] = useState<{
+    headline: string;
+    tally: { examined: number; neededAndBuilt: number; builtButNotNeeded: number; neededButMissing: number; neitherNeededNorBuilt: number; reasonCounts: Record<string, number> };
+    sample: Array<{ workspaceId: string; prompt: string; neededServer: boolean; reasons: string[]; builtServer: boolean }>;
+  } | null>(null);
+  const [necessityLoading, setNecessityLoading] = useState(false);
+
+  const fetchNecessity = useCallback(async () => {
+    setNecessityLoading(true);
+    try {
+      const r = await fetch('/api/admin/server-necessity?limit=500', { headers });
+      const d = await r.json();
+      setNecessity(d?.tally ? d : null);
+      if (!d?.tally) toast(d?.error || 'Could not measure — no builds with enough recorded detail yet.');
+    } catch (e) { console.error(e); setNecessity(null); toast('Could not measure server necessity.'); }
+    finally { setNecessityLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
   const openBuildReport = useCallback(async (id: string) => {
     setSelectedReportLoading(true);
     setReportPart('all'); // a new report always opens on the whole thing, never the previous part index
@@ -1394,13 +1420,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </h3>
                   <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only. Download marks a report sent; “Mark fixed” is yours to set once the work is merged.</p>
                 </div>
-                <button
-                  onClick={fetchBuildReports}
-                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* SERVER NECESSITY (admin 2026-08-12) — see fetchNecessity. Behind a button because it
+                      reads up to 500 build documents; nobody should pay that on every tab visit. */}
+                  <button
+                    onClick={fetchNecessity}
+                    disabled={necessityLoading}
+                    title="How many past apps were given a server they never needed? Every one of those could have skipped the sandbox."
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-amber-500/40 text-amber-300 hover:text-white hover:bg-amber-600/20 disabled:opacity-40"
+                  >
+                    <Server className={`w-3.5 h-3.5 ${necessityLoading ? 'animate-pulse' : ''}`} /> Server necessity
+                  </button>
+                  <button
+                    onClick={fetchBuildReports}
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
               </div>
+
+              {/* SERVER NECESSITY RESULT (admin 2026-08-12). The number that decides whether the
+                  browser-native plan proceeds. Shown with its CAVEAT and a spot-check sample, never as a
+                  bare percentage — this drives a large decision, and a number without its limits is how
+                  a large change gets approved on a misunderstanding. */}
+              {necessity && (
+                <div className="bg-[#161b22] border border-amber-500/25 rounded-[1.25rem] p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Server className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Did these apps need a server?</h4>
+                  </div>
+                  <p className="text-[12px] text-amber-200/90 font-bold leading-relaxed">{necessity.headline}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {([
+                      ['Server built, NOT needed', necessity.tally.builtButNotNeeded, 'text-amber-300', 'could have skipped the sandbox'],
+                      ['Neither needed nor built', necessity.tally.neitherNeededNorBuilt, 'text-emerald-300', 'already browser-native'],
+                      ['Genuinely needed one', necessity.tally.neededAndBuilt, 'text-sky-300', 'E2B is required here'],
+                      ['Needed, but missing', necessity.tally.neededButMissing, 'text-red-300', 'a correctness gap, not a cost one'],
+                    ] as const).map(([label, n, cls, hint]) => (
+                      <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mt-1">{label}</div>
+                        <div className="text-[10px] text-[#6e7681] mt-0.5 leading-snug">{hint}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {Object.keys(necessity.tally.reasonCounts).length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">Why a server was genuinely needed</div>
+                      <div className="space-y-1">
+                        {Object.entries(necessity.tally.reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, n]) => (
+                          <div key={reason} className="flex items-start gap-2 text-[11px] text-[#c9d1d9]">
+                            <span className="tabular-nums font-black text-sky-300 shrink-0 w-6">{n}×</span>
+                            <span className="leading-snug">{reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* SPOT-CHECK. A percentage produced by a classifier nobody has read is not evidence —
+                      these are real builds the admin can recognise and disagree with. */}
+                  <details className="text-[11px]">
+                    <summary className="cursor-pointer text-[#8b949e] font-bold hover:text-white">Check it against {necessity.sample.length} real builds</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {necessity.sample.map((s) => (
+                        <div key={s.workspaceId} className="bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${s.neededServer ? 'border-sky-500/40 text-sky-300' : 'border-emerald-500/40 text-emerald-300'}`}>
+                              {s.neededServer ? 'needed' : 'not needed'}
+                            </span>
+                            {s.builtServer && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-amber-300">built one</span>}
+                          </div>
+                          <div className="text-[11px] text-[#c9d1d9] mt-1 leading-snug">{s.prompt || <span className="text-[#6e7681]">(no prompt recorded)</span>}</div>
+                          {s.reasons.length > 0 && <div className="text-[10px] text-[#8b949e] mt-0.5">{s.reasons.join(' · ')}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
 
               {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
                   WITHOUT the user pressing Report. The engine already records every build durably;

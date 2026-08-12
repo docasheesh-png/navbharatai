@@ -76,6 +76,16 @@ describe('normaliseAppId — Android rejects anything that is not reverse-domain
       expect(normaliseAppId(bad, 'Chai Point'), bad).toBe('com.navbharat.chaipoint');
     }
   });
+
+  it('repairs a lowercase Java reserved-word segment in place — the ship path, G8', () => {
+    // com.new.shop is well-formed reverse-DNS but "new" is a Java keyword → cap add / AGP rejects it.
+    expect(normaliseAppId('com.new.shop', 'Shop')).toBe('com.newx.shop');
+    expect(normaliseAppId('com.acme.class', 'Shop')).toBe('com.acme.classx');
+    // case-sensitive: "New" is a legal Java identifier (only lowercase "new" is reserved) — left as typed
+    expect(normaliseAppId('com.New.Shop', 'Shop')).toBe('com.New.Shop');
+    // a derived id can never carry a reserved segment either
+    expect(normaliseAppId('', 'New')).toBe('com.navbharat.newx');
+  });
 });
 
 describe('buildPackageJson', () => {

@@ -36,6 +36,19 @@ function safeSegment(seg: string): string {
 }
 
 /**
+ * Suffix any Java reserved-word segment in a dot-separated id (com.new.shop → com.newx.shop), preserving
+ * every other segment (including its case) unchanged. Case-sensitive by design: Java keywords are all
+ * lowercase, so `com.New.shop` is a legal package and is left alone. Shared so the case-preserving
+ * `normaliseAppId` (the ship path) and the lowercasing derive path enforce the SAME reserved-word rule.
+ */
+export function sanitizeReservedSegments(id: string): string {
+  return String(id || '')
+    .split('.')
+    .map(safeSegment)
+    .join('.');
+}
+
+/**
  * A valid application id: 2+ dot-separated segments, each starting with a letter then [a-z0-9_], and no
  * segment a Java reserved word/literal (which Android's package tooling rejects even though it is
  * syntactically well-formed).

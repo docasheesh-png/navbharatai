@@ -13,6 +13,10 @@
 // Conservative by design: patterns target unambiguously risky commands so benign
 // build/test/git commands are never flagged.
 
+import {
+  shellCommandVariants, unquoteToken, hasGlob, globLiteralPrefix, interpreterTreeRemovalTargets,
+} from './shellNormalize';
+
 export type RiskLevel = 'high' | 'medium' | 'none';
 
 export interface CommandRisk {
@@ -43,7 +47,12 @@ const HIGH_RULES: Rule[] = [
   // allowed — only `env`/`printenv` with no command after it matches.
   { level: 'high', test: /(^|[;&|]\s*)(printenv|env)\s*($|[|;&>])/i, reason: 'dumps all environment variables (exposes every server secret)' },
   // Reading a dotenv file (`.env`, `.env.local`, …) with any text tool leaks its secrets the same way.
-  { level: 'high', test: /\b(cat|less|more|head|tail|nl|xxd|od|strings|grep|awk|sed)\b[^\n|]*(^|[\s/'"=])\.env(\.[A-Za-z0-9_.-]+)?\b/i, reason: 'reads a .env secrets file (exposes stored keys)' },
+  // TEMPLATE files are excluded — `.env.example` / `.env.sample` / `.env.template` / `.env.dist` hold
+  // VARIABLE NAMES and no values. That is the whole point of them, this engine has a tool that
+  // GENERATES one, and reading it is how a build learns which variables an app needs. Blocking that was
+  // a false positive that refused ordinary work, and a guard which refuses ordinary work gets fought
+  // until something gives.
+  { level: 'high', test: /\b(cat|less|more|head|tail|nl|xxd|od|strings|grep|awk|sed)\b[^\n|]*(^|[\s/'"=])\.env(?!\.(example|sample|template|dist|defaults?)\b)(\.[A-Za-z0-9_.-]+)?\b/i, reason: 'reads a .env secrets file (exposes stored keys)' },
   { level: 'high', test: /\bchmod\s+(-[a-z]*\s+)*777\s+(\/|~|\$HOME)\b/i, reason: 'chmod 777 on a root/home path (insecure + dangerous)' },
   { level: 'high', test: /\bsudo\b/i, reason: 'runs with elevated privileges (sudo)' },
   { level: 'high', test: /\bgit\s+push\b[^\n]*(--force\b|\s-f\b)/i, reason: 'force-push rewrites remote history (can destroy others\' commits)' },
@@ -63,15 +72,25 @@ const MEDIUM_RULES: Rule[] = [
 /**
  * Classify a shell command's risk. Returns the highest level matched and the
  * concrete reasons. PURE & deterministic.
+ *
+ * Classifies every command bash would really run, not just the line as written — `sh -c "sudo rm -rf
+ * /"` is exactly as dangerous as `sudo rm -rf /`, and matching only the outer text let the wrapper act
+ * as a cloak. (Note for anyone reading the header above: a HIGH verdict IS blocked at the dispatcher.
+ * That header used to say otherwise and was simply out of date.)
  */
 export function classifyCommandRisk(command: string): CommandRisk {
   const cmd = (command || '').trim();
   if (!cmd) return { level: 'none', reasons: [] };
+  const variants = shellCommandVariants(cmd);
 
-  const highReasons = HIGH_RULES.filter((r) => r.test.test(cmd)).map((r) => r.reason);
+  const highReasons = [...new Set(
+    variants.flatMap((v) => HIGH_RULES.filter((r) => r.test.test(v)).map((r) => r.reason)),
+  )];
   if (highReasons.length) return { level: 'high', reasons: highReasons };
 
-  const medReasons = MEDIUM_RULES.filter((r) => r.test.test(cmd)).map((r) => r.reason);
+  const medReasons = [...new Set(
+    variants.flatMap((v) => MEDIUM_RULES.filter((r) => r.test.test(v)).map((r) => r.reason)),
+  )];
   if (medReasons.length) return { level: 'medium', reasons: medReasons };
 
   return { level: 'none', reasons: [] };
@@ -103,10 +122,45 @@ function isUnderSourceLocation(norm: string): boolean {
   return parts.some((p) => SOURCE_DIR_RE.test(p));
 }
 
-/** Strip quotes and a trailing slash from a raw shell arg; return '' for a pure flag/empty. */
+/**
+ * The path a shell arg really names, after bash's own quote and escape removal.
+ *
+ * Stripping only the OUTER quotes was a confirmed bypass: `rm -rf s""rc` and `rm -rf sr\c` both delete
+ * `src` while sharing no substring with it, so a comparison against the literal token could never match.
+ * Returns '' for a pure flag or an empty arg.
+ */
 function cleanPathArg(rawArg: string): string {
   if (rawArg.startsWith('-')) return '';
-  return rawArg.replace(/^['"]|['"]$/g, '').replace(/\/+$/, '');
+  return unquoteToken(rawArg).replace(/\/+$/, '');
+}
+
+/** Source directory names, for deciding whether a glob could reach one. */
+const SOURCE_DIR_NAMES = [
+  'src', 'app', 'components', 'pages', 'hooks', 'lib', 'utils', 'util', 'types', 'type', 'features',
+  'feature', 'store', 'stores', 'context', 'contexts', 'services', 'service', 'api', 'routes',
+  'styles', 'assets', 'models', 'state', 'containers', 'views', 'layouts', 'widgets',
+];
+
+/**
+ * Could this glob token expand onto the app's own source?
+ *
+ * `rm -rf src*` was a confirmed bypass: the token is not `src`, so nothing matched, and the command
+ * deletes `src` anyway. A guard cannot expand a glob without a filesystem, but it always knows the
+ * literal prefix the glob is anchored on, and "is that a prefix of a source directory name" answers the
+ * question well enough to refuse. Over-inclusive on purpose — `rm -rf c*` at a workspace root is not
+ * cleanup anybody needs, and the cost of refusing it is one retry.
+ */
+function globCouldHitSource(token: string): boolean {
+  const prefix = globLiteralPrefix(token).replace(/^\.\//, '');
+  const parts = prefix.split('/');
+  // A complete leading segment that is regenerable settles it: `node_modules/*`, `dist/**`.
+  if (parts.slice(0, -1).some((p) => SAFE_DELETE_RE.test(p))) return false;
+  if (parts.length > 1 && isUnderSourceLocation(parts.slice(0, -1).join('/'))) return true;
+  const last = (parts[parts.length - 1] || '').toLowerCase();
+  // A bare `*` is already handled as a whole-project wipe by the caller.
+  if (!last) return false;
+  if (SAFE_DELETE_RE.test(last)) return false;
+  return SOURCE_DIR_NAMES.some((d) => d.startsWith(last));
 }
 
 /**
@@ -120,6 +174,14 @@ function classifySourceTarget(rawPath: string): 'dir' | 'file' | null {
   if (!path) return null;
   // A bare `.`/`*`/`src/*` at the workspace root wipes the whole project.
   if (path === '.' || path === './' || path === '*' || path === './*') return 'dir';
+  // A glob names more paths than it spells. Decide on what it is anchored on, before the exact-name
+  // tests below (which a glob can never satisfy) get a chance to wave it through.
+  if (hasGlob(path)) {
+    if (!globCouldHitSource(path)) return null;
+    // `src/*.tsx` names source FILES; `src*` names a source DIRECTORY. The distinction matters because
+    // the caller gates directory deletion on a recursive flag, which a file glob does not need.
+    return SOURCE_CODE_EXT_RE.test(path) ? 'file' : 'dir';
+  }
   const norm = path.replace(/^\.\//, '');
   const parts = norm.split('/');
   if (parts.some((p) => SAFE_DELETE_RE.test(p))) return null; // node_modules/dist/.vite/… — always allowed
@@ -162,6 +224,23 @@ function isOutsideWorkspace(rawDest: string): boolean {
  * not just segment starts, so a destructive verb hidden in a loop body / pipe / `-exec` is still caught.
  */
 export function destructiveSourceDeletionTarget(command: string): string | null {
+  // WHAT BASH WILL RUN, not what the line says. `bash -c "rm -rf src"`, `sh -c '…'` and `eval "…"` were
+  // all confirmed bypasses of everything below, purely because the destructive verb was not at the start
+  // of any segment of the OUTER line. Each wrapped command is inspected on its own terms.
+  for (const variant of shellCommandVariants(command)) {
+    const hit = destructiveInOneCommand(variant);
+    if (hit) return hit;
+  }
+  // A tree removal written in JavaScript or Python is the same catastrophe as `rm -rf`, and shares no
+  // shell syntax with it — no amount of pattern work on the shell side would ever have caught it.
+  for (const target of interpreterTreeRemovalTargets(command)) {
+    if (classifySourceTarget(target)) return `${target} (interpreter one-liner)`;
+  }
+  return null;
+}
+
+/** The single-command analysis. `destructiveSourceDeletionTarget` applies it to every unwrapped variant. */
+function destructiveInOneCommand(command: string): string | null {
   const cmd = (command || '').trim();
   if (!cmd) return null;
 
@@ -260,7 +339,9 @@ export function destructiveSourceDeletionTarget(command: string): string | null 
     const rmMatch = /^rm\s+(.+)$/i.exec(s);
     if (!rmMatch) continue;
     const args = rmMatch[1].trim().split(/\s+/);
-    const hasRecursive = args.some((a) => /^-[a-z]*[rR]/.test(a));
+    // Long flags count too. `rm --recursive --force src` was a confirmed bypass purely because the
+    // short-flag pattern `-[a-z]*[rR]` cannot match `--recursive`.
+    const hasRecursive = args.some((a) => /^-[a-z]*[rR]/.test(a) || /^--(recursive|dir)$/i.test(a));
 
     // Recursive delete of a source DIRECTORY at any depth.
     if (hasRecursive) {
@@ -268,6 +349,11 @@ export function destructiveSourceDeletionTarget(command: string): string | null 
         if (classifySourceTarget(raw) === 'dir') return cleanPathArg(raw) || raw;
       }
     }
+
+    // A GLOB over source files is bulk deletion by definition — `rm src/*.tsx` needs no second argument
+    // to wipe a module set, so it must not have to clear the two-file threshold below.
+    const globArg = args.find((a) => !a.startsWith('-') && hasGlob(a) && classifySourceTarget(a) === 'file');
+    if (globArg) return cleanPathArg(globArg) || globArg;
 
     // Bulk delete of source-code FILES (≥ threshold) in one rm — the "wipe my module set" signature.
     const sourceFileArgs = args.map(cleanPathArg).filter((p) => p && classifySourceTarget(p) === 'file');
@@ -287,17 +373,21 @@ export function destructiveSourceDeletionTarget(command: string): string | null 
  * cleanup keeps working while a build-killing delete becomes impossible. Pure; never throws.
  */
 export function singleSourceDeleteTargets(command: string): string[] {
-  const cmd = (command || '').trim();
-  if (!cmd) return [];
   const out: string[] = [];
-  for (const seg of cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/)) {
-    const m = /^(?:rm|unlink)\s+(.+)$/i.exec(seg.trim());
-    if (!m) continue;
-    for (const raw of m[1].trim().split(/\s+/)) {
-      if (raw.startsWith('-')) continue;
-      const p = cleanPathArg(raw);
-      if (p && classifySourceTarget(p) === 'file' && !out.includes(p)) out.push(p);
+  // Same reasoning as the guard above: a delete inside `sh -c "…"` deletes just as thoroughly.
+  for (const cmd of shellCommandVariants(command)) {
+    for (const seg of cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/)) {
+      const m = /^(?:rm|unlink)\s+(.+)$/i.exec(seg.trim());
+      if (!m) continue;
+      for (const raw of m[1].trim().split(/\s+/)) {
+        if (raw.startsWith('-')) continue;
+        const p = cleanPathArg(raw);
+        if (p && classifySourceTarget(p) === 'file' && !out.includes(p)) out.push(p);
+      }
     }
+  }
+  for (const target of interpreterTreeRemovalTargets(command)) {
+    if (classifySourceTarget(target) === 'file' && !out.includes(target)) out.push(target);
   }
   return out;
 }

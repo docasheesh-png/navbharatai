@@ -208,3 +208,61 @@ REGRESSIONS:    None. tsc (frontend + server) clean; full suite green. Every pat
                 invariants at all, so the prompt is byte-identical to before.
 NEXT PHASE:     2 — Adversarial security suite (§4)
 ```
+
+---
+
+## PHASE 2 REPORT
+
+```
+PHASE:          2 — Adversarial security suite (§4)
+STATUS:         SHIPPED · 9 real bypasses found and closed
+CURRENT SCORE:  Dimension 8 (Security) 8 → 8. Unchanged, and the reason matters: the suite found NINE
+                live bypasses of the source-destruction guard on the day it was written. A dimension
+                that was scored 8 on "strong controls exist" was, in the one place it was measured,
+                not holding. It is now — but "we tested one guard properly" is not 9/10 either. The
+                honest reading is that the 8 was never evidence-backed, and now part of it is.
+TARGET:         9 once the remaining controls (SSRF, SQL allowlist, package install scripts, platform
+                source guard, secret leak) each have an attack suite of their own.
+WHAT CHANGED:   tests/security/adversarialShellGuards.test.ts — 102 tests that ATTACK the guards
+                rather than confirm them. Every other security test in this repo checks a control does
+                what its author intended; none attacked one. That gap is exactly where the nine were.
+
+                CONFIRMED BYPASSES, all of which delete the app's own source while the guard says
+                nothing — the PaisaTrack failure the guard exists to prevent, repeatable nine ways:
+                  bash -c "rm -rf src"          sh -c 'rm -rf src'            eval "rm -rf src"
+                  node -e "fs.rmSync('src',…)"  python3 -c "shutil.rmtree()"  rm --recursive --force src
+                  rm -rf src*                   rm -rf s""rc                  rm -rf sr\c
+                Not one of these is exotic. `bash -c` and `rm -rf src*` are things a model writes on an
+                ordinary Tuesday.
+
+                ROOT CAUSE — ONE, NOT NINE: the guards matched the command as literal text while bash
+                matches it after unwrapping, quote removal, escape removal and glob expansion. Guard and
+                shell were reading two different commands, and every gap between the two readings was a
+                bypass. src/server/AgentV3/shellNormalize.ts now gives every guard what bash sees:
+                nested-shell unwrapping (bounded), line-continuation joining, bash-accurate quote and
+                escape removal, glob literal-prefix analysis, interpreter-one-liner extraction. Wired
+                into destructiveSourceDeletionTarget, singleSourceDeleteTargets and classifyCommandRisk
+                — one shared normalizer, so the fix cannot drift the way four copies of safeRelPath once
+                did.
+
+                TWO FURTHER DEFECTS THE ATTACK PASS TURNED UP, both fixed:
+                  • `cat .env.example` was blocked as secret exfiltration. It is a template of variable
+                    NAMES with no values, this engine has a tool that generates one, and reading it is
+                    how a build learns what an app needs. A guard that refuses ordinary work gets fought
+                    until something gives.
+                  • The CommandGovernance header claimed it "does NOT block execution". It has blocked
+                    HIGH-risk commands at the dispatcher for some time. Stale doc corrected.
+
+                A REGRESSION I INTRODUCED AND CAUGHT: treating `{` as a glob metacharacter truncated
+                `${PWD}/src` to a literal prefix of `$`, so a path that had always been blocked started
+                passing. `${VAR}` is a variable; `src/{a,b}` is a brace expansion. Both handled.
+TESTS:          14,283 passing (1,185 files), up from 14,181. 102 new. Roughly a third of them assert
+                the OPPOSITE direction — that npm install, rm -rf node_modules, rm -rf dist, a single
+                stale-file delete, an in-workspace rename and `sh -c "npm run build"` all still work.
+                A guard that blocks everything is not secure, it is a broken build, and a regression
+                there is as serious as a bypass.
+BENCHMARK:      NOT RUN — no cost incurred. The attack suite runs in 54ms as part of ordinary CI.
+REGRESSIONS:    None. tsc (frontend + server) clean; full suite green; all 53 pre-existing
+                CommandGovernance tests still pass unmodified.
+NEXT PHASE:     3 — Multi-service runner (§6), if the SERVICE_GRAPH_MULTI records show real demand
+```

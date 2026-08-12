@@ -48,6 +48,12 @@ export interface HostingChooserProps {
   onClose: () => void;
   /** A build/deploy is already running — disable the actions. */
   busy: boolean;
+  /**
+   * Live status of the direct publish ("Building your app…", the live URL, or the server's own error).
+   * Shown verbatim: a generic failure message is what made this surface feel fake, and a build error
+   * carries the compiler's real output the user needs.
+   */
+  publishStatus?: string;
   /** The current workspace — required to connect a per-app custom domain. */
   workspaceId?: string;
   /** Whether the Firebase-native "connect your own domain" surface is live (server flag). */
@@ -76,7 +82,7 @@ interface DatabaseReadiness {
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
-  providers, onDeploy, onClose, busy, workspaceId, customDomainsEnabled,
+  providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
@@ -247,6 +253,18 @@ export function HostingChooser({
           <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-[11.5px] text-rose-200">
             <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>{blocked}</span>
+          </div>
+        )}
+
+        {/* The publish IS running, or has finished. The surface stays open and reports it — the whole
+            point of moving publishing off the chat stream is that the user can watch it here. A build
+            failure arrives with the compiler's real output, so `whitespace-pre-wrap` is deliberate. */}
+        {publishStatus && (
+          <div className="mx-4 mt-4 rounded-lg border border-sky-900/50 bg-sky-950/30 px-3 py-2 text-[11.5px] text-sky-100">
+            <div className="flex items-start gap-2">
+              {busy ? <TirangaLoader className="w-3.5 h-3.5 mt-0.5 shrink-0" /> : <Rocket className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
+              <span className="whitespace-pre-wrap break-words max-h-48 overflow-auto">{publishStatus}</span>
+            </div>
           </div>
         )}
 

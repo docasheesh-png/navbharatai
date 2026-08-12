@@ -129,7 +129,7 @@ describe('WIRING — the timeout stops us waiting, not looking', () => {
     for (const consumer of [
       'const reviewText = review ? formatReview(review) : ',
       'buildDiag.recordReview(reviewText)',
-      'if (criticals.length > 0 && !isImportTurn) reviewCriticalsUnresolved = criticals.slice();',
+      'if (criticals.length > 0 && !isImportTurn && !greenStopReview) reviewCriticalsUnresolved = criticals.slice();',
       'const criticals = (review?.issues ?? []).filter((i) => i.severity === ',
     ]) {
       expect(route.indexOf(consumer), consumer).toBeGreaterThan(at);

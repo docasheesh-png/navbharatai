@@ -114,6 +114,7 @@ import {
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -11608,19 +11609,44 @@ export function registerAgentV3Routes(app: Express): void {
             ? selectAutoFixableWarnings(review?.issues ?? []).map((i) => i.message.trim()).filter(Boolean)
             : [];
           const autoFixItems = [...criticals, ...warningFixes];
+          // GREEN STOP — once the app WORKS, offer improvements, do not impose them (admin 2026-08-12,
+          // verified in BENCHMARK 0: the app rendered at 6.6 min and the build ran to 14.3, most of it
+          // spent editing a working app; and in the 44-min report the reviewer's silent fix ERASED the
+          // user's real .env secrets). The reviewer reports the engine's OWN quality/security/design
+          // opinions. When the app is ALREADY verified rendering, applying those silently is exactly the
+          // re-break class. So they become a "want me to fix these?" offer in the user's own summary,
+          // and the working app ships untouched. The user's actual requests (a missing requested feature,
+          // a real runtime error) are handled by their own passes and keep fixing automatically — this
+          // governs only the reviewer's opinions. Kill switch: AGENTV3_GREEN_STOP=off. See greenReviewPolicy.
+          const greenStopReview = !reviewerShouldWrite({ previewGreen }) && autoFixItems.length > 0 && !isImportTurn;
           // FALSE-SUCCESS GUARD: a real build turn (never an import/survey turn, where findings stay
           // advisory by design) whose reviewer found [CRITICAL]s is NOT-ok until they are verifiably
           // fixed. Set the holder NOW (before the bounded fix pass) so the verdict is honest even if
           // the fix can't run — no headroom, aborted, or (the real bug) cut off mid-repair by the
           // advisory cap. Warnings never gate success (only true criticals do). Cleared only on a
           // verifiably-completed fix pass below.
-          if (criticals.length > 0 && !isImportTurn) reviewCriticalsUnresolved = criticals.slice();
-          // NEVER on an import/survey turn (2026-07-07): the user said "do not change any files yet",
-          // the reviewer found criticals in the IMPORTED code, and this pass went and edited the
-          // project anyway — a direct instruction violation. On import turns the findings stay
-          // advisory; the user decides ("create the missing files") — the AI turn already has the
-          // [IMPORT COMPLETENESS] context to do it on request.
-          if (autoFixItems.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted && !isImportTurn) {
+          // NOT when green-stopping: a verified-rendering app is NOT made not-ok by the reviewer's
+          // opinions — those are now suggestions the user can accept, not blockers.
+          if (criticals.length > 0 && !isImportTurn && !greenStopReview) reviewCriticalsUnresolved = criticals.slice();
+          if (greenStopReview) {
+            // The app is verified working. Surface the findings as an offer instead of silently editing.
+            const suggestions = toReviewSuggestions(
+              autoFixItems.map((t) => ({ text: t, functional: criticals.includes(t) })),
+            );
+            const suggestSummary = reviewSuggestionSummary(suggestions);
+            if (suggestSummary) result = { ...result, summary: `${result.summary || ''}${suggestSummary}` };
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'REVIEW_SUGGESTED_NOT_APPLIED',
+                message: `The app was verified rendering, so ${suggestions.length} reviewer finding(s) were OFFERED to the user rather than applied silently (the working app was left untouched): ${suggestions.map((s) => s.title).join('; ')}`,
+                autoResolved: true,
+              });
+            } catch { /* best-effort */ }
+            const card = reviewSuggestionCard(suggestions);
+            // A richer client can render per-item "fix" buttons; the summary above already carries the
+            // whole feature end-to-end for a plain client, so this emit is purely additive.
+            if (card) { try { events.emit({ type: 'suggest', ...card, ts: Date.now() }); } catch { /* best-effort */ } }
+          } else if (autoFixItems.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted && !isImportTurn) {
             const label = warningFixes.length
               ? `${criticals.length} critical + ${warningFixes.length} functional issue(s)`
               : `${criticals.length} critical issue(s)`;

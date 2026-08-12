@@ -262,6 +262,23 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Run a browser action, retrying exactly ONCE after relaunching the CDP daemon if the first attempt
+ * fails (BENCHMARK #2, 2026-08-12 — browser_action failed twice with a bare "exit status 1" because the
+ * daemon was not reachable and the failure was never retried, so the model reported interactive features
+ * PASS it had never driven). Pure control-flow: both effects are injected, so the retry behaviour is
+ * unit-testable without a live sandbox. `relaunch` drops the cached (dead) daemon so the second `attempt`
+ * re-ensures a fresh one; a second failure is thrown honestly rather than swallowed.
+ */
+export async function withDaemonRetry<T>(attempt: () => Promise<T>, relaunch: () => void): Promise<T> {
+  try {
+    return await attempt();
+  } catch {
+    relaunch();
+    return await attempt();
+  }
+}
+
 /** Guess the dev-server port from the launch command for health-check polling. */
 function extractDevPort(command: string): number {
   // Explicit --port / PORT= always wins
@@ -1370,11 +1387,20 @@ ${paintWaitJs('p')}
         if (c.stdout && c.stdout.includes('webSocketDebuggerUrl')) return true;
         await new Promise(r => setTimeout(r, 1000));
       }
-      // Proceed anyway — the action script also waits/retries the connection.
-      return true;
+      // The CDP port never opened. Report it HONESTLY as false, not the old optimistic `true`.
+      // Returning true here (BENCHMARK #2, 2026-08-12) is exactly what made browser_action fail with a
+      // bare "exit status 1": the action script then ran connectOverCDP() against a daemon that was not
+      // there, its outer catch fired, and the model — told only "exit status 1" — went on to report
+      // interactive features PASS that it had never actually driven.
+      return false;
     })();
 
     this._browserDaemon.set(workspaceId, promise);
+    // NEVER cache a FAILED daemon. The old code cached the optimistic `true` forever, so once the daemon
+    // was (wrongly) marked ready every later browser_action reused it and kept failing — the report's two
+    // consecutive exit-1s. Dropping the cache on a false/rejected result means the next call relaunches it.
+    promise.then((ok) => { if (!ok) this._browserDaemon.delete(workspaceId); })
+      .catch(() => { this._browserDaemon.delete(workspaceId); });
     return promise;
   }
 
@@ -1394,19 +1420,27 @@ ${paintWaitJs('p')}
       throw new Error('Playwright not ready yet (still installing or failed).');
     }
 
-    await this._ensureBrowserDaemon(sandbox, workspaceId);
-
     const payload = JSON.stringify({ action, ...args });
-    const result = await sandbox.commands.run(
-      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/browser-action.js ${shellQuote(payload)}`,
-      { cwd: TOOLS_DIR, timeoutMs: 30_000 },
-    );
+    // ONE attempt: ensure the CDP daemon is genuinely reachable, then drive the action against it.
+    const attempt = async (): Promise<{ result: string; url?: string; screenshot: string; cursorX?: number; cursorY?: number }> => {
+      await this._ensureBrowserDaemon(sandbox, workspaceId);
+      const result = await sandbox.commands.run(
+        `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/browser-action.js ${shellQuote(payload)}`,
+        { cwd: TOOLS_DIR, timeoutMs: 30_000 },
+      );
+      if (!result.stdout || result.exitCode !== 0) {
+        throw new Error(`Browser action failed: ${result.stderr.slice(0, 300) || 'the browser was not reachable'}`);
+      }
+      return JSON.parse(result.stdout.trim());
+    };
 
-    if (!result.stdout || result.exitCode !== 0) {
-      throw new Error(`Browser action failed: ${result.stderr.slice(0, 300)}`);
-    }
+    // The one failure worth retrying: the CDP daemon was not reachable (the action script's OUTER catch,
+    // exit 1). A genuine action error — a missing selector — never reaches here, because the script
+    // returns it as `result:"ERROR: …"` with exit 0. `withDaemonRetry` drops the cached daemon so it is
+    // RELAUNCHED, then retries exactly once. If it still fails it throws honestly, so the caller reports
+    // the tool as unavailable rather than the model treating a bare exit-1 as licence to claim success.
+    const parsed = await withDaemonRetry(attempt, () => { this._browserDaemon.delete(workspaceId); });
 
-    const parsed = JSON.parse(result.stdout.trim());
     const detail = parsed.url ? `${parsed.result} (now at ${parsed.url})` : parsed.result;
     return {
       screenshot: parsed.screenshot,

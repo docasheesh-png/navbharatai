@@ -1,5 +1,37 @@
 import { describe, it, expect } from 'vitest';
-import { withTimeout, isIgnoredListPath, resolveE2bTemplate } from './E2BActuator';
+import { withTimeout, isIgnoredListPath, resolveE2bTemplate, withDaemonRetry } from './E2BActuator';
+
+describe('withDaemonRetry — browser_action survives a dead CDP daemon (BENCHMARK #2 autopsy)', () => {
+  it('a first-try success runs the action once and never relaunches the daemon', async () => {
+    let attempts = 0; let relaunches = 0;
+    const r = await withDaemonRetry(async () => { attempts++; return 'ok'; }, () => { relaunches++; });
+    expect(r).toBe('ok');
+    expect(attempts).toBe(1);
+    expect(relaunches).toBe(0);
+  });
+
+  it('a first-try failure RELAUNCHES the daemon and retries once, then succeeds', async () => {
+    // The exact benchmark shape: the daemon was not reachable on the first attempt (exit 1), so the
+    // cached-dead daemon is dropped and a fresh one is launched before the retry.
+    let attempts = 0; const order: string[] = [];
+    const r = await withDaemonRetry(
+      async () => { attempts++; order.push(`attempt:${attempts}`); if (attempts === 1) throw new Error('exit status 1'); return 'clicked'; },
+      () => { order.push('relaunch'); },
+    );
+    expect(r).toBe('clicked');
+    expect(attempts).toBe(2);
+    expect(order).toEqual(['attempt:1', 'relaunch', 'attempt:2']); // relaunch happens BETWEEN the two tries
+  });
+
+  it('two failures throw honestly — the tool is reported unavailable, never a false success', async () => {
+    let relaunches = 0;
+    await expect(withDaemonRetry(
+      async () => { throw new Error('the browser was not reachable'); },
+      () => { relaunches++; },
+    )).rejects.toThrow(/not reachable/);
+    expect(relaunches).toBe(1); // relaunched once, retried once, then gave up honestly
+  });
+});
 
 describe('withTimeout — bounds a call that could hang forever (sandbox create/connect)', () => {
   it('resolves with the value when the promise settles in time', async () => {

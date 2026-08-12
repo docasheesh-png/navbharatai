@@ -31323,3 +31323,82 @@ Tests: 12 in `tests/releaseGateVerdict.test.ts`. Gate: tsc clean both projects, 
 **Next from this autopsy, in order:** the orphaned-process/EADDRINUSE class (the actual cause of the
 dead preview), the reviewer's CRITICAL never being applied, and `Requested feature not found` being
 detected and then ignored.
+
+---
+
+## 2026-08-12 (later) — BENCHMARK 0 autopsy: the first real build of everything shipped today
+
+The admin built a 3D coin-collector (Three.js), watched it run, collected all ten coins and saw the win
+screen. 14.3 min · KIMI (36 turns) · `noClaude: true` · ₹0 (free-list). The app worked.
+
+**The report it produced did not.** It led with:
+
+    Release gate: RED — Not shippable — the app's own test suite passes — this FAILED.
+
+Gibberish, wrong, and printed as the ROOT CAUSE of a successful build. All three defects were MINE,
+all shipped hours earlier the same day, and the first build to use them found every one (#2310).
+
+### The chain behind that RED — we failed our own app with a test we wrote and never installed
+
+    E2E_SCAFFOLDED  → we write playwright.config.ts + e2e/smoke.spec.ts and say out loud:
+                      "It has not been run here — run it yourself after `npm i -D @playwright/test`"
+    TEST_SUITE      → our own runner finds that config and runs it → FAIL (exit 1, no counts)
+    RELEASE_GATE    → RED, "Not shippable"
+
+And `READINESS_WARNING` in the same report said "No tests at all". Three parts of the system, three
+different answers about whether the app has tests.
+
+`detectTestPlan` treated a CONFIG FILE as proof a runner exists. A config proves intent; the dependency
+proves it can run. All three JS runners had the identical hole, so all three were fixed, and
+`suitePresentButRunnerMissing` says WHY nothing ran — trading a false accusation for silence would be a
+different bug.
+
+### GLM failed 21 times and the report could not say why
+
+`providerFailures: {GLM: 21, KIMI: 3}` with FOUR timeline entries, because `record()` collapses
+consecutive identical messages and every one reads "Provider GLM failed — falling back". Twenty of the
+twenty-four error messages were discarded. The single largest struggle signal in the build was
+undiagnosable. Failures now keep BUCKETED reasons — "18 rate-limit, 2 timeout, 1 bad-request" — and an
+unrecognised failure keeps its own text so a new mode cannot vanish into "other".
+
+### "Requested feature not found: login / payment" — on a coin-collector game
+
+The prompt opened by describing the plan: build a tiny game first, then take the SAME game 0 → 100
+through successive edits. Those later stages mentioned login and payments. `featureRequest.ts` already
+knew "no login" is not a request; it did not know "login in stage 3" isn't either. Same bug, different
+tense. Deferral cues are now read on BOTH sides of a mention, in English and Hinglish, with a small
+window so a paragraph about future work cannot silence a real ask.
+
+### Two more false reasons, both fixed
+
+A Vite `index.html` is a MOUNT SHELL, not a page — `<div id="root">` plus a module script, no heading BY
+DESIGN. The design gate judged it and would have done so on essentially every app this platform builds.
+And "no page components were found" was said about a React game whose whole UI lives in `src/App.tsx` —
+a file `deriveJourneys` reads and `noJourneyReason` did not. One shared candidate list now serves both.
+
+### What WORKED, on its first real outing
+
+- `PREVIEW_SERVER_RESTARTED` — the dev server died and was restarted **deterministically, no model
+  call**. Yesterday this was a multi-minute LLM repair pass that concluded "no code changes were needed".
+- `TIME_TO_FIRST_CALL` — 27s of setup, recorded, and separated from the 84s the first model call took.
+  `SETUP_TIMING` still says "Workspace ready in 0s" beside it; the real number is now visible anyway.
+- No `CLAIM_UNSUPPORTED` — the summary was honest this time.
+- Architecture invariants and the journey engine both ran and correctly said nothing about a
+  single-file 3D game with no forms.
+
+### OPEN ROOT CAUSE (rule 6) — not fixed, and not guessed at
+
+`src/ErrorBoundary.tsx` failed to typecheck (`Property 'state' does not exist`) and was ALSO flagged
+"created but never used". I checked both scaffold templates that emit an ErrorBoundary
+(`ViteReactProviderContents.ts`, `UiStatesGenerator.ts`) — **both are correct**, and both declare
+`state` properly. So the broken file was written by the MODEL, over a correct one we already ship, and
+then left unimported. My first reading of this — "our own scaffold produces the error" — was wrong and
+is corrected here.
+
+The likely mechanism is that the model overwrites the scaffold's `main.tsx` and drops its
+`import ErrorBoundary` along the way, leaving a dead file and no crash protection. **That needs the
+actual generated file to confirm, which the report does not carry.** Shipping a fix on that guess would
+be exactly the surface patch rule 4 forbids. What would close it: the file contents in the report, or a
+regression case from a build that reproduces it.
+
+Gate: tsc clean both projects, full run **14,653 / 14,653**.

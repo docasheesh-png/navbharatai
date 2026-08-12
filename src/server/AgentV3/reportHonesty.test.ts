@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseTestOutcome, reportedNoTestResults } from './testRunner';
-import { BuildDiagnostics, isRecoverableOnSuccess } from './BuildDiagnostics';
+import { BuildDiagnostics, isRecoverableOnSuccess, classifyProviderFailure } from './BuildDiagnostics';
 import { isSpaMountShell, analyzeHtmlPage, analyzeDesignCoverage } from './DesignCoverage';
 import { journeyCandidates, noJourneyReason } from './journeyDerivation';
 
@@ -193,5 +193,63 @@ describe('the journey reason describes the search that actually happened', () =>
   it('the candidate list is deterministic and shared', () => {
     const files = { 'src/pages/B.tsx': 'x', 'src/pages/A.tsx': 'x', 'src/App.tsx': 'x' };
     expect(journeyCandidates(files)).toEqual(['src/pages/A.tsx', 'src/pages/B.tsx', 'src/App.tsx']);
+  });
+});
+
+/**
+ * "GLM: 21" WITH NO REASON IS A NUMBER YOU CAN ONLY WORRY ABOUT (BENCHMARK 0, 2026-08-12).
+ *
+ * That report carried `providerFailures: {GLM: 21, KIMI: 3}` and FOUR timeline entries, because
+ * record() collapses consecutive identical messages and every one reads "Provider GLM failed — falling
+ * back to the next provider". Twenty of the twenty-four error messages were thrown away, so the largest
+ * struggle signal in the whole build could not be diagnosed at all.
+ */
+describe('a provider failure keeps its reason, not just its count', () => {
+  it('buckets the reasons so 21 failures become one readable line', () => {
+    const d = new BuildDiagnostics({});
+    for (let i = 0; i < 18; i += 1) d.recordProviderFailure('GLM', new Error('429 Too Many Requests'));
+    for (let i = 0; i < 2; i += 1) d.recordProviderFailure('GLM', new Error('socket timeout'));
+    d.recordProviderFailure('GLM', new Error('400 invalid request'));
+    expect(d.providerFailureBreakdown().GLM).toBe('18 rate-limit, 2 timeout, 1 bad-request');
+  });
+
+  it('the count still works, and the breakdown reaches the report', () => {
+    const d = new BuildDiagnostics({});
+    d.recordProviderFailure('KIMI', new Error('429'));
+    const r = d.report();
+    expect(r.providerFailures).toEqual({ KIMI: 1 });
+    expect(r.providerFailureReasons).toEqual({ KIMI: '1 rate-limit' });
+  });
+
+  it('an UNRECOGNISED failure keeps its own text — a new failure mode must not vanish into "other"', () => {
+    expect(classifyProviderFailure(new Error('model glm-9 has been retired')))
+      .toContain('model glm-9 has been retired');
+  });
+
+  it('classifies the shapes that actually occur', () => {
+    const cases: Array<[string, string]> = [
+      ['429 Too Many Requests', 'rate-limit'],
+      ['Request timed out after 60000ms', 'timeout'],
+      ['401 Unauthorized: invalid api key', 'auth'],
+      ['400 Bad Request', 'bad-request'],
+      ['503 Service Unavailable', 'server-error'],
+      ['ECONNRESET', 'network'],
+      ['context length exceeded', 'context-length'],
+    ];
+    for (const [text, bucket] of cases) expect(classifyProviderFailure(new Error(text)), text).toBe(bucket);
+  });
+
+  it('a failure with no reason still counts — the tally never regresses', () => {
+    const d = new BuildDiagnostics({});
+    d.recordProviderFailure('GLM');
+    expect(d.report().providerFailures).toEqual({ GLM: 1 });
+    expect(d.report().providerFailureReasons).toBeUndefined();
+  });
+
+  it('the build passes the real error through, not just the name', () => {
+    const routes = require('fs').readFileSync(
+      require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
+    ) as string;
+    expect(routes).toContain('buildDiag.recordProviderFailure(name, err)');
   });
 });

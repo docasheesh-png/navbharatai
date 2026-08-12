@@ -216,3 +216,86 @@ describe('splitPaintMarker', () => {
     expect(splitPaintMarker('')).toEqual({ html: '' });
   });
 });
+
+/**
+ * THE 44-MINUTE HOME PAGE (admin build transcript, 2026-08-12 — 44m50s, ₹42.16, 178.4k tokens).
+ *
+ * The user asked for one home page with four corner buttons. Three separate times the preview came
+ * back "nothing is listening on that port". Three times the platform ran a full LLM repair pass on it.
+ * All three times the model read the files, typechecked, found nothing, restarted the dev server and
+ * wrote some version of "No code changes were needed — the app itself is fine."
+ *
+ * The detection was never wrong. The RESPONSE was: a code repair cannot fix a dead process, and while
+ * the model was in there looking for a bug that did not exist, it edited working code.
+ */
+describe('a dead dev server is a process problem, not an app problem', () => {
+  const CLOSED_PORT = '<html><body><h1>Closed Port Error</h1>'
+    + '<p>The sandbox is running but there is no service running on port 5173. Connection refused.</p></body></html>';
+
+  it('is reported as serverDown, not as a broken app', () => {
+    const v = analyzePreviewHtml(CLOSED_PORT);
+    expect(v.serverDown).toBe(true);
+    expect(v.rendered).toBe(false);
+  });
+
+  it('says plainly that this is not the user\'s app', () => {
+    expect(analyzePreviewHtml(CLOSED_PORT).problems[0]).toContain('this is not your app');
+  });
+
+  it('is NOT confused with an inconclusive snapshot — they need opposite handling', () => {
+    // Unpainted means do nothing. Dead server means do one specific, free, deterministic thing.
+    expect(analyzePreviewHtml(CLOSED_PORT).inconclusive).toBeFalsy();
+  });
+
+  it('short-circuits — nothing else in the html can testify about an app we never reached', () => {
+    // The closed-port page is the HOST talking, so its content must not be mined for app defects.
+    const v = analyzePreviewHtml(CLOSED_PORT);
+    expect(v.problems).toHaveLength(1);
+  });
+
+  it('a real app is never mistaken for a dead server', () => {
+    const real = '<html><body><div id="root"><h1>Jungle Adventure</h1><button>Play</button></div></body></html>';
+    expect(analyzePreviewHtml(real).serverDown).toBeFalsy();
+    expect(analyzePreviewHtml(real).rendered).toBe(true);
+  });
+
+  it('an app that merely MENTIONS a closed port is not a dead server', () => {
+    // A devops dashboard is allowed to contain these words. Two independent signals are required.
+    const dashboard = '<html><body><div id="root"><h2>Connection refused on port 8080</h2><p>Retry</p></div></body></html>';
+    expect(analyzePreviewHtml(dashboard).serverDown).toBeFalsy();
+  });
+});
+
+describe('the build restarts the server instead of hiring a model to do it', () => {
+  const routes = require('fs').readFileSync(
+    require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
+  ) as string;
+
+  it('a serverDown verdict takes the deterministic path', () => {
+    expect(routes).toContain('if (verdict.serverDown)');
+    expect(routes).toContain('preview-server-revive');
+    expect(routes).toContain('PREVIEW_SERVER_RESTARTED');
+  });
+
+  it('the restart happens BEFORE the repair prompt is ever built', () => {
+    // If it landed after, the model call would already have been made and the money already spent.
+    const at = routes.indexOf('if (verdict.serverDown)');
+    const repairAt = routes.indexOf('buildPreviewRepairPrompt(verdict.problems');
+    expect(at).toBeGreaterThan(-1);
+    expect(repairAt).toBeGreaterThan(at);
+  });
+
+  it('a restart does NOT spend the repair budget', () => {
+    // Otherwise one crashed dev server silently costs the app its only chance at a real fix.
+    expect(routes).toContain('attempt -= 1; // a process restart is not a repair attempt');
+  });
+
+  it('it is bounded — a server that will not stay up cannot loop', () => {
+    expect(routes).toContain('const MAX_SERVER_REVIVALS = 2');
+    expect(routes).toContain('serverRevivals >= MAX_SERVER_REVIVALS');
+  });
+
+  it('giving up is reported as OUR infrastructure failing, not as the user\'s bad code', () => {
+    expect(routes).toContain("The app's code was never the problem here");
+  });
+});

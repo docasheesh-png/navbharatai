@@ -10580,6 +10580,11 @@ export function registerAgentV3Routes(app: Express): void {
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
+        // Restarting a dead process is NOT a repair attempt and must not spend the repair budget —
+        // otherwise one crashed dev server silently costs the app its only chance at a real fix. Bounded
+        // on its own so a server that refuses to stay up cannot loop.
+        const MAX_SERVER_REVIVALS = 2;
+        let serverRevivals = 0;
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
           let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
           try {
@@ -10648,6 +10653,43 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* feature-presence is best-effort — never blocks a verified build */ }
             previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
             break;
+          }
+          // THE DEV SERVER IS DEAD — RESTART A PROCESS, DO NOT REWRITE AN APP (admin build transcript
+          // 2026-08-12: a 44m50s / ₹42.16 build of one home page). Three times the preview came back
+          // "closed port"; three times a full LLM repair pass ran; all three times the model read the
+          // files, found nothing wrong, restarted the dev server and reported "No code changes were
+          // needed — the app itself is fine." We were paying a language model to be a process
+          // supervisor, at minutes and rupees per restart, and it edited working code while it was in
+          // there. A code repair cannot fix a dead process; nothing in the repair prompt ("fix imports,
+          // undefined variables, failed data access, or a crashing component") applies to one.
+          //
+          // Deterministic, free, and bounded: bring the server back, look again. If it will not stay up
+          // after MAX_SERVER_REVIVALS, THAT is the honest finding — and it is an infrastructure finding,
+          // not an accusation against the user's code.
+          if (verdict.serverDown) {
+            if (serverRevivals >= MAX_SERVER_REVIVALS) {
+              buildDiag.record({
+                phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
+                message: `The dev server would not stay running (${serverRevivals} restarts). The app's code was never the problem here — nothing was listening on the preview port. ${verdict.problems[0] ?? ''}`.trim(),
+                autoResolved: false,
+              });
+              previewVerifiedFailed = true;
+              break;
+            }
+            serverRevivals += 1;
+            events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
+            try {
+              // The health-check wrapper in devServerHost recognises this command, installs stale deps
+              // and waits for the port, so this one call is the whole restart.
+              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-server-revive');
+            } catch { /* the re-check below is the real verdict — a failed restart just means another try */ }
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
+              message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
+              autoResolved: true,
+            });
+            attempt -= 1; // a process restart is not a repair attempt
+            continue;
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
           // WE COULD NOT SEE THE APP — that is not the same as seeing it broken, and a repair pass here

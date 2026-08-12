@@ -25,6 +25,24 @@ export interface PreviewVerdict {
    * build, and every pass through it edited working code.
    */
   inconclusive?: boolean;
+  /**
+   * The dev server is not running — nothing is listening on the preview port.
+   *
+   * ROOT CAUSE (admin build transcript, 2026-08-12, a 44m50s / ₹42.16 build of a home page): this was
+   * detected correctly and then handled as if the APP were broken. Three times the preview came back
+   * "closed port", three times the platform spent a full LLM repair pass on it, and all three times the
+   * model — after reading files, typechecking and finding nothing — restarted the dev server and wrote
+   * some version of "No code changes were needed; the app itself is fine."
+   *
+   * A code repair CANNOT fix a dead process. The repair prompt literally asks the model to "fix
+   * imports, undefined variables, failed data access, or a crashing component", none of which exist.
+   * We were paying a language model, for minutes at a time, to act as a process supervisor — and while
+   * it was in there it edited working code, which is how one home page took forty-five minutes.
+   *
+   * Kept separate from `inconclusive` because the two need OPPOSITE handling: an unpainted snapshot
+   * means do nothing, a dead server means do one specific, deterministic, free thing.
+   */
+  serverDown?: boolean;
 }
 
 /**
@@ -183,7 +201,9 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
   // exact bug the flip was built to fix. Recognising it here is what makes that whole mechanism work.
   const hostError = hostErrorPage(h);
   if (hostError) {
-    problems.push(hostError);
+    // Return IMMEDIATELY and say what this is. Nothing else in this function can tell us anything
+    // about an app we never reached, and the caller must restart a process rather than rewrite code.
+    return { rendered: false, serverDown: true, problems: [hostError] };
   }
 
   if (problems.length === 0 && h.length < 40) {

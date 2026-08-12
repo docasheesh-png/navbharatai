@@ -993,6 +993,26 @@ export class BuildDiagnostics {
     return true;
   }
 
+  /**
+   * How many findings of a severity are about THE APP, for the release gate.
+   *
+   * The exclusion list is the reason this is a method and not a filter at the call site. Several
+   * findings measure OUR OWN process — how the grounding budget was spent, how long the post-answer
+   * pass took, what shape the service graph has — and are recorded at warning severity so a human
+   * notices them. None of them is a reason to hesitate before shipping the user's app, and letting
+   * them demote a green build to yellow would make the gate's most important state unreachable in
+   * practice, which is the same as not having it. Anything already resolved is likewise not a caveat.
+   */
+  shippingIssueCount(severity: IssueSeverity): number {
+    const PROCESS_ONLY = new Set([
+      'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
+      'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+    ]);
+    return this.issues.filter(
+      (i) => i.severity === severity && !i.autoResolved && !PROCESS_ONLY.has(i.code),
+    ).length;
+  }
+
   report(): BuildDiagnosticsReport {
     // Normalize recovered-on-success issues at SERIALIZATION time, so counts, issues[] and the derived
     // rootCause are all consistent even when a finalize path bypassed finish()'s back-fill. Idempotent.

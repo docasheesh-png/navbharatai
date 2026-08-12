@@ -98,7 +98,10 @@ export const indexHtml = `<!DOCTYPE html>
 </html>
 `;
 
-export const mainTsx = `import React from 'react';
+export const mainTsx = `// ENTRY POINT — provided and correct. Put routing, context providers and global wrappers inside
+// src/App.tsx, NOT here. Keep the ErrorBoundary import and the <ErrorBoundary> wrapper below: the app
+// root is already protected, and rewriting this file is what drops the boundary and breaks the build.
+import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';

@@ -41,15 +41,20 @@ describe('Prisma relation guidance (deep-test App #10 — 7 wasted `prisma gener
   });
 });
 
-describe('ErrorBoundary class-field guidance (build autopsy 2026-07-21 — 6 rewrites in one edit turn)', () => {
-  it('gives the canonical constructor-based ErrorBoundary and names the useDefineForClassFields cause', () => {
+describe('ErrorBoundary prevention (autopsy 2026-07-21, and the 2026-08-12 root fix — do not rewrite it)', () => {
+  it('tells the model the boundary is PROVIDED and must NOT be rewritten — the real prevention', () => {
+    // The old guidance taught the model HOW to write the boundary (constructor, useDefineForClassFields)
+    // — which still primed it to author one, and it kept breaking it (three reports). The stronger fix,
+    // confirmed by the prevention audit, is: the scaffold already ships a correct one; do not touch it.
     const p = architectSystemPrompt();
     expect(p).toContain('ERROR BOUNDARY');
-    expect(p).toContain('useDefineForClassFields');
-    expect(p).toContain('constructor');
-    expect(p).toContain('getDerivedStateFromError');
-    // it must steer AWAY from the thrash (functional-component workaround / repeated rewrites)
-    expect(p).toContain('do NOT loop');
+    expect(p).toContain('ALREADY PROVIDED');
+    expect(p).toContain('DO NOT OPEN OR REWRITE IT');
+    expect(p).toContain('functional component'); // names the exact wrong move the model keeps making
+    // it must steer AWAY from the thrash: reuse the existing boundary rather than authoring a new one
+    // (the prompt no longer teaches HOW to write one — that priming was the problem).
+    expect(p).toContain('reuse the existing ErrorBoundary');
+    expect(p).not.toContain('write the CANONICAL class ONCE');
   });
 });
 
@@ -526,5 +531,35 @@ describe('the page contract is honest about which scaffolds actually ship the ki
     expect(prompt).toContain('the five requirements are exactly');
     expect(prompt).toContain("project's own global stylesheet");
     expect(prompt).toContain('The rule is the OUTCOME, never the specific class name');
+  });
+});
+
+/**
+ * PREVENTION — the FIRST build should not generate the defects the post-build passes exist to fix
+ * (the 50/50 law, admin 2026-08-12). Evidence from three real reports; verified by the prevention audit.
+ */
+describe('write-it-right-the-first-time prevention list', () => {
+  const p = architectSystemPrompt();
+
+  it('the error-boundary "Add one" priming is GONE — it is named as provided', () => {
+    // The prompt used to tell the model to ADD an error boundary in three places, so it authored (and
+    // broke) one. It now names the provided file as protected.
+    expect(p).toContain('src/ErrorBoundary.tsx');
+    expect(p).not.toContain('reports a missing ERROR BOUNDARY');
+  });
+
+  it('no-unused-imports is a first-time rule, not just an after-the-fact sweep', () => {
+    expect(p).toContain('NO UNUSED IMPORTS');
+  });
+
+  it('no dynamic innerHTML — the XSS defect is prevented, not only scanned for', () => {
+    expect(p).toMatch(/innerHTML/);
+    expect(p).toContain('XSS');
+  });
+
+  it('the entry point tells the model to put providers in App.tsx, not rewrite main.tsx', () => {
+    // Mirrors the scaffold's sealed-entry banner — the model's rewrite of main.tsx is what dropped the
+    // ErrorBoundary import.
+    expect(p).toContain('KEEP the `import ErrorBoundary` line');
   });
 });

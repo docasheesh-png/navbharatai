@@ -31596,3 +31596,35 @@ green-latched. Kill switch AGENTV3_VERIFY_AFTER_FIX=off.
 
 Pure orchestration (every side effect injected) so the keep-vs-revert logic is fully unit-tested and
 cannot lie. Gate: tsc clean both projects, full run **14,737 / 14,737** (13 verify-after-fix tests).
+
+---
+
+## 2026-08-12 (continued) — LAYER 3 (PREVENTION) batch 1: stop generating the ErrorBoundary thrash
+
+The 50/50 law's "prevent, don't heal" half. A prevention audit (4 agents reading the code + three real
+reports) found the biggest recurring post-build fix is the ErrorBoundary/main.tsx class, and its cause is
+UPSTREAM: the architect prompt told the model to AUTHOR an error boundary in THREE places and named it as
+provided in ZERO. So the model kept writing (and breaking) one the scaffold already ships correctly.
+
+Batch 1 — all prompt/scaffold, no engine behaviour change:
+- systemPrompt.ts: the three "add an ErrorBoundary" / "write the CANONICAL class" instructions are
+  replaced by one "it is ALREADY PROVIDED at src/ErrorBoundary.tsx and wired in main.tsx — DO NOT rewrite
+  it (a boundary must be a class; rewriting breaks its typing); reuse the existing one for a new subtree."
+  When editing main.tsx, KEEP the ErrorBoundary import.
+- Added two items to the WRITE-IT-RIGHT-THE-FIRST-TIME list: (4) no unused imports/vars, (5) never assign
+  a dynamic value to innerHTML/outerHTML/insertAdjacentHTML (XSS). Both were recurring report defects the
+  engine only caught reactively.
+- The scaffold's main.tsx now carries a sealed-entry banner: "put routing/providers in App.tsx, not here;
+  keep the ErrorBoundary import." Removes the incentive to rewrite the entry.
+- ArchitectureAnalysis.findOrphanComponents exempts ErrorBoundary.tsx — when the model drops its import,
+  the momentary orphan was a phantom "created but never used" finding in real reports.
+
+This composes with the reactive scaffold-restore (the heal that now becomes dead code when prevention
+works) — prevent first, restore as the last line of defence. Gate: tsc clean both projects, full run
+**14,742 / 14,742**. systemPrompt.test.ts updated (the old "how to write a boundary" assertions replaced
+by the new "do not rewrite it" ones — the intent, preventing the thrash, is unchanged).
+
+⚠️ CI STATUS: GitHub Actions has run NO CI since 12:46 today despite many pushes + a PR reopen — almost
+certainly the repo's Actions minutes/quota (admin-only to resolve). Everything above is verified by the
+LOCAL gate (the same tsc + vitest CI runs), but per the constitution nothing merges until CI is green.
+Green Freeze + verify-after-fix (#2314) and this Prevention batch are all waiting on Actions.

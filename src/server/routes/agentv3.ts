@@ -7,6 +7,7 @@ import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendB
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
+import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -8276,6 +8277,24 @@ export function registerAgentV3Routes(app: Express): void {
               if (card) architectSystem = `${card}\n\n---\n\n${architectSystem}`;
             } catch { /* the contract card is best-effort — never blocks a build */ }
           }
+          // ARCHITECTURE INVARIANTS (Mission 10/10 Phase 1) — the PREVENT half. The contract card above
+          // answers "which module owns this symbol"; this answers the question that decides whether an
+          // app stays one app: "how is THIS project built?" Styling system, import style, where network
+          // calls go, where pages live — all READ OUT OF the project, never a house style of ours.
+          //
+          // Derived from the warm graph only (paths + import specifiers + dependencies), so it costs no
+          // file reads at all. The post-build check below sees file CONTENTS as well and can therefore
+          // observe one rule more; deriving with less input only ever yields FEWER rules, never
+          // different ones. Kill switch AGENTV3_ARCH_INVARIANTS=off.
+          if (process.env.AGENTV3_ARCH_INVARIANTS !== 'off') {
+            try {
+              const g = getWorkspaceMemory(workspaceId).graph();
+              const block = renderInvariants(deriveInvariants({
+                files: g.files, imports: g.imports, dependencies: g.dependencies,
+              }));
+              if (block) architectSystem = `${block}\n\n---\n\n${architectSystem}`;
+            } catch { /* architecture invariants are best-effort — never block a build */ }
+          }
           // P-AI.2 retrieval v2 (Mitrify autopsy) — intent-aware grounding: content hits (grep) +
           // structural anchors (package.json/README/entry/routes/schema) + import-graph centrality.
           // Replaces path-token-overlap-only selection, whose zero-overlap tie handed a survey
@@ -10095,6 +10114,66 @@ export function registerAgentV3Routes(app: Express): void {
               });
             }
           } catch { /* the service graph is advisory — it can never affect a build */ }
+
+          // ARCHITECTURE INVARIANTS (Mission 10/10 Phase 1) — the DETECT half of the same rules that
+          // were handed to the builder before it wrote anything. Deterministic, no model call, purely
+          // advisory: it costs nothing on a clean build and can never fail one.
+          //
+          // The baseline is the project as it was BEFORE this build touched it. Deriving from the
+          // finished project instead would let a build that broke the convention across five new files
+          // REDEFINE the convention and then report itself clean — the measurement equivalent of
+          // marking your own exam.
+          if (process.env.AGENTV3_ARCH_INVARIANTS !== 'off') {
+            try {
+              // The project as it was BEFORE this build touched it.
+              const invariantBaseline: Record<string, string> = {};
+              for (const [p, c] of Object.entries(storeFiles)) {
+                if (!writtenFiles.has(p)) invariantBaseline[p] = c;
+              }
+              // The IMPORT graph has to be filtered to the baseline too, and so do the dependencies
+              // read out of it. Otherwise a build that adds styled-components to a Tailwind app makes
+              // the project look like it has always used two styling systems, the invariant dissolves,
+              // and the very edit that broke it reports itself clean.
+              const graphImports = getWorkspaceMemory(workspaceId).graph().imports;
+              const baseImports: Record<string, string[]> = {};
+              const baseDeps = new Set<string>();
+              for (const [f, specs] of Object.entries(graphImports)) {
+                if (writtenFiles.has(f)) continue;
+                baseImports[f] = specs;
+                for (const s of specs) {
+                  if (!s.startsWith('.') && !/^(@|~)\//.test(s)) {
+                    baseDeps.add(s.startsWith('@') ? s.split('/').slice(0, 2).join('/') : s.split('/')[0]);
+                  }
+                }
+              }
+              const baseInvariants = deriveInvariants({
+                files: Object.keys(invariantBaseline),
+                imports: baseImports,
+                dependencies: [...baseDeps],
+                contents: invariantBaseline,
+              });
+              if (baseInvariants.length > 0) {
+                const broken = checkInvariants(baseInvariants, Object.fromEntries(writtenFiles));
+                for (const v of broken) {
+                  buildDiag.record({
+                    phase: 'build',
+                    severity: 'warning',
+                    code: 'ARCHITECTURE_INVARIANT_VIOLATED',
+                    ...obs(`${v.file} breaks how this app is built — ${v.detail}. ${v.rule}`),
+                  });
+                }
+                if (broken.length === 0) {
+                  // Recorded on a clean build too: a check that only ever speaks up when it finds
+                  // something leaves no evidence that it ran at all, and an unproven check is exactly
+                  // what this whole mission is about.
+                  buildDiag.record({
+                    phase: 'build', severity: 'info', code: 'ARCHITECTURE_INVARIANTS_HELD',
+                    message: invariantSummary(baseInvariants, broken), autoResolved: true,
+                  });
+                }
+              }
+            } catch { /* architecture invariants are advisory — they can never affect a build */ }
+          }
 
           const designFiles = Object.fromEntries(writtenFiles);
           const design = analyzeDesignCoverage(designFiles);

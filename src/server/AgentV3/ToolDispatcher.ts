@@ -1,4 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
+import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
@@ -2608,6 +2610,48 @@ export class ToolDispatcher {
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
         } catch { /* diagnostics capture is best-effort */ }
+        /**
+         * SECURITY REMEDIATION (admin 2026-08-12). THIS is where the dukaan build's 8 vulnerabilities
+         * came from — the agent's own `npm install react-router-dom @neondatabase/serverless bcryptjs
+         * jsonwebtoken express cors multer uuid`, whose output said "8 vulnerabilities (4 moderate,
+         * 4 high)" and was read by nobody.
+         *
+         * When high/critical ones are present and the admin has switched this on, apply npm's OWN
+         * SemVer-compatible fixes. Never `--force`: that applies breaking major upgrades and is a way
+         * to break a working app while claiming to secure it (see npmAuditFix.ts).
+         *
+         * The fix is recorded as its own command, so the report's vulnerability count comes from the
+         * tree the app ACTUALLY ships with rather than the one it started from — and the outcome line
+         * states plainly what happened, including "could not fix any of them" and "the result could
+         * not be re-read". A remediation step that quietly reports success is worse than one that
+         * never ran, because the count it leaves behind is the one the admin will trust.
+         *
+         * Best-effort throughout: securing dependencies must never be able to fail a working build.
+         */
+        if (exitCode === 0 && looksLikeDependencyInstall(command)) {
+          try {
+            const before = parseNpmAuditSummary(`${stdout}\n${stderr}`);
+            if (shouldRunAuditFix(before)) {
+              const fixStartedAt = Date.now();
+              const fix = await this.actuator.runCommand(this.workspaceId, AUDIT_FIX_COMMAND).catch(() => null);
+              const after = fix ? parseNpmAuditSummary(`${fix.stdout}\n${fix.stderr}`) : null;
+              // Recorded like any other command, so the post-fix count replaces the pre-fix one through
+              // the SAME path every install already uses — no second, divergent reporting route.
+              try {
+                this.onCommand?.({
+                  command: AUDIT_FIX_COMMAND, exitCode: fix ? fix.exitCode : null,
+                  stdout: fix?.stdout ?? '', stderr: fix?.stderr ?? '', durationMs: Date.now() - fixStartedAt,
+                });
+              } catch { /* diagnostics capture is best-effort */ }
+              // The COUNT reaches the report through the recorded command above (the same path every
+              // install already uses). This leaves the WORDS — which matter most in the awkward cases:
+              // "could not fix any of them" and "the result could not be re-read" are both outcomes a
+              // bare number would quietly round to something more flattering.
+              const note = auditFixOutcome(before, after, !!fix);
+              if (note) getWorkspaceMemory(this.workspaceId).recordAudit(note);
+            }
+          } catch { /* a security step must never break the command it followed */ }
+        }
         // T1-sec-redact: a command can print a secret (`cat .env`, `printenv`, `echo $API_KEY`).
         // Command stdout/stderr is NEVER an edit_file match source, so — unlike read_file content —
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.

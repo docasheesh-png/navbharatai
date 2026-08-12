@@ -242,7 +242,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
-import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -11491,8 +11491,14 @@ export function registerAgentV3Routes(app: Express): void {
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
           let review;
-          try {
-            review = await raceTimeout(reviewBuild({
+          // THE TIMEOUT STOPS US WAITING — IT MUST NOT STOP US LOOKING (admin report 2026-08-12).
+          //
+          // The promise is held in its own binding so that when the budget expires it is still
+          // reachable. In the dukaan stock app the reviewer landed its `[CRITICAL] Missing CSS
+          // Styling — App will look broken` **1.5 seconds** after `raceTimeout` rejected; because the
+          // reference was gone with the expression, that finding — 26 files of the user's tokens,
+          // already spent — was discarded, and the user shipped the broken app instead.
+          const reviewPromise = reviewBuild({
               userRequest: prompt,
               fileTree: rFiles,
               fileSample: rSample,
@@ -11501,16 +11507,43 @@ export function registerAgentV3Routes(app: Express): void {
               // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
               // spent re-reading code they did not touch.
               changedFiles: [...writtenFiles.keys()],
-            }), reviewBudget, 'post-build-review');
+          });
+          try {
+            review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
             // instead of silently dropping the completeness check (the empty-`review` report gap).
             const timedOut = e instanceof Error && /timed out/i.test(e.message);
-            events.emit({ type: 'narration', agent: 'architect', text: timedOut
-              ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
-              : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
-            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms on ${rFiles.length} files` : 'Post-build review errored', autoResolved: true }); } catch { /* best-effort */ }
-            review = null;
+            // GRACE — collect a review that is ABOUT TO LAND. Only after a TIMEOUT: a reviewer that
+            // THREW has already produced its answer (an error), and waiting on a settled rejection
+            // would buy nothing. Bounded by reviewGraceMs against the CURRENT headroom, so a genuinely
+            // hung reviewer can never eat the build's remaining wall clock — and returns 0 (skip
+            // entirely, today's behaviour byte-for-byte) when the safety margin is not there.
+            //
+            // Re-racing the SAME promise is safe: the first raceTimeout already attached handlers to
+            // it, so a rejection can never surface as an unhandled rejection, and no second reviewer
+            // is spawned — this waits on work that is already running and already paid for.
+            const graceMs = timedOut
+              ? reviewGraceMs(reviewBudget, effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)))
+              : 0;
+            if (graceMs > 0) {
+              review = await raceTimeout(reviewPromise, graceMs, 'post-build-review-grace').catch(() => null);
+            }
+            if (review) {
+              // It landed. Everything downstream — recordReview, the C9 auto-fix, the honesty holder —
+              // now runs exactly as it would have on a review that finished inside its budget.
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LATE', message: `Post-build review overran its ${reviewBudget}ms budget and was collected within the ${graceMs}ms grace — its findings were kept, not discarded.`, autoResolved: true }); } catch { /* best-effort */ }
+            } else {
+              events.emit({ type: 'narration', agent: 'architect', text: timedOut
+                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
+                : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
+              // HONESTY (rule 5): this used to be recorded `autoResolved: true` — a literal claim that
+              // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
+              // build, which is exactly the caveat the health card should carry. It is a warning, not
+              // an error, so it can never block a working app from shipping.
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
+              review = null;
+            }
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {

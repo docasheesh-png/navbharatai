@@ -142,7 +142,7 @@ export function resolvePmScript(command: string, scripts: Record<string, string>
  * flag. When `framework` is undefined the historical Vite-style `--host` pass-through is kept, so
  * existing callers and the common Vite scaffold are byte-for-byte unchanged.
  */
-export function ensureHostBinding(command: string, framework?: DevFramework): string {
+export function ensureHostBinding(command: string, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
@@ -153,7 +153,17 @@ export function ensureHostBinding(command: string, framework?: DevFramework): st
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
   // that ignores HOST is unchanged. (Mitrify node-express import fix, 2026-07-24.)
-  if (isNodeServerCommand(command)) return `HOST=0.0.0.0 ${command}`;
+  //
+  // LOOK THROUGH `npm run server` TOO — the drifted sibling of report 26a8e81c. That report fixed
+  // `pinDevServerPort` to test the RESOLVED script instead of the raw pm command, because a Node server
+  // behind `npm run dev` shows no `tsx`/`node` to match on. The function immediately above it was never
+  // given the same signal, so the identical blind spot survived here: `npm run server` → the branch below
+  // sees no node server, no `dev|serve` keyword either, and returns the command untouched — so an Express
+  // app that binds `localhost` (its own default, unless it reads HOST) is up, healthy, and NOT reachable
+  // on the public preview. Same defect, same line of reasoning, one function apart.
+  if (isNodeServerCommand(command) || (!!resolvedScript && isNodeServerCommand(resolvedScript))) {
+    return `HOST=0.0.0.0 ${command}`;
+  }
   // Next.js dev server.
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
@@ -204,6 +214,28 @@ function isDevServerInvocation(segment: string): boolean {
     // command timeout (deadline_exceeded), wasting ~10 min per build when the agent tried it and the
     // live preview still never came up. `npm run build` stays excluded (compiles then exits).
     /(?:npm|pnpm|yarn)\s+run\s+(?:dev|start|serve|preview)\b/i.test(segment) ||
+    // THE BACKEND IS ALSO A LONG-RUNNING SERVER (admin report 2026-08-12, the dukaan stock app).
+    //
+    // `npm run server` matched NOTHING here: `serve\b` does not match "server", and the script it
+    // actually runs (`tsx watch server/index.ts`) is invisible at this point — we only see the script
+    // NAME. So a full-stack app's backend took the FOREGROUND path, blocked for the 45s command
+    // timeout, and — this is the part that broke the build — **the process it started did not die**.
+    // The build then ran the same command again and collided with its own orphan:
+    //     Error: listen EADDRINUSE: address already in use :::3000
+    // The backend crashed; the app runs server+client under `concurrently`, so the CLIENT died with
+    // it; port 5173 went dead and the user's preview showed a Closed Port Error — on a build that had
+    // just told them "App live hai".
+    //
+    // Classifying it correctly is the upstream fix, not a heal: it then takes the background path,
+    // which already brings the port fast-path (an existing healthy server is REUSED, never collided
+    // with) and the keepalive. The failure cannot recur rather than being recovered from.
+    //
+    // Anchored on the script NAME so `server`, `api`, `backend` and the `dev:`/`start:` variants match
+    // while a one-shot like `npm run server:build` does not.
+    /(?:npm|pnpm|yarn)\s+run\s+(?:dev|start):?(?:server|api|backend)\b(?!:)/i.test(segment) ||
+    /(?:npm|pnpm|yarn)\s+run\s+(?:server|api|backend)\b(?!:)/i.test(segment) ||
+    // The tools those scripts run, when the agent invokes them directly instead of through a script.
+    /\btsx\s+watch\b|\bnodemon\b|\bts-node-dev\b/i.test(segment) ||
     /python.*http\.server|http-server|live-server/i.test(segment) ||
     /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(segment) ||
     // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)

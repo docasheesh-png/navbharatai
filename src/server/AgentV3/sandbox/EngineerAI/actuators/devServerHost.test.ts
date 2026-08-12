@@ -409,6 +409,116 @@ describe('isLongRunningCommand', () => {
   });
 });
 
+/**
+ * ADMIN REPORT 2026-08-12 — the dukaan stock app. The user's preview was a **Closed Port Error** on a
+ * build that had just told them, in their own language, "App live hai".
+ *
+ * The chain, from the report's own transcript:
+ *   1. The agent ran `npm run server` (the backend, `tsx watch server/index.ts` under the hood).
+ *   2. `isLongRunningCommand` said FALSE — `serve\b` does not match "server", and the script body is
+ *      invisible here: at classification time we see only the script NAME.
+ *   3. So it took the FOREGROUND path, blocked for the whole command timeout, and returned
+ *      `deadline_exceeded` — **while the process it started stayed alive**.
+ *   4. The build, told the command had failed, ran it again — into its own orphan:
+ *          Error: listen EADDRINUSE: address already in use :::3000
+ *   5. The backend died. The app runs server+client under `concurrently`, so the CLIENT died with it.
+ *      Port 5173 went dead, and that dead port is what the user was handed.
+ *
+ * This is a CLASSIFICATION bug, not a crash — every recovery mechanism the engine owns (pre-kill,
+ * port fast-path, keepalive watchdog) lives on the background path and none of them was reachable.
+ * Fixing the classification is the upstream half (50/50 law): the collision stops being something to
+ * recover from and becomes something that cannot occur.
+ */
+describe('the backend is a long-running server too (dukaan stock app, 2026-08-12)', () => {
+  it('the exact command from the report is long-running', () => {
+    expect(isLongRunningCommand('npm run server')).toBe(true);
+  });
+
+  it('…and its siblings, whatever a scaffold happened to name the script', () => {
+    for (const c of [
+      'npm run server', 'pnpm run api', 'yarn run backend',
+      'npm run dev:server', 'npm run dev:api', 'npm run start:server', 'npm run devserver',
+    ]) {
+      expect(isLongRunningCommand(c), c).toBe(true);
+    }
+  });
+
+  it('detects the TOOLS those scripts run, when invoked directly', () => {
+    // `npm run server` resolves to one of these; the agent also types them by hand.
+    expect(isLongRunningCommand('tsx watch server/index.ts')).toBe(true);
+    expect(isLongRunningCommand('nodemon server/index.js')).toBe(true);
+    expect(isLongRunningCommand('ts-node-dev --respawn src/main.ts')).toBe(true);
+  });
+
+  it('a ONE-SHOT script whose name merely starts with "server" is NOT long-running', () => {
+    /**
+     * THE PRECISION LINE, and the reason the patterns are anchored on the script name with `(?!:)`
+     * rather than a loose `server` substring. Routing a build/typecheck into the background path would
+     * make it return the moment a port is up — i.e. report a compile it never waited for. A false
+     * positive here is a fake success, which is worse than the bug being fixed.
+     */
+    for (const c of [
+      'npm run server:build', 'npm run build:server', 'npm run server:test',
+      'npm run api:types', 'npm run backend:migrate', 'npm run build', 'npm install',
+    ]) {
+      expect(isLongRunningCommand(c), c).toBe(false);
+    }
+  });
+
+  it('inspecting the backend is still not starting it', () => {
+    // The ONE_SHOT_PREFIX rule above must keep applying to the new patterns.
+    expect(isLongRunningCommand('pkill -f "npm run server"')).toBe(false);
+    expect(isLongRunningCommand('ps aux | grep "npm run server"')).toBe(false);
+    // …but a kill-then-restart chain still starts one, exactly as for the client.
+    expect(isLongRunningCommand('pkill -f node; sleep 1; npm run server')).toBe(true);
+  });
+});
+
+describe('the backend reaches the public preview on the port it actually binds', () => {
+  /**
+   * Classification alone would be a half fix: the background path must also aim at the RIGHT port and
+   * the RIGHT host, or the pre-kill frees a port nobody is holding and the health check watches a port
+   * nobody is serving. Both decisions are made from the RESOLVED script, because `npm run server`
+   * carries neither signal.
+   */
+  const RESOLVED = 'tsx watch server/index.ts';
+
+  it('the port is pinned from the resolved script, so the pre-kill and the health check agree with the app', () => {
+    expect(pinDevServerPort('npm run server', 3000, undefined, RESOLVED)).toBe('PORT=3000 npm run server');
+  });
+
+  it('the HOST is forced from the resolved script too — the drifted sibling of report 26a8e81c', () => {
+    /**
+     * `pinDevServerPort` was taught to look THROUGH the pm script; `ensureHostBinding`, one function
+     * above it in the same file, was not. So an Express app that binds `localhost` by default came up
+     * healthy on the sandbox's own probe and returned nothing on the PUBLIC preview URL — a blank page
+     * on a working app, from the identical "we tested the wrong string" defect.
+     */
+    expect(ensureHostBinding('npm run server', undefined, RESOLVED)).toBe('HOST=0.0.0.0 npm run server');
+  });
+
+  it('composes into a single valid command, the way the actuator calls it', () => {
+    expect(pinDevServerPort(ensureHostBinding('npm run server', undefined, RESOLVED), 3000, undefined, RESOLVED))
+      .toBe('PORT=3000 HOST=0.0.0.0 npm run server');
+  });
+
+  it('an explicit host or port the caller already set is still respected', () => {
+    expect(ensureHostBinding('HOST=127.0.0.1 npm run server', undefined, RESOLVED)).toBe('HOST=127.0.0.1 npm run server');
+    expect(pinDevServerPort('PORT=8080 npm run server', 3000, undefined, RESOLVED)).toBe('PORT=8080 npm run server');
+  });
+
+  it('omitting the resolved script behaves exactly as before — every existing caller is unchanged', () => {
+    expect(ensureHostBinding('npm run dev')).toBe('npm run dev -- --host 0.0.0.0');
+    expect(ensureHostBinding('npm run server')).toBe('npm run server');
+    expect(ensureHostBinding('vite', 'vite')).toBe('vite --host 0.0.0.0');
+  });
+
+  it('a FRONTEND script is not turned into a node server by a stray resolved string', () => {
+    // The resolved script decides, and `vite` is not a node server — no HOST= prefix, the Vite flag.
+    expect(ensureHostBinding('npm run dev', 'vite', 'vite')).toBe('npm run dev -- --host 0.0.0.0');
+  });
+});
+
 describe('stripDevServerBackgrounding', () => {
   it('strips a trailing `&` so vite is not orphaned + reaped by E2B (the "Killed" loop)', () => {
     // Every launch in the failing build report ended in `&` and printed "Killed" after "ready".

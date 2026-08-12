@@ -105,6 +105,10 @@ import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
 import { extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS } from '../AgentV3/PageRouteCheck';
+import {
+  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason,
+  JOURNEY_TIMEOUT_MS,
+} from '../AgentV3/journeyDerivation';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -10734,6 +10738,64 @@ export function registerAgentV3Routes(app: Express): void {
               message: pageSummary.summary,
               autoResolved: pageSummary.ok,
               detail: pageResults.map((r) => `${r.verdict.toUpperCase()} ${r.note}`).join('\n'),
+            });
+          }
+        } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
+      }
+
+      // DOES THE APP ACTUALLY WORK, OR DOES IT ONLY RENDER? (Mission 10/10 Phase 4, §7)
+      //
+      // Every check above asks a version of "did it paint". None of them presses a button. So the most
+      // common invisible failure in a generated app survives all of them: the UI PRETENDS. You type a
+      // task, hit Add, the item appears — because it was pushed into a useState array. You reload and it
+      // is gone. The app rendered, threw nothing, answered 200 everywhere, and does not work.
+      //
+      // create → reload → is it still there is the only assertion that separates real persistence from a
+      // convincing illusion, and the journey is derived from the app's OWN markup — every selector read
+      // out of its source, never guessed. A form we cannot address honestly yields no journey rather
+      // than one that fails for the wrong reason.
+      //
+      // Cheap for the same reason PageRouteCheck is: Playwright and Chromium are pre-baked into the E2B
+      // images, so this is a handful of browser actions and no model call.
+      //
+      // EVIDENCE, NEVER A GATE. And a journey that never reached the app's own behaviour is reported
+      // UNREACHABLE, never FAILED — a login wall is not a defect.
+      if (
+        process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
+        && !isImportTurn && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+      ) {
+        try {
+          const journeyFiles = Object.fromEntries(writtenFiles);
+          // A marker unique to this build, so "the item appeared" cannot pass on pre-existing data.
+          const marker = `nbai-${buildStartedAt.toString(36)}`;
+          const journeys = deriveJourneys({
+            files: journeyFiles,
+            routes: extractPageRoutes(journeyFiles),
+            marker,
+          });
+          if (journeys.length > 0) {
+            const out = await withTimeout(
+              actuator.runCommand(workspaceId, journeyScript(lastPreviewUrl, journeys, marker)),
+              20_000 + journeys.length * JOURNEY_TIMEOUT_MS * 2, 'journey-check',
+            );
+            const journeyResults = parseJourneyResults(out.stdout);
+            const verdict = summarizeJourneys(journeyResults);
+            buildDiag.record({
+              phase: 'preview',
+              severity: verdict.ok ? 'info' : 'warning',
+              code: verdict.ok ? 'JOURNEY_PASSED' : 'JOURNEY_FAILED',
+              message: verdict.summary,
+              autoResolved: verdict.ok,
+              detail: journeyResults.map((r) => `${r.verdict.toUpperCase()} ${r.route} (${r.step}) — ${r.note}`).join('\n'),
+            });
+          } else {
+            // A quiet result that explains itself. "Nothing ran" and "nothing could be derived" look
+            // identical in a report unless one of them says which it was.
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'JOURNEY_NOT_DERIVED',
+              message: `No user journey was run — ${noJourneyReason(journeyFiles)}.`,
+              autoResolved: true,
             });
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }

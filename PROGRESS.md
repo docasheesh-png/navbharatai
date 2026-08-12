@@ -31785,3 +31785,65 @@ cache → guaranteed repeat failure), so it cannot regress today's behaviour.
 **Still open (the honesty half of BENCHMARK #2):** even with a reliable tool, a model that claims interactive
 PASS when the tool DID fail needs a verdict-level guard. Detecting "claimed PASS on an interactive feature the
 browser never reached" generically is fuzzy (false-positive risk) — remains an open item, not silently patched.
+
+---
+
+## 2026-08-12 — Release gate fairness to games/stateless apps (BENCHMARK #1 & #2 recurring)
+
+Both game reports showed the release gate at YELLOW with "It runs and renders — but no user journey was
+proven, so whether it actually SAVES anything is untested." For a game (or a dashboard, landing page,
+animation) that is a CATEGORY ERROR — it saves nothing, so implying a missing save is dishonest about a
+working app.
+
+**Safe fix — wording only, GREEN untouched (zero risk of a false GREEN):**
+- New pure signal `appHasNoDataEntry(files)` (journeyDerivation.ts): true only when the app has NO
+  data-entry surface ANYWHERE — no input/textarea/select/form element, no UI-library input component, no
+  change/submit handler, no contentEditable. CONSERVATIVE: any sign of data entry returns false, so a real
+  data app is never mislabelled "stateless". A false positive could only soften a YELLOW headline; it can
+  never promote anything to GREEN.
+- New JourneyOutcome `'none-derivable'` (distinct from 'unreachable' = a journey we couldn't finish, and
+  'not-run' = the check didn't execute). Set in agentv3.ts only when deriveJourneys found nothing AND
+  appHasNoDataEntry is true.
+- releaseGate: 'none-derivable' lists the missing journey as "not a defect", and the YELLOW headline becomes
+  neutral — "This app has no data-entry flow to exercise, so there was no user journey to prove — its
+  interactive behaviour was not machine-verified." GREEN still requires a PROVEN journey, so a stateless app
+  stays YELLOW (never promoted). A real data app whose journey wasn't proven still gets the honest "SAVES"
+  caveat. runtimeProven unaffected (a rendered game is still proven to RUN).
+
+Together with the earlier fixes, a correct game now reports: rootCause "completed successfully" (#2317),
+no timing-note headline (#2318), and an honest non-deficient gate line (this) — instead of "failing /
+missing features / doesn't save anything." Tests: releaseGate 51, journeyDerivation 49.
+
+**DELIBERATELY NOT done (needs admin sign-off):** letting a stateless app EARN green on render-alone. That
+would mean trusting "no inputs found = nothing to save", which a broken app that merely FORGOT its inputs
+could also trip — eroding the gate's core "renders ≠ shippable" guarantee. Kept YELLOW on purpose.
+
+---
+
+## 2026-08-12 — Reviewer over-tagging: present-but-different is not [CRITICAL] (item 4, honest scope)
+
+BENCHMARK #1: the reviewer stamped [CRITICAL] (confidence: high) "Missing Required Features" on a game
+whose features were PRESENT but built differently (5 lives not 3, frame-timer) — its own table called them
+"PARTIAL". A working app reported as failing.
+
+**Why there is NO safe deterministic guard (rule 3, stated plainly):** `parseReviewOutput` is line-based;
+the `[CRITICAL] Missing Required Features` line does not itself contain "PARTIAL" (that was in separate
+table rows), and in isolation it is indistinguishable from a legitimate high-confidence critical. Any blunt
+rule ("downgrade a critical mentioning 'missing features' on a rendering app") would ALSO suppress a genuine
+missing-feature critical — e.g. "checkout button missing" on a real shop. Suppressing real criticals is
+worse than the disease, so no such guard was added.
+
+**What WAS done:**
+1. The worst harm is already gone: #2317 stops a reviewer [CRITICAL] from becoming a SUCCESSFUL build's
+   rootCause (a working app is no longer headlined "failing").
+2. The safe lever — the reviewer PROMPT — now states explicitly: PRESENT-BUT-DIFFERENT is NOT [CRITICAL]
+   (a different value / partial variant / working alternative is at most [WARNING], usually [SUGGESTION]);
+   [CRITICAL] is ONLY for a feature genuinely ABSENT or completely non-functional; and do NOT roll several
+   present-but-imperfect items into one [CRITICAL] "Missing Required Features". This aligns the model with
+   the prompt's own [CRITICAL]/[WARNING] definitions. Prompt guidance can nudge but not force an LLM — so
+   this is an honest improvement, not a hard guarantee. Test locks the guidance is present.
+
+**Item 1 (claimed PASS on unverified interactive features) — status:** largely mitigated by the
+browser_action reliability fix (#2319): the trigger (interaction failing) is now rare. A verdict-level guard
+that catches "claimed interactive PASS while the browser tool failed" remains genuinely fuzzy (false-positive
+risk) and is NOT faked — recorded as the one remaining open item.

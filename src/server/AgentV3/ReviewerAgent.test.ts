@@ -284,3 +284,19 @@ describe('reviewScope', () => {
     expect(reviewScope(many(27), 78).focused).toBe(false);
   });
 });
+
+describe('the reviewer prompt forbids over-tagging present-but-different features (BENCHMARK #1)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'ReviewerAgent.ts'), 'utf8') as string;
+
+  it('tells the reviewer that PRESENT-BUT-DIFFERENT is not [CRITICAL]', () => {
+    // The benchmark game (5 lives not 3, frame-timer) was PRESENT-but-different, yet tagged CRITICAL
+    // "Missing Required Features" — a working app reported as failing.
+    expect(src).toContain('PRESENT-BUT-DIFFERENT is NOT [CRITICAL]');
+    expect(src).toContain('genuinely ABSENT or');
+  });
+
+  it('forbids rolling several present-but-imperfect items into one CRITICAL "Missing Required Features"', () => {
+    expect(src).toContain('Missing Required Features');
+    expect(src.toLowerCase()).toContain('working app as failing');
+  });
+});

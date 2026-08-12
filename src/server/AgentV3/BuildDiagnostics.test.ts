@@ -381,6 +381,32 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     expect(deriveRootCause({ issues: [], review })).toBe('Critical issue found by review: **Missing Features.css file** - the import has no matching file.');
   });
 
+  // BENCHMARK #1 game-evolution autopsy 2026-08-12: an admin-confirmed-CORRECT game was headlined
+  // rootCause "Critical issue found by review: Missing Required Features" — a working, rendering app
+  // reported as FAILING — because the review [CRITICAL] branch never consulted `ok`. Three of the
+  // reviewer's own four items were "PARTIAL" (present-but-different), and the app ran.
+  it('a reviewer [CRITICAL] is NOT the rootCause of a SUCCESSFUL build — a working app is not "failing"', () => {
+    const review = '[CRITICAL] (confidence: high) Missing Required Features\n- No START screen\n[WARNING] timer is frame-based';
+    // ok:true + only info/advisory issues → the honest verdict is success, not the offered review finding.
+    expect(deriveRootCause({ issues: [], review, ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('the reviewer [CRITICAL] STILL leads the rootCause on a FAILED build (never hide a real failure cause)', () => {
+    const review = '[CRITICAL] Login is completely broken.';
+    expect(deriveRootCause({ issues: [], review, ok: false })).toBe('Critical issue found by review: Login is completely broken.');
+    // ok undefined (still running) is unchanged too.
+    expect(deriveRootCause({ issues: [], review })).toBe('Critical issue found by review: Login is completely broken.');
+  });
+
+  it('on ok:true a GENUINE unresolved error still outranks a working-app review suggestion', () => {
+    // The rootCause suppression is scoped to the review finding — a real error on the timeline still wins.
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'DB_UNREACHABLE', message: 'prisma migrate → the database was NOT reachable (P1001).', autoResolved: false },
+    ];
+    const review = '[CRITICAL] Missing Required Features';
+    expect(deriveRootCause({ issues, review, ok: true })).toContain('database was NOT reachable');
+  });
+
   it('falls back to the first fully-captured error', () => {
     const errors = [{ ts: 1, phase: 'build' as const, message: 'Cannot find module \'./Features.css\'' }];
     expect(deriveRootCause({ issues: [], errors })).toBe('Error: Cannot find module \'./Features.css\'');

@@ -104,11 +104,15 @@ import { randomUUID } from 'crypto';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
-import { extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS } from '../AgentV3/PageRouteCheck';
+import {
+  extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS,
+  a11yIssueCount, slowRouteCount,
+} from '../AgentV3/PageRouteCheck';
 import {
   deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason,
   JOURNEY_TIMEOUT_MS,
 } from '../AgentV3/journeyDerivation';
+import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -9568,6 +9572,22 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
+      // THE RELEASE GATE'S EVIDENCE (Mission 10/10 Phase 5, §23), collected as the checks below run.
+      //
+      // Every field starts at 'not-run' and is only ever moved by a check that ACTUALLY RAN. That
+      // default is the entire design: every runtime check in this engine is gated on a preview URL, so
+      // they all skip together, and they skip precisely when the app is most broken. A gate that
+      // defaulted to 'passed' — or that inferred health from silence — would report the quietest, most
+      // broken builds as the healthiest ones.
+      const gateEvidence: RuntimeEvidence = {
+        buildOk: false, preview: 'not-run', pages: 'not-run', journeys: 'not-run',
+        typecheck: 'not-run', tests: 'not-run',
+      };
+      // Zero means "none found", and it stays zero when the browser never ran — which is correct here
+      // only because the gate cannot reach GREEN without runtime proof anyway, so an unmeasured app is
+      // already held back by the evidence rules rather than by a fabricated quality score.
+      const gateQuality: QualitySignals = { a11yIssues: 0, slowRoutes: 0 };
+
       // G3 — POST-AGENTIC TSC GATE (default-on; disable with AGENTV3_AGENTIC_TSC_GATE=off). The fast
       // lane (SimpleBuilder) type-checks + repairs, but the agentic loop / escalation / empty-build
       // retry had NO deterministic compile gate — it relied on the agent choosing to run tsc, which is
@@ -9587,7 +9607,10 @@ export function registerAgentV3Routes(app: Express): void {
         // Only with comfortable time left for install + tsc + one repair pass.
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
-        const runTsc = async (): Promise<{ ok: boolean; errors: string }> => {
+        // `verified` is separate from `ok` on purpose. Two of the paths below return ok=true meaning
+        // "we could not check, so do not block" — which is right for the gate and would be a LIE as
+        // release evidence. Collapsing the two is how "we did not look" becomes "it passed".
+        const runTsc = async (): Promise<{ ok: boolean; verified: boolean; errors: string }> => {
           try {
             // ENSURE A TSCONFIG FIRST: an imported/older project can have NO tsconfig.json, in which case
             // `tsc --noEmit` prints its HELP page and exits 0 — a FALSE "clean" pass while real type
@@ -9600,10 +9623,13 @@ export function registerAgentV3Routes(app: Express): void {
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             // A help-page result means tsc STILL didn't really run (e.g. no src TS files) — treat as
             // "unverified, don't block", never as a clean pass (no fake success).
-            if (looksLikeTscHelpOutput(out)) return { ok: true, errors: '' };
-            return hasTscErrors(out) ? { ok: false, errors: out.slice(0, 6000) } : { ok: true, errors: '' };
+            if (looksLikeTscHelpOutput(out)) return { ok: true, verified: false, errors: '' };
+            return hasTscErrors(out)
+              ? { ok: false, verified: true, errors: out.slice(0, 6000) }
+              : { ok: true, verified: true, errors: '' };
           } catch {
-            return { ok: true, errors: '' }; // couldn't verify (no real sandbox / tooling) → don't block
+            // Couldn't verify (no real sandbox / tooling) → don't block, and don't claim a pass either.
+            return { ok: true, verified: false, errors: '' };
           }
         };
         let check = await runTsc();
@@ -9635,6 +9661,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some TypeScript errors remain after one fix pass. Your files are saved — send a follow-up and I\'ll finish fixing them.', ts: Date.now() });
           }
         }
+        if (check.verified) gateEvidence.typecheck = check.ok ? 'passed' : 'failed';
       }
 
       // MISSING-FILES GATE for the AGENTIC path (deep-test App #4 — Instagram, 2026-07-13). The fast
@@ -10731,6 +10758,13 @@ export function registerAgentV3Routes(app: Express): void {
             );
             const pageResults = parsePageCheck(out.stdout);
             const pageSummary = summarizePageCheck(pageResults, pageRoutes.length);
+            // Only when the browser really returned results — an empty parse means the script never
+            // produced a line, which is "we do not know", not "every page is fine".
+            if (pageResults.length > 0) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
+            // §17/§26 — accessibility and performance were already measured here and already printed,
+            // and had no bearing on the verdict. They now cost GREEN (never RED — see QualitySignals).
+            gateQuality.a11yIssues = a11yIssueCount(pageResults);
+            gateQuality.slowRoutes = slowRouteCount(pageResults);
             buildDiag.record({
               phase: 'preview',
               severity: pageSummary.ok ? 'info' : 'warning',
@@ -10781,6 +10815,11 @@ export function registerAgentV3Routes(app: Express): void {
             );
             const journeyResults = parseJourneyResults(out.stdout);
             const verdict = summarizeJourneys(journeyResults);
+            // 'unreachable' is its own outcome, not a pass and not a failure — a login wall tells us
+            // nothing about the app, and either other answer would be invented.
+            if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
+            else if (journeyResults.some((r) => r.verdict === 'passed')) gateEvidence.journeys = 'passed';
+            else if (journeyResults.length > 0) gateEvidence.journeys = 'unreachable';
             buildDiag.record({
               phase: 'preview',
               severity: verdict.ok ? 'info' : 'warning',
@@ -10917,6 +10956,7 @@ export function registerAgentV3Routes(app: Express): void {
               outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
             } catch { break; /* couldn't run the suite (timeout / no sandbox) — skip silently */ }
             if (outcome.ok) {
+              gateEvidence.tests = 'passed';
               buildDiag.record({ phase: 'readiness', severity: 'info', code: 'TEST_SUITE', message: outcome.summary, autoResolved: true });
               if (attempt > 0) events.emit({ type: 'narration', agent: 'architect', text: `✅ Test suite green after fix — ${outcome.summary}.`, ts: Date.now() });
               break;
@@ -10936,6 +10976,8 @@ export function registerAgentV3Routes(app: Express): void {
             }
             // Out of repair budget OR near the wall-clock cap → record the honest failure and stop.
             if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
+              // The suite RAN and did not pass — that is real evidence, unlike the unverified case above.
+              gateEvidence.tests = 'failed';
               buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
               break;
             }
@@ -10956,6 +10998,38 @@ export function registerAgentV3Routes(app: Express): void {
           }
         } catch { /* vaccine is best-effort — never blocks a build */ }
       }
+
+      // THE RELEASE GATE (Mission 10/10 Phase 5, §23). Every check that could speak has now spoken, so
+      // this is the first honest moment to answer the only question the user actually has: can I ship it?
+      //
+      // Four states, and the fourth is the point. RED means something we checked is broken. YELLOW means
+      // it runs with caveats. GREEN means it runs AND a real user journey held up. UNKNOWN means nothing
+      // failed and nothing was PROVEN — which, before this, was silently reported as health, because
+      // every runtime check is gated on a preview URL and they all skip together exactly when the app is
+      // most broken.
+      //
+      // GREEN CANNOT BE EARNED BY STATIC CLEANLINESS. That is the whole rule.
+      try {
+        gateEvidence.buildOk = result.ok;
+        gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
+        const gate = releaseGate(gateEvidence, {
+          // Counted from what this build actually recorded, so the gate and the report cannot disagree.
+          blockers: buildDiag.shippingIssueCount('error'),
+          // Security findings already arrive as error-severity issues above; counting them again here
+          // would report one problem twice in the same sentence.
+          highSeverity: 0,
+          warnings: buildDiag.shippingIssueCount('warning'),
+        }, gateQuality);
+        buildDiag.record({
+          phase: 'readiness',
+          // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,
+          // and filing it as info is how it stops being read.
+          severity: gate.state === 'red' ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          code: 'RELEASE_GATE',
+          message: releaseGateSummary(gate),
+          autoResolved: gate.state === 'green',
+        });
+      } catch { /* the gate reports on the build; it must never affect it */ }
 
       // APP HEALTH CULTURE — RED-TEAM (Immune System Phase 3 / GA-17, opt-in AGENTV3_REDTEAM=on): the
       // happy-path preview check only proves the app renders on GOOD input. The red-team ADVERSARIALLY

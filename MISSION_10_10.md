@@ -345,3 +345,120 @@ BENCHMARK:      NOT RUN — no cost incurred. The evidence arrives free from rea
 REGRESSIONS:    None. tsc (frontend + server) clean; full suite green.
 NEXT PHASE:     5 — Error taxonomy (§24) + release gate states GREEN/YELLOW/RED/UNKNOWN (§23)
 ```
+
+---
+
+## PHASE 5 REPORT
+
+```
+PHASE:          5 — Release gate GREEN/YELLOW/RED/UNKNOWN (§23) + error taxonomy (§24)
+STATUS:         SHIPPED · found the worst honesty defect in the audit so far
+CURRENT SCORE:  Dimension 7 (Verification) 8 → 8. No bump: this phase did not add verification, it
+                stopped us OVERSTATING the verification we had. That is worth more than a point and
+                is not one.
+TARGET:         Unchanged — 9 when real builds supply the field evidence.
+WHAT CHANGED:   THE DEFECT, stated plainly: this platform's most confident statement was made with the
+                least evidence.
+
+                Every input to the build-confidence score was a STATIC analysis count — unresolved
+                imports, security findings, dependency counts, env vars. Not one input asked whether the
+                app RAN. So an app whose preview never came up, whose page-render check was therefore
+                skipped, whose journeys never ran and whose route smoke check no-opped — an app about
+                which we knew NOTHING — scored 100%, band HIGH, and said "I'm confident this build is
+                solid."
+
+                It is not a coincidence that it lands there. EVERY runtime check in the engine is gated
+                on a preview URL, so they all skip together, and they skip precisely when the app is
+                most broken. A quiet report is not evidence of health; it is the shape failure takes.
+                `PREVIEW_NEVER_CAME_UP` already said so in words — and the confidence number sitting
+                next to it still read 100%.
+
+                src/server/AgentV3/releaseGate.ts — four states, and the fourth is the point:
+                  RED      something we checked actually failed
+                  YELLOW   it runs, with real caveats
+                  GREEN    it runs AND a real user journey held up end to end
+                  UNKNOWN  nothing failed and nothing was PROVEN — we cannot tell you this works
+                GREEN CANNOT BE EARNED BY STATIC CLEANLINESS. Typecheck and tests are deliberately not
+                runtime proof: a project can typecheck perfectly and paint a blank screen, and letting a
+                compiler stand in for a browser is the substitution this gate exists to prevent.
+
+                BuildConfidence now takes `runtimeProven` and caps at 74 (below "high") without proof
+                the app ran, 40 when a run was watched to FAIL. Omitting the field counts as unknown —
+                silence caps confidence, it never earns it. The cap is EXPLAINED in the negatives list,
+                because a number that drops with no stated reason is the number nobody trusts.
+
+                Evidence is collected as the checks run, every field defaulting to 'not-run' and moved
+                only by a check that actually produced a result. `runTsc` gained a `verified` flag
+                separate from `ok`: two of its paths return ok=true meaning "could not check, do not
+                block", which is right for the gate and would be a lie as release evidence.
+
+                FOUR EXISTING TESTS ENCODED THE OLD BEHAVIOUR and were updated, not deleted. Their
+                fixture was named "clean" and asserted 100%/High while describing an app nobody had
+                ever seen run. The fixture now states `runtimeProven: 'passed'` explicitly, which is
+                what "every gate is clean" was always meant to mean, with the reason written above it.
+
+                ERROR TAXONOMY (§24) — NOT BUILT, on purpose. A taxonomy already exists in practice as
+                the BuildDiagnostics code set (OUTCOME_*, PAGE_RENDER_*, JOURNEY_*, TEST_SUITE, …),
+                which is machine-readable, already recorded on every build and already read by the
+                root-cause deriver. A second parallel classification would be a synonym table to keep
+                in sync, which is the drift this codebase has paid for before.
+TESTS:          14,375 passing (1,188 files), up from 14,345. 30 new.
+BENCHMARK:      NOT RUN — no cost incurred.
+REGRESSIONS:    None. tsc (frontend + server) clean; full suite green. The gate is recorded, never
+                enforced — it cannot fail a build.
+NEXT PHASE:     6 — Accessibility + performance into the gate (§17, §26)
+```
+
+---
+
+## PHASE 6 REPORT
+
+```
+PHASE:          6 — Accessibility + performance into the release gate (§17, §26)
+STATUS:         SHIPPED
+CURRENT SCORE:  Dimension 13 (Performance) 6 → 7 · Dimension 14 (Accessibility) 6 → 7.
+                Both move one point, not two: the gap Phase 0 named was "advisory only, not part of the
+                release gate", and that is now closed. Neither reaches 8 without field evidence.
+TARGET:         8 once real builds show how often either actually fires.
+WHAT CHANGED:   Smaller than Phase 0 implied, and worth saying so. Accessibility (six checks, in a real
+                browser) and Web Vitals (LCP/CLS/TTFB, with an honest refusal to grade an unsettled
+                page) were ALREADY measured by PageRouteCheck and already printed in the report. What
+                they never did was affect the verdict — so an app with twelve unlabelled buttons and a
+                six-second LCP could be called shippable-GREEN.
+
+                They now cost GREEN. PageRouteCheck exports a11yIssueCount() and slowRouteCount() as
+                NUMBERS — not re-derived from the summary sentence, because parsing prose back into a
+                count is how two halves of one report end up disagreeing — and the gate takes them.
+
+                THEY CAN NEVER MAKE A BUILD RED, and that ceiling is deliberate rather than lenient. A
+                slow page still renders and an unlabelled button still works, so calling either "not
+                shippable" would be a false alarm about a working app. The perf number in particular is
+                measured inside a 2-vCPU sandbox on a cold dev server — not the user's device on a
+                production build — and the headline says so, so nobody reads it as a user's experience.
+TESTS:          14,383 passing (1,188 files), up from 14,375. 8 new, including the one that matters
+                most: 99 a11y issues and 99 slow routes still cannot produce RED.
+BENCHMARK:      NOT RUN — no cost incurred.
+REGRESSIONS:    None. The new gate argument is optional and defaults to clean, so no existing caller
+                changes behaviour.
+NEXT PHASE:     None free. Phases 7–9 all need a decision or budget — see below.
+```
+
+---
+
+## WHERE THE FREE WORK ENDS
+
+Phases 1, 2, 4, 5 and 6 are shipped; Phase 3 is deferred on its own stated condition. That is every
+phase that could be done without either spending the admin's money or moving it.
+
+| Phase | Work | Blocked on |
+|---|---|---|
+| 3 | Multi-service runner (§6) | field data — `SERVICE_GRAPH_MULTI` needs real traffic |
+| 7 | Fast-lane cost attribution | **a decision** — moves real money in both directions; the shadow ledger (#2283) is measuring it now |
+| 8 | Golden benchmark suite (§36) | **₹1.5k–6k of real provider spend** |
+| 9 | Edit-survival benchmark (§9) | **₹75k–2.8L of real provider spend** |
+
+**The single highest-value action remains the one Phase 0 named: run real builds.** Five of the six
+dimensions still marked UNKNOWN or evidence-free become knowable from ordinary traffic, at no
+engineering cost, through machinery that is now all deployed — the scorecard (#2277), first-pass
+quality (#2287), the shadow ledger (#2283), the service graph (#2278), and as of today
+`ARCHITECTURE_INVARIANTS_HELD`, `JOURNEY_PASSED`/`JOURNEY_FAILED` and `RELEASE_GATE`.

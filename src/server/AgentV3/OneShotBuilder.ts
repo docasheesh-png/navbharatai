@@ -42,6 +42,41 @@ export function classifyForSimpleLane(startTier: StartTier | undefined): boolean
   return startTier === 'gemini' || startTier === 'haiku' || startTier === 'sonnet';
 }
 
+/**
+ * After the SIMPLE-BUILDER lane has failed, is the ONE-SHOT lane still worth attempting?
+ *
+ * ROOT CAUSE (admin report 2026-08-12, the dukaan stock app). The build's first seven minutes:
+ *
+ *     0s    setup begins
+ *     107s  first model call (the user waits through every second of the 107)
+ *     260s  SIMPLE_BUILD_FALLBACK — "could not produce the app"      ← 153s spent
+ *     260s  "Trying a fast one-shot build…"
+ *     410s  ONESHOT_FALLBACK — "could not generate the app"          ← 150s more
+ *     422s  the real builder finally starts
+ *
+ * Five minutes into two lanes that both failed. The one-shot's failure was not bad luck — it was
+ * PREDICTABLE, from evidence the platform already held. This lane exists, in its own caller's words,
+ * for "a TRIVIAL one-file app the manifest skips". The manifest had not skipped: it planned EIGHT
+ * files, and the narration said so out loud ("Building 8 file(s) — one focused pass each…"). A single
+ * ~8k-token call cannot emit an eight-file app — that truncation limit is the documented reason the
+ * simple lane was built to replace this one.
+ *
+ * So the one-shot was asked to do something the platform had just measured to be impossible, and the
+ * user paid 150 seconds and a full generation call for the answer. The measurement existed the whole
+ * time; it simply died with the closure that made it.
+ *
+ * This is a strict NARROWING of an existing gate: `classifyForOneShot` still decides eligibility by
+ * tier, and this only declines the attempt when the sibling lane has already PROVEN the app is
+ * multi-file. Unknown (no manifest — the plan call itself failed or returned nothing parseable) stays
+ * VIABLE, because a lane that never planned has proven nothing. Pure + tested.
+ */
+export function oneShotStillViable(sb: { plannedFiles?: number } | null | undefined): boolean {
+  const planned = sb?.plannedFiles;
+  if (typeof planned !== 'number' || !Number.isFinite(planned) || planned <= 0) return true; // never measured
+  // ONE file is exactly the case this lane owns. TWO or more is an app a single call truncates.
+  return planned <= 1;
+}
+
 /** Whether the OneShot lane is enabled. On by default (the agentic loop is the safety net);
  *  AGENTV3_ONESHOT=off instantly disables it (rollback to pure-loop behavior). */
 export function oneShotEnabled(): boolean {

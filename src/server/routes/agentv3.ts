@@ -193,7 +193,7 @@ import {
 } from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
-import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -9353,15 +9353,23 @@ export function registerAgentV3Routes(app: Express): void {
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }
+        // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
+        // read in the report as "the one-shot was never eligible", which is a different fact.
+        if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the file plan had already found ${sb.plannedFiles} files, and that lane only fits a single-file app — going straight to the full builder instead of spending a generation call proving it.`, autoResolved: true });
+        }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier)) {
+        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
+          //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
+          //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
+          //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
           const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {

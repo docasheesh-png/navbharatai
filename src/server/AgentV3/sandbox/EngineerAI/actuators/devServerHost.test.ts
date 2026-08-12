@@ -780,3 +780,42 @@ describe('devServerWatchdogCommand', () => {
     expect(parseDevServerWatchdogLog('')).toEqual({ revivals: 0, gaveUp: false });
   });
 });
+
+/**
+ * THE FIRST HALF OF THE FIX (admin build transcript, 2026-08-12).
+ *
+ * Restarting a dead dev server well is the second half. The first half is not needing to — and the
+ * keepalive that exists for exactly that was armed only after a FRESH launch. The fast path that
+ * ADOPTS an already-running server returned "already healthy … reused it" and armed nothing, so a
+ * server we inherited had no watchdog at all. It died mid-build, the preview went to the host's
+ * closed-port page, and the platform spent an LLM repair pass concluding "the app itself is fine; it
+ * just needed the dev server restarted." Three times, in one build.
+ */
+describe('every path that yields a live dev server arms the keepalive', () => {
+  const actuator = require('fs').readFileSync(
+    require('path').join(__dirname, 'E2BActuator.ts'), 'utf8',
+  ) as string;
+  const code = actuator.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('arming lives in ONE helper — two call sites cannot arm differently, or one not at all', () => {
+    expect(code).toContain('const armKeepalive =');
+    expect((code.match(/await armKeepalive\(/g) || []).length).toBe(2);
+  });
+
+  it('the ADOPTED-server path arms it — this is the one that was missing', () => {
+    const at = code.indexOf('already healthy on port');
+    expect(at).toBeGreaterThan(-1);
+    // The arm must happen BEFORE the early return, or it never happens at all.
+    const before = code.slice(Math.max(0, at - 400), at);
+    expect(before).toContain('await armKeepalive(boundPort)');
+  });
+
+  it('the fresh-launch path still arms it', () => {
+    expect(code).toContain('if (up) await armKeepalive(port);');
+  });
+
+  it('no path constructs the watchdog command by hand any more', () => {
+    // A second hand-rolled call site is how the first one drifted out of the fast path.
+    expect((code.match(/devServerWatchdogCommand\(\{/g) || []).length).toBe(1);
+  });
+});

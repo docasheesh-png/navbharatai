@@ -830,6 +830,22 @@ export class E2BActuator implements IEngineerActuator {
       // already reflects file edits via HMR, so relaunching just re-pays ~25s+ for nothing. Both checks
       // are real sandbox probes (a false "up"/"fresh" is impossible), and on ANY doubt we fall through
       // to the full, proven sequence below — never worse than today. AGENTV3_DEVSERVER_FASTPATH=off bypasses.
+      // ARM THE KEEPALIVE — from ONE place, so a path cannot quietly skip it.
+      //
+      // ROOT CAUSE (admin build transcript 2026-08-12). The watchdog was armed only after a FRESH
+      // launch. The fast path below — "already healthy on port N, reused it" — returned a healthy
+      // verdict and armed nothing, so a server we adopted rather than started had no keepalive at all.
+      // It then died mid-build with nothing watching, the preview went to the host's closed-port page,
+      // and the platform spent an LLM repair pass concluding "the app itself is fine; it just needed
+      // the dev server restarted". Three times, in one build.
+      //
+      // Restarting well was the second half of that fix. This is the first half: not needing to.
+      const armKeepalive = async (livePort: number): Promise<void> => {
+        await sandbox.commands
+          .run(devServerWatchdogCommand({ port: livePort, runCommand: devCommand, cwd: WORKSPACE_ROOT }), { timeoutMs: 15_000 })
+          .catch(() => null); // best-effort: every reactive net still stands if detaching is refused
+      };
+
       if (process.env.AGENTV3_DEVSERVER_FASTPATH !== 'off') {
         const alreadyUp = await sandbox.commands.run(buildPortWaitCommand(port, 2), { timeoutMs: 6000 })
           .then((r) => r.stdout.includes('PORT_UP')).catch(() => false);
@@ -838,6 +854,9 @@ export class E2BActuator implements IEngineerActuator {
             .then((r) => r.stdout.includes('STALE')).catch(() => false);
           if (shouldSkipDevServerLaunch(alreadyUp, stale)) {
             const boundPort = port;
+            // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
+            // more, since nobody in this process has been watching it so far.
+            await armKeepalive(boundPort);
             return { exitCode: 0, stdout: `[health-check] dev server already healthy on port ${boundPort} — reused it (no relaunch; edits apply via HMR).\n${devServerHealthLine(true, boundPort)}`, stderr: '' };
           }
         }
@@ -953,11 +972,7 @@ export class E2BActuator implements IEngineerActuator {
         // twice; the sandbox had reaped it. Bounded (see devServerWatchdogCommand) so a server dying of
         // a real code error is never restarted forever. Best-effort: if nohup/setsid cannot detach in
         // this sandbox, every existing reactive net still stands.
-        if (up) {
-          await sandbox.commands
-            .run(devServerWatchdogCommand({ port, runCommand: devCommand, cwd: WORKSPACE_ROOT }), { timeoutMs: 15_000 })
-            .catch(() => null);
-        }
+        if (up) await armKeepalive(port);
         return up;
       };
       const readDevLog = async (): Promise<string> =>

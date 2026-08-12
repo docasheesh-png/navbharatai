@@ -1154,11 +1154,31 @@ export interface BillingLedgerView {
  * Returns 0 on ANY doubt: no actuator, no measurement, the feature off, or no real rate configured.
  * A money path must fail toward charging LESS, never toward charging for something we cannot measure.
  */
-function billableSandboxUsd(actuator: unknown, workspaceId: string | null | undefined): number {
+function billableSandboxUsd(actuator: unknown, workspaceId: string | null | undefined, buildStartedAtMs?: number): number {
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return 0;
-    return sandboxBillableUsd(sandboxCost(fn.call(actuator, workspaceId)));
+    const held = fn.call(actuator, workspaceId);
+    /**
+     * BILL ONLY THE TIME WE WERE ACTUALLY USING THE VM (admin question 2026-08-12: "AGENTV3_BILL_SANDBOX
+     * se in-browser preview ke paise to nahi lagenge?").
+     *
+     * `sandboxHeldSeconds` measures from the moment the sandbox came UP, not from the moment this build
+     * began — the clock is set once per workspace and only cleared when the VM is paused or reaped. So a
+     * user who builds, then reads their preview for twenty minutes, then asks for one more change would
+     * have had those twenty idle minutes billed onto the SECOND build. A third build would be charged
+     * for all of it again: the same seconds, sold twice.
+     *
+     * Capping at the build's own duration fixes both at once. Idle time between builds is a cost of OUR
+     * idle reaper, not of the user's next request, and no second can land on more than one bill. It
+     * errs downward by construction — an unknown build start bills nothing rather than guessing.
+     */
+    const seconds = Number(held);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    const started = Number(buildStartedAtMs);
+    if (!Number.isFinite(started) || started <= 0) return 0;
+    const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
+    return sandboxBillableUsd(sandboxCost(Math.min(seconds, buildSeconds)));
   } catch {
     return 0;
   }
@@ -6770,7 +6790,7 @@ export function registerAgentV3Routes(app: Express): void {
       let watchdogBilledUsd = 0;
       if (ok && billingCtx.providerLedger) {
         try {
-          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId));
+          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId, billingCtx.buildStartedAt));
           watchdogBilledUsd = decided.effectiveBilledUsd;
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
@@ -12417,7 +12437,7 @@ export function registerAgentV3Routes(app: Express): void {
       // shared decideBuildBilledUsd so this settle path and the watchdog finalization (Fix 67) never
       // drift. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`).
       const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
-        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId));
+        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId, buildStartedAt));
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.

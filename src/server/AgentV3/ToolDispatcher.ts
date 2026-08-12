@@ -305,7 +305,7 @@ import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLin
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
-import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
+import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -1573,6 +1573,23 @@ export class ToolDispatcher {
   }
 
   /**
+   * Files that are NAMED like an error boundary but implement none. See looksLikeBrokenErrorBoundary:
+   * without this, such a file produces "React app has no error boundary", which invites a repair pass to
+   * ADD one beside the broken one — the duplicate-ErrorBoundary failure this repo has already paid for
+   * twice.
+   */
+  private collectBrokenErrorBoundaries(sources: EvalSourceFile[]): string[] {
+    const FRONTEND = /\.(tsx|jsx)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const out: string[] = [];
+    for (const { path, content } of sources) {
+      if (!FRONTEND.test(path) || SKIP.test(path)) continue;
+      if (looksLikeBrokenErrorBoundary(path, content)) out.push(path);
+    }
+    return out;
+  }
+
+  /**
    * Best-effort trust/safety/compliance scan (Layer 77 "Bharosa") over the
    * project's source files. Combines file-local privacy defects (PII in logs,
    * sensitive values in browser storage, cookies without SameSite, personal data
@@ -2808,6 +2825,7 @@ export class ToolDispatcher {
         const errorBoundary = analyzeErrorBoundary(
           mem.graph().components.length,
           this.collectHasErrorBoundary(snap.sources),
+          this.collectBrokenErrorBoundaries(snap.sources),
         );
         // Best-effort security-config pass (Section I #4): insecure TLS/CORS config.
         const securityConfig = this.collectSecurityConfigIssues(snap.sources);
@@ -2894,7 +2912,14 @@ export class ToolDispatcher {
         for (const f of reqCoverage.findings) {
           extra.push({ severity: 'medium', label: f.confirmed ? `Requested feature NOT BUILT: ${f.feature}` : `Requested feature not found: ${f.feature}` });
         }
-        if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
+        // A boundary that EXISTS but does not work is a different instruction from one that is absent —
+        // see looksLikeBrokenErrorBoundary. The old single label said "has no error boundary" for both,
+        // which is what invites a duplicate.
+        if (errorBoundary.findings.length) {
+          extra.push({ severity: 'medium', label: errorBoundary.brokenBoundaries.length > 0
+            ? `${errorBoundary.brokenBoundaries[0]} is named like an error boundary but implements none — fix that file, do NOT add another`
+            : 'React app has no error boundary' });
+        }
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/

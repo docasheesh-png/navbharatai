@@ -119,6 +119,53 @@ describe('GREEN — earned, and only earned', () => {
   });
 });
 
+/**
+ * §17 / §26. Accessibility and performance were already measured in a real browser and already printed
+ * in the report — and had no bearing on the verdict, so an app with twelve unlabelled buttons and a
+ * six-second LCP could be called shippable-green.
+ */
+describe('accessibility and performance cost green — and can never cost more', () => {
+  const ran = ev({ preview: 'passed', pages: 'passed', journeys: 'passed' });
+
+  it('an otherwise-green build with accessibility problems is YELLOW', () => {
+    const v = releaseGate(ran, clean, { a11yIssues: 12, slowRoutes: 0 });
+    expect(v.state).toBe('yellow');
+    expect(v.headline).toContain('12 accessibility problem(s)');
+  });
+
+  it('an otherwise-green build with slow pages is YELLOW', () => {
+    const v = releaseGate(ran, clean, { a11yIssues: 0, slowRoutes: 2 });
+    expect(v.state).toBe('yellow');
+    expect(v.headline).toContain('2 page(s) measured as slow');
+  });
+
+  it('NEITHER can ever make a build RED', () => {
+    // A slow page still renders and an unlabelled button still works. Calling either "not shippable"
+    // would be a false alarm about a working app — and the perf number is measured inside a 2-vCPU
+    // sandbox on a cold dev server, which is not anybody's real device.
+    const v = releaseGate(ran, clean, { a11yIssues: 99, slowRoutes: 99 });
+    expect(v.state).toBe('yellow');
+    expect(v.failures).toEqual([]);
+  });
+
+  it('the slow-page wording says WHERE it was measured, so nobody reads it as a user\'s experience', () => {
+    expect(releaseGate(ran, clean, { a11yIssues: 0, slowRoutes: 1 }).headline).toContain('preview sandbox');
+  });
+
+  it('clean quality still reaches green', () => {
+    expect(releaseGate(ran, clean, { a11yIssues: 0, slowRoutes: 0 }).state).toBe('green');
+  });
+
+  it('omitting quality entirely is the same as clean — no caller is broken by the new argument', () => {
+    expect(releaseGate(ran, clean).state).toBe('green');
+  });
+
+  it('quality caveats do not rescue a build that was never proven to run', () => {
+    // UNKNOWN outranks a quality note: the point is that we have no idea, not that the a11y was fine.
+    expect(releaseGate(nothing, clean, { a11yIssues: 0, slowRoutes: 0 }).state).toBe('unknown');
+  });
+});
+
 describe('runtimeProven is one answer, shared', () => {
   it('passed when any render check passed', () => {
     expect(runtimeProven(ev({ pages: 'passed' }))).toBe('passed');
@@ -216,6 +263,12 @@ describe('it is actually wired into a build', () => {
   it('the gate is computed from the build\'s real evidence and recorded', () => {
     expect(routes).toContain('releaseGate(');
     expect(routes).toContain('RELEASE_GATE');
+  });
+
+  it('the browser-measured accessibility and performance counts reach the gate', () => {
+    expect(routes).toContain('a11yIssueCount(pageResults)');
+    expect(routes).toContain('slowRouteCount(pageResults)');
+    expect(routes).toContain('gateQuality');
   });
 
   it('the evidence comes from the checks that really ran, not from defaults', () => {

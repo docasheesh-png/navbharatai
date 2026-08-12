@@ -58,6 +58,25 @@ export interface StaticFindings {
   warnings: number;
 }
 
+/**
+ * Quality measured in a real browser: accessibility problems found, and routes graded genuinely slow
+ * (§17, §26).
+ *
+ * These were already measured and already printed — and had no bearing on the verdict, so an app with
+ * twelve unlabelled buttons and a six-second LCP could still be called shippable-green. They now cost
+ * green.
+ *
+ * THEY CAN NEVER MAKE A BUILD RED, and that limit is deliberate rather than lenient. A slow page still
+ * renders and an unlabelled button still works, so calling either "not shippable" would be a false
+ * alarm about a working app. The perf number in particular is taken inside a 2-vCPU sandbox on a cold
+ * dev server, which is not the user's device on a production build — treating it as a blocking fact
+ * would frighten people about an app that is fine.
+ */
+export interface QualitySignals {
+  a11yIssues: number;
+  slowRoutes: number;
+}
+
 export type GateState = 'green' | 'yellow' | 'red' | 'unknown';
 
 export interface GateVerdict {
@@ -106,9 +125,14 @@ const RUNTIME_PROOF: Array<keyof Omit<RuntimeEvidence, 'buildOk'>> = ['preview',
  * implementation that checked "is it clean?" first would find a clean-looking nothing and call it green,
  * which is exactly the bug.
  */
-export function releaseGate(evidence: RuntimeEvidence, findings: StaticFindings): GateVerdict {
+export function releaseGate(
+  evidence: RuntimeEvidence,
+  findings: StaticFindings,
+  quality: QualitySignals = { a11yIssues: 0, slowRoutes: 0 },
+): GateVerdict {
   const ev = evidence ?? ({} as RuntimeEvidence);
   const f = findings ?? { blockers: 0, highSeverity: 0, warnings: 0 };
+  const q = quality ?? { a11yIssues: 0, slowRoutes: 0 };
   const proven: string[] = [];
   const unproven: string[] = [];
   const failures: string[] = [];
@@ -153,7 +177,12 @@ export function releaseGate(evidence: RuntimeEvidence, findings: StaticFindings)
   // sufficient: an app that paints beautifully and saves nothing renders exactly as well as one that
   // works, which is why "it rendered" alone lands at yellow.
   const journeyProven = ev.journeys === 'passed';
-  if (journeyProven && f.warnings === 0 && ev.preview === 'passed') {
+  // Measured-in-a-browser quality costs green, but never more than that (see QualitySignals).
+  const qualityCaveats: string[] = [];
+  if (q.a11yIssues > 0) qualityCaveats.push(`${q.a11yIssues} accessibility problem(s) real users would hit`);
+  if (q.slowRoutes > 0) qualityCaveats.push(`${q.slowRoutes} page(s) measured as slow in the preview sandbox`);
+
+  if (journeyProven && f.warnings === 0 && qualityCaveats.length === 0 && ev.preview === 'passed') {
     return {
       state: 'green',
       headline: 'Shippable — it runs, and a real user journey held up end to end.',
@@ -161,11 +190,15 @@ export function releaseGate(evidence: RuntimeEvidence, findings: StaticFindings)
     };
   }
 
+  const caveat = [
+    f.warnings > 0 ? `${f.warnings} thing(s) worth a look` : '',
+    ...qualityCaveats,
+  ].filter(Boolean).join(', ');
   return {
     state: 'yellow',
     headline: journeyProven
-      ? `It runs and a user journey held up, with ${f.warnings} thing(s) worth a look before shipping.`
-      : 'It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested.',
+      ? `It runs and a user journey held up${caveat ? `, with ${caveat} before shipping` : ''}.`
+      : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`,
     proven, unproven, failures,
   };
 }

@@ -346,6 +346,28 @@ export function a11ySummary(results: PageResult[]): string {
 }
 
 /**
+ * How many accessibility problems the browser actually found, across every page checked.
+ *
+ * Exported as a NUMBER, not re-derived from the summary sentence, because the release gate needs the
+ * same fact and parsing prose back into a count is how two parts of one report end up disagreeing.
+ */
+export function a11yIssueCount(results: readonly PageResult[]): number {
+  let n = 0;
+  for (const r of results ?? []) for (const i of r.a11y ?? []) n += i.count;
+  return n;
+}
+
+/**
+ * How many routes were measured and found genuinely poor.
+ *
+ * A page that never settled is NOT counted — it was not graded, and counting an ungraded page as slow
+ * would be inventing the measurement that `vitalsVerdict` explicitly refuses to make.
+ */
+export function slowRouteCount(results: readonly PageResult[]): number {
+  return (results ?? []).filter((r) => vitalsVerdict(r).poor.length > 0).length;
+}
+
+/**
  * The one line the report carries.
  *
  * Says how many were CHECKED as well as how many passed, because "3 pages render" means nothing without

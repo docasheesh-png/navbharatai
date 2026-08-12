@@ -408,3 +408,57 @@ REGRESSIONS:    None. tsc (frontend + server) clean; full suite green. The gate 
                 enforced — it cannot fail a build.
 NEXT PHASE:     6 — Accessibility + performance into the gate (§17, §26)
 ```
+
+---
+
+## PHASE 6 REPORT
+
+```
+PHASE:          6 — Accessibility + performance into the release gate (§17, §26)
+STATUS:         SHIPPED
+CURRENT SCORE:  Dimension 13 (Performance) 6 → 7 · Dimension 14 (Accessibility) 6 → 7.
+                Both move one point, not two: the gap Phase 0 named was "advisory only, not part of the
+                release gate", and that is now closed. Neither reaches 8 without field evidence.
+TARGET:         8 once real builds show how often either actually fires.
+WHAT CHANGED:   Smaller than Phase 0 implied, and worth saying so. Accessibility (six checks, in a real
+                browser) and Web Vitals (LCP/CLS/TTFB, with an honest refusal to grade an unsettled
+                page) were ALREADY measured by PageRouteCheck and already printed in the report. What
+                they never did was affect the verdict — so an app with twelve unlabelled buttons and a
+                six-second LCP could be called shippable-GREEN.
+
+                They now cost GREEN. PageRouteCheck exports a11yIssueCount() and slowRouteCount() as
+                NUMBERS — not re-derived from the summary sentence, because parsing prose back into a
+                count is how two halves of one report end up disagreeing — and the gate takes them.
+
+                THEY CAN NEVER MAKE A BUILD RED, and that ceiling is deliberate rather than lenient. A
+                slow page still renders and an unlabelled button still works, so calling either "not
+                shippable" would be a false alarm about a working app. The perf number in particular is
+                measured inside a 2-vCPU sandbox on a cold dev server — not the user's device on a
+                production build — and the headline says so, so nobody reads it as a user's experience.
+TESTS:          14,383 passing (1,188 files), up from 14,375. 8 new, including the one that matters
+                most: 99 a11y issues and 99 slow routes still cannot produce RED.
+BENCHMARK:      NOT RUN — no cost incurred.
+REGRESSIONS:    None. The new gate argument is optional and defaults to clean, so no existing caller
+                changes behaviour.
+NEXT PHASE:     None free. Phases 7–9 all need a decision or budget — see below.
+```
+
+---
+
+## WHERE THE FREE WORK ENDS
+
+Phases 1, 2, 4, 5 and 6 are shipped; Phase 3 is deferred on its own stated condition. That is every
+phase that could be done without either spending the admin's money or moving it.
+
+| Phase | Work | Blocked on |
+|---|---|---|
+| 3 | Multi-service runner (§6) | field data — `SERVICE_GRAPH_MULTI` needs real traffic |
+| 7 | Fast-lane cost attribution | **a decision** — moves real money in both directions; the shadow ledger (#2283) is measuring it now |
+| 8 | Golden benchmark suite (§36) | **₹1.5k–6k of real provider spend** |
+| 9 | Edit-survival benchmark (§9) | **₹75k–2.8L of real provider spend** |
+
+**The single highest-value action remains the one Phase 0 named: run real builds.** Five of the six
+dimensions still marked UNKNOWN or evidence-free become knowable from ordinary traffic, at no
+engineering cost, through machinery that is now all deployed — the scorecard (#2277), first-pass
+quality (#2287), the shadow ledger (#2283), the service graph (#2278), and as of today
+`ARCHITECTURE_INVARIANTS_HELD`, `JOURNEY_PASSED`/`JOURNEY_FAILED` and `RELEASE_GATE`.

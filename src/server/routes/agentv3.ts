@@ -104,12 +104,15 @@ import { randomUUID } from 'crypto';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
-import { extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS } from '../AgentV3/PageRouteCheck';
+import {
+  extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS,
+  a11yIssueCount, slowRouteCount,
+} from '../AgentV3/PageRouteCheck';
 import {
   deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason,
   JOURNEY_TIMEOUT_MS,
 } from '../AgentV3/journeyDerivation';
-import { releaseGate, releaseGateSummary, type RuntimeEvidence } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -9580,6 +9583,10 @@ export function registerAgentV3Routes(app: Express): void {
         buildOk: false, preview: 'not-run', pages: 'not-run', journeys: 'not-run',
         typecheck: 'not-run', tests: 'not-run',
       };
+      // Zero means "none found", and it stays zero when the browser never ran — which is correct here
+      // only because the gate cannot reach GREEN without runtime proof anyway, so an unmeasured app is
+      // already held back by the evidence rules rather than by a fabricated quality score.
+      const gateQuality: QualitySignals = { a11yIssues: 0, slowRoutes: 0 };
 
       // G3 — POST-AGENTIC TSC GATE (default-on; disable with AGENTV3_AGENTIC_TSC_GATE=off). The fast
       // lane (SimpleBuilder) type-checks + repairs, but the agentic loop / escalation / empty-build
@@ -10754,6 +10761,10 @@ export function registerAgentV3Routes(app: Express): void {
             // Only when the browser really returned results — an empty parse means the script never
             // produced a line, which is "we do not know", not "every page is fine".
             if (pageResults.length > 0) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
+            // §17/§26 — accessibility and performance were already measured here and already printed,
+            // and had no bearing on the verdict. They now cost GREEN (never RED — see QualitySignals).
+            gateQuality.a11yIssues = a11yIssueCount(pageResults);
+            gateQuality.slowRoutes = slowRouteCount(pageResults);
             buildDiag.record({
               phase: 'preview',
               severity: pageSummary.ok ? 'info' : 'warning',
@@ -11008,7 +11019,7 @@ export function registerAgentV3Routes(app: Express): void {
           // would report one problem twice in the same sentence.
           highSeverity: 0,
           warnings: buildDiag.shippingIssueCount('warning'),
-        });
+        }, gateQuality);
         buildDiag.record({
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,

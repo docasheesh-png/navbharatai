@@ -92,6 +92,31 @@ function jsRunnerOf(scriptOrDep: string): TestFramework | undefined {
  * Priority: the project's OWN `npm test` script wins (it encodes the author's intent); otherwise we
  * infer the runner from config files / dependencies / test-file conventions, per language.
  */
+/**
+ * A test suite is present but its runner is not installed — the honest reason nothing ran.
+ *
+ * Without this the improved rule above would trade a false accusation for silence, and silence is how
+ * "we did not check" becomes indistinguishable from "there was nothing to check". Returns null when
+ * there is genuinely no suite. Pure.
+ */
+export function suitePresentButRunnerMissing(files: string[], packageJsonRaw?: string): string | null {
+  const { testScript, deps } = parsePackageJson(packageJsonRaw);
+  if (testScript) return null; // the project's own script wins; it was planned above
+  const has = (re: RegExp) => (files || []).some((f) => re.test(f));
+  const cases: Array<{ present: boolean; pkg: string; label: string }> = [
+    { present: has(/(^|\/)playwright\.config\.[cm]?[jt]s$/), pkg: '@playwright/test', label: 'Playwright' },
+    { present: has(/(^|\/)vitest\.config\.[cm]?[jt]s$/), pkg: 'vitest', label: 'Vitest' },
+    { present: has(/(^|\/)jest\.config\.[cm]?[jt]s$|(^|\/)jest\.config\.json$/), pkg: 'jest', label: 'Jest' },
+  ];
+  for (const c of cases) {
+    if (c.present && !(c.pkg in deps)) {
+      return `This project has a ${c.label} test suite but \`${c.pkg}\` is not installed here, so it was NOT run — `
+        + `nothing about those tests passed or failed. Install it with \`npm i -D ${c.pkg}\` and run them yourself.`;
+    }
+  }
+  return null;
+}
+
 export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPlan | null {
   const has = (re: RegExp) => files.some(f => re.test(f));
   const { testScript, deps } = parsePackageJson(packageJsonRaw);
@@ -110,15 +135,26 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
     };
   }
 
-  // 2. JS/TS runners by config file or declared dependency — invoked through the project's PM runner.
-  if (has(/(^|\/)vitest\.config\.[cm]?[jt]s$/) || 'vitest' in deps) {
-    return { framework: 'vitest', command: `${exec} vitest run`, reason: `Vitest config/dependency detected (${pm}).` };
+  // 2. JS/TS runners — THE PACKAGE MUST ACTUALLY BE DECLARED, not merely configured.
+  //
+  // ROOT CAUSE (BENCHMARK 0 report, 2026-08-12). A config file alone used to be enough. And WE write one:
+  // the E2E scaffold drops `playwright.config.ts` into every app and says so out loud — "It has not been
+  // run here — run it yourself with `npm run test:e2e` after `npm i -D @playwright/test`". Then this
+  // function found that config, ran `playwright test` against a runner nobody had installed, got exit 1
+  // with no output, and the app was reported as having a failing test suite. The release gate escalated
+  // that to "Not shippable" — for a game the admin was playing at the time.
+  //
+  // So: we wrote the tests, said their runner was not installed, ran them anyway, and blamed the user's
+  // app for the result. A config file proves INTENT; the dependency proves it can actually run. The rule
+  // is applied to all three runners, not just Playwright — vitest and jest had the identical hole.
+  if ('vitest' in deps) {
+    return { framework: 'vitest', command: `${exec} vitest run`, reason: `Vitest is a declared dependency (${pm}).` };
   }
-  if (has(/(^|\/)jest\.config\.[cm]?[jt]s$/) || has(/(^|\/)jest\.config\.json$/) || 'jest' in deps) {
-    return { framework: 'jest', command: `${exec} jest --ci`, reason: `Jest config/dependency detected (${pm}).` };
+  if ('jest' in deps) {
+    return { framework: 'jest', command: `${exec} jest --ci`, reason: `Jest is a declared dependency (${pm}).` };
   }
-  if (has(/(^|\/)playwright\.config\.[cm]?[jt]s$/) || '@playwright/test' in deps) {
-    return { framework: 'playwright', command: `${exec} playwright test`, reason: `Playwright config/dependency detected (${pm}).` };
+  if ('@playwright/test' in deps) {
+    return { framework: 'playwright', command: `${exec} playwright test`, reason: `Playwright is a declared dependency (${pm}).` };
   }
 
   // 3. Python — pytest by convention.

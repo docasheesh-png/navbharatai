@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan } from './testRunner';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan, suitePresentButRunnerMissing } from './testRunner';
 
 // B4: detection + parsing of the project's OWN test suite. Both functions are pure, so we exercise
 // every framework branch with real-shaped tool output — no sandbox needed.
@@ -24,9 +24,13 @@ describe('detectTestPlan', () => {
   });
 
   it('invokes an inferred runner through the project\'s PM exec (pnpm exec / bunx)', () => {
-    expect(detectTestPlan(['vitest.config.ts', 'pnpm-lock.yaml'])!.command).toBe('pnpm exec vitest run');
-    expect(detectTestPlan(['jest.config.js', 'bun.lockb'])!.command).toBe('bunx jest --ci');
-    expect(detectTestPlan(['playwright.config.ts', 'yarn.lock'])!.command).toBe('yarn playwright test');
+    // Unchanged intent: when a runner IS inferred, it must go through the project's own package
+    // manager. The fixtures now declare the dependency because a config file alone no longer infers
+    // a runner — see "a config file is not proof the runner is installed" below.
+    const withDep = (dep: string) => JSON.stringify({ devDependencies: { [dep]: '^1' } });
+    expect(detectTestPlan(['vitest.config.ts', 'pnpm-lock.yaml'], withDep('vitest'))!.command).toBe('pnpm exec vitest run');
+    expect(detectTestPlan(['jest.config.js', 'bun.lockb'], withDep('jest'))!.command).toBe('bunx jest --ci');
+    expect(detectTestPlan(['playwright.config.ts', 'yarn.lock'], withDep('@playwright/test'))!.command).toBe('yarn playwright test');
   });
 
   it('ignores the npm-init placeholder test script and falls through to config detection', () => {
@@ -39,15 +43,46 @@ describe('detectTestPlan', () => {
     expect(plan!.command).toBe('npx jest --ci');
   });
 
-  it('detects vitest by config file with no package.json', () => {
-    const plan = detectTestPlan(['vitest.config.ts', 'src/x.ts']);
-    expect(plan!.framework).toBe('vitest');
-    expect(plan!.command).toBe('npx vitest run');
+  /**
+   * A CONFIG FILE IS NOT PROOF THE RUNNER IS INSTALLED (BENCHMARK 0 report, 2026-08-12).
+   *
+   * These two used to assert the opposite, and that behaviour produced a real, user-visible false
+   * accusation. The E2E scaffold writes `playwright.config.ts` into every app and says so out loud —
+   * "It has not been run here — run it yourself after `npm i -D @playwright/test`". Detection then
+   * found that config, ran `playwright test` against a runner nobody had installed, got exit 1 with no
+   * output, and the app was reported as having a failing test suite. The release gate escalated that to
+   * "Not shippable" — for a game the admin was playing at the time.
+   *
+   * We wrote the tests, said their runner was not installed, ran them anyway, and blamed the user's app.
+   * A config proves INTENT; the dependency proves it can actually run.
+   */
+  it('does NOT run a suite whose runner is not a declared dependency', () => {
+    expect(detectTestPlan(['vitest.config.ts', 'src/x.ts'])).toBeNull();
+    expect(detectTestPlan(['playwright.config.ts', 'tests/e2e.spec.ts'])).toBeNull();
+    // The exact shape our own scaffold leaves behind.
+    expect(detectTestPlan(['playwright.config.ts', 'e2e/smoke.spec.ts', 'package.json'],
+      JSON.stringify({ devDependencies: { vite: '^5' } }))).toBeNull();
   });
 
-  it('detects playwright by config', () => {
-    const plan = detectTestPlan(['playwright.config.ts', 'tests/e2e.spec.ts']);
-    expect(plan!.framework).toBe('playwright');
+  it('DOES run it once the dependency is really there', () => {
+    const plan = detectTestPlan(['vitest.config.ts', 'package.json'],
+      JSON.stringify({ devDependencies: { vitest: '^2' } }));
+    expect(plan!.framework).toBe('vitest');
+    expect(plan!.command).toBe('npx vitest run');
+    expect(detectTestPlan(['playwright.config.ts'],
+      JSON.stringify({ devDependencies: { '@playwright/test': '^1' } }))!.framework).toBe('playwright');
+  });
+
+  it('says WHY nothing ran, instead of going quiet', () => {
+    // Trading a false accusation for silence would be a different bug: "we did not check" must not
+    // become indistinguishable from "there was nothing to check".
+    const why = suitePresentButRunnerMissing(['playwright.config.ts', 'e2e/smoke.spec.ts'], '{}');
+    expect(why).toContain('@playwright/test');
+    expect(why).toContain('was NOT run');
+    expect(suitePresentButRunnerMissing(['src/x.ts'], '{}')).toBeNull();
+    // A project with its own test script is planned normally — nothing to explain.
+    expect(suitePresentButRunnerMissing(['playwright.config.ts'],
+      JSON.stringify({ scripts: { test: 'playwright test' } }))).toBeNull();
   });
 
   it('detects pytest by test file convention', () => {

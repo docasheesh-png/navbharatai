@@ -212,7 +212,7 @@ import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
-import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
@@ -7071,7 +7071,7 @@ export function registerAgentV3Routes(app: Express): void {
       const recordProviderFallback = (name: string, err: unknown): void => {
         // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
         // kitni baar") + the existing per-event timeline entry (carries the message).
-        try { buildDiag.recordProviderFailure(name); } catch { /* diagnostics are best-effort */ }
+        try { buildDiag.recordProviderFailure(name, err); } catch { /* diagnostics are best-effort */ }
         buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,
@@ -9439,7 +9439,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Bringing in NavBharatAI\'s stronger engine to fix what the review found…' : 'Bringing in NavBharatAI\'s stronger engine to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name) => { try { buildDiag.recordProviderFailure(name); } catch { /* best-effort */ } } }),
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -11041,7 +11041,19 @@ export function registerAgentV3Routes(app: Express): void {
             let pkgRaw: string | undefined;
             try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
             const plan = detectTestPlan(files, pkgRaw);
-            if (!plan) break; // no real suite — honest no-op, never a fake pass
+            if (!plan) {
+              // "Nothing ran" and "there was nothing to run" are different facts, and only the second is
+              // good news. A suite whose runner is not installed — which includes the one WE scaffold —
+              // now says so instead of going quiet.
+              const missing = suitePresentButRunnerMissing(files, pkgRaw);
+              if (missing) {
+                buildDiag.record({
+                  phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
+                  message: missing, autoResolved: true, // not an app defect — nothing for the build to resolve
+                });
+              }
+              break; // no real suite — honest no-op, never a fake pass
+            }
             let outcome;
             try {
               const { exitCode, stdout, stderr } = await withTimeout(actuator.runCommand(workspaceId, plan.command), 180_000, 'vaccine-run-tests');
@@ -11116,7 +11128,10 @@ export function registerAgentV3Routes(app: Express): void {
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,
           // and filing it as info is how it stops being read.
-          severity: gate.state === 'red' ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          // A RED gate on a build that SUCCEEDED is a warning about shipping, not an error in the run —
+          // recording it as an error made it outrank every real finding and become the report's root
+          // cause. Only a gate that agrees with a failed build is an error.
+          severity: gate.state === 'red' && !result.ok ? 'error' : gate.state === 'green' ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           autoResolved: gate.state === 'green',

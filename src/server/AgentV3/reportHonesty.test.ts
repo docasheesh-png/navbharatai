@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseTestOutcome, reportedNoTestResults } from './testRunner';
-import { BuildDiagnostics, isRecoverableOnSuccess } from './BuildDiagnostics';
+import { BuildDiagnostics, isRecoverableOnSuccess, classifyProviderFailure } from './BuildDiagnostics';
+import { isSpaMountShell, analyzeHtmlPage, analyzeDesignCoverage } from './DesignCoverage';
+import { journeyCandidates, noJourneyReason } from './journeyDerivation';
 
 /**
  * FOUR THINGS THE 2026-08-12 REPORT SAID THAT WERE NOT TRUE.
@@ -131,5 +133,123 @@ describe('the E2E decision judges the project, not this turn\'s writes', () => {
     // about their own app.
     expect(routes).toContain('const projectFiles = await loadWorkspaceFiles(workspaceId)');
     expect(routes).toContain('{ ...projectFiles, ...Object.fromEntries(writtenFiles) }');
+  });
+});
+
+/**
+ * TWO FALSE REASONS THE FIRST REAL BUILD PRODUCED (2026-08-12).
+ *
+ * Neither broke anything. Both told the admin something untrue about his own app, which is how a report
+ * stops being read.
+ */
+describe('an SPA mount shell is not a page', () => {
+  const SHELL = `<!doctype html><html><head><title>Game</title></head><body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <meta a><meta b><meta c><meta d><meta e>
+  </body></html>`;
+
+  it('index.html is not judged for having no heading — React renders the heading', () => {
+    // This fired on the very first build: "index.html does not match the app's own design standard
+    // (NO_HEADING; 0% of its elements carry a class)". It would fire on essentially every app this
+    // platform builds, about the one file that is SUPPOSED to look like that.
+    expect(isSpaMountShell(SHELL)).toBe(true);
+    expect(analyzeHtmlPage('index.html', SHELL)).toBeNull();
+  });
+
+  it('nor is it COUNTED — otherwise "1 of 1 pages fall short" is still wrong', () => {
+    const r = analyzeDesignCoverage({ 'index.html': SHELL });
+    expect(r.findings).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('a REAL static page with no stylesheet is still caught — this is what the check is for', () => {
+    const bare = '<html><body><h1>About</h1><p>a</p><p>b</p><p>c</p><p>d</p><p>e</p></body></html>';
+    expect(isSpaMountShell(bare)).toBe(false);
+    expect(analyzeHtmlPage('about.html', bare)?.defects).toContain('NO_STYLESHEET');
+  });
+
+  it('BOTH signals are required — a mount root alone is not an SPA shell', () => {
+    // A genuine static page may contain a div#app, and a page may load a module. Neither alone means
+    // the visible content arrives from JavaScript.
+    expect(isSpaMountShell('<div id="app"></div>')).toBe(false);
+    expect(isSpaMountShell('<script type="module" src="/x.js"></script>')).toBe(false);
+  });
+});
+
+describe('the journey reason describes the search that actually happened', () => {
+  it('a single-file app is NOT "no page components were found"', () => {
+    // The first build said exactly that about a React game whose whole UI lives in src/App.tsx — a
+    // file deriveJourneys looks at and noJourneyReason did not. One candidate list now serves both.
+    const game = { 'src/App.tsx': '<canvas /><div>Score</div>' };
+    expect(journeyCandidates(game)).toEqual(['src/App.tsx']);
+    expect(noJourneyReason(game)).toContain('no form');
+  });
+
+  it('a project with genuinely no pages still says so', () => {
+    expect(noJourneyReason({ 'src/util.ts': 'export const x = 1;' })).toContain('no page components');
+  });
+
+  it('the candidate list is deterministic and shared', () => {
+    const files = { 'src/pages/B.tsx': 'x', 'src/pages/A.tsx': 'x', 'src/App.tsx': 'x' };
+    expect(journeyCandidates(files)).toEqual(['src/pages/A.tsx', 'src/pages/B.tsx', 'src/App.tsx']);
+  });
+});
+
+/**
+ * "GLM: 21" WITH NO REASON IS A NUMBER YOU CAN ONLY WORRY ABOUT (BENCHMARK 0, 2026-08-12).
+ *
+ * That report carried `providerFailures: {GLM: 21, KIMI: 3}` and FOUR timeline entries, because
+ * record() collapses consecutive identical messages and every one reads "Provider GLM failed — falling
+ * back to the next provider". Twenty of the twenty-four error messages were thrown away, so the largest
+ * struggle signal in the whole build could not be diagnosed at all.
+ */
+describe('a provider failure keeps its reason, not just its count', () => {
+  it('buckets the reasons so 21 failures become one readable line', () => {
+    const d = new BuildDiagnostics({});
+    for (let i = 0; i < 18; i += 1) d.recordProviderFailure('GLM', new Error('429 Too Many Requests'));
+    for (let i = 0; i < 2; i += 1) d.recordProviderFailure('GLM', new Error('socket timeout'));
+    d.recordProviderFailure('GLM', new Error('400 invalid request'));
+    expect(d.providerFailureBreakdown().GLM).toBe('18 rate-limit, 2 timeout, 1 bad-request');
+  });
+
+  it('the count still works, and the breakdown reaches the report', () => {
+    const d = new BuildDiagnostics({});
+    d.recordProviderFailure('KIMI', new Error('429'));
+    const r = d.report();
+    expect(r.providerFailures).toEqual({ KIMI: 1 });
+    expect(r.providerFailureReasons).toEqual({ KIMI: '1 rate-limit' });
+  });
+
+  it('an UNRECOGNISED failure keeps its own text — a new failure mode must not vanish into "other"', () => {
+    expect(classifyProviderFailure(new Error('model glm-9 has been retired')))
+      .toContain('model glm-9 has been retired');
+  });
+
+  it('classifies the shapes that actually occur', () => {
+    const cases: Array<[string, string]> = [
+      ['429 Too Many Requests', 'rate-limit'],
+      ['Request timed out after 60000ms', 'timeout'],
+      ['401 Unauthorized: invalid api key', 'auth'],
+      ['400 Bad Request', 'bad-request'],
+      ['503 Service Unavailable', 'server-error'],
+      ['ECONNRESET', 'network'],
+      ['context length exceeded', 'context-length'],
+    ];
+    for (const [text, bucket] of cases) expect(classifyProviderFailure(new Error(text)), text).toBe(bucket);
+  });
+
+  it('a failure with no reason still counts — the tally never regresses', () => {
+    const d = new BuildDiagnostics({});
+    d.recordProviderFailure('GLM');
+    expect(d.report().providerFailures).toEqual({ GLM: 1 });
+    expect(d.report().providerFailureReasons).toBeUndefined();
+  });
+
+  it('the build passes the real error through, not just the name', () => {
+    const routes = require('fs').readFileSync(
+      require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
+    ) as string;
+    expect(routes).toContain('buildDiag.recordProviderFailure(name, err)');
   });
 });

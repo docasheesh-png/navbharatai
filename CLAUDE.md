@@ -559,11 +559,6 @@ the code (it is actually read somewhere) on 2026-07-11.
   real timeout. Set a POSITIVE value (e.g. `45000`) ONLY if you want to re-impose the old "skip huge prompts
   straight to Claude" behaviour. The prompt-diet block-trim (`perBlockCap` 6000) always applies either way.
 
-**REMOVE from Cloud Run (retired — Bedrock never worked + test-chat deleted; code degrades cleanly
-when absent):** `BEDROCK_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_GLM_MODEL`, `AWS_REGION`,
-`AWS_DEFAULT_REGION`, `TEST_CHAT_ENABLED`. (These are read ONLY by the Bedrock cheap-floor rung and the
-Bedrock test-chat page — neither is in use.)
-
 **Available AgentV3 flags (state below is the live Cloud Run config; leave unset = today's behavior):**
 - **`AGENTV3_COST_ROUTING`** (= `on`) — the ONE master switch for the whole cheap-routing regime
   (free-tier cheap-only builds + per-tier billing). ✅ **SET to `on` by the admin 2026-07-12, CANARY-scoped via
@@ -606,6 +601,37 @@ Bedrock test-chat page — neither is in use.)
   ships. Precision-first: skips Tailwind/CSS-module/styled-components/UI-library pages, leaf components,
   and anything under 6 elements, so it cannot nag a good app. The upstream half (a five-point per-page
   contract in the architect prompt, so the FIRST build is right) is always on and needs no flag.
+- **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
+  engine reads that app's OWN rules out of its code (styling system, import style, where network calls
+  go, where pages live) and hands them to the builder before it writes a line; after the build it checks
+  the changed files against the rules derived from the project as it was BEFORE the build. Costs no file
+  reads (it uses the already-warm graph) and no model call. Purely advisory — it can never fail a build.
+  Report codes: `ARCHITECTURE_INVARIANTS_HELD` (clean) / `ARCHITECTURE_INVARIANT_VIOLATED`.
+- **`AGENTV3_JOURNEY_CHECK`** (default ON, set `off` to disable) — after a successful build with a live
+  preview, derives a real user journey from the app's OWN markup and runs it in the sandbox's pre-baked
+  browser: fill the form, submit, **reload, and check the item is still there**. That last step is the
+  only thing that separates an app which really saves data from one that only looks like it does. Every
+  selector is read out of the source, never guessed; a form it cannot address honestly yields NO journey.
+  A journey against a USER-OWNED database is downgraded to a non-writing submit — we do not put test rows
+  in somebody's real Supabase. Evidence, never a gate. Codes: `JOURNEY_PASSED` / `JOURNEY_FAILED` /
+  `JOURNEY_NOT_DERIVED`.
+
+**New report codes you will now see (2026-08-12) — what they mean:**
+- `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and
+  nothing was PROVEN, because every runtime check needs a live preview and they all skip together. GREEN
+  cannot be earned by clean code alone; RED needs evidence the APP does not work (a failing test suite or
+  typecheck is a loud caveat, not a "not shippable"). It is a SUMMARY of other findings, so it can never
+  be a build's root cause.
+- `CLAIM_UNSUPPORTED` — the build's own summary claimed something the platform's measurements contradict
+  (e.g. "no console errors" when the console could not be captured, or a screen description whose labels
+  appear nowhere in the app). The user-facing reply carries an honest correction.
+- `PREVIEW_SERVER_RESTARTED` — the dev server had stopped and was restarted deterministically. **No code
+  was changed and no model call was made** — this used to be a multi-minute LLM repair pass that always
+  concluded "no code changes were needed".
+- `PREVIEW_UNVERIFIED` — the preview snapshot could not be trusted (taken before the app painted, or
+  fetched without running its JavaScript). NOT evidence the app is broken, and no repair is spent on it.
+- `TIME_TO_FIRST_CALL` — how long setup took before the build's first model call. A warning past 60s,
+  because the user waits through every second of it and nothing used to record it.
 - **`AGENTV3_LINT_GATE`** — NOW SET to `on` (admin, 2026-07-11) → moved up into the configured "AgentV3
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.

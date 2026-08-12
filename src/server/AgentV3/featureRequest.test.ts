@@ -33,3 +33,56 @@ describe('isAffirmativelyRequested', () => {
     expect(isAffirmativelyRequested(null, /\bx\b/i)).toBe(false);
   });
 });
+
+/**
+ * "WE'LL ADD LOGIN IN STAGE 3" IS NOT A REQUEST FOR THIS BUILD (BENCHMARK 0 report, 2026-08-12).
+ *
+ * The admin's prompt opened by describing the plan: build a deliberately tiny 3D game first, then take
+ * the SAME game from 0 to 100 through successive edits. Those later stages mentioned login and
+ * payments. The engine read the whole message as one list of requirements and reported "Requested
+ * feature not found: login / authentication" against a coin-collector game that was never supposed to
+ * have one.
+ *
+ * Same bug this file already existed to fix, in a different tense: a keyword test cannot tell "add
+ * login" from "we'll add login later" any more than it could tell it from "no login".
+ */
+describe('a feature promised for LATER is not requested now', () => {
+  const login = /\blogin\b/i;
+
+  it('the shape from the real report', () => {
+    expect(isAffirmativelyRequested('Build a very simple 3D game. In the next stage we add login.', login)).toBe(false);
+    expect(isAffirmativelyRequested('Payments come in a later phase.', /\bpayments?\b/i)).toBe(false);
+  });
+
+  it('reads the cue on EITHER side — a roadmap writes it both ways', () => {
+    expect(isAffirmativelyRequested('later we will add login', login)).toBe(false);
+    expect(isAffirmativelyRequested('add login later', login)).toBe(false);
+  });
+
+  it('understands the Hinglish a roadmap is actually written in', () => {
+    expect(isAffirmativelyRequested('login baad me add karenge', login)).toBe(false);
+    expect(isAffirmativelyRequested('aage login bhi jodenge', login)).toBe(false);
+  });
+
+  it('numbered stages count as later work', () => {
+    expect(isAffirmativelyRequested('Phase 2: login and profiles', login)).toBe(false);
+    expect(isAffirmativelyRequested('BENCHMARK 3 — add login', login)).toBe(false);
+  });
+
+  it('A GENUINE REQUEST IS STILL A REQUEST — this must not swallow real features', () => {
+    expect(isAffirmativelyRequested('Add a login page with email and password', login)).toBe(true);
+    expect(isAffirmativelyRequested('The app needs login', login)).toBe(true);
+  });
+
+  it('a distant mention of "later" does not defer an unrelated request', () => {
+    // The window is deliberately small; a paragraph about future work must not silence a real ask.
+    const prompt = 'Add a login page with email and password. '
+      + 'The design should be clean and modern with good spacing throughout the whole application. '
+      + 'We can improve the colours later.';
+    expect(isAffirmativelyRequested(prompt, login)).toBe(true);
+  });
+
+  it('negation still works — the original fix is untouched', () => {
+    expect(isAffirmativelyRequested('No settings, no other features — just the live clock', /\bsettings\b/i)).toBe(false);
+  });
+});

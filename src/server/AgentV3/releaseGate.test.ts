@@ -4,6 +4,7 @@ import {
   type RuntimeEvidence, type StaticFindings,
 } from './releaseGate';
 import { computeBuildConfidence, type BuildConfidenceInput } from './BuildConfidence';
+import { isNeverRootCause } from './BuildDiagnostics';
 
 /**
  * THE STATE EVERY GATE LEAVES OUT.
@@ -275,5 +276,73 @@ describe('it is actually wired into a build', () => {
     // A hardcoded 'passed' anywhere here would make the whole gate a decoration.
     expect(routes).toContain('gateEvidence');
     expect(routes).not.toContain("preview: 'passed', pages: 'passed', journeys: 'passed'");
+  });
+});
+
+/**
+ * THE FIRST REAL BUILD AFTER THIS GATE SHIPPED CAUGHT THREE DEFECTS IN IT (2026-08-12).
+ *
+ * The admin built a 3D game, watched it run, collected all ten coins and saw the win screen. The report
+ * he got back led with:
+ *
+ *     Release gate: RED — Not shippable — the app's own test suite passes — this FAILED.
+ *
+ * Gibberish, wrong, and printed as the ROOT CAUSE of a successful build. All three are below.
+ */
+describe('the gate, as corrected by the first build that used it', () => {
+  const ran = ev({ preview: 'passed', pages: 'passed', journeys: 'passed', typecheck: 'passed' });
+
+  it('a failure reads as a failure — not the pass sentence with "this FAILED" bolted on', () => {
+    const v = releaseGate(ev({ preview: 'failed' }), clean);
+    expect(v.failures.join(' ')).toContain('did not come up');
+    expect(v.failures.join(' ')).not.toContain('this FAILED');
+    expect(v.failures.join(' ')).not.toContain('passes —');
+  });
+
+  it('A FAILING TEST SUITE DOES NOT MAKE A RUNNING APP "NOT SHIPPABLE"', () => {
+    // The mirror of the green rule. Green cannot be earned by static cleanliness; RED cannot be earned
+    // by static failure. The admin was playing the game while the report called it unshippable — and
+    // that same report said the test result could not be told apart from a runner that never started.
+    const v = releaseGate(ev({ preview: 'passed', journeys: 'passed', tests: 'failed' }), clean);
+    expect(v.state).toBe('yellow');
+    expect(v.headline).not.toContain('Not shippable');
+  });
+
+  it('but it is named LOUDLY, first among the caveats — not softened away', () => {
+    const v = releaseGate(ev({ preview: 'passed', journeys: 'passed', tests: 'failed' }), { ...clean, warnings: 3 });
+    expect(v.headline).toContain('test suite did not pass');
+    // Ahead of the generic count of "things worth a look".
+    expect(v.headline.indexOf('test suite')).toBeLessThan(v.headline.indexOf('thing(s)'));
+  });
+
+  it('a failing typecheck is the same shape — serious, but the app still runs', () => {
+    const v = releaseGate(ev({ preview: 'passed', journeys: 'passed', typecheck: 'failed' }), clean);
+    expect(v.state).toBe('yellow');
+    expect(v.headline).toContain('does not typecheck');
+  });
+
+  it('and it can never be GREEN — a failing suite is not a clean build', () => {
+    expect(releaseGate({ ...ran, tests: 'failed' }, clean).state).toBe('yellow');
+    expect(releaseGate(ran, clean).state).toBe('green');
+  });
+
+  it('a failure that PROVES the app does not work is still RED', () => {
+    // The distinction the whole fix rests on: these are about the app, not about our tooling.
+    expect(releaseGate(ev({ preview: 'failed' }), clean).state).toBe('red');
+    expect(releaseGate(ev({ preview: 'passed', pages: 'failed' }), clean).state).toBe('red');
+    expect(releaseGate(ev({ preview: 'passed', journeys: 'failed' }), clean).state).toBe('red');
+  });
+
+  it('THE GATE CANNOT BE A ROOT CAUSE — it is a summary of other findings', () => {
+    // It became the rootCause of a successful build, which is the same defect that was fixed for
+    // PREVIEW_NOT_RENDERED and then reintroduced by a new code.
+    expect(isNeverRootCause('RELEASE_GATE')).toBe(true);
+  });
+
+  it('a RED gate on a build that SUCCEEDED is recorded as a warning, not an error', () => {
+    const routes = require('fs').readFileSync(
+      require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
+    ) as string;
+    expect(routes).toContain("gate.state === 'red' && !result.ok ? 'error'");
   });
 });

@@ -220,6 +220,9 @@ export interface BuildDiagnosticsReport {
   /** How many times each provider FAILED a turn (threw → fell through to the next), e.g.
    *  { GLM: 3, VERTEX: 1 } — "kaun se providers fail hue, kitni baar". Absent if none failed. */
   providerFailures?: Record<string, number>;
+  /** provider → "18 rate-limit, 2 timeout" — WHY it failed, not just how often. A count with no reason
+   *  cannot be acted on; it can only be worried about. See recordProviderFailure. */
+  providerFailureReasons?: Record<string, string>;
   /** Per-provider REAL token spend for this build (reconciled to the billed total; 'other' = aux
    *  calls). The report-level view of the Billing-Phase-3 ledger. */
   providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
@@ -342,6 +345,8 @@ export function capProblems(problems: readonly BuildIssue[]): BuildIssue[] {
 
 export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
+  /** provider → failure bucket → count. See recordProviderFailure. */
+  private readonly providerFailureReasons = new Map<string, Map<string, number>>();
   private readonly meta: BuildDiagnosticsMeta;
   private readonly now: () => number;
   private readonly startedAt: number;
@@ -1000,10 +1005,41 @@ export class BuildDiagnostics {
    * per-provider failure COUNT the admin asked for ("kaun se providers fail hue, kitni baar").
    * Complements the PROVIDER_FALLBACK timeline entries (those carry the messages; this is the tally).
    */
-  recordProviderFailure(name: string): void {
+  /**
+   * Tally a provider failure — AND keep the distinct REASONS, which is the part that was missing.
+   *
+   * ROOT CAUSE (BENCHMARK 0 report, 2026-08-12): the report said `providerFailures: {GLM: 21, KIMI: 3}`
+   * and carried FOUR timeline entries, because `record()` collapses consecutive identical messages and
+   * every one of them reads "Provider GLM failed — falling back to the next provider". Twenty of the
+   * twenty-four error messages were discarded, so the single largest struggle signal in the whole build
+   * — twenty-one failures of the default provider — could not be diagnosed at all. A count with no
+   * reason cannot be acted on; it can only be worried about.
+   *
+   * Reasons are bucketed (rate-limit / timeout / auth / …) so 21 failures collapse into "18 rate-limit,
+   * 2 timeout, 1 bad-request" instead of 21 near-identical strings, and the set is hard-capped.
+   */
+  recordProviderFailure(name: string, reason?: unknown): void {
     if (!name) return;
     this.providerFailures.set(name, (this.providerFailures.get(name) ?? 0) + 1);
+    if (reason !== undefined) {
+      const bucket = classifyProviderFailure(reason);
+      const byBucket = this.providerFailureReasons.get(name) ?? new Map<string, number>();
+      byBucket.set(bucket, (byBucket.get(bucket) ?? 0) + 1);
+      this.providerFailureReasons.set(name, byBucket);
+    }
     this.notify();
+  }
+
+  /** "GLM: 18 rate-limit, 2 timeout, 1 bad-request" — one line per provider that failed. Pure read. */
+  providerFailureBreakdown(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [name, byBucket] of this.providerFailureReasons) {
+      out[name] = [...byBucket.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([bucket, n]) => `${n} ${bucket}`)
+        .join(', ');
+    }
+    return out;
   }
 
   /** Billing & tier facts, written once at settle time from the REAL charge (admin 2026-07-11). */
@@ -1175,6 +1211,7 @@ export class BuildDiagnostics {
       // "App kisne banaya" — the provider with the MOST delivered turns (ties keep first-seen).
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
+      providerFailureReasons: this.providerFailureReasons.size ? this.providerFailureBreakdown() : undefined,
       providerTokens: this.providerTokens,
       shadowFastLaneTokens: this.shadowFastLaneTokens,
       sandboxCost: this.sandboxCostRecord,
@@ -1353,7 +1390,34 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
   'POST_ANSWER_TIMING',          // pure measurement
   'ARCHITECTURE_INVARIANT_VIOLATED', // consistency with the project's own conventions — not a failure
+  // THE GATE IS A SUMMARY OF OTHER FINDINGS, SO IT CANNOT BE A CAUSE OF ANYTHING (first real build after
+  // it shipped, 2026-08-12). It became the rootCause of a SUCCESSFUL build, and the headline the admin
+  // read about a game he was playing at the time was "Not shippable". This is the same defect that was
+  // fixed for PREVIEW_NOT_RENDERED and then reintroduced by a new code — which is why the fix belongs
+  // in this set rather than at the gate's call site.
+  'RELEASE_GATE',
 ]);
+
+/**
+ * Bucket a provider error into something countable.
+ *
+ * Deliberately coarse: the goal is "why did this provider fail twenty-one times", and twenty-one
+ * slightly-different rate-limit strings answer that no better than one does. Anything unrecognised
+ * keeps its own first line so a new failure mode is visible rather than swallowed by 'other'. PURE.
+ */
+export function classifyProviderFailure(reason: unknown): string {
+  const text = (reason instanceof Error ? reason.message : String(reason ?? '')).trim();
+  if (!text) return 'unknown';
+  const t = text.toLowerCase();
+  if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
+  if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
+  if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';
+  if (/\b400\b|bad request|invalid request|schema/.test(t)) return 'bad-request';
+  if (/\b5\d\d\b|internal server|service unavailable|overloaded|bad gateway/.test(t)) return 'server-error';
+  if (/econnreset|enotfound|econnrefused|socket hang up|network/.test(t)) return 'network';
+  if (/context length|too long|max tokens|token limit/.test(t)) return 'context-length';
+  return `other: ${text.split('\n')[0].slice(0, 60)}`;
+}
 
 /** True when a finding is advisory-only and must never become the build's rootCause. Pure. */
 export function isNeverRootCause(code: string): boolean {

@@ -590,6 +590,40 @@ export async function listAllDiagnostics(limit = 100): Promise<AllDiagnosticsEnt
   }
 }
 
+/**
+ * The two fields the server-necessity measurement needs, and nothing else: what the user ASKED for,
+ * and what the build actually WROTE.
+ *
+ * ADMIN 2026-08-12. Before changing how the builder chooses an architecture, we need to know whether
+ * the change is worth making: how many past apps were given a Node server they never needed? That is
+ * one number, and it decides whether a large plan proceeds — so it is measured from real builds rather
+ * than estimated. See serverNecessity.ts.
+ *
+ * Reads the SAME documents `listAllDiagnostics` already reads; the manifest's file hashes carry the
+ * paths, so no extra query and no file contents are needed. Never throws — [] on any failure.
+ */
+export async function listPromptsAndPaths(limit = 200): Promise<Array<{ workspaceId: string; prompt?: string; paths: string[] }>> {
+  const db = getDb();
+  if (!db) return [];
+  try {
+    const snap = await db
+      .collection(COLLECTION)
+      .orderBy('savedAt', 'desc')
+      .limit(Math.max(1, Math.min(500, limit)))
+      .get();
+    return snap.docs.map((d) => {
+      const r = (d.data()?.report ?? {}) as BuildDiagnosticsReport;
+      return {
+        workspaceId: d.id,
+        prompt: typeof r.prompt === 'string' ? r.prompt : undefined,
+        paths: Object.keys((r.manifest as { fileHashes?: Record<string, string> } | undefined)?.fileHashes ?? {}),
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 /** Load ONE specific historical report by id (an entry's `id` from listDiagnosticsHistory). Null on any failure/absence. */
 export async function getDiagnosticsHistoryItem(workspaceId: string, id: string): Promise<BuildDiagnosticsReport | null> {
   const db = getDb();

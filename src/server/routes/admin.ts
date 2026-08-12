@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { needsRealServer, builtAServer, tallyServerNecessity, necessityHeadline } from '../AgentV3/serverNecessity';
 import type { Express, Request, Response, NextFunction } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
@@ -15,7 +16,7 @@ import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTe
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
-import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { listAllDiagnostics, listPromptsAndPaths, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
@@ -714,6 +715,42 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ok: true, triage });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to mark the build report.' });
+    }
+  });
+
+  /**
+   * SERVER NECESSITY (admin 2026-08-12) — the ONE number that decides whether the browser-native plan
+   * is worth building: how many past apps were given a Node server they never needed?
+   *
+   * Every such app is one that could have skipped the E2B sandbox entirely — no VM for the preview, no
+   * VM for the verification. The dukaan stock app is the example: Express + Postgres + bcrypt + multer
+   * for a login, a list, a search box, a photo and a total, every one of which a browser can do
+   * directly against a hosted database.
+   *
+   * Measured, not estimated, and read-only: it changes nothing about how builds run. If the gap turns
+   * out to be small, the plan should not proceed — which is exactly why this endpoint exists BEFORE
+   * any of it.
+   */
+  app.get('/api/admin/server-necessity', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const builds = await listPromptsAndPaths(limit);
+      const tally = tallyServerNecessity(builds);
+      // The sample is returned so the admin can spot-check the classifier against builds they remember,
+      // rather than trusting a percentage produced by a regex they have never seen.
+      const sample = builds.slice(0, 25).map((b) => {
+        const n = needsRealServer(b.prompt);
+        return {
+          workspaceId: b.workspaceId,
+          prompt: (b.prompt ?? '').slice(0, 160),
+          neededServer: n.needed,
+          reasons: n.reasons,
+          builtServer: builtAServer(b.paths),
+        };
+      });
+      res.json({ headline: necessityHeadline(tally), tally, window: limit, sample });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to measure server necessity.' });
     }
   });
 

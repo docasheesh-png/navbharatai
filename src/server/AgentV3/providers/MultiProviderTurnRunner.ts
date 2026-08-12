@@ -264,8 +264,14 @@ export function pacedRunner(inner: TurnRunner, pacerKey: string): TurnRunner {
 export interface RateLimitCooldowns {
   /** ms timestamp until which this bench name is cooling down (0 = not cooling). */
   until(name: string): number;
-  /** Record one 429 for the name; arms/extends the cooldown once the consecutive threshold is hit. */
-  strike(name: string, nowMs: number): void;
+  /**
+   * Record one 429/timeout for the name; arms/extends the cooldown once the consecutive threshold is hit.
+   *
+   * `minWindowMs` — the MEASURED cost of the failure that caused this strike, when known. The armed bench
+   * is never shorter than what the failure actually cost. See the cost-floor note in
+   * `createRateLimitCooldowns` for the arithmetic this closes.
+   */
+  strike(name: string, nowMs: number, minWindowMs?: number): void;
   /** The provider answered — clear its strikes and any active cooldown. */
   clear(name: string): void;
   /** Reset all state (tests). */
@@ -331,9 +337,22 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
   return {
     // The effective bench is the LATER of the short cooldown and the long breaker window.
     until: (name) => Math.max(untilMs.get(name) ?? 0, breakerUntil.get(name) ?? 0),
-    strike(name, nowMs) {
+    strike(name, nowMs, minWindowMs) {
       const n = (strikes.get(name) ?? 0) + 1;
       strikes.set(name, n);
+      // THE COST FLOOR (admin report 2026-08-12, the dukaan stock app).
+      //
+      // KIMI's request timeout is 120s (the admin's own 2026-07-13 decision: "kimi ka time badhao").
+      // This cooldown's base window is 60s. So a provider whose failure costs TWO MINUTES was benched
+      // for ONE, and the report's timeline shows exactly what that produces — KIMI timing out at 236s,
+      // 356s, 467s, 587s: a failure every 120 seconds, forever. The bench expires, the next call burns
+      // the full timeout again, and during those 120 seconds nothing is benched at all.
+      //
+      // A bench SHORTER than the failure it protects against can never get ahead of it: the platform
+      // spends more time inside doomed calls than outside them, by construction. So the window is
+      // floored at what the failure actually COST — measured from the call itself, not configured, so
+      // it self-adjusts to whatever timeout any provider is running under.
+      const costFloor = Number.isFinite(minWindowMs) && (minWindowMs as number) > 0 ? (minWindowMs as number) : 0;
       if (cooldownMs > 0 && n >= benchAfter) {
         const prevUntil = untilMs.get(name) ?? 0;
         if (prevUntil <= nowMs) {
@@ -344,7 +363,16 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
           const linked = prevUntil > 0 && nowMs - prevUntil <= cooldownMs * 2;
           const episodes = linked ? (benchEpisodes.get(name) ?? 0) + 1 : 1;
           benchEpisodes.set(name, episodes);
-          untilMs.set(name, nowMs + Math.min(cooldownMs * Math.pow(2, episodes - 1), capMs));
+          // The cost floor applies AFTER the cap: `capMs` bounds how far ESCALATION may run, and a
+          // single failure that genuinely cost more than the cap is not escalation — it is the price
+          // already paid. Benching for less than that guarantees paying it again.
+          const escalated = Math.min(cooldownMs * Math.pow(2, episodes - 1), capMs);
+          untilMs.set(name, nowMs + Math.max(escalated, costFloor));
+        } else if (costFloor > 0) {
+          // Already benched, but this failure cost more than the remaining window. Extending to cover
+          // the real cost is not escalation (episodes are untouched) — it is the same "never bench for
+          // less than the failure cost" rule, applied to a straggler that landed mid-bench.
+          untilMs.set(name, Math.max(prevUntil, nowMs + costFloor));
         }
         // else: already benched — a concurrent straggler; keep the current window (no escalation).
       }
@@ -523,6 +551,10 @@ export function makeMultiProviderTurnRunner(
           continue;
         }
         alive++;
+        // What this attempt actually COSTS if it fails — the number the cost floor below is built on.
+        // Measured rather than read from config, so it is right for whatever timeout each provider runs
+        // under and stays right when those are retuned.
+        const attemptStartedAt = now();
         try {
           const result = await runner.runTurn(params);
           timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
@@ -551,11 +583,16 @@ export function makeMultiProviderTurnRunner(
             // blindness the 429 cooldown fixed, in the other transient class. A timeout wastes far
             // MORE wall-clock than a 429 (the full timeout window burns before the fallback), so the
             // shared cooldown matters even more here. Same registry, same recovery semantics.
-            cooldowns.strike(name, now());
+            // THE COST FLOOR — this is the timeout class, so the bench must cover what the timeout
+            // actually cost. A 120s KIMI timeout benched for the 60s base window meant the next call
+            // burned another 120s the moment the bench expired: the dukaan report's 236s / 356s / 467s /
+            // 587s drip, one full doomed call every two minutes.
+            const costMs = Math.max(0, now() - attemptStartedAt);
+            cooldowns.strike(name, now(), costMs);
             // Quiz-app autopsy 2026-07-17: a timeout is SERVICE saturation, not one key's quota — strike
             // the POOL too, so 2 service-level failures across ANY keys bench the whole provider for the
             // cooldown window (soft — the same registry recovery brings it back automatically).
-            if (isPoolMember(chain[i])) cooldowns.strike(`pool:${reportName}`, now());
+            if (isPoolMember(chain[i])) cooldowns.strike(`pool:${reportName}`, now(), costMs);
           } else if (isRateLimitProviderError(err)) {
             rateLimitStreak.set(name, (rateLimitStreak.get(name) ?? 0) + 1); // bench after 2 consecutive 429s
             cooldowns.strike(name, now()); // shared memory — concurrent turns/instances stop hammering too

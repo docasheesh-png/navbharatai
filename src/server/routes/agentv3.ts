@@ -312,6 +312,7 @@ import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNar
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
+import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
@@ -1127,12 +1128,48 @@ export interface BillingLedgerView {
  * per-provider recording, so a build that overran its cap silently bypassed Fix 65). Pure w.r.t. its
  * inputs (reads only env + the shared routing predicate); the zero-bill guards are applied by callers.
  */
+/**
+ * What this build's sandbox cost, read at BILLING time.
+ *
+ * The report already records sandbox seconds — but it does so AFTER the settle, so at the moment the
+ * bill is decided the number does not exist yet. Reading it here (the same `sandboxHeldSeconds` the
+ * report uses, so the two can never disagree) is what lets the cost reach the bill at all.
+ *
+ * Returns 0 on ANY doubt: no actuator, no measurement, the feature off, or no real rate configured.
+ * A money path must fail toward charging LESS, never toward charging for something we cannot measure.
+ */
+function billableSandboxUsd(actuator: unknown, workspaceId: string | null | undefined): number {
+  try {
+    const fn = (actuator as any)?.sandboxHeldSeconds;
+    if (typeof fn !== 'function' || !workspaceId) return 0;
+    return sandboxBillableUsd(sandboxCost(fn.call(actuator, workspaceId)));
+  } catch {
+    return 0;
+  }
+}
+
 export function decideBuildBilledUsd(
   providerLedger: BillingLedgerView,
   sinkTotal: { inputTokens: number; outputTokens: number },
   powerLevel: BillingPowerLevel | boolean,
   userId: string | null | undefined,
   email: string | null | undefined,
+  /**
+   * What this build's E2B sandbox cost us (admin 2026-08-11: "e2b ka kharcha bill me jodo").
+   *
+   * Added to the REAL cost BEFORE the markup, which is the only place it belongs: the non-Opus
+   * formula is literally `tieredMarkup(real cost)`, and a cloud VM billed by wall-clock is as real a
+   * cost as a token. Until now NavBharatAI absorbed 100% of it, so a build that spent almost nothing
+   * on tokens but held a VM for forty minutes was pure loss.
+   *
+   * `sandboxBillableUsd` returns 0 unless the admin has BOTH switched it on AND set their real
+   * `E2B_USD_PER_HOUR` — the default rate is an admitted placeholder, and billing a placeholder is
+   * exactly the invented cost the billing law forbids. So the default behaviour is unchanged.
+   *
+   * The OPUS tiers are deliberately untouched: CLAUDE.md records that path as admin-confirmed at
+   * "real Opus × 2", and quietly changing a confirmed price is not mine to do.
+   */
+  sandboxUsd = 0,
 ): {
   effectiveBilledUsd: number;
   reconciledProviderUsage: Record<string, { inputTokens: number; outputTokens: number }>;
@@ -1151,7 +1188,8 @@ export function decideBuildBilledUsd(
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    effectiveBilledUsd = tieredMarkupUsd(realProviderCostUsd(providerLedger.entries(), realCostRemainder));
+    const tokenCost = realProviderCostUsd(providerLedger.entries(), realCostRemainder);
+    effectiveBilledUsd = tieredMarkupUsd(tokenCost + Math.max(0, sandboxUsd || 0));
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)
@@ -6590,7 +6628,7 @@ export function registerAgentV3Routes(app: Express): void {
       let watchdogBilledUsd = 0;
       if (ok && billingCtx.providerLedger) {
         try {
-          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email);
+          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId));
           watchdogBilledUsd = decided.effectiveBilledUsd;
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
@@ -11638,7 +11676,7 @@ export function registerAgentV3Routes(app: Express): void {
       // shared decideBuildBilledUsd so this settle path and the watchdog finalization (Fix 67) never
       // drift. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`).
       const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
-        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email);
+        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId));
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
@@ -12233,6 +12271,15 @@ export function registerAgentV3Routes(app: Express): void {
           ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null
           : null;
         buildDiagRef?.setSandboxSeconds(held);
+        // SAY WHETHER IT REACHED THE BILL, and why (admin 2026-08-11). Without this line the admin
+        // cannot tell "we charged for the VM" from "we absorbed it" — and the difference is a config
+        // flag plus a rate they alone can supply. ADMIN-ONLY: the user never sees an infrastructure
+        // line item (White-Label Law §3).
+        buildDiagRef?.record({
+          phase: 'build', severity: 'info', code: 'SANDBOX_BILLING',
+          message: sandboxBillingNote(sandboxCost(held)),
+          autoResolved: true,
+        });
       } catch { /* a cost measurement must never affect a build */ }
       // A zip/GitHub import's background preview boot must finish BEFORE the response ends — Cloud
       // Run throttles CPU after the stream closes, which would silently kill npm install mid-way.

@@ -30994,3 +30994,58 @@ Tests: 6 added to `tests/builderMetrics.test.ts` (31 total). Gate: tsc clean bot
 **14,130/14,130**.
 
 **Remaining in the cheap set:** a build idempotency guard (the "whole build ran twice" class).
+
+---
+
+## 2026-08-11 — The E2B sandbox cost now reaches the bill (behind a two-key honesty gate)
+
+**Admin:** "e2b ka kharcha bill me jodo."
+
+**They were right that it is a real gap.** Every v5 build runs a cloud VM billed by WALL-CLOCK, and
+until now NavBharatAI absorbed **100%** of it. A build that spent almost nothing on tokens but held a
+VM for forty minutes was pure loss, and nothing in the bill reflected it.
+
+**BUT IT COULD NOT SIMPLY BE SWITCHED ON, and this is the part that needed care.**
+`sandboxUsdPerHour` defaults to **$0.10 — described in its own file as "a ROUND, conservative
+placeholder"**. The billing law says the bill a user sees is 100% REAL and that we must **never invent
+a cost**. Feeding that default into a real person's balance would be exactly what the law forbids.
+
+**So it bills only when BOTH are true:**
+1. `AGENTV3_BILL_SANDBOX=on` — the admin's explicit decision to charge for it, and
+2. `E2B_USD_PER_HOUR` is **explicitly set** — the admin's real, verified rate from their E2B plan.
+
+The second key is the one that matters. With it, the seconds are **measured** (a clock, not an
+estimate) and the rate is a **stated price** — a measurement times a price, which is the same honest
+shape as voice billing. Without it, the bill is unchanged and the admin report keeps showing the
+(estimated) infrastructure cost exactly as it does today.
+
+**Where it enters:** inside `tieredMarkup(real cost)`, not bolted on after — the non-Opus formula is
+literally "markup of the real cost", and a wall-clock VM is as real a cost as a token. **The OPUS
+tiers are deliberately untouched:** CLAUDE.md records that path as admin-CONFIRMED at "real Opus × 2",
+and quietly changing a confirmed price is not a session's call.
+
+**Read at BILLING time.** The report already recorded sandbox seconds — but AFTER the settle, so at
+the moment the bill was decided the number did not exist. `billableSandboxUsd` reads the SAME
+`sandboxHeldSeconds` the report uses (two sources would eventually disagree, and the bill would be the
+wrong one), and returns **0 on any doubt** — no actuator, no measurement, feature off, no rate. A
+money path must fail toward charging LESS.
+
+**The admin can now tell "we charged for it" from "we absorbed it"** (`SANDBOX_BILLING`), and the
+missing-rate case is named specifically with what to do about it — "it is off" and "we do not know the
+price" are different problems with different fixes. ADMIN-ONLY: the user never sees an infrastructure
+line item (White-Label Law §3).
+
+**⚠️ ADMIN ACTION TO ACTUALLY TURN IT ON:** set `E2B_USD_PER_HOUR` to your real E2B rate **first**,
+then `AGENTV3_BILL_SANDBOX=on`. In that order — the flag alone does nothing, by design.
+
+Tests: 18 in `tests/sandboxBilling.test.ts` — both keys of the gate, the placeholder never reaching a
+bill, unmeasured/absurd durations, that it is marked up rather than added after, that a negative cost
+can never reduce a bill, that omitting the argument behaves exactly as before, that Opus is untouched,
+the three report messages, and wiring assertions that both billing paths pass it and that any doubt
+bills zero. Gate: tsc clean both projects, full run **14,153/14,153**.
+
+**Also merged today: #2270** (the parallel session's scaling check). Its green CI was on an OLDER
+commit and its branch was 14 commits behind `main`, so the green proved nothing about the merge
+result — I merged `main` into it locally and ran the full gate on the MERGE (tsc ×2, 14,130 tests,
+build, bundle) before merging. Verifying the merge rather than the branch is the difference between
+"CI was green" and "this will be green".

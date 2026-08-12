@@ -266,3 +266,82 @@ REGRESSIONS:    None. tsc (frontend + server) clean; full suite green; all 53 pr
                 CommandGovernance tests still pass unmodified.
 NEXT PHASE:     3 — Multi-service runner (§6), if the SERVICE_GRAPH_MULTI records show real demand
 ```
+
+---
+
+## PHASE 3 — DEFERRED, ON ITS OWN STATED CONDITION
+
+```
+PHASE:          3 — Multi-service runner (§6)
+STATUS:         DEFERRED (condition not met) — not skipped, not forgotten
+CURRENT SCORE:  Dimension 5 (Full Stack) stays 6
+WHAT CHANGED:   Nothing, deliberately.
+WHY:            The condition was written into the phase plan before any code: "only if the graph shows
+                real demand." The service graph (#2278) records SERVICE_GRAPH_MULTI on every build and
+                has not yet seen production traffic, so the number of real projects with a genuine
+                second service is currently unknown.
+
+                Building the runner now would be the same mistake as scoring a benchmark nobody ran —
+                shipping a subsystem on an assumption about user projects, when the measurement that
+                answers it is already deployed and costs nothing but time. The honest move is to let it
+                collect and revisit.
+NEXT PHASE:     4 — E2E journey derivation (§7)
+```
+
+---
+
+## PHASE 4 REPORT
+
+```
+PHASE:          4 — Autonomous E2E journey engine (§7)
+STATUS:         SHIPPED (implementation) · UNVERIFIED (field)
+CURRENT SCORE:  Dimension 7 (Verification) 7 → 8. This is the one score that moves, and it moves for a
+                specific reason: the gap named in Phase 0 was "no autonomous E2E journey derivation",
+                and there now is one that RUNS. It is not 9, because no real build has run it yet.
+TARGET:         9 once real builds show the pass/fail split, and the JOURNEY_FAILED rate tells us how
+                often generated apps only pretend to save data.
+WHAT CHANGED:   src/server/AgentV3/journeyDerivation.ts + wiring in routes/agentv3.ts.
+
+                THE GAP: every check we run after a build asks a version of "did it paint". The preview
+                verifier loads home. PageRouteCheck opens each route. The console capture watches for
+                errors. RouteSmokeCheck curls the API. All necessary — and not one of them presses a
+                button.
+
+                So the most common invisible failure in a generated app survives every check we own:
+                THE UI PRETENDS. You type a task, hit Add, the item appears — because it was pushed
+                into a useState array. You reload and it is gone. That app rendered perfectly, threw
+                nothing, answered 200 everywhere, and does not work. A user finds it in ninety seconds,
+                and we told them it was ready.
+
+                create → reload → is it still there is the only assertion that separates real
+                persistence from a convincing illusion. That is now derived and executed.
+
+                EVERY SELECTOR IS READ OUT OF THE APP'S OWN SOURCE — data-testid, then name, then id,
+                then placeholder, then aria-label. Nothing is guessed. A form with a field we cannot
+                address honestly yields NO journey rather than one that fails for the wrong reason: a
+                failing test handed to someone alongside a working app teaches them our reports are
+                noise, and the next one, the real one, goes unread.
+
+                A JOURNEY THAT NEVER REACHED THE APP'S OWN BEHAVIOUR IS 'UNREACHABLE', NEVER 'FAILED'.
+                A login wall is not a defect. Unreachable is the default verdict in the runner, so a
+                crash in our own script cannot manufacture an accusation about a working app.
+
+                IT WILL NOT WRITE INTO SOMEBODY ELSE'S DATABASE. A create journey inserts a real row.
+                Against local state that is nothing; against the user's own Supabase or Firebase project
+                it is us putting junk data in their real account without asking. When the app is wired
+                to a user-owned database the journey is DOWNGRADED to a non-writing form submit — not
+                silently skipped.
+
+                Cheap for the same reason PageRouteCheck is: Playwright and Chromium are pre-baked into
+                the E2B images. A few browser actions, no model call, no install. Kill switch
+                AGENTV3_JOURNEY_CHECK=off. Evidence, never a gate.
+TESTS:          14,345 passing (1,187 files), up from 14,283. 44 new — including a guard that parses the
+                GENERATED runner as real JavaScript. A generated script with a syntax error fails
+                silently inside the sandbox (the grep finds no result lines and the check reports
+                "nothing ran" forever); that has happened in this codebase before, so it is asserted
+                rather than assumed. Verified additionally by emitting the script and running
+                `node --check` on it.
+BENCHMARK:      NOT RUN — no cost incurred. The evidence arrives free from real builds.
+REGRESSIONS:    None. tsc (frontend + server) clean; full suite green.
+NEXT PHASE:     5 — Error taxonomy (§24) + release gate states GREEN/YELLOW/RED/UNKNOWN (§23)
+```

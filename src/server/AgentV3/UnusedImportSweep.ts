@@ -53,7 +53,14 @@ export function stripUnusedNamedImports(path: string, content: string): string {
     return content.replace(IMPORT_RE, (whole, head: string, clause: string, tail: string) => {
       const braceMatch = /\{([\s\S]*?)\}/.exec(clause);
       if (!braceMatch) return whole;                 // no named group (default-only, `* as`, side-effect) → untouched
-      const before = clause.slice(0, braceMatch.index);   // a leading default binding (e.g. `Def, `)
+      let before = clause.slice(0, braceMatch.index);     // a leading default binding (e.g. `Def, `)
+      // `import type { … }` — the `type` is a type-only MODIFIER on the whole import, NOT a default
+      // binding. Peel it off so it is preserved as a prefix and never rebuilt as `type, { … }`, which is
+      // a syntax error that corrupts a working app (confirmed: `import type { Props, Unused }` →
+      // `import type, { Props }`; `import type {` appears in 390 files in this repo alone, and
+      // findSyntaxErrors parses the broken output fine so nothing catches it — admin audit 2026-08-12).
+      let typeModifier = '';
+      if (/^\s*type\s+$/.test(before)) { typeModifier = 'type '; before = ''; }
       const inner = braceMatch[1];
       const after = clause.slice(braceMatch.index + braceMatch[0].length);
       const specs = inner.split(',').map((s) => s.trim()).filter(Boolean);
@@ -72,7 +79,7 @@ export function stripUnusedNamedImports(path: string, content: string): string {
       if (kept.length > 0) {
         const named = `{ ${kept.join(', ')} }`;
         const newClause = defaultPart ? `${defaultPart}, ${named}` : named;
-        return `${head}${newClause}${after}${tail}`;
+        return `${head}${typeModifier}${newClause}${after}${tail}`;
       }
       // Every named specifier was unused.
       if (defaultPart) return `${head}${defaultPart}${after}${tail}`; // keep the default binding

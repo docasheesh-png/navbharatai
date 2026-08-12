@@ -115,6 +115,7 @@ import {
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
+import { scaffoldFilesInTscErrors, canonicalScaffold } from '../AgentV3/scaffoldBoilerplate';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -9648,6 +9649,39 @@ export function registerAgentV3Routes(app: Express): void {
           }
         };
         let check = await runTsc();
+        // DETERMINISTIC FIRST — restore the boilerplate WE ship before asking a weak model to fix it
+        // (confirmed across three real builds, 2026-08-12). The scaffold's class-component
+        // src/ErrorBoundary.tsx is correct; a weak coder that touches it breaks its typing
+        // (`Property 'state' does not exist on type 'ErrorBoundary'`) and then CANNOT fix it — a React
+        // error boundary must be a class, which the model does not know, so it burned five tsc passes
+        // and shipped it broken. The model never has a legitimate reason to rewrite an error boundary,
+        // so restoring our version can never lose user intent. Same shape as the dead-server fix: when
+        // the failure is in a file we own and there is one correct form, do the free certain thing.
+        // Kill switch: AGENTV3_SCAFFOLD_RESTORE=off.
+        if (!check.ok && process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off') {
+          try {
+            const brokenScaffold = scaffoldFilesInTscErrors(check.errors);
+            const restored: string[] = [];
+            for (const path of brokenScaffold) {
+              const canonical = canonicalScaffold(path);
+              if (!canonical) continue;
+              let current = '';
+              try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
+              if (current !== canonical) {
+                await dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend');
+                restored.push(path);
+              }
+            }
+            if (restored.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'SCAFFOLD_RESTORED',
+                message: `Restored ${restored.length} file(s) NavBharatAI ships (e.g. the error boundary) to their known-good version instead of spending a model pass on them: ${restored.join(', ')}. A build never needs to change these.`,
+                autoResolved: true,
+              });
+              check = await runTsc();
+            }
+          } catch { /* deterministic restore is best-effort — fall through to the model repair below */ }
+        }
         if (!check.ok) {
           events.emit({ type: 'narration', agent: 'architect', text: '🔍 Type-checking the finished build — found type errors, fixing them…', ts: Date.now() });
           try {

@@ -31748,3 +31748,40 @@ before the gate keys on it).
 
 **Reliability note:** KIMI (cheap floor) timed out twice this build — the GLM/Kimi cheap-tier ceiling
 CLAUDE.md already flags; auto-fallback covered it, but it is real latency the user paid for in wall-clock.
+
+---
+
+## 2026-08-12 — browser_action reliability: the root lever behind BENCHMARK #2's false "PASS"
+
+**Why this is the root lever:** in BENCHMARK #2 the model reported Level 2 gameplay/restart/victory = PASS
+while its `browser_action` calls had failed twice (exit 1) — it never actually drove the game. If the
+interaction tool worked, the engine could TRULY verify interactive apps instead of claiming it. Root-caused
+the exit-1.
+
+**Root cause (deterministic, code-anchored — no live sandbox needed to see it):** the in-sandbox
+`browser-action.js` returns genuine action errors (missing selector) as `result:"ERROR: …"` with exit 0; the
+ONLY path to exit 1 is its outer catch — `connectOverCDP(localhost:CDP_PORT)` throwing because the CDP
+daemon was not reachable. And `_ensureBrowserDaemon` (1) returned `true` even after the CDP port never
+opened in 20s ("proceed anyway"), and (2) CACHED that optimistic `true` forever. So once the daemon was
+wrongly marked ready, every later `browser_action` reused the dead handle and failed — the two consecutive
+exit-1s in the report — and the model, told only "exit status 1", went on to claim PASS.
+
+**Fix (E2BActuator):**
+- `_ensureBrowserDaemon` now returns `false` when the CDP port never opens (honest), and NEVER caches a
+  failed/rejected result — the next call relaunches the daemon.
+- `browserAction` runs through `withDaemonRetry(attempt, relaunch)`: on the first failure it drops the
+  cached (dead) daemon so a fresh one is launched, retries exactly once, and on a second failure throws
+  honestly ("the browser was not reachable") so the tool is reported UNAVAILABLE rather than the model
+  treating a bare exit-1 as licence to claim the interaction worked.
+- `withDaemonRetry` is an EXPORTED pure control-flow helper (both effects injected), unit-tested for all
+  three paths (first-try success; fail→relaunch→retry→success; two failures throw). This is the codebase's
+  established way to test E2BActuator (pure exported helpers; the live-sandbox methods are not unit-tested).
+
+**HONEST boundary (rule 6):** the daemon poll/launch itself runs against a real E2B sandbox and cannot be
+exercised from this session — the fix is verified by code-reasoning + tsc + the pure retry test, and will be
+confirmed live on the next real build report. It strictly improves a currently-broken path (false-optimistic
+cache → guaranteed repeat failure), so it cannot regress today's behaviour.
+
+**Still open (the honesty half of BENCHMARK #2):** even with a reliable tool, a model that claims interactive
+PASS when the tool DID fail needs a verdict-level guard. Detecting "claimed PASS on an interactive feature the
+browser never reached" generically is fuzzy (false-positive risk) — remains an open item, not silently patched.

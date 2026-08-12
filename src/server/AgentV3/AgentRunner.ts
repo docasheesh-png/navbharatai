@@ -17,6 +17,7 @@ import { findSyntaxErrors } from './SyntaxCheck';
 import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
 import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
+import { missingFeatureNotice } from './missingFeatureNotice';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -685,6 +686,13 @@ export class AgentRunner {
             } catch { /* injection is best-effort — never fails a build */ }
           }
 
+          // SAY WHAT THE APP DOES NOT DO, in the message that says it is ready. A CONFIRMED-missing
+          // requested feature is a WARNING, so it correctly does not block the build — but "do not
+          // block" had quietly become "do not mention", and the user read only the model's summary of
+          // everything it HAD made. Being told an app is ready and later finding the search box you
+          // asked for is absent is misleading by omission. Empty for a complete build. See
+          // missingFeatureNotice.ts.
+          if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed() };
@@ -966,6 +974,10 @@ export class AgentRunner {
           events.emit({ type: 'narration', agent: agentRole, text: '🔁 The build hit its step budget while unfinished — extending once to complete the remaining blockers…', ts: Date.now() });
           continue stepResumeLoop;
         }
+        // SIBLING of the notice above: this is the step-cap exit, a second and entirely separate `done`
+        // emit. A long build is exactly the kind most likely to drop a feature, so leaving this one
+        // silent would have hidden the worst cases.
+        if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
         await persist(ok ? 'complete' : 'stopped');
         events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
         return { ok, summary, steps, usage, billedUsd: billed() };
